@@ -184,27 +184,3 @@ Guest 一整列除了「查看」全是否，没有任何关系能翻过来：�
 ### 已知欠账
 
 `workspaceToResponse` 同时用来构造 `workspace:updated` 广播，一份负载发给所有人，装不下「对这个调用者而言可见的仓库」。所以仓库过滤只加在 GET 路径（`ListWorkspaces` / `GetWorkspace` 调 `visibleWorkspaceRepos`），广播里的 `repos` 仍是全量。要彻底解决得让广播按订阅者分发，或者把仓库列表从工作区负载里拆出去——不在本票范围内。
-
-## 跨工作区连通（DENE-1225）
-
-连通**不改上面四档矩阵的任何一格**。看方的人在源方不是成员，判定顺序第 1 步就是「找不到」，源方的既有接口对他们一律 404。连通只开一个出口 `GET /api/workspace-links/{id}/view`，返回白名单字段。为什么不复用访客，见 [ADR-0004](../adr/0004-workspace-link.md)。
-
-可执行版本是 `workspacelink.Decide`，`TestDecideMatrix` 把每一格写死了：
-
-| 操作 | 源方 | 看方 |
-| --- | --- | --- |
-| 发起连通 | Owner | — |
-| 改勾选项目（DENE-1811） | Owner | 本工作区 Owner / Admin，且同一人是源方 Owner |
-| 接受 | — | Owner / Admin |
-| 断开 | Owner | Owner / Admin |
-| 只读查看 | — | Owner / Admin / Member，以及这些人跑的智能体；访客不行 |
-| 设置页管理列表 | Owner / Admin | Owner / Admin |
-| 审计记录 | Owner | Owner |
-| 列出待接受的请求（DENE-1641） | — | Owner / Admin，以及这些人跑的智能体 |
-
-- 智能体只能 `list` 和 `view`，管理操作一律 403，哪怕它背后的人是 Owner。背后的人是 Owner / Admin 时，`list` 还会列出等本工作区接受的请求（只有对方名字），接受仍然只能人来点。
-- 发起请求时，看方的 Owner / Admin 各收到一条收件箱提醒；接受或拒绝后源方的 Owner / Admin 收到回执；请求被接受、拒绝或撤回后，那条提醒自动归档。从看方拉取的连通立即生效，不发提醒。
-- 读取内容按源方规则过滤：只看勾选的项目，项目和任务都必须不是 private，不借任何人的身份放宽。
-- 所有拒绝（不存在、未接受、已断开、访客、项目被取消勾选）都回同一个 404 “link not found”，和第 2 步「看不见 → 找不到」是同一个语义。
-
-DENE-1808：可托管增加聊天目录、本人聊天读取和文本代发，仍按 run 发起人在源方的权限，非本人聊天拒绝。新建连通默认开托管，创建时可关；既有连通保持原值。权限与外部内容边界见 [ADR-0004](../adr/0004-workspace-link.md#聊天代发dene-1808)。

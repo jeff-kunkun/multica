@@ -11,25 +11,21 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/permission"
-	"github.com/multica-ai/multica/server/internal/workspacelink"
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 var errFastScope = errors.New("requested scope is not accessible")
 var errFastLarge = errors.New("snapshot exceeds 10000 items; narrow workspace scope or since")
 
 type fastWorkspace struct {
-	ID             string
-	Name           string
-	Viewer         visibilityViewer
-	Agents         []pgtype.UUID
-	LinkedProjects []pgtype.UUID
-	Managed        bool
-	IssuesAllowed  bool
+	ID            string
+	Name          string
+	Viewer        visibilityViewer
+	Agents        []pgtype.UUID
+	IssuesAllowed bool
 }
 
 // fastScopes uses the originator for source-object visibility. Task credentials
-// can cross their home workspace only via the existing linked/managed gate.
+// never cross their home workspace.
 func (h *Handler) fastScopes(r *http.Request, user string, req fastRequest) ([]fastWorkspace, error) {
 	ctx := r.Context()
 	home := ctxWorkspaceID(ctx)
@@ -41,17 +37,8 @@ func (h *Handler) fastScopes(r *http.Request, user string, req fastRequest) ([]f
 	scopes := map[string]fastWorkspace{}
 	for _, m := range members {
 		id := uuidToString(m.ID)
-		managed := false
 		if task && id != home {
-			_, err := h.workspaceLinks().AuthorizeManaged(ctx, workspacelink.ManagedCall{ViewerWS: parseUUID(home), AgentID: parseUUID(r.Header.Get("X-Agent-ID")), TaskID: parseUUID(r.Header.Get("X-Task-ID")), Source: id})
-			if err != nil {
-				var denied *workspacelink.Error
-				if errors.As(err, &denied) {
-					continue
-				}
-				return nil, err
-			}
-			managed = true
+			continue
 		}
 		v, err := h.visibilityViewerForUser(ctx, m.ID, parseUUID(user))
 		if err != nil {
@@ -69,50 +56,7 @@ func (h *Handler) fastScopes(r *http.Request, user string, req fastRequest) ([]f
 		if err != nil {
 			return nil, err
 		}
-		scopes[id] = fastWorkspace{ID: id, Name: m.Name, Viewer: v, Agents: agents, Managed: managed, IssuesAllowed: v.canSeeModule(module)}
-	}
-	// Non-managed links grant project status only, never chats or agent identity.
-	// Use the same source/project predicates and the central decision table.
-	for _, m := range members {
-		viewerWS := uuidToString(m.ID)
-		if task && viewerWS != home {
-			continue
-		}
-		member, err := h.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{WorkspaceID: m.ID, UserID: parseUUID(user)})
-		if err != nil {
-			return nil, err
-		}
-		if !workspacelink.Decide(workspacelink.OpView, workspacelink.SideViewer, workspacelink.Actor{Role: permission.Role(member.Role), IsAgent: task}) {
-			continue
-		}
-		links, err := h.Queries.ListWorkspaceLinksForWorkspace(ctx, m.ID)
-		if err != nil {
-			return nil, err
-		}
-		for _, link := range links {
-			if link.TargetWorkspaceID != m.ID || link.Status != "active" {
-				continue
-			}
-			id := uuidToString(link.SourceWorkspaceID)
-			if existing, ok := scopes[id]; ok && existing.Viewer.userID.Valid {
-				continue
-			}
-			projects, err := h.Queries.ListWorkspaceLinkProjects(ctx, db.ListWorkspaceLinkProjectsParams{LinkID: link.ID, SourceWorkspaceID: link.SourceWorkspaceID})
-			if err != nil {
-				return nil, err
-			}
-			s := scopes[id]
-			s.ID = id
-			s.Name = link.SourceName
-			s.IssuesAllowed = true
-			s.Agents = []pgtype.UUID{}
-			for _, p := range projects {
-				if p.Visibility != "private" {
-					s.LinkedProjects = append(s.LinkedProjects, p.ID)
-				}
-			}
-			scopes[id] = s
-		}
+		scopes[id] = fastWorkspace{ID: id, Name: m.Name, Viewer: v, Agents: agents, IssuesAllowed: v.canSeeModule(module)}
 	}
 	if req.Scope.Mode == "workspace_ids" {
 		selected := map[string]fastWorkspace{}
@@ -144,10 +88,7 @@ func (s fastWorkspace) issueSQL(q *fastSQL, alias string) string {
 	if !s.IssuesAllowed {
 		return "FALSE"
 	}
-	if s.Viewer.userID.Valid {
-		return s.Viewer.issueVisibilitySQL(alias, q.add)
-	}
-	return fmt.Sprintf("(%s.visibility <> 'private' AND %s.triage_state IS NULL AND %s.project_id=ANY(%s::uuid[]) AND EXISTS(SELECT 1 FROM project fp WHERE fp.id=%s.project_id AND fp.workspace_id=%s.workspace_id AND fp.visibility<>'private'))", alias, alias, alias, q.add(s.LinkedProjects), alias, alias)
+	return s.Viewer.issueVisibilitySQL(alias, q.add)
 }
 func (s fastWorkspace) chatSQL(q *fastSQL, alias string) string {
 	if !s.Viewer.userID.Valid {
@@ -160,9 +101,6 @@ func (s fastWorkspace) chatSQL(q *fastSQL, alias string) string {
 		workspace = alias + ".visibility='workspace'"
 	}
 	predicate := fmt.Sprintf(`(%[1]s.creator_id=%[2]s::uuid OR %[3]s OR (%[1]s.visibility='project' AND (%[1]s.project_id=ANY(%[4]s::uuid[]) OR EXISTS(SELECT 1 FROM chat_session_project fp WHERE fp.chat_session_id=%[1]s.id AND fp.project_id=ANY(%[4]s::uuid[])) OR EXISTS(SELECT 1 FROM resource_share fs WHERE fs.workspace_id=%[1]s.workspace_id AND fs.resource_type='chat_session' AND fs.resource_id=%[1]s.id::text AND fs.member_id=%[2]s::uuid))))`, alias, user, workspace, projects)
-	if s.Managed {
-		predicate += " AND " + alias + ".creator_id=" + user + "::uuid"
-	}
 	return "(" + predicate + ")"
 }
 func fastKey(item fastItem) string { return item.WorkspaceID + "/" + item.Kind + "/" + item.ID }

@@ -61,7 +61,6 @@ import {
   notificationPreferenceKeys,
 } from "../notification-preferences/queries";
 import { workspaceKeys, workspaceListOptions } from "../workspace/queries";
-import { workspaceLinkKeys } from "../workspace-links/queries";
 import { isWorkspaceDeletePending } from "../workspace/pending-delete";
 import {
   showWebNotification,
@@ -130,7 +129,6 @@ import type {
   ChatPendingTask,
   ChatMessagesPage,
   ChatSession,
-  ChatLinkedProject,
   Progress,
   ChatSessionCreatedPayload,
   InvitationCreatedPayload,
@@ -378,8 +376,6 @@ type ChatSessionUpdatedPayload = {
   /** The session's full project set, sent on the same events that carry
    *  `project_id` (DENE-522). Absent on rename/pin/archive. */
   project_ids?: string[];
-  /** Full read-only linked set (DENE-1643); absent unless it changed. */
-  linked_projects?: ChatLinkedProject[];
   pinned?: boolean;
   status?: "active" | "archived";
   /** Present only when the creator dismisses the "bind a project" reminder. */
@@ -424,7 +420,6 @@ export function applyChatSessionUpdatedToCache(
             // predating project_ids sends only project_id, and the singular
             // patch above still moves the chip.
             ...("project_ids" in payload ? { project_ids: payload.project_ids } : {}),
-            ...("linked_projects" in payload ? { linked_projects: payload.linked_projects } : {}),
             pinned: payload.pinned ?? s.pinned,
             status: payload.status ?? s.status,
             ...("project_nudge_dismissed" in payload
@@ -798,7 +793,6 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
     qc.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
     qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
     qc.invalidateQueries({ queryKey: workspaceKeys.invitations(wsId) });
-    qc.invalidateQueries({ queryKey: workspaceLinkKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: autopilotKeys.all(wsId) });
@@ -859,7 +853,6 @@ function invalidateReconnectDetailQueries(qc: QueryClient): void {
     qc.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
     qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
     qc.invalidateQueries({ queryKey: workspaceKeys.invitations(wsId) });
-    qc.invalidateQueries({ queryKey: workspaceLinkKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: autopilotKeys.all(wsId) });
@@ -1479,21 +1472,11 @@ export function useRealtimeSync(
       }),
     );
 
-    const unsubWorkspaceLinkChanged = ws.on("workspace_link:changed", (p) => {
-      const wsId = getCurrentWsId();
-      if (!wsId || !p || typeof p !== "object" || !("workspace_id" in p) || p.workspace_id !== wsId) return;
-      qc.invalidateQueries({ queryKey: workspaceLinkKeys.all(wsId) });
-    });
     const unsubInboxNew = ws.on("inbox:new", async (p) => {
       const { item } = p as InboxNewPayload;
       if (!item) return;
       const inboxWsId = getCurrentWsId();
       if (inboxWsId) qc.invalidateQueries({ queryKey: homeKeys.all(inboxWsId) });
-      // A link request or receipt changed that workspace's link list
-      // (DENE-1641); the settings nav counts pending requests from it.
-      if (item.type.startsWith("workspace_link_")) {
-        qc.invalidateQueries({ queryKey: workspaceLinkKeys.list(item.workspace_id) });
-      }
       await handleInboxNew(qc, item);
     });
 
@@ -2181,7 +2164,6 @@ export function useRealtimeSync(
       unsubIssuePropertiesChanged();
       unsubPropertyChanged.forEach((unsub) => unsub());
       unsubInboxNew();
-      unsubWorkspaceLinkChanged();
       unsubCommentCreated();
       unsubCommentUpdated();
       unsubCommentDeleted();

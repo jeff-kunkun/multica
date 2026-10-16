@@ -70,10 +70,7 @@
     "access_request_expires": "{{until}} に期限切れ",
     "access_status_approved": "承認済み",
     "access_status_declined": "拒否済み",
-    "access_status_expired": "期限切れ：対応されませんでした",
-    "link_projects": "プロジェクト：{{projects}}",
-    "link_answer": "連携ワークスペースで確認",
-    "link_open": "連携ワークスペースを開く"
+    "access_status_expired": "期限切れ：対応されませんでした"
   },
   "types": {
     "needs_you": "対応が必要です",
@@ -104,9 +101,6 @@
     "agent_access_approved": "エージェント利用が承認されました",
     "agent_access_declined": "エージェント利用が拒否されました",
     "parking_unexplained": "理由なく停止",
-    "workspace_link_request": "連携リクエスト",
-    "workspace_link_accepted": "連携が承認されました",
-    "workspace_link_declined": "連携が拒否されました",
     "runtime_offline": "マシンがオフライン",
     "runtime_online": "マシンがオンライン"
   },
@@ -126,10 +120,7 @@
     "children_done_stage": "ステージ {{stage}} のサブタスクがすべて終わりました",
     "access_requested_by": "{{requester}} が {{agent}} の利用を申請",
     "access_approved_for": "{{agent}} の利用申請が承認されました",
-    "access_declined_for": "{{agent}} の利用申請が拒否されました",
-    "link_requested_by": "{{source}} がプロジェクトの共有を希望しています",
-    "link_accepted_by": "{{target}} が連携を承認しました",
-    "link_declined_by": "{{target}} が連携を拒否しました"
+    "access_declined_for": "{{agent}} の利用申請が拒否されました"
   },
   "toasts": {
     "source_context_retry_started": "元のコンテキストで再試行を開始しました",

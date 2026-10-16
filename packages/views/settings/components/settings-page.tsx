@@ -72,8 +72,6 @@ import { McpTab } from "./mcp-tab";
 import { BillingTab } from "./billing-tab";
 import { ConfigTransferTab } from "./config-transfer-tab";
 import { ProjectSharingTab } from "./project-sharing-tab";
-import { workspaceLinksOptions } from "@multica/core/workspace-links";
-import { WorkspaceLinksTab } from "./workspace-links-tab";
 import { SETTINGS_ANCHOR_ATTR } from "./settings-layout";
 import { searchSettings } from "./settings-search";
 import { HighlightText } from "../../search/highlight-text";
@@ -101,8 +99,6 @@ type SettingsEntry = ExtraSettingsTab & {
   wide?: boolean;
   /** Owners and admins manage it; members see a read-only page. */
   adminOnly?: boolean;
-  /** Things waiting for the reader on this page, shown after the label. */
-  count?: number;
 };
 
 interface SettingsSubgroup {
@@ -149,20 +145,12 @@ export function SettingsPage({ extraDeviceTabs: deviceTabs = [] }: SettingsPageP
     false,
   );
   const appsAvailable = useComposioAvailable();
-  // Offers this workspace has not answered yet (DENE-1641).
-  const { data: links } = useQuery({
-    ...workspaceLinksOptions(workspace?.id ?? ""),
-    enabled: !!workspace?.id,
-  });
-  const pendingLinks = (links?.links ?? []).filter(
-    (link) => link.side === "viewer" && link.status === "pending",
-  ).length;
   const entry = (
     value: string,
     label: string,
     icon: ExtraSettingsTab["icon"],
     content: React.ReactNode,
-    options: { wide?: boolean; adminOnly?: boolean; count?: number } = {},
+    options: { wide?: boolean; adminOnly?: boolean } = {},
   ): SettingsEntry => ({ value, label, icon, content, ...options });
   const membersEntry = entry(
     "members",
@@ -242,13 +230,6 @@ export function SettingsPage({ extraDeviceTabs: deviceTabs = [] }: SettingsPageP
       ? [entry("plugins", t(($) => $.page.tabs.plugins), Blocks, <PluginsTab />, { adminOnly: true })]
       : []),
   ];
-  const workspaceLinksEntry = entry(
-    "workspace-links",
-    t(($) => $.page.tabs.workspace_links),
-    Network,
-    <WorkspaceLinksTab />,
-    { wide: true, count: pendingLinks || undefined },
-  );
 
   const groups: SettingsScopeGroup[] = [
     {
@@ -318,8 +299,6 @@ export function SettingsPage({ extraDeviceTabs: deviceTabs = [] }: SettingsPageP
                   }),
                 ]
               : []),
-            // Only listed while another workspace's offer waits for an answer.
-            ...(pendingLinks ? [workspaceLinksEntry] : []),
           ],
         },
       ],
@@ -344,7 +323,7 @@ export function SettingsPage({ extraDeviceTabs: deviceTabs = [] }: SettingsPageP
   // A non-owner who opens the members link directly still lands on it and is
   // told why it is closed, instead of being bounced to another tab unexplained.
   const active =
-    [...allEntries, membersEntry, workspaceLinksEntry, ...retired, ...(deviceTabs as SettingsEntry[])].find((item) => item.value === candidate) ??
+    [...allEntries, membersEntry, ...retired, ...(deviceTabs as SettingsEntry[])].find((item) => item.value === candidate) ??
     allEntries[0]!;
   const href = (value: string) =>
     settingsHref(navigation.pathname, navigation.searchParams, value);
@@ -431,12 +410,7 @@ export function SettingsPage({ extraDeviceTabs: deviceTabs = [] }: SettingsPageP
         )}
       >
         <item.icon className="size-4 shrink-0" aria-hidden="true" />
-        <span className="min-w-0 flex-1 truncate">{item.label}</span>{" "}
-        {item.count ? (
-          <span className="shrink-0 text-caption tabular-nums text-muted-foreground">
-            {item.count}
-          </span>
-        ) : null}
+        <span className="min-w-0 flex-1 truncate">{item.label}</span>
         {isMember && item.adminOnly ? (
           <Lock
             className="size-3 shrink-0 text-faint-foreground"
@@ -522,7 +496,7 @@ export function SettingsPage({ extraDeviceTabs: deviceTabs = [] }: SettingsPageP
                 >
                   {subgroup.entries.map((item) => (
                     <option key={item.value} value={item.value}>
-                      {item.count ? `${item.label} (${item.count})` : item.label}
+                      {item.label}
                     </option>
                   ))}
                 </optgroup>

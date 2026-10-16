@@ -23,7 +23,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/routing"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
-	"github.com/multica-ai/multica/server/internal/workspacelink"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -44,9 +43,6 @@ type CreateChatSessionRequest struct {
 	// older clients send; sending both is rejected rather than silently
 	// ignoring one of them. An empty array means "no project context".
 	ProjectIDs []string `json:"project_ids"`
-	// LinkedProjects attaches projects shared through a workspace link as
-	// read-only references (DENE-1643). They never become the chat's project.
-	LinkedProjects []ChatLinkedProjectRef `json:"linked_projects"`
 	// Brief is the opening message, read only when agent_id is empty: routing
 	// judges it the way it judges a ticket body and picks the agent
 	// (DENE-1834). It is not stored; the caller still sends the message.
@@ -89,19 +85,6 @@ func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
 	}
 	agentID, ok := parseUUIDOrBadRequest(w, req.AgentID, "agent_id")
 	if !ok {
-		return
-	}
-	linkedRefs, ok := parseChatLinkedProjectRefs(w, req.LinkedProjects)
-	if !ok {
-		return
-	}
-	linkedProjects, err := h.resolveChatLinkedProjects(r.Context(), workspaceUUID, requestMemberRole(r), linkedRefs)
-	switch {
-	case errors.Is(err, errChatLinkedProjectNotFound):
-		writeError(w, http.StatusNotFound, "linked project not found")
-		return
-	case err != nil:
-		writeError(w, http.StatusInternalServerError, "failed to load linked projects")
 		return
 	}
 
@@ -184,10 +167,6 @@ func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := h.insertChatSessionProjects(r.Context(), qtx, session, projectIDs); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to store chat session projects")
-		return
-	}
-	if err := insertChatSessionLinkedProjects(r.Context(), qtx, session, linkedProjects); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to store chat session linked projects")
 		return
 	}
 	if len(projectIDs) > 0 {
@@ -597,9 +576,6 @@ type UpdateChatSessionRequest struct {
 	// set, in selection order. RawMessage distinguishes an absent field from
 	// an explicit empty array, which clears the session's project context.
 	ProjectIDs json.RawMessage `json:"project_ids"`
-	// LinkedProjects is the complete replacement set of read-only linked
-	// projects (DENE-1643); an empty array clears it.
-	LinkedProjects *[]ChatLinkedProjectRef `json:"linked_projects"`
 }
 
 // UpdateChatSession updates one user-editable field on a chat session. Title
@@ -623,9 +599,8 @@ func (h *Handler) UpdateChatSession(w http.ResponseWriter, r *http.Request) {
 	hasTitle := req.Title != nil
 	hasProjectID := req.ProjectID != nil
 	hasProjectIDs := req.ProjectIDs != nil
-	hasLinkedProjects := req.LinkedProjects != nil
-	if !exactlyOneTrue(hasTitle, hasProjectID, hasProjectIDs, hasLinkedProjects) {
-		writeError(w, http.StatusBadRequest, "exactly one of title, project_id, project_ids or linked_projects is required")
+	if !exactlyOneTrue(hasTitle, hasProjectID, hasProjectIDs) {
+		writeError(w, http.StatusBadRequest, "exactly one of title, project_id or project_ids is required")
 		return
 	}
 
@@ -641,7 +616,7 @@ func (h *Handler) UpdateChatSession(w http.ResponseWriter, r *http.Request) {
 		updated db.ChatSession
 		err     error
 	)
-	var projectIDChanged, linkedProjectsChanged bool
+	var projectIDChanged bool
 	switch {
 	case hasTitle:
 		title := strings.TrimSpace(*req.Title)
@@ -680,20 +655,6 @@ func (h *Handler) UpdateChatSession(w http.ResponseWriter, r *http.Request) {
 		}
 		updated, err = h.replaceChatSessionProjects(r.Context(), session, projectIDs)
 		projectIDChanged = true
-	case hasLinkedProjects:
-		refs, ok := parseChatLinkedProjectRefs(w, *req.LinkedProjects)
-		if !ok {
-			return
-		}
-		var resolved []workspacelink.ReferenceOption
-		resolved, err = h.resolveChatLinkedProjectsReplace(r.Context(), session, requestMemberRole(r), refs)
-		if err == nil {
-			err = h.replaceChatSessionLinkedProjects(r.Context(), session, resolved)
-		}
-		if err == nil {
-			updated, err = h.Queries.GetChatSession(r.Context(), session.ID)
-		}
-		linkedProjectsChanged = true
 	default:
 		var raw []string
 		if err := json.Unmarshal(req.ProjectIDs, &raw); err != nil {
@@ -710,9 +671,6 @@ func (h *Handler) UpdateChatSession(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case errors.Is(err, errChatSessionProjectNotFound):
 		writeError(w, http.StatusNotFound, "project not found")
-		return
-	case errors.Is(err, errChatLinkedProjectNotFound):
-		writeError(w, http.StatusNotFound, "linked project not found")
 		return
 	case err != nil:
 		writeError(w, http.StatusInternalServerError, "failed to update chat session")
@@ -743,16 +701,6 @@ func (h *Handler) UpdateChatSession(w http.ResponseWriter, r *http.Request) {
 		// chip, not just the mirrored primary.
 		projectIDs := responses[0].ProjectIDs
 		payload.ProjectIDs = &projectIDs
-	}
-	if linkedProjectsChanged {
-		linked := make([]protocol.ChatLinkedProject, 0, len(responses[0].LinkedProjects))
-		for _, item := range responses[0].LinkedProjects {
-			linked = append(linked, protocol.ChatLinkedProject{
-				LinkID: item.LinkID, ProjectID: item.ProjectID, Title: item.Title,
-				Icon: item.Icon, SourceName: item.SourceName, Available: item.Available,
-			})
-		}
-		payload.LinkedProjects = &linked
 	}
 	h.publishChatWithSource(r.Context(), protocol.EventChatSessionUpdated, workspaceID, "member", userID, resolvedSessionID, payload)
 
@@ -1297,18 +1245,15 @@ type SendChatMessageResponse struct {
 	// with pickup_timeout unless a daemon starts it first. FallbackRuntime is
 	// true when the turn went to the configured fallback because the primary
 	// runtime was offline.
-	Urgent           bool                       `json:"urgent,omitempty"`
-	PickupDeadlineAt *string                    `json:"pickup_deadline_at,omitempty"`
-	FallbackRuntime  bool                       `json:"fallback_runtime,omitempty"`
-	Warning          string                     `json:"warning,omitempty"`
-	ReasonCode       string                     `json:"reason_code,omitempty"`
-	ChatSessionID    string                     `json:"chat_session_id,omitempty"`
-	MessageKind      string                     `json:"message_kind,omitempty"`
-	LinkedDelivery   *ManagedChatDeliverySource `json:"linked_delivery,omitempty"`
-	MessageID        string                     `json:"message_id"`
-	TaskID           string                     `json:"task_id"`
-	SupportsQueue    bool                       `json:"supports_queue"`
-	Queued           bool                       `json:"queued"`
+	Urgent           bool    `json:"urgent,omitempty"`
+	PickupDeadlineAt *string `json:"pickup_deadline_at,omitempty"`
+	FallbackRuntime  bool    `json:"fallback_runtime,omitempty"`
+	Warning          string  `json:"warning,omitempty"`
+	ReasonCode       string  `json:"reason_code,omitempty"`
+	MessageID        string  `json:"message_id"`
+	TaskID           string  `json:"task_id"`
+	SupportsQueue    bool    `json:"supports_queue"`
+	Queued           bool    `json:"queued"`
 	// Mode is what actually happened: steer, queue, restart, replace, or start
 	// when nothing was replying. A steer whose reply ended first reports queue.
 	Mode string `json:"mode"`
@@ -1347,28 +1292,6 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Content == "" {
 		writeError(w, http.StatusBadRequest, "content is required")
-		return
-	}
-	if grant, managed := workspacelink.ManagedGrantFromContext(r.Context()); managed {
-		id, err := parseUUIDSafe(sessionID)
-		if err != nil {
-			writeWorkspaceLinkError(w, workspacelink.ErrManagedDenied)
-			return
-		}
-		session, err := h.Queries.GetChatSessionInWorkspace(r.Context(), db.GetChatSessionInWorkspaceParams{ID: id, WorkspaceID: grant.Source.ID})
-		if err != nil {
-			writeWorkspaceLinkError(w, workspacelink.ErrManagedDenied)
-			return
-		}
-		if req.Urgent {
-			writeError(w, http.StatusBadRequest, "urgent is not supported for linked-workspace sends")
-			return
-		}
-		if req.Mode == sendModeReplace {
-			writeError(w, http.StatusBadRequest, "replace is not supported for linked-workspace sends")
-			return
-		}
-		h.sendManagedChatMessage(w, r, session, grant, req)
 		return
 	}
 	mode, ok := normalizeChatSendMode(req.Mode)
@@ -1881,9 +1804,6 @@ func (h *Handler) ListChatMessages(w http.ResponseWriter, r *http.Request) {
 	resp := make([]ChatMessageResponse, len(messages))
 	for i, m := range messages {
 		resp[i] = chatMessageToResponse(m, groupedAtt[uuidToString(m.ID)])
-		if _, managed := workspacelink.ManagedGrantFromContext(r.Context()); managed {
-			resp[i].Content = protocol.ChatPromptContent(m.MessageKind, m.Content)
-		}
 	}
 	h.attachChatSessionLineage(r.Context(), resp, messages)
 	writeJSON(w, http.StatusOK, resp)
@@ -2666,15 +2586,11 @@ type ChatSessionResponse struct {
 	// ProjectIDs is the session's full project set in selection order
 	// (DENE-523); ProjectID above mirrors its first entry for older clients.
 	// Always an array — empty when the session carries no project context.
-	ProjectIDs []string `json:"project_ids"`
-	// LinkedProjects are read-only references shared through a workspace link
-	// (DENE-1643). Always an array; an entry whose link was revoked stays with
-	// available=false so the chat can show it as stale.
-	LinkedProjects []ChatLinkedProjectResponse `json:"linked_projects"`
-	Title          string                      `json:"title"`
-	TitleLocked    bool                        `json:"title_locked"`
-	Progress       *ProgressResponse           `json:"progress,omitempty"`
-	Status         string                      `json:"status"`
+	ProjectIDs  []string          `json:"project_ids"`
+	Title       string            `json:"title"`
+	TitleLocked bool              `json:"title_locked"`
+	Progress    *ProgressResponse `json:"progress,omitempty"`
+	Status      string            `json:"status"`
 	// Only populated by list endpoints — single-session fetches return 0/false/nil.
 	// HasUnread is kept as a convenience (== UnreadCount > 0) for existing consumers.
 	HasUnread   bool             `json:"has_unread"`
@@ -2915,7 +2831,7 @@ func (h *Handler) hydrateChatSessionProjectIDs(ctx context.Context, sessions []C
 			sessions[i].ProjectIDs = []string{*sessions[i].ProjectID}
 		}
 	}
-	return h.hydrateChatSessionLinkedProjects(ctx, sessions)
+	return nil
 }
 
 // ChatLastMessage is a preview of a session's most recent message, used to

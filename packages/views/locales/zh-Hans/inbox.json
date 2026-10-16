@@ -70,10 +70,7 @@
     "access_request_expires": "{{until}} 过期",
     "access_status_approved": "已批准",
     "access_status_declined": "已拒绝",
-    "access_status_expired": "已过期：没人及时处理",
-    "link_projects": "项目：{{projects}}",
-    "link_answer": "去连通工作区处理",
-    "link_open": "打开连通工作区"
+    "access_status_expired": "已过期：没人及时处理"
   },
   "types": {
     "needs_you": "需要你处理",
@@ -104,9 +101,6 @@
     "agent_access_approved": "智能体借用已批准",
     "agent_access_declined": "智能体借用已拒绝",
     "parking_unexplained": "停了没交代",
-    "workspace_link_request": "连通请求",
-    "workspace_link_accepted": "连通已接受",
-    "workspace_link_declined": "连通已拒绝",
     "runtime_offline": "机器掉线",
     "runtime_online": "机器恢复在线"
   },
@@ -126,10 +120,7 @@
     "children_done_stage": "第 {{stage}} 阶段的子任务已全部结束",
     "access_requested_by": "{{requester}} 申请使用 {{agent}}",
     "access_approved_for": "你使用 {{agent}} 的申请已批准",
-    "access_declined_for": "你使用 {{agent}} 的申请已拒绝",
-    "link_requested_by": "{{source}} 想把项目共享给你们",
-    "link_accepted_by": "{{target}} 接受了你们的连通",
-    "link_declined_by": "{{target}} 拒绝了你们的连通"
+    "access_declined_for": "你使用 {{agent}} 的申请已拒绝"
   },
   "toasts": {
     "source_context_retry_started": "已使用原始上下文开始重试",

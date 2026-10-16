@@ -52,12 +52,6 @@ vi.mock("@multica/core/projects/queries", () => ({
   },
 }));
 
-// Keep the real reference-projects section rendered while isolating its mutation.
-vi.mock("@multica/core/workspace-links", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@multica/core/workspace-links")>()),
-  useSetLinkedProjectSettings: () => ({ mutate: vi.fn(), isPending: false }),
-}));
-
 vi.mock("@multica/core/projects/mutations", () => ({
   useUpdateProject: () => ({ mutate: vi.fn() }),
   useDeleteProject: () => ({ mutate: mocks.deleteProject }),

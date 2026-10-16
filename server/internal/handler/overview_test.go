@@ -75,7 +75,7 @@ func TestOverviewCountsFiltersAndCompact(t *testing.T) {
 		{"agents", "", testHandler.ListAgents}, {"projects", "projects", testHandler.ListProjects},
 		{"chats", "", testHandler.ListChatDirectory}, {"automations", "autopilots", testHandler.ListAutopilots},
 		{"skills", "", testHandler.ListSkills}, {"squads", "", testHandler.ListSquads},
-		{"runtimes", "", testHandler.ListAgentRuntimes}, {"workspace_links", "links", testHandler.ListWorkspaceLinks},
+		{"runtimes", "", testHandler.ListAgentRuntimes},
 	}
 	for _, source := range sources {
 		req := overviewRequest(overviewTestRequest(t, testUserID, ""), nil)
@@ -105,18 +105,6 @@ func TestOverviewCountsFiltersAndCompact(t *testing.T) {
 			capacity, ok := row["machine_capacity"].(map[string]any)
 			if !ok || capacity["max_concurrent_runs"] != float64(12) {
 				t.Fatalf("overview dropped default machine capacity: %v", row)
-			}
-		}
-		for _, section := range []string{"projects", "automations"} {
-			for _, row := range overviewTestRows(t, snapshot, section) {
-				for _, field := range []string{"linked_projects", "effective_linked_projects", "inherited"} {
-					if _, ok := row[field]; !ok {
-						t.Fatalf("%s lacks %s: %v", section, field, row)
-					}
-				}
-				if overviewString(row, "id") == automation && row["inherited"] != true {
-					t.Fatalf("unset automation references must inherit: %v", row)
-				}
 			}
 		}
 	}

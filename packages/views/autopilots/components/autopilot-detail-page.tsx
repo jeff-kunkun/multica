@@ -1,5 +1,4 @@
 "use client";
-import { ReferenceProjectsSetting } from "../../projects/components/reference-projects-setting";
 
 import { useState } from "react";
 import {
@@ -69,7 +68,6 @@ import { EditScheduleTriggerDialog } from "./edit-schedule-trigger-dialog";
 import { runNowToastKind, runNowBlockedKey } from "./run-now-toast";
 import { WebhookPayloadPreview } from "./webhook-payload-preview";
 import { WebhookDeliveriesSection } from "./webhook-deliveries-section";
-import { LinkedChangesSection } from "./linked-changes-section";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { useT } from "../../i18n";
 import { PageHeader } from "../../layout/page-header";
@@ -979,8 +977,6 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
             </div>
           </section>
 
-          <ReferenceProjectsSetting kind="autopilots" id={autopilotId} canWrite={canWrite} />
-
           {/* Triggers */}
           <section className="space-y-3">
             <div className="flex items-center justify-between">
@@ -1014,8 +1010,6 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
             autopilotId={autopilotId}
             hasWebhookTrigger={triggers.some((trig) => trig.kind === "webhook")}
           />
-
-          <LinkedChangesSection autopilotId={autopilotId} />
 
           {/* Run History */}
           <section className="space-y-3">

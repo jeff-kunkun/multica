@@ -73,10 +73,7 @@
     "access_request_expires": "Expires {{until}}",
     "access_status_approved": "Approved",
     "access_status_declined": "Declined",
-    "access_status_expired": "Expired — nobody answered in time",
-    "link_projects": "Projects: {{projects}}",
-    "link_answer": "Review in Linked workspaces",
-    "link_open": "Open Linked workspaces"
+    "access_status_expired": "Expired — nobody answered in time"
   },
   "types": {
     "needs_you": "Needs your attention",
@@ -107,9 +104,6 @@
     "agent_access_approved": "Agent access approved",
     "agent_access_declined": "Agent access declined",
     "parking_unexplained": "Stopped without explanation",
-    "workspace_link_request": "Link request",
-    "workspace_link_accepted": "Link accepted",
-    "workspace_link_declined": "Link declined",
     "runtime_offline": "Machine offline",
     "runtime_online": "Machine online"
   },
@@ -129,10 +123,7 @@
     "children_done_stage": "Stage {{stage}}'s sub-issues finished",
     "access_requested_by": "{{requester}} asked to use {{agent}}",
     "access_approved_for": "Your request to use {{agent}} was approved",
-    "access_declined_for": "Your request to use {{agent}} was declined",
-    "link_requested_by": "{{source}} wants to share projects with you",
-    "link_accepted_by": "{{target}} accepted your link",
-    "link_declined_by": "{{target}} declined your link"
+    "access_declined_for": "Your request to use {{agent}} was declined"
   },
   "toasts": {
     "source_context_retry_started": "Retry started with the original context",

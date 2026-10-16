@@ -23,7 +23,7 @@ import {
 // switches at their defaults.
 const JUDGE_ONLY: Pick<
   RoutingSettings,
-  "judge_enabled" | "analysis" | "usage_priority" | "allow_upshift" | "strongest_gate" | "decision_mode" | "consult_per_issue" | "prefer_continuation" | "prefer_idle" | "learn_from_outcomes" | "learn_low_rate" | "learn_window_days" | "judged_review"
+  "judge_enabled" | "analysis" | "usage_priority" | "allow_upshift" | "strongest_gate" | "decision_mode" | "consult_per_issue" | "prefer_continuation" | "prefer_idle" | "judged_review"
 > = {
   judge_enabled: true,
   analysis: { enabled: false, model: "", base_url: "" },
@@ -32,9 +32,6 @@ const JUDGE_ONLY: Pick<
   strongest_gate: true, decision_mode: "legacy" as const, consult_per_issue: 3,
   prefer_continuation: false,
   prefer_idle: false,
-  learn_from_outcomes: false,
-  learn_low_rate: 0.3,
-  learn_window_days: 30,
   judged_review: false,
 };
 
@@ -74,9 +71,6 @@ describe("parseRoutingSettings", () => {
       strongest_gate: true, decision_mode: "legacy" as const, consult_per_issue: 3,
       prefer_continuation: false,
       prefer_idle: false,
-      learn_from_outcomes: false,
-      learn_low_rate: 0.3,
-      learn_window_days: 30,
       judged_review: false,
     });
   });
@@ -90,9 +84,6 @@ describe("parseRoutingSettings", () => {
       strongest_gate: true, decision_mode: "legacy" as const, consult_per_issue: 3,
       prefer_continuation: false,
       prefer_idle: false,
-      learn_from_outcomes: false,
-      learn_low_rate: 0.3,
-      learn_window_days: 30,
       judged_review: false,
     });
     expect(
@@ -108,15 +99,6 @@ describe("parseRoutingSettings", () => {
     // DENE-1203: 负载分流 is off (shadow) unless explicitly true.
     expect(parseRoutingSettings({ routing: {} }).prefer_idle).toBe(false);
     expect(parseRoutingSettings({ routing: { prefer_idle: true } }).prefer_idle).toBe(true);
-    // DENE-1722: 从结果里学 is off (shadow) unless explicitly true; its rate
-    // and window fall back to the server defaults when out of range.
-    expect(parseRoutingSettings({ routing: {} }).learn_from_outcomes).toBe(false);
-    expect(
-      parseRoutingSettings({ routing: { learn_from_outcomes: true, learn_low_rate: 0.5, learn_window_days: 14 } }),
-    ).toMatchObject({ learn_from_outcomes: true, learn_low_rate: 0.5, learn_window_days: 14 });
-    expect(
-      parseRoutingSettings({ routing: { learn_low_rate: 1.5, learn_window_days: 0 } }),
-    ).toMatchObject({ learn_low_rate: 0.3, learn_window_days: 30 });
     // DENE-1252: 按判断配验收 is off unless explicitly true.
     expect(parseRoutingSettings({ routing: {} }).judged_review).toBe(false);
     expect(parseRoutingSettings({ routing: { judged_review: true } }).judged_review).toBe(true);
@@ -282,9 +264,6 @@ describe("withRoutingSettings", () => {
         strongest_gate: true, decision_mode: "legacy" as const, consult_per_issue: 3,
         prefer_continuation: false,
         prefer_idle: false,
-        learn_from_outcomes: false,
-        learn_low_rate: 0.3,
-        learn_window_days: 30,
         judged_review: false,
       },
     });
@@ -311,9 +290,6 @@ describe("withRoutingSettings", () => {
       strongest_gate: true, decision_mode: "legacy" as const, consult_per_issue: 3,
       prefer_continuation: false,
       prefer_idle: false,
-      learn_from_outcomes: false,
-      learn_low_rate: 0.3,
-      learn_window_days: 30,
       judged_review: false,
       projects: { tarot: "出海" },
       future: 1,
@@ -343,9 +319,6 @@ describe("withRoutingSettings", () => {
         strongest_gate: true, decision_mode: "legacy" as const, consult_per_issue: 3,
         prefer_continuation: false,
         prefer_idle: false,
-        learn_from_outcomes: false,
-        learn_low_rate: 0.3,
-        learn_window_days: 30,
         judged_review: false,
       },
     );
@@ -364,9 +337,6 @@ describe("withRoutingSettings", () => {
         strongest_gate: true, decision_mode: "legacy" as const, consult_per_issue: 3,
         prefer_continuation: false,
         prefer_idle: false,
-        learn_from_outcomes: false,
-        learn_low_rate: 0.3,
-        learn_window_days: 30,
         judged_review: false,
       },
     );

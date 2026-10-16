@@ -819,8 +819,6 @@ func validateIssueEnum(field, value string, allowed []string) error {
 }
 
 func init() {
-	addLinkedFlag(issueListCmd, issueGetCmd, issueChildrenCmd, issueCreateCmd, issueUpdateCmd, issueAssignCmd, issueStatusCmd,
-		issueCommentListCmd, issueCommentAddCmd, issueSearchCmd, issueLabelListCmd, issueLabelAddCmd, issueLabelRemoveCmd)
 	issueCmd.AddCommand(issueListCmd)
 	issueCmd.AddCommand(issueGetCmd)
 	issueCmd.AddCommand(issueWaitCmd)

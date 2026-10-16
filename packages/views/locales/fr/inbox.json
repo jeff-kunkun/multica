@@ -73,10 +73,7 @@
     "access_request_expires": "Expire {{until}}",
     "access_status_approved": "Approuvée",
     "access_status_declined": "Refusée",
-    "access_status_expired": "Expirée : personne n'a répondu à temps",
-    "link_projects": "Projets : {{projects}}",
-    "link_answer": "Traiter dans Espaces liés",
-    "link_open": "Ouvrir Espaces liés"
+    "access_status_expired": "Expirée : personne n'a répondu à temps"
   },
   "types": {
     "needs_you": "Nécessite votre attention",
@@ -107,9 +104,6 @@
     "agent_access_approved": "Accès à l'agent approuvé",
     "agent_access_declined": "Accès à l'agent refusé",
     "parking_unexplained": "Arrêt sans explication",
-    "workspace_link_request": "Demande de liaison",
-    "workspace_link_accepted": "Liaison acceptée",
-    "workspace_link_declined": "Liaison refusée",
     "runtime_offline": "Machine hors ligne",
     "runtime_online": "Machine en ligne"
   },
@@ -129,10 +123,7 @@
     "children_done_stage": "Sous-tâches de l’étape {{stage}} terminées",
     "access_requested_by": "{{requester}} demande à utiliser {{agent}}",
     "access_approved_for": "Votre demande d'utiliser {{agent}} a été approuvée",
-    "access_declined_for": "Votre demande d'utiliser {{agent}} a été refusée",
-    "link_requested_by": "{{source}} souhaite partager des projets avec vous",
-    "link_accepted_by": "{{target}} a accepté votre liaison",
-    "link_declined_by": "{{target}} a refusé votre liaison"
+    "access_declined_for": "Votre demande d'utiliser {{agent}} a été refusée"
   },
   "toasts": {
     "source_context_retry_started": "Nouvelle tentative démarrée avec le contexte d'origine",

@@ -1,6 +1,6 @@
 ---
 name: multica-platform
-description: "Overview, ask, open a chat, consult, goal, inbox, sub-issue, wakeup, routing, close protocol, driver, halt, mention, agent, specialisation, squad, autopilot, project, runtime, progress, state card, skill import, transfer, linked workspace, bot, GitHub App, status, env."
+description: "Overview, ask, open a chat, consult, goal, inbox, sub-issue, wakeup, routing, close protocol, driver, halt, mention, agent, specialisation, squad, autopilot, project, runtime, progress, state card, skill import, transfer, bot, GitHub App, status, env."
 user-invocable: false
 allowed-tools: Bash(multica *), Bash(git *), Bash(gh *)
 ---
@@ -19,8 +19,8 @@ Read the invariants below, then open the reference(s) your task actually needs
 
 When starting without a workspace map, call `multica overview --compact` first.
 One permission-scoped server request summarizes agents and their runtimes/projects,
-projects and repositories, active chats and tickets, automations, skills, squads,
-workspace links and external Bots. Use `--output json` for structured data,
+projects and repositories, active chats and tickets, automations, skills, squads
+and external Bots. Use `--output json` for structured data,
 `--project <id-or-exact-name>` or `--agent <id-or-exact-name>` to narrow it.
 Omitted sections are unavailable to this caller; do not try another identity.
 See `references/overview.md` for filter semantics and examples.
@@ -53,7 +53,6 @@ See `references/overview.md` for filter semantics and examples.
 | `references/consult.md` | Asking a strong-tier seat one question while you keep the ticket (`multica issue consult`): when to ask, the per-issue limit, cost, refusal codes |
 | `references/chats.md` | The chat directory and transcripts (`chat list` / `search` / `history`), messaging a running chat (`chat send` modes, `--urgent`), `chat handoff`, `chat to-goal` |
 | `references/chat-spawn.md` | Opening a chat with another agent from a chat (`multica chat open`): task-or-chat table, limits, refusal codes |
-| `references/workspace-links.md` | Reading another workspace's shared projects through a link: `multica workspace link list` / `view`, pending link requests (`list --pending`), what the view contains, why it says link not found; on a managed link, working on the source's issues, autopilots and initiator-owned chats (`chat list/send`) with `--linked <source-slug>`; new links default to managed, opt out with `create --managed=false` |
 | `references/transfer.md` | `multica transfer export` / `import` / `bind-runtimes`, and the kun `/transfer/*` endpoints |
 | `references/skill-import.md` | Importing a skill into this workspace from a URL or a local archive |
 | `references/github-app.md` | GitHub App identity for this deployment: status, and a setup link a person opens to create the App |
@@ -88,9 +87,9 @@ projects after permission checks and the CLI also trims older-server responses.
 API read commands accept `--workspace <UUID|slug|exact-name>` for this invocation;
 case-insensitive names must be unique. The parameter wins over the environment
 and saved profile; the chosen workspace and conflicts are printed on stderr,
-so stdout keeps its existing JSON shape. `--linked` remains a separate route;
-commands with an existing local `--workspace` (such as cross-workspace
-`changes/runs` and transfer) retain their own scope contract.
+so stdout keeps its existing JSON shape. Commands with an existing local
+`--workspace` (such as cross-workspace `changes/runs` and transfer) retain
+their own scope contract.
 
 **`--output json` writes to stdout; warnings and confirmations go to stderr.**
 Do not merge them (`2>&1`) into anything that parses the output — that makes a

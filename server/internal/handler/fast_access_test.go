@@ -253,34 +253,6 @@ func TestFastAccessBudgets(t *testing.T) {
 }
 func ptrTime(t time.Time) *time.Time { return &t }
 
-func TestFastAccessLinkedProjectBoundary(t *testing.T) {
-	source := dbfx.Workspace(t, "Linked fixture", "linked-fast-"+randomID())
-	project := dbfx.Project(t, "Shared project", testutil.Cols{"workspace_id": source, "visibility": "workspace"})
-	other := dbfx.Project(t, "Not shared", testutil.Cols{"workspace_id": source, "visibility": "workspace"})
-	link := dbfx.Insert(t, "workspace_link", testutil.Cols{"source_workspace_id": source, "target_workspace_id": testWorkspaceID, "created_by": testUserID, "status": "active"})
-	dbfx.Exec(t, "INSERT INTO workspace_link_project(link_id,project_id) VALUES($1,$2)", link, project)
-	allowed := dbfx.Issue(t, "Linked allowed", testutil.Cols{"workspace_id": source, "project_id": project, "visibility": "workspace"})
-	dbfx.Issue(t, "LINK-PRIVATE", testutil.Cols{"workspace_id": source, "project_id": project, "visibility": "private"})
-	dbfx.Issue(t, "LINK-OTHER", testutil.Cols{"workspace_id": source, "project_id": other, "visibility": "workspace"})
-	rt := dbfx.Runtime(t, "linked-runtime", testutil.Cols{"workspace_id": source})
-	agent := dbfx.Agent(t, "linked-agent", rt, testutil.Cols{"workspace_id": source})
-	dbfx.Task(t, agent, testutil.Cols{"runtime_id": rt, "status": "running", "issue_id": allowed})
-	resetFastQuota()
-	resp, w := fastCall(t, fastRequest{Scope: &fastScope{Mode: "workspace_ids", WorkspaceIDs: []string{source}}})
-	if w.Code != 200 {
-		t.Fatalf("linked %d %s", w.Code, w.Body.String())
-	}
-	if len(resp.Changes) != 1 || resp.Changes[0].ID != allowed || len(resp.ActiveRuns) != 0 || resp.Changes[0].NewCommentCount != nil {
-		t.Fatalf("link grants too much: %s", w.Body.String())
-	}
-	dbfx.Exec(t, "UPDATE project SET visibility='private' WHERE id=$1", project)
-	resetFastQuota()
-	resp, w = fastCall(t, fastRequest{Scope: &fastScope{Mode: "workspace_ids", WorkspaceIDs: []string{source}}})
-	if w.Code != 200 || len(resp.Changes) != 0 {
-		t.Fatalf("private project: %d %s", w.Code, w.Body.String())
-	}
-}
-
 func TestFastAccessAutopilotAndRunEndpoint(t *testing.T) {
 	rt := dbfx.Runtime(t, "autopilot-fast")
 	agent := dbfx.Agent(t, "autopilot-fast", rt)

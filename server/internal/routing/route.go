@@ -401,9 +401,6 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 	executorSource := ""
 	var cont ContinuationPick
 	var load LoadPick
-	var learn LearnPick
-	var class *OutcomeClass
-	learnApplied := false
 	if labelled && !labelSeatOK && !dispatch.Filtered {
 		notes = append(notes, "labelled tier "+requestedTier+" was not eligible")
 	}
@@ -422,34 +419,13 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 			if seat.ID == "" {
 				return r.deliver(ctx, workspaceID, issue, KindAssignment, "## 自动选派\n\n**为什么是他**：兜底 —— "+why+"\n\n未派出；请调整兜底席或人工指派。", false, Outcome{State: StateEnabled, Action: ActionSkipped, Reason: why})
 			}
-			// 从结果里学 only revisits the table's own tier: a label is a
-			// person's call and a fallback is no judgement to learn from.
-			if source == pickJudge && dec.Decider == DeciderRule && dec.Facts != nil {
-				c := ClassOf(scene, verdict.ExecutorTier, *dec.Facts)
-				class = &c
-				learn = r.learned(ctx, workspaceID, settings, ladder, c)
-				if learn.Raise && settings.LearnFromOutcomes {
-					if up, ok := SeatByTier(fresh, learn.To); ok {
-						seat, source, learnApplied = up, pickLearned, true
-						seat.Learned = learn.Detail()
-					}
-				}
-			}
 			// 最强档门槛: the top rung only when nobody on the middle rungs
 			// can take it and its seat is not tight. A person's label is
 			// their call and is not gated.
-			// A learned raise to the top is evidence that the strong rung
-			// was not suitable for this class, which is the gate's own
-			// test, so it is not gated.
 			var gate StrongestGate
-			if !labelStill && source != pickLearned && !verdict.Reasoned && settings.StrongestGateOn() {
+			if !labelStill && !verdict.Reasoned && settings.StrongestGateOn() {
 				seat, gate = ladder.gateStrongest(seat, candidates, fresh, pickRoster, snaps)
 				out.StrongestGate = gate
-				if gate.Moved && class != nil {
-					// The outcome class names the judged rung; the seat is
-					// now a rung below, so nothing is recorded to learn from.
-					class = nil
-				}
 				if seat.ID == "" {
 					return r.deliver(ctx, workspaceID, issue, KindAssignment, "## 自动选派\n\n**为什么是他**：兜底 —— "+gate.Why+"；未派出，请人工指派或调整可用席位。", false, Outcome{State: StateEnabled, Action: ActionSkipped, Reason: gate.Why})
 				}
@@ -457,7 +433,7 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 					notes = append(notes, line)
 				}
 			}
-			tierSeat, tierSource, tierWhy := seat, source, why
+			tierSource, tierWhy := source, why
 			// 接着做 ranks above the ladder's pick but not above a person's
 			// tier label: the label is a person's instruction about strength.
 			if !labelStill && source != pickFallback && !verdict.Reasoned {
@@ -491,7 +467,6 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 						// Series changes the seat within the chosen tier. Restore
 						// the tier provenance, not the displaced seat's reason.
 						source, why = tierSource, tierWhy
-						preferred.Learned = tierSeat.Learned
 						cont, load = ContinuationPick{}, LoadPick{}
 					}
 					seat = preferred
@@ -509,9 +484,6 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 			if written {
 				executor, executorSource = &seat, source
 				out.ExecutorWritten = &seat
-				if class != nil {
-					r.recordOutcome(ctx, workspaceID, issue.ID, *class)
-				}
 				if why != "" {
 					notes = append(notes, "executor fell back to "+seat.Name+": "+why)
 				}
@@ -618,8 +590,7 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 		executor, executorSource, reviewer, reviewerFallback, fallbackWhy, humanSignoff,
 		needExecutor, needReviewer, notify, mode, dec, settings, ignored,
 		ContinuationLine(cont, settings.PreferContinuation, executor),
-		LoadLine(load, settings.PreferIdle, executor),
-		learnLine(learn, settings.LearnFromOutcomes, learnApplied, executor, executorSource))
+		LoadLine(load, settings.PreferIdle, executor))
 	if seriesNote != "" {
 		body += "\n\n" + seriesNote
 	}
@@ -637,15 +608,6 @@ func (r *Router) routeTodo(ctx context.Context, workspaceID string, settings Set
 	}
 
 	return r.deliver(ctx, workspaceID, issue, KindAssignment, body, notify, out)
-}
-
-// learnLine is LearnLine for the seat this call wrote; with nothing written
-// there is no pick to talk about.
-func learnLine(p LearnPick, enabled, applied bool, written *Seat, source string) string {
-	if written == nil {
-		return ""
-	}
-	return LearnLine(p, enabled, applied, source == pickLearned)
 }
 
 // judgeNote names a judge answer the rule table did not take, so a hook or
@@ -666,8 +628,6 @@ const (
 	pickContinuation = "continuation"
 	// pickLoad — the 负载 rule placed the seat (DENE-1203).
 	pickLoad = "load"
-	// pickLearned — 从结果里学 raised the table's tier one rung (DENE-1722).
-	pickLearned = "learned"
 )
 
 // pickExecutor resolves the executor seat, and always resolves one: candidates

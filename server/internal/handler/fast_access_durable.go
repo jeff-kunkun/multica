@@ -101,15 +101,12 @@ func (h *Handler) fastState(r *http.Request, viewer string, req fastRequest) ([]
 	parts := []string{strconv.FormatInt(epoch, 10)}
 	marks := map[string]int64{}
 	for _, s := range scopes {
-		parts = append(parts, s.ID+":"+string(s.Viewer.role)+fmt.Sprint(s.Managed, s.IssuesAllowed))
+		parts = append(parts, s.ID+":"+string(s.Viewer.role)+fmt.Sprint(s.IssuesAllowed))
 		for _, a := range s.Agents {
 			parts = append(parts, s.ID+":agent:"+uuidToString(a))
 		}
 		for _, p := range s.Viewer.projectIDs {
 			parts = append(parts, s.ID+":member-project:"+uuidToString(p))
-		}
-		for _, p := range s.LinkedProjects {
-			parts = append(parts, s.ID+":link-project:"+uuidToString(p))
 		}
 		var n int64
 		if err = h.DB.QueryRow(r.Context(), `SELECT COALESCE((SELECT seq FROM fast_access_feed WHERE workspace_id=$1),0)`, parseUUID(s.ID)).Scan(&n); err != nil {

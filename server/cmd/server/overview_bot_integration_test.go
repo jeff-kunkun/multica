@@ -42,7 +42,7 @@ func TestOverviewExternalBotMatchesOwnerPAT(t *testing.T) {
 			if !reflect.DeepEqual(botSnapshot, ownerSnapshot) {
 				t.Fatal("bot and owner PAT overview snapshots differ")
 			}
-			for _, section := range []string{"agents", "projects", "chats", "automations", "skills", "squads", "runtimes", "workspace_links", "external_connections"} {
+			for _, section := range []string{"agents", "projects", "chats", "automations", "skills", "squads", "runtimes", "external_connections"} {
 				if _, ok := botSnapshot[section].([]any); !ok {
 					t.Errorf("missing array %s", section)
 				}

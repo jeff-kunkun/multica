@@ -2,8 +2,6 @@ package handler
 
 import (
 	"net/http"
-
-	"github.com/multica-ai/multica/server/internal/workspacelink"
 )
 
 // RequireHumanActor rejects machine credentials on human-only route groups.
@@ -33,9 +31,7 @@ func isMachineCredentialActor(r *http.Request) bool {
 	// client-supplied value before stamping its own, so a recognized value here
 	// is authoritative.
 	switch r.Header.Get("X-Actor-Source") {
-	case "task_token", "cloud_pat", workspacelink.ManagedActorSource:
-		// A managed request (DENE-1663) runs as its originator but is still
-		// an agent's call: human-only gates refuse it.
+	case "task_token", "cloud_pat":
 		return true
 	default:
 		return false

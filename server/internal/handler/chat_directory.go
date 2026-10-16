@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/workspacelink"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -101,9 +100,6 @@ func (h *Handler) ListChatDirectory(w http.ResponseWriter, r *http.Request) {
 	}
 	items := make([]ChatDirectoryItem, 0, len(rows))
 	for _, row := range rows {
-		if grant, managed := workspacelink.ManagedGrantFromContext(r.Context()); managed && row.CreatorID != grant.Originator {
-			continue
-		}
 		if currentSessionID != "" && uuidToString(row.ID) == currentSessionID {
 			continue
 		}

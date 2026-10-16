@@ -199,7 +199,6 @@ func init() {
 	issuePropertySetCmd.Flags().String("value", "", "Property value (required; see --help for per-type forms)")
 	issuePropertyUnsetCmd.Flags().String("output", "table", "Output format: table or json")
 	issuePropertyUnsetCmd.Flags().String("name", "", "Property name or UUID (required)")
-	addLinkedFlag(issuePropertyListCmd, issuePropertySetCmd, issuePropertyUnsetCmd)
 
 	issueCmd.AddCommand(issuePropertyCmd)
 }

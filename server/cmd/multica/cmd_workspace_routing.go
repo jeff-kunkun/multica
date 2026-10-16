@@ -35,10 +35,9 @@ own executor. One rejected review returns to the executor; the second escalates.
 
 Migration: legacy preserves pre-cutover decisions; shadow records one-model
 comparisons without changing the reference-rule tier; active uses reasoning.
-Run workspace routing shadow --days 30 before switching --decision-mode active.
 
 The remaining tuning flags are advanced compatibility settings. Continuation,
-load, learning, upshift and the legacy strongest gate do not override active
+load, upshift and the legacy strongest gate do not override active
 reasoning selection. --judged-review is retained for old clients and has no
 effect: review follows the common purpose selector.`,
 	Args: cobra.NoArgs,
@@ -49,7 +48,7 @@ func init() {
 	workspaceRoutingSetCmd.Flags().String("enabled", "", "Routing master switch: on or off")
 	workspaceRoutingSetCmd.Flags().String("policy-prompt-file", "", "Read the routing prompt from a UTF-8 file; an empty file restores the default reference prompt")
 	workspaceRoutingSetCmd.Flags().String("consult-per-issue", "", "Consult limit per issue, 1..20 (default 3)")
-	workspaceRoutingSetCmd.Flags().String("decision-mode", "", "legacy, shadow (compare without changing dispatch), or active (reasoning model chooses); run routing shadow first")
+	workspaceRoutingSetCmd.Flags().String("decision-mode", "", "legacy, shadow (compare without changing dispatch), or active (reasoning model chooses)")
 
 	workspaceRoutingSetCmd.Flags().String("output", "json", "Output format: json")
 
@@ -60,9 +59,6 @@ func init() {
 	workspaceRoutingSetCmd.Flags().String("thinking", "", "Thinking level: low, medium, high")
 	workspaceRoutingSetCmd.Flags().String("continuation", "", "接着做 switch: on (prefer the previous executor) or off (shadow mode)")
 	workspaceRoutingSetCmd.Flags().String("load", "", "负载分流 switch: on (prefer a less busy seat of the same tier) or off (shadow mode)")
-	workspaceRoutingSetCmd.Flags().String("learn", "", "从结果里学 switch: on (raise a class judged low too often one tier) or off (shadow mode)")
-	workspaceRoutingSetCmd.Flags().String("learn-low-rate", "", "从结果里学: share of a class judged low that raises it, (0, 1]")
-	workspaceRoutingSetCmd.Flags().String("learn-window-days", "", "从结果里学: days of history the rate is taken over, [1, 365]")
 	workspaceRoutingSetCmd.Flags().String("usage-priority", "", "用量优先 switch: on (ample seats first) or off (stable name order)")
 	workspaceRoutingSetCmd.Flags().String("allow-upshift", "", "允许上调一档 switch: on (borrow an ample seat from the tier above) or off")
 	workspaceRoutingSetCmd.Flags().String("strongest-gate", "", "最强档门槛 switch: on (strongest tier only when quota is not tight and no strong/medium seat can take it) or off")
@@ -105,15 +101,6 @@ func routingView(block map[string]any) map[string]any {
 		// Missing reads as on, the same as the server.
 		strongestGate = true
 	}
-	learn, _ := block["learn_from_outcomes"].(bool)
-	lowRate := routing.DefaultLearnLowRate
-	if value, ok := numberFromRoutingBlock(block, "learn_low_rate"); ok && value > 0 && value <= 1 {
-		lowRate = value
-	}
-	windowDays := float64(routing.DefaultLearnWindowDays)
-	if value, ok := numberFromRoutingBlock(block, "learn_window_days"); ok && value >= 1 && value <= 365 {
-		windowDays = float64(int(value))
-	}
 	judgedReview, _ := block["judged_review"].(bool)
 	confidenceThreshold := routing.DefaultConfidenceThreshold
 	if value, ok := numberFromRoutingBlock(block, "confidence_threshold"); ok && value > 0 && value <= 1 {
@@ -132,7 +119,6 @@ func routingView(block map[string]any) map[string]any {
 		"source": analysis["source"], "runtime_id": analysis["runtime_id"], "model": analysis["model"], "thinking_level": analysis["thinking_level"],
 		"prefer_continuation": continuation, "continuation_mode": switchMode(continuation),
 		"prefer_idle": idle, "load_mode": switchMode(idle),
-		"learn_from_outcomes": learn, "learn_mode": switchMode(learn), "learn_low_rate": lowRate, "learn_window_days": windowDays,
 		"usage_priority": usagePriority, "allow_upshift": allowUpshift, "strongest_gate": strongestGate, "judged_review": judgedReview,
 		"confidence_threshold": confidenceThreshold, "stale_review_hours": staleReviewHours,
 	}
@@ -180,20 +166,6 @@ func runWorkspaceRoutingSet(cmd *cobra.Command, _ []string) error {
 	load, _ := cmd.Flags().GetString("load")
 	if load != "" && load != "on" && load != "off" {
 		return fmt.Errorf("--load must be on or off")
-	}
-	learn, _ := cmd.Flags().GetString("learn")
-	if learn != "" && learn != "on" && learn != "off" {
-		return fmt.Errorf("--learn must be on or off")
-	}
-	learnLowRate, _ := cmd.Flags().GetString("learn-low-rate")
-	lowRateValue, err := parseRoutingRange(learnLowRate, "--learn-low-rate", 0, 1, false)
-	if err != nil {
-		return err
-	}
-	learnWindowDays, _ := cmd.Flags().GetString("learn-window-days")
-	windowValue, err := parseRoutingRange(learnWindowDays, "--learn-window-days", 1, 365, true)
-	if err != nil {
-		return err
 	}
 	usagePriority, _ := cmd.Flags().GetString("usage-priority")
 	if usagePriority != "" && usagePriority != "on" && usagePriority != "off" {
@@ -273,15 +245,6 @@ func runWorkspaceRoutingSet(cmd *cobra.Command, _ []string) error {
 	if load != "" {
 		block["prefer_idle"] = load == "on"
 	}
-	if learn != "" {
-		block["learn_from_outcomes"] = learn == "on"
-	}
-	if learnLowRate != "" {
-		block["learn_low_rate"] = lowRateValue
-	}
-	if learnWindowDays != "" {
-		block["learn_window_days"] = windowValue
-	}
 	if usagePriority != "" {
 		block["usage_priority"] = usagePriority == "on"
 	}
@@ -346,24 +309,6 @@ func parseRoutingStaleReviewHours(value string) (float64, error) {
 	parsed, err := strconv.ParseFloat(value, 64)
 	if err != nil || !(parsed > 0 && parsed <= 24*365) {
 		return 0, fmt.Errorf("--stale-review-hours must be a number in (0, 8760]")
-	}
-	return parsed, nil
-}
-
-// parseRoutingRange reads an optional number flag. The lower bound is
-// inclusive only when lowInclusive is set; the upper bound always is.
-func parseRoutingRange(value, flag string, low, high float64, lowInclusive bool) (float64, error) {
-	if value == "" {
-		return 0, nil
-	}
-	parsed, err := strconv.ParseFloat(value, 64)
-	inRange := parsed <= high && (parsed > low || (lowInclusive && parsed == low))
-	if err != nil || !inRange {
-		open := "("
-		if lowInclusive {
-			open = "["
-		}
-		return 0, fmt.Errorf("%s must be a number in %s%v, %v]", flag, open, low, high)
 	}
 	return parsed, nil
 }

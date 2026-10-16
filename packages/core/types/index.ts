@@ -395,7 +395,6 @@ export type {
   CronPreviewResponse,
   GetAutopilotResponse,
   ListAutopilotRunsResponse,
-  AutopilotLinkedChange,
   WebhookDelivery,
   WebhookDeliveryStatus,
   WebhookSignatureStatus,
@@ -461,24 +460,3 @@ export type { Ask, AskOption, AskQuestion, CreateAskRequest, AnswerAskRequest } 
 export type { IssueWakeup, IssueWakeupInput, SystemWakeup, WorkspaceSystemWakeup, WakeupPreview, IssueWakeupSummaryRow, WakeupCondition, WakeupPausedReason, WakeupRun, PausedWakeup, WakeupSource } from "./issue-wakeup";
 
 export type { WorkspaceWakeup, WorkspaceWakeupPage, WorkspaceWakeupFilters, WakeupScope } from "./issue-wakeup";
-export type {
-  WorkspaceLink,
-  WorkspaceLinkSide,
-  WorkspaceLinkStatus,
-  WorkspaceLinkWorkspace,
-  WorkspaceLinkProject,
-  WorkspaceLinkAbilities,
-  ListWorkspaceLinksResponse,
-  WorkspaceLinkAuditEntry,
-  LinkedView,
-  LinkedViewProject,
-  LinkedViewIssue,
-  LinkedViewStatus,
-  LinkedViewParams,
-  LinkedResource,
-  LinkedProjectOption,
-  ChatLinkedProjectRef,
-  ChatLinkedProject,
-  WorkspaceLinkLookup,
-  WorkspaceLinkDirection,
-} from "./workspace-link";

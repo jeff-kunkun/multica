@@ -107,11 +107,6 @@ import {
 } from "./inbox-display";
 import { AutopilotQuotaNotice } from "./autopilot-quota-notice";
 import { AgentAccessRequestNotice, isAgentAccessRequestNotice } from "./agent-access-request-notice";
-import {
-  WorkspaceLinkNotice,
-  isWorkspaceLinkNotice,
-  useWorkspaceLinkNoticeTitle,
-} from "./workspace-link-notice";
 import { useT } from "../../i18n";
 import { BoardProjectControls, InboxBoardLanes, LANE_TAG_CLASS } from "../../home/components/home-page";
 import type { InboxRowDecoration } from "./inbox-list-item";
@@ -352,7 +347,6 @@ function InboxActivityPageContent({ merged = false }: { merged?: boolean } = {})
   const retrySourceContextMutation = useRetrySourceContextQuickCreate();
   const timeAgo = useTimeAgo();
   const typeLabels = useTypeLabels();
-  const linkNoticeTitle = useWorkspaceLinkNoticeTitle();
 
 
   // An explicit "mark as unread" on the row that is currently open has to
@@ -843,7 +837,7 @@ function InboxActivityPageContent({ merged = false }: { merged?: boolean } = {})
       <h2 className="text-title font-semibold">
         {isAutopilotQuotaNotice(detailItem.type)
           ? typeLabels[detailItem.type]
-          : linkNoticeTitle(detailItem) ?? getInboxDisplayTitle(detailItem)}
+          : getInboxDisplayTitle(detailItem)}
       </h2>
       <p className="mt-1 text-body text-muted-foreground">
         {typeLabels[detailItem.type]} · {timeAgo(detailItem.created_at)}
@@ -853,8 +847,6 @@ function InboxActivityPageContent({ merged = false }: { merged?: boolean } = {})
           item={detailItem}
           onOpenRecovery={showAutopilotQuotaRecoveryPrompt}
         />
-      ) : isWorkspaceLinkNotice(detailItem.type) ? (
-        <WorkspaceLinkNotice item={detailItem} />
       ) : detailItem.body ? (
         <div className="mt-4 whitespace-pre-wrap text-body leading-relaxed text-foreground">
           {detailItem.body}

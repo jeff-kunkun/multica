@@ -18,12 +18,11 @@ Agent/project relationships include project leadership, project membership,
 explicit dispatch project assignments, visible chats and assigned automations.
 An unrestricted dispatch seat is not listed as responsible for every project.
 Attached chat projects and squad-assigned automation projects also count.
-Skills include a visible base role’s inherited bindings. Skills, runtimes and squads are narrowed to those agents; workspace links remain
-only when their visible project bindings match. External Bot keys have no
+Skills include a visible base role’s inherited bindings. Skills, runtimes and squads are narrowed to those agents. External Bot keys have no
 project/agent binding and are omitted from filtered results.
 
 The JSON arrays are `agents`, `projects`, `chats`, `automations`, `skills`,
-`squads`, `runtimes`, `runtime_outages`, `workspace_links` and `external_connections`. `chats` contains active directory entries only. `counts`
+`squads`, `runtimes`, `runtime_outages` and `external_connections`. `chats` contains active directory entries only. `counts`
 counts returned items after filtering, never hidden items. `omitted_sections`
 names sections whose access gate denied the caller. Empty arrays otherwise
 mean no visible matches. Compact mode keeps identifiers and key status fields;
@@ -39,13 +38,6 @@ to change it as the machine owner (see `runtimes.md`).
 External Bot personal keys follow the same ordinary authentication and access
 rules as their owner. Task tokens retain their existing actor/visibility rules;
 they cannot read the external key inventory. See `external-bots.md` for setup.
-
-Project and automation rows include `linked_projects` (saved selection),
-`effective_linked_projects` (selection after inheritance), and `inherited`.
-Each reference names `link_id`, `project_id`, `title`, `source_name` and `available`;
-unavailable references remain visible for removal. Automation `linked_projects: null`
-means inherit, while `[]` means explicitly no references. These fields survive
-compact mode and use the same access checks as the settings read endpoints.
 
 `runtime_outages` contains the owner’s latest 100 machine disconnect records
 with machine_name, runtime_ids, started_at, ended_at and alerted_at, including

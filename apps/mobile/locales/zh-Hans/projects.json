@@ -78,19 +78,5 @@
     "count": "运行 · {{count}}"
   },
   "status.planned": "计划中",
-  "form.description_placeholder": "这个项目是做什么的？",
-  "references": {
-    "title": "参考项目",
-    "description": "运行时可读取这些项目。",
-    "choose": "选择项目",
-    "inherit": "跟随所属项目",
-    "empty": "暂无可选的连通项目",
-    "unavailable": "已失效",
-    "load_error": "无法加载参考项目",
-    "retry": "重试",
-    "save_error": "无法保存，请重试。",
-    "read_only": "你没有修改权限。",
-    "loading": "加载中...",
-    "none": "无"
-  }
+  "form.description_placeholder": "这个项目是做什么的？"
 }

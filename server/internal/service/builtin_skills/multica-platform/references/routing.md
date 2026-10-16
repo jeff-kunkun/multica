@@ -299,22 +299,8 @@ multica workspace routing set --load on      # or off to go back to shadow
 So create independent tickets in one batch and leave them to routing; do not
 hand-assign them to different seats to spread the load.
 
-**从结果里学 (DENE-1722).** A ticket the rule table tiered is remembered by
-class: direction × tier × scope / clarity / risk. `issue escalate` and an
-acceptance `verdict: hold` mark it judged low. Once a class has at least 5
-tickets in the window and the judged-low share reaches the threshold
-(defaults 30% over 30 days), its next ticket goes one rung higher. Also **off
-by default = shadow mode**: the comment only says 「按新规则会上调一档——同类票近
-30 天 4/10 张判低…」.
-
-```bash
-multica workspace routing learning --output json   # classes, counts, would-raise
-multica workspace routing set --learn on           # or off to go back to shadow
-multica workspace routing set --learn-low-rate 0.4 --learn-window-days 14
-```
-
-So when a ticket is beyond your seat, say so with `issue escalate`; that call
-is what teaches routing, a comment saying "too hard" is not.
+When a ticket is beyond your seat, say so with `issue escalate`, not with a
+comment saying "too hard".
 
 **按判断配验收 (DENE-1252)** is legacy configuration only: `review`
 uses the unified selector, not a model vote on whether to review. `--judged-review` is still
@@ -350,23 +336,14 @@ Consequences for how you work:
 - Read `action` in `--output json` as what was WRITTEN. `assigned`: a slot was
   filled. `declined`: nothing was written, which now means somebody else won
   the write. `noop`: nothing to decide. Only `assigned` is a dispatch.
-- **Decision rollout.** Existing settings without `decision_mode` keep `legacy`
-  until compared; new UI configurations start in `shadow`, with no independent
-  judge call. `multica workspace routing set --decision-mode shadow`
+- **Decision rollout.** Existing settings without `decision_mode` keep `legacy`;
+  new UI configurations start in `shadow`, with no independent judge call. `multica workspace routing set --decision-mode shadow`
   makes one analysis call return numbered facts plus a tier, eligible seat ID,
   reason and confidence. It reads `policy_prompt`, the whole ticket, available
   seats and reference rules. Shadow keeps the old assignment; `active` uses the
   model's choice instead of first-match rules. Low confidence raises at most one
   tier, never into strongest as a fallback. Invalid or unavailable selections
   cannot bypass server eligibility or the safe fallback policy.
-- **Compare before activating.** `multica workspace routing shadow --days 30
-  --limit 20 --output json` makes at most 20 model calls, writes no issue state
-  and starts no runs. `next_offset` resumes with `--offset`; increase `--limit`
-  up to 1000 for a wider review. These are past ticket texts evaluated with the
-  CURRENT roster and policy, not reconstructed historical quota. Keep partial
-  errors in the report. The settings page runs the same endpoint in batches.
-  Grok reviews the report before `--decision-mode active`; do not claim a live
-  comparison or activate a rollout merely because fixture tests passed.
 - The issue's **scene** decides which specialisation on a rung gets the
   work; it never changes the rung or the confidence. The scene is the issue's
   own domain; else all of its project's domains; else generic. Every

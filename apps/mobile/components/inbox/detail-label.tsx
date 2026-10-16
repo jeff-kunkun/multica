@@ -65,9 +65,6 @@ const TYPE_KEY: Record<InboxItemType, string> = {
   agent_access_declined: "type.agent_access_declined",
   parking_unexplained: "type.parking_unexplained",
   children_done: "type.children_done",
-  workspace_link_request: "type.workspace_link_request",
-  workspace_link_accepted: "type.workspace_link_accepted",
-  workspace_link_declined: "type.workspace_link_declined",
 };
 
 // due_date is a calendar day — format timezone-safely (no offset day shift).

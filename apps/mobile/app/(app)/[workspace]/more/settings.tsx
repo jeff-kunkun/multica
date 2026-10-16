@@ -1,8 +1,8 @@
 /**
  * Settings page — account info, workspace switching, appearance, profile
  * subscreen, and sign out. Only what a person must set is listed (DENE-2009):
- * notifications go to the group through the Bot, and linked workspaces show
- * only while an offer waits for an answer. Both screens stay reachable by link.
+ * notifications go to the group through the Bot, and that screen stays
+ * reachable by link.
  *
  * Inherits the responsibilities the old More tab carried (account row,
  * workspace list, sign-out button) now that the More tab is gone and global
@@ -19,7 +19,6 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { runtimeListOptions } from "@/data/queries/runtimes";
-import { workspaceLinksOptions } from "@/data/queries/workspace-links";
 import { runtimeDisplayName } from "@multica/core/runtimes/display";
 import type { Workspace } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
@@ -65,7 +64,6 @@ export default function SettingsPage() {
     setPreference: setLocalePreference,
   } = useLocalePreference();
   const { t } = useT("settings");
-  const { t: tw } = useT("workspace");
   const { t: tCommon } = useT();
   const mutedFg = THEME[colorScheme].mutedForeground;
   const localeLabels = {
@@ -100,10 +98,6 @@ export default function SettingsPage() {
 
   const goProfile = () => router.push(`/${currentSlug}/more/settings/profile`);
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
-  const linksQuery = useQuery(workspaceLinksOptions(wsId));
-  const pendingLinks = (linksQuery.data?.links ?? []).filter(
-    (link) => link.side === "viewer" && link.status === "pending",
-  ).length;
   const runtimesQuery = useQuery({ ...runtimeListOptions(wsId), refetchInterval: 5000 });
   const machines = new Map<string, NonNullable<typeof runtimesQuery.data>[number]>();
   for (const runtime of runtimesQuery.data ?? []) {
@@ -136,10 +130,6 @@ export default function SettingsPage() {
           subtitle={user?.email}
         />
       </SectionGroup>
-
-      {pendingLinks > 0 ? (
-        <SectionGroup title={tw("links.tab.title")}><NavRow title={tw("links.tab.title")} subtitle={tw("links.tab.description")} chevronColor={mutedFg} onPress={() => { if (currentSlug) router.push({ pathname: "/[workspace]/workspace-links", params: { workspace: currentSlug } }); }} /></SectionGroup>
-      ) : null}
 
       <SectionGroup title={t("account.workspaces")}>
         {isLoading ? (

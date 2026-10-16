@@ -37,10 +37,6 @@ A Bot wake blocked by bot_wake_chain_limit keeps the new chat and saved
 message, prints their receipt (routing included), and exits nonzero before
 waiting. Do not resend the saved message; see chat send --help for recovery.
 
-Attach read-only references with --reference LINK_ID:PROJECT_ID (repeatable).
-Find IDs with "multica chat linked-projects --available --output json".
-References are not working projects; disconnecting stops injection in the next run.
-
 For people and external bots logged in with a personal key. An agent run
 is refused here: use "multica chat open" from a chat run instead.
 
@@ -57,7 +53,6 @@ func init() {
 	chatNewCmd.Flags().String("content-file", "", "Read the first message from this file instead of the argument")
 	chatNewCmd.Flags().String("title", "", "Chat title (optional; the server names it otherwise)")
 	chatNewCmd.Flags().String("project", "", "Project id or prefix to give the chat as context")
-	chatNewCmd.Flags().StringSlice("reference", nil, "Read-only LINK_ID:PROJECT_ID references (repeatable; not working projects)")
 	chatNewCmd.Flags().Bool("wait", false, "Wait for the agent's reply and print it")
 	chatNewCmd.Flags().Duration("wait-timeout", 10*time.Minute, "How long --wait waits for the reply")
 	chatNewCmd.Flags().String("output", "json", "Output format: table or json")
@@ -72,11 +67,6 @@ func runChatNew(cmd *cobra.Command, args []string) error {
 	}
 	agentRef, _ := cmd.Flags().GetString("agent")
 	content, err := readChatContent(cmd, args, "chat new")
-	if err != nil {
-		return err
-	}
-	values, _ := cmd.Flags().GetStringSlice("reference")
-	refs, err := parseChatReferences(values)
 	if err != nil {
 		return err
 	}
@@ -97,9 +87,6 @@ func runChatNew(cmd *cobra.Command, args []string) error {
 		// No agent named: the server routes from the brief (DENE-1834). The
 		// brief is judged, not stored; the message is still sent below.
 		body["brief"] = content
-	}
-	if cmd.Flags().Changed("reference") {
-		body["linked_projects"] = refs
 	}
 	if title, _ := cmd.Flags().GetString("title"); strings.TrimSpace(title) != "" {
 		body["title"] = strings.TrimSpace(title)

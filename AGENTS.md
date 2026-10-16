@@ -92,7 +92,7 @@ Root frontend commands and `make check` do not verify mobile. Docs-only changes 
 - 文档索引：[docs/README.md](docs/README.md)
 - 架构决定：[docs/adr/](docs/adr/)
 - 证据索引：[docs/evidence/INDEX.md](docs/evidence/INDEX.md)
-- 跨工作区变化摘要或活动运行：读[紧凑读取协议](docs/kun/fast-access.md)及[验证边界](docs/evidence/INDEX.md#compact-cross-workspace-reads)，身份出口沿用 [ADR-0004](docs/adr/0004-workspace-link.md)。
+- 跨工作区变化摘要或活动运行：读[紧凑读取协议](docs/kun/fast-access.md)及[验证边界](docs/evidence/INDEX.md#compact-cross-workspace-reads)。
 - 当前移动端适配盘点：[docs/evidence/DENE-1277/report.html](docs/evidence/DENE-1277/report.html)
 
 自动派票的执行席边界：

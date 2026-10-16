@@ -175,8 +175,8 @@ multica chat send --session <id> --urgent "验证码 482913，请立刻填入" -
   server wrote (`failed`/`cancelled`). Only the server decides the task's
   fate. A zero exit means the message is being read now. Read the reply later
   with `multica chat history`.
-- `--urgent` is not available with `--linked` (linked-workspace sends) and is
-  not a flag of `chat new`; open the chat first, then send urgent.
+- `--urgent` is not a flag of `chat new`; open the chat first, then send
+  urgent.
 - `multica chat progress --session <id> --history --output json` shows
   `pickup_timeout` as the task reason once the deadline has passed.
 

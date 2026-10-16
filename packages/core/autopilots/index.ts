@@ -4,7 +4,6 @@ export {
   autopilotListOptions,
   autopilotDetailOptions,
   autopilotRunsOptions,
-  autopilotLinkedChangesOptions,
   autopilotDeliveriesOptions,
   autopilotDeliveryOptions,
   cronPreviewOptions,

@@ -20,7 +20,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
-	"github.com/multica-ai/multica/server/internal/routing"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -2076,16 +2075,11 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	if err := service.RecordReviewPass(r.Context(), h.Queries, comment); err != nil {
 		slog.Warn("record review pass heads failed", append(logger.RequestAttrs(r), "error", err, "comment_id", uuidToString(comment.ID))...)
 	}
-	// A hold is routing's other "tiered too low" signal (DENE-1722). A ticket
-	// routing never tiered has no class and is left alone.
 	reviewRoutingWarning := ""
 	if comment.IssueID.Valid && blockwait.Verdict(comment.Content) == "hold" {
 		if err := h.applyReviewRejection(r.Context(), comment); err != nil {
 			reviewRoutingWarning = "验收打回已记录，但未能交棒：" + err.Error()
 			slog.Error("review rejection routing failed", "issue_id", uuidToString(comment.IssueID), "error", err)
-		}
-		if err := markUnderjudged(r.Context(), h.Queries, comment.WorkspaceID, comment.IssueID, routing.SignalHeld); err != nil {
-			slog.Warn("record review hold for routing failed", append(logger.RequestAttrs(r), "error", err, "comment_id", uuidToString(comment.ID))...)
 		}
 	}
 

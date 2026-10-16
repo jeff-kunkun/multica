@@ -73,8 +73,6 @@ func executorPickReason(issue Issue, needExecutor bool, executor *Seat, executor
 		return PickReasonContinuation, executor.Continues
 	case pickLoad:
 		return PickReasonLoad, executor.Balanced
-	case pickLearned:
-		return PickReasonTier, executor.Learned
 	case pickFallback:
 		return PickReasonFallback, "置信度不足或本档没有可用席位，按统一选人规则选席"
 	}

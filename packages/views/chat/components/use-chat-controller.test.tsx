@@ -72,14 +72,6 @@ const h = vi.hoisted(() => {
     consumeRestoreMutate: vi.fn(),
     setProjectMutate: vi.fn(),
     removeFromCaches: vi.fn(),
-    linkedProjects: {
-      items: [],
-      options: [],
-      onChange: vi.fn(),
-      isUpdating: false,
-      draftRefs: [] as { link_id: string; project_id: string }[],
-      clearDraft: vi.fn(),
-    },
     // useQuery reads these so each test can vary the loaded data.
     sessions: [] as ChatSession[],
     agents: [] as Agent[],
@@ -156,9 +148,6 @@ vi.mock("@multica/core/chat/mutations", () => ({
     isPending: false,
   }),
   useConsumeChatDraftRestore: () => ({ mutate: h.consumeRestoreMutate }),
-}));
-vi.mock("./use-chat-linked-projects", () => ({
-  useChatLinkedProjects: () => h.linkedProjects,
 }));
 vi.mock("../../common/use-app-foreground", () => ({
   useAppForeground: () => h.appForeground.value,
@@ -410,76 +399,6 @@ describe("useChatController project context", () => {
     expect(h.createSessionMutate).toHaveBeenCalledWith(
       expect.objectContaining({ project_ids: [project.id, otherProject.id] }),
     );
-  });
-
-  it("sends the read-only linked draft with the lazy create, then clears it", async () => {
-    h.store.activeSessionId = null;
-    h.store.selectedAgentId = agentA.id;
-    h.sessions = [];
-    h.agents = [agentA];
-    const ref = { link_id: "link-1", project_id: "shared-1" };
-    h.linkedProjects.draftRefs = [ref];
-    h.linkedProjects.clearDraft.mockClear();
-    vi.mocked(api.sendChatMessage).mockResolvedValue({
-      message_id: "message-1",
-      task_id: "task-1",
-      created_at: new Date(0).toISOString(),
-    } as Awaited<ReturnType<typeof api.sendChatMessage>>);
-
-    const { result } = renderHook(() => useChatController());
-    await act(async () => {
-      await result.current.handleSend("hello", undefined, vi.fn());
-    });
-    h.linkedProjects.draftRefs = [];
-
-    expect(h.createSessionMutate).toHaveBeenCalledWith(
-      expect.objectContaining({ linked_projects: [ref] }),
-    );
-    expect(h.linkedProjects.clearDraft).toHaveBeenCalled();
-  });
-
-  it("lazy-creates a routed chat with the brief and no agent_id (DENE-1834)", async () => {
-    routing.available = true;
-    h.store.activeSessionId = null;
-    h.store.selectedAgentId = "routed";
-    h.sessions = [];
-    h.agents = [agentA];
-    h.createSessionMutate.mockResolvedValue({
-      id: "new-session",
-      routing: { source: "档位", routed: true, agent_id: agentA.id, agent: agentA.name },
-    });
-    vi.mocked(api.sendChatMessage).mockResolvedValue({
-      message_id: "message-1",
-      task_id: "task-1",
-      created_at: new Date(0).toISOString(),
-    } as Awaited<ReturnType<typeof api.sendChatMessage>>);
-
-    const { result } = renderHook(() => useChatController());
-    expect(result.current.routedPick).toBe(true);
-    expect(result.current.activeAgent).toBeNull();
-    expect(result.current.isAgentRuntimeBound).toBe(true);
-    await act(async () => {
-      await result.current.handleSend("hello routed", undefined, vi.fn());
-    });
-    routing.available = false;
-
-    expect(h.createSessionMutate).toHaveBeenCalledWith(
-      expect.objectContaining({ brief: "hello routed" }),
-    );
-    expect(h.createSessionMutate).not.toHaveBeenCalledWith(
-      expect.objectContaining({ agent_id: expect.anything() }),
-    );
-  });
-
-  it("falls back to the first agent when routing is off even if the draft asked for it", () => {
-    routing.available = false;
-    h.store.activeSessionId = null;
-    h.store.selectedAgentId = "routed";
-    h.sessions = [];
-    h.agents = [agentA];
-    const { result } = renderHook(() => useChatController());
-    expect(result.current.routedPick).toBe(false);
-    expect(result.current.activeAgent?.id).toBe(agentA.id);
   });
 
   it("does not inherit the current session projects when starting a new chat", () => {

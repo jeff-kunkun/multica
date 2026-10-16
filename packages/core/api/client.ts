@@ -1,6 +1,4 @@
 import { parseFastAccess, type FastAccessRequest } from "./fast-access";
-import { LinkedProjectSettingsSchema } from "./schemas";
-import type { LinkedProjectSettings } from "../types/workspace-link";
 import type { AgentSpawnPolicy, AgentSpawnPolicyPatch } from "../workspace/agent-spawn";
 import type { ZodType } from "zod";
 import type { IssueWakeup, IssueWakeupInput, IssueWakeupSummaryRow, PausedWakeup, SystemWakeup, WakeupRun, WorkspaceSystemWakeup } from "../types/issue-wakeup";
@@ -8,12 +6,10 @@ import type { WorkspaceWakeupPage, WorkspaceWakeupFilters } from "../types/issue
 import type { IssueDeliveryLines } from "./schemas";
 import { WorkspaceWakeupPageSchema, IssueWakeupSchema, IssueWakeupSummaryRowSchema, PausedWakeupSchema, SystemWakeupSchema, WakeupRunSchema, WorkspaceSystemWakeupSchema } from "./schemas";
 import type { InboxFilters } from "../inbox/filter-store";
-import type { ChatLinkedProjectRef, LinkedProjectOption } from "../types/workspace-link";
 import type { ArchivedInboxPage, ArchivedInboxFacets } from "../types/inbox";
 import type { InboxBoardResponse, ParkingRecordsResponse, UnreadInboxIssue, WaitingSummon } from "../types/home";
 import type { WorkThreadSnapshot } from "../types/work_thread";
 import type { Ask, CreateAskRequest, AnswerAskRequest } from "../types/ask";
-import type { LinkedView, LinkedViewParams, ListWorkspaceLinksResponse, WorkspaceLink, WorkspaceLinkAuditEntry, WorkspaceLinkDirection, WorkspaceLinkLookup } from "../types/workspace-link";
 import { configStore } from "../config";
 import { IssueGoalSchema, type CommentSendMode, type CreateIssueGoalInput } from "../types";
 import type {
@@ -214,7 +210,6 @@ import type {
   GetAutopilotResponse,
   AutopilotCollaboratorsResponse,
   ListAutopilotRunsResponse,
-  AutopilotLinkedChange,
   ListWebhookDeliveriesResponse,
   WebhookDelivery,
   NotificationPreferenceResponse,
@@ -4158,14 +4153,6 @@ export class ApiClient {
   }
 
   /** The 分工规则 as the server holds it, plus the series and tiers a row may name. */
-  async listRoutingShadowTickets(workspaceId: string, offset = 0): Promise<{ items: { id: string; title: string }[]; next_offset: number }> {
-    return this.fetch(`/api/workspaces/${workspaceId}/routing/shadow?days=30&offset=${offset}`);
-  }
-
-  async compareRoutingShadow(workspaceId: string, issueId: string): Promise<import("../workspace/routing-shadow").RoutingShadowResult> {
-    return this.fetch(`/api/workspaces/${workspaceId}/routing/shadow/${issueId}`, { method: "POST", body: JSON.stringify({}) });
-  }
-
   async getRoutingDispatch(workspaceId: string): Promise<RoutingDispatch> {
     const raw = await this.fetch<unknown>(
       `/api/workspaces/${workspaceId}/routing/dispatch`,
@@ -5354,8 +5341,6 @@ export class ApiClient {
        *  than silently preferring one. */
       project_ids?: string[];
       project_id?: string | null;
-      /** Read-only projects shared from linked workspaces (DENE-1643). */
-      linked_projects?: ChatLinkedProjectRef[];
     },
     workspaceSlug?: string,
   ): Promise<ChatSession> {
@@ -5406,12 +5391,10 @@ export class ApiClient {
     // One field per request: the server rejects a body that carries more than
     // one of them. `project_ids` is the complete replacement set in selection
     // order; an empty array clears the session's project context.
-    // `linked_projects` replaces the read-only linked set the same way.
     data:
       | { title: string }
       | { project_id: string | null }
-      | { project_ids: string[] }
-      | { linked_projects: ChatLinkedProjectRef[] },
+      | { project_ids: string[] },
   ): Promise<ChatSession> {
     return this.fetch(`/api/chat/sessions/${id}`, {
       method: "PATCH",
@@ -6537,11 +6520,6 @@ export class ApiClient {
   // Returns a single run including its full trigger_payload. List responses
   // omit trigger_payload to keep them small (a webhook envelope can be
   // up to 256 KiB × limit rows), so the detail view fetches via this route.
-  async listAutopilotLinkedChanges(id: string): Promise<AutopilotLinkedChange[]> {
-    const raw = await this.fetch<{ changes?: AutopilotLinkedChange[] }>(`/api/autopilots/${id}/linked-changes`);
-    return raw.changes ?? [];
-  }
-
   async getAutopilotRun(autopilotId: string, runId: string): Promise<AutopilotRun> {
     return this.fetch(`/api/autopilots/${autopilotId}/runs/${runId}`);
   }
@@ -6850,79 +6828,6 @@ export class ApiClient {
       `/api/workspaces/${workspaceId}/repos/connections`,
     );
     return { repos: Array.isArray(raw?.repos) ? raw.repos : [] };
-  }
-
-  // Cross-workspace read-only links (DENE-1225). Scoped by the current
-  // workspace header; the server answers every refusal with the same 404.
-  async listWorkspaceLinks(): Promise<ListWorkspaceLinksResponse> {
-    const raw = await this.fetch<Partial<ListWorkspaceLinksResponse>>("/api/workspace-links");
-    return {
-      links: Array.isArray(raw?.links) ? raw.links : [],
-      can: { create: false, accept: false, pull: false, manage: false, audit: false, ...raw?.can },
-    };
-  }
-
-  async listWorkspaceLinkAudit(cursor = ""): Promise<{ entries: WorkspaceLinkAuditEntry[]; next_cursor: string | null }> {
-    const raw = await this.fetch<{ entries?: WorkspaceLinkAuditEntry[]; next_cursor?: string | null }>(`/api/workspace-links/audit?limit=50&cursor=${encodeURIComponent(cursor)}`);
-    return { entries: Array.isArray(raw?.entries) ? raw.entries : [], next_cursor: raw?.next_cursor ?? null };
-  }
-
-  /** Names the workspace a pasted link or slug points to; 404 when none. */
-  async lookupWorkspaceLinkTarget(target: string): Promise<WorkspaceLinkLookup> {
-    return this.fetch(`/api/workspace-links/lookup?target=${encodeURIComponent(target)}`);
-  }
-
-  async createWorkspaceLink(body: {
-    target_slug: string;
-    project_ids: string[];
-    direction?: WorkspaceLinkDirection;
-    managed?: boolean;
-  }): Promise<WorkspaceLink> {
-    return this.fetch("/api/workspace-links", { method: "POST", body: JSON.stringify(body) });
-  }
-
-  async updateWorkspaceLink(
-    linkId: string,
-    body: { project_ids: string[] } | { accept: true } | { managed: boolean },
-  ): Promise<WorkspaceLink> {
-    return this.fetch(`/api/workspace-links/${encodeURIComponent(linkId)}`, {
-      method: "PATCH",
-      body: JSON.stringify(body),
-    });
-  }
-
-  async revokeWorkspaceLink(linkId: string): Promise<void> {
-    await this.fetch(`/api/workspace-links/${encodeURIComponent(linkId)}`, { method: "DELETE" });
-  }
-
-  /** Shared projects this workspace may attach to a chat read-only (DENE-1643). */
-  async getLinkedProjectSettings(kind: "projects" | "autopilots", id: string): Promise<LinkedProjectSettings> {
-    const endpoint = `/api/${kind}/${encodeURIComponent(id)}/linked-projects`;
-    const parsed = parseWithFallback<LinkedProjectSettings | null>(await this.fetch(endpoint), LinkedProjectSettingsSchema, null, { endpoint });
-    if (!parsed) throw new Error("Could not read reference projects");
-    return parsed;
-  }
-
-  async setLinkedProjectSettings(kind: "projects" | "autopilots", id: string, refs: ChatLinkedProjectRef[] | null): Promise<LinkedProjectSettings> {
-    const endpoint = `/api/${kind}/${encodeURIComponent(id)}/linked-projects`;
-    const raw = await this.fetch(endpoint, { method: "PUT", body: JSON.stringify({ linked_projects: refs }) });
-    const parsed = parseWithFallback<LinkedProjectSettings | null>(raw, LinkedProjectSettingsSchema, null, { endpoint });
-    if (!parsed) throw new Error("Could not read saved reference projects");
-    return parsed;
-  }
-
-  async listLinkedProjectOptions(): Promise<LinkedProjectOption[]> {
-    const raw = await this.fetch<{ projects?: LinkedProjectOption[] }>("/api/workspace-links/projects");
-    return Array.isArray(raw?.projects) ? raw.projects : [];
-  }
-
-  async getLinkedView(linkId: string, params: LinkedViewParams = {}): Promise<LinkedView> {
-    const search = new URLSearchParams();
-    if (params.projectId) search.set("project_id", params.projectId);
-    if (params.cursor) search.set("cursor", params.cursor);
-    if (params.limit) search.set("limit", String(params.limit));
-    const qs = search.toString();
-    return this.fetch(`/api/workspace-links/${encodeURIComponent(linkId)}/view${qs ? `?${qs}` : ""}`);
   }
 
   // Repository connection catalog (GitHub App / token, GitLab, Forgejo, Gitea).

@@ -35,9 +35,6 @@ func prepareWorkspaceSelection(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 	if flag != nil && flag.Changed {
-		if linked, _ := cmd.Flags().GetString(linkedFlag); linked != "" {
-			return fmt.Errorf("--workspace and --linked are exclusive")
-		}
 		input := strings.TrimSpace(flag.Value.String())
 		if input == "" {
 			return fmt.Errorf("--workspace requires a name or UUID")
@@ -63,9 +60,6 @@ func prepareWorkspaceSelection(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 	if isWorkspaceRead(cmd) {
-		if linked, _ := cmd.Flags().GetString(linkedFlag); linked != "" {
-			return nil
-		}
 		if id := resolveWorkspaceID(cmd); id != "" {
 			fmt.Fprintf(cmd.ErrOrStderr(), "Workspace: %s\n", id)
 		}

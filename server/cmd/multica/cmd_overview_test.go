@@ -15,7 +15,7 @@ func TestOverviewJSONUsesOneFilteredRequest(t *testing.T) {
 		"workspace_id": "ws-123", "compact": true,
 		"agents":   []any{map[string]any{"id": "ag-1", "name": "My agent", "online": true}},
 		"projects": []any{}, "chats": []any{}, "automations": []any{}, "skills": []any{},
-		"squads": []any{}, "runtimes": []any{}, "workspace_links": []any{}, "external_connections": []any{},
+		"squads": []any{}, "runtimes": []any{}, "external_connections": []any{},
 		"counts": map[string]any{"agents": float64(1)}, "omitted_sections": []any{"external_connections"},
 	}
 	requests := 0
@@ -82,7 +82,7 @@ func TestOverviewCompactReadableAndOmitted(t *testing.T) {
 	snapshot := map[string]any{
 		"workspace_id":     "ws-123",
 		"agents":           []any{map[string]any{"id": "ag-1", "name": "Example agent", "online": false, "description": "line one\nline two"}},
-		"omitted_sections": []any{"workspace_links"},
+		"omitted_sections": []any{"external_connections"},
 	}
 	var compact, full bytes.Buffer
 	if err := printOverview(&compact, snapshot, true); err != nil {
@@ -94,7 +94,7 @@ func TestOverviewCompactReadableAndOmitted(t *testing.T) {
 	if !strings.Contains(compact.String(), "name=Example agent | id=ag-1 | description=line one line two | online=false\n") {
 		t.Fatalf("compact lost record fields or line boundary: %s", compact.String())
 	}
-	if !strings.Contains(compact.String(), "Omitted by permissions: workspace_links") {
+	if !strings.Contains(compact.String(), "Omitted by permissions: external_connections") {
 		t.Fatal("omitted sections not explained")
 	}
 	if strings.Count(compact.String(), "\n") >= strings.Count(full.String(), "\n") {

@@ -107,19 +107,3 @@ trigger.
 These mutate durable state or start work: `create`, `update`, `delete`, trigger
 add/update/delete/rotate, `trigger`, and webhook calls to
 `/api/webhooks/autopilots/{token}`.
-
-## Reference projects
-
-```sh
-multica autopilot linked-projects <autopilot-id> --output json
-multica autopilot linked-projects <autopilot-id> --reference <link-id>:<source-project-id>
-multica autopilot linked-projects <autopilot-id> --clear
-multica autopilot linked-projects <autopilot-id> --inherit
-```
-
-The first reads settings; the other commands replace the complete selection.
-An unset override (`linked_projects: null`) inherits the owning project's defaults;
-`--clear` stores `[]`, explicitly selecting none. `effective_linked_projects` shows
-the resolved selection with source names and `available`; `inherited` identifies
-project defaults. Every run rechecks references as its existing run originator.
-Reference context never changes the working project, code source or write authority.

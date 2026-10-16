@@ -88,16 +88,3 @@ export function findProject(
   if (!id) return undefined;
   return projects.find((p) => p.id === id);
 }
-
-export const projectReferencesOptions = (wsId: string | null, id: string) => queryOptions({
-  queryKey: [...projectKeys.detail(wsId, id), "references"],
-  queryFn: ({ signal }) => api.getProjectReferences(id, { signal }),
-  enabled: !!wsId && !!id,
-  refetchInterval: 60_000,
-});
-
-export const referenceProjectOptions = (wsId: string | null) => queryOptions({
-  queryKey: [...projectKeys.all(wsId), "reference-options"],
-  queryFn: ({ signal }) => api.listReferenceProjectOptions({ signal }),
-  enabled: !!wsId,
-});

@@ -52,14 +52,12 @@ func TestRunChatNewCreatesSendsAndWaits(t *testing.T) {
 	defer func() { chatReplyPollInterval = prev }()
 
 	cmd := chatNewCmd
-	for k, v := range map[string]string{"agent": "小助手", "title": "算术", "wait": "true", "output": "json", "reference": referenceLink + ":" + referenceProject} {
+	for k, v := range map[string]string{"agent": "小助手", "title": "算术", "wait": "true", "output": "json"} {
 		if err := cmd.Flags().Set(k, v); err != nil {
 			t.Fatal(err)
 		}
 	}
 	defer func() {
-		_ = cmd.Flags().Set("reference", "")
-		cmd.Flags().Lookup("reference").Changed = false
 		_ = cmd.Flags().Set("agent", "")
 		_ = cmd.Flags().Set("title", "")
 		_ = cmd.Flags().Set("wait", "false")
@@ -69,14 +67,6 @@ func TestRunChatNewCreatesSendsAndWaits(t *testing.T) {
 	}
 	if created["agent_id"] != agentID || created["title"] != "算术" {
 		t.Fatalf("create body = %v", created)
-	}
-	refs, _ := created["linked_projects"].([]any)
-	if len(refs) != 1 {
-		t.Fatalf("references: %v", created)
-	}
-	ref := refs[0].(map[string]any)
-	if ref["link_id"] != referenceLink || ref["project_id"] != referenceProject {
-		t.Fatalf("reference: %v", ref)
 	}
 	if sentContent != "1+1?" {
 		t.Fatalf("sent %q", sentContent)

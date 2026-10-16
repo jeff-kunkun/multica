@@ -337,19 +337,5 @@
     "cancel": "キャンセル",
     "loading": "読み込み中…",
     "load_more": "さらに読み込む"
-  },
-  "references": {
-    "title": "参考プロジェクト",
-    "description": "実行時にこれらのプロジェクトを参照します。",
-    "choose": "プロジェクトを選択",
-    "inherit": "所属プロジェクトに従う",
-    "empty": "共有プロジェクトはありません",
-    "unavailable": "無効",
-    "load_error": "参考プロジェクトを読み込めません",
-    "retry": "再試行",
-    "save_error": "保存できません。再試行してください。",
-    "read_only": "編集権限がありません。",
-    "loading": "読み込み中...",
-    "none": "なし"
   }
 }

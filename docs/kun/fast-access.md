@@ -92,9 +92,9 @@ commit; the evidence includes that cost. The pending rows are deleted before com
 
 ## Authorization and bounded resources
 
-Originator/task identity is reused, never the host's broader identity. Member and
-linked-project grants remain distinct; source authorization and agent visibility
-both apply to runs. Replay and every page revalidate access, including expiring
+Originator/task identity is reused, never the host's broader identity. Task
+credentials never cross their home workspace; member authorization and agent
+visibility both apply to runs. Replay and every page revalidate access, including expiring
 agent passes. Handles bind principal, originating task, home workspace and filters.
 
 Authorization changes (including new grants) invalidate the old scope. Deletion

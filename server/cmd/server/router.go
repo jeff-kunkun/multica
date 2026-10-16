@@ -5,7 +5,6 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
-	"github.com/multica-ai/multica/server/internal/workspacelink"
 	"log/slog"
 	"net/http"
 	"net/netip"
@@ -1768,11 +1767,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.Auth(queries, patCache, cloudPATVerifier, cfSigner))
 		r.Use(middleware.RefreshCloudFrontCookies(cfSigner))
-		// The one way a task token reaches another workspace (DENE-1663): a
-		// managed link carries the run's originator into the source on a
-		// whitelist of issue/autopilot routes. Before the guest interceptor
-		// so it, and every gate after it, judges the originator there.
-		r.Use(workspacelink.New(queries, pool).Managed)
 		// Guests are the read-only tier (DENE-695). One interceptor in
 		// front of every authenticated route, rather than a check
 		// repeated in each of the ~250 write handlers below — the rule
@@ -1907,12 +1901,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// that routing is on, so everyone should be able to see
 					// that it is currently broken. Only admins can change it.
 					r.Get("/routing/health", h.GetRoutingHealth)
-					r.Get("/routing/learning", h.GetRoutingLearning)
 					// The division of labour in force (DENE-1834). Reading
 					// it is member-visible like the health report; an agent
 					// run reads the rules it works under the same way.
 					r.Get("/routing/dispatch", h.GetRoutingDispatch)
-					r.Get("/routing/shadow", h.ListRoutingShadowTickets)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {
@@ -1932,7 +1924,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// PUT is the confirmation that makes the rows take
 					// effect (DENE-1834 part 4).
 					r.Post("/routing/dispatch/preview", h.PreviewRoutingDispatch)
-					r.Post("/routing/shadow/{issueId}", h.CompareRoutingShadow)
 					r.Put("/routing/dispatch", h.UpdateRoutingDispatch)
 					r.Get("/config/export", h.ExportWorkspaceConfig)
 					r.Post("/config/import", h.ImportWorkspaceConfig)
@@ -2286,22 +2277,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Assignee frequency
 			r.Get("/api/assignee-frequency", h.GetAssigneeFrequency)
 
-			// Cross-workspace read-only links (DENE-1225). The header names
-			// the caller's own workspace; internal/workspacelink decides
-			// everything else; /view and /projects (the shared projects a chat
-			// may attach read-only, DENE-1643) are the only ways source data
-			// leaves.
-			r.Route("/api/workspace-links", func(r chi.Router) {
-				r.Get("/", h.ListWorkspaceLinks)
-				r.Post("/", h.CreateWorkspaceLink)
-				r.Get("/audit", h.ListWorkspaceLinkAudit)
-				r.Get("/lookup", h.LookupWorkspaceLinkTarget)
-				r.Get("/projects", h.ListChatLinkedProjectOptions)
-				r.Patch("/{id}", h.UpdateWorkspaceLink)
-				r.Delete("/{id}", h.RevokeWorkspaceLink)
-				r.Get("/{id}/view", h.GetWorkspaceLinkView)
-			})
-
 			// Project-memory checklist (DENE-972). Not under /api/projects: that
 			// tree is behind the projects module, and a close must be able to
 			// read the same list the server validates against.
@@ -2576,8 +2551,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/", h.CreateProject)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetProject)
-					r.Get("/linked-projects", h.GetProjectLinkedProjects)
-					r.Put("/linked-projects", h.PutProjectLinkedProjects)
 					r.Get("/memory", h.GetProjectMemory)
 					r.Get("/memory/check", h.GetProjectMemory)
 					r.Get("/memory/status", h.GetProjectMemory)
@@ -2635,14 +2608,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/usage", h.GetAutopilotQuotaUsage)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetAutopilot)
-					r.Get("/linked-projects", h.GetAutopilotLinkedProjects)
-					r.Put("/linked-projects", h.PutAutopilotLinkedProjects)
 					r.Patch("/", h.UpdateAutopilot)
 					r.Delete("/", h.DeleteAutopilot)
 					r.Post("/trigger", h.TriggerAutopilot)
 					r.Get("/runs", h.ListAutopilotRuns)
 					r.Get("/runs/{runId}", h.GetAutopilotRun)
-					r.Get("/linked-changes", h.ListAutopilotLinkedChanges)
 					r.Get("/deliveries", h.ListAutopilotDeliveries)
 					r.Get("/deliveries/{deliveryId}", h.GetAutopilotDelivery)
 					r.Post("/deliveries/{deliveryId}/replay", h.ReplayAutopilotDelivery)

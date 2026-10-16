@@ -256,7 +256,5 @@
     "failed": "停止失败，请重试。"
   },
   "converted_to_issue": "这件事已转到任务中执行",
-  "open_converted_issue": "前往任务",
-  "references": "只读参考项目",
-  "references_unavailable": "部分参考项目已失效。"
+  "open_converted_issue": "前往任务"
 }

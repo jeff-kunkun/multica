@@ -27,8 +27,6 @@ import {
 } from "@multica/core/workspace/routing-health";
 import { DEFAULT_ROUTING_POLICY_PROMPT } from "@multica/core/workspace/routing-policy-prompt";
 import {
-  normalizeLearnLowRate,
-  normalizeLearnWindowDays,
   normalizeStaleReviewHours,
   normalizeThreshold,
   parseRoutingSettings,
@@ -50,7 +48,6 @@ import {
   SettingsTab,
 } from "./settings-layout";
 import { useAutoSave } from "./use-auto-save";
-import { RoutingShadowSection } from "./routing-shadow";
 import { RoutingSeatsTable } from "./routing-seats-table";
 import { RoutingDomainsSection } from "./routing-domains";
 import { RoutingDispatchSection } from "./routing-dispatch";
@@ -133,10 +130,6 @@ export function RoutingTab() {
   const [strongestGate, setStrongestGate] = useState(saved.strongest_gate);
   const [preferContinuation, setPreferContinuation] = useState(saved.prefer_continuation);
   const [preferIdle, setPreferIdle] = useState(saved.prefer_idle);
-  const [learnFromOutcomes, setLearnFromOutcomes] = useState(saved.learn_from_outcomes);
-  // Typed as a percentage; stored as a share.
-  const [learnRate, setLearnRate] = useState(String(Math.round(saved.learn_low_rate * 100)));
-  const [learnDays, setLearnDays] = useState(String(saved.learn_window_days));
   const [judgedReview, setJudgedReview] = useState(saved.judged_review);
   // Held apart from the auto-saved draft on purpose. Auto-save fires while
   // somebody is still typing, and a half-typed credential saved to the server
@@ -168,9 +161,6 @@ export function RoutingTab() {
     setDecisionMode(next.decision_mode ?? "legacy");
     setPreferContinuation(next.prefer_continuation);
     setPreferIdle(next.prefer_idle);
-    setLearnFromOutcomes(next.learn_from_outcomes);
-    setLearnRate(String(Math.round(next.learn_low_rate * 100)));
-    setLearnDays(String(next.learn_window_days));
     setJudgedReview(next.judged_review);
     setAnalysisKeyInput("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -200,9 +190,6 @@ export function RoutingTab() {
       decision_mode: decisionMode,
       prefer_continuation: preferContinuation,
       prefer_idle: preferIdle,
-      learn_from_outcomes: learnFromOutcomes,
-      learn_low_rate: normalizeLearnLowRate(Number(learnRate) / 100),
-      learn_window_days: normalizeLearnWindowDays(Number(learnDays)),
       judged_review: judgedReview,
     }),
     [
@@ -226,9 +213,6 @@ export function RoutingTab() {
       consultLimit,
       preferContinuation,
       preferIdle,
-      learnFromOutcomes,
-      learnRate,
-      learnDays,
       judgedReview,
     ],
   );
@@ -276,9 +260,6 @@ export function RoutingTab() {
       a.decision_mode === b.decision_mode &&
       a.prefer_continuation === b.prefer_continuation &&
       a.prefer_idle === b.prefer_idle &&
-      a.learn_from_outcomes === b.learn_from_outcomes &&
-      a.learn_low_rate === b.learn_low_rate &&
-      a.learn_window_days === b.learn_window_days &&
       a.judged_review === b.judged_review,
   });
 
@@ -607,58 +588,6 @@ export function RoutingTab() {
             />
           </SettingsRow>
 
-          <SettingsRow
-            label={t(($) => $.routing.learn_label)}
-            description={
-              learnFromOutcomes
-                ? t(($) => $.routing.learn_description_on)
-                : t(($) => $.routing.learn_description_shadow)
-            }
-          >
-            <Switch
-              checked={learnFromOutcomes}
-              disabled={!canManage || !enabled}
-              onCheckedChange={setLearnFromOutcomes}
-              aria-label={t(($) => $.routing.learn_label)}
-            />
-          </SettingsRow>
-
-          <SettingsRow
-            label={t(($) => $.routing.learn_rate_label)}
-            description={t(($) => $.routing.learn_rate_description)}
-            size="code"
-          >
-            <Input
-              type="number"
-              min={1}
-              max={100}
-              step={5}
-              value={learnRate}
-              // The rate and window also drive the shadow line, so they stay
-              // editable while the switch is off.
-              disabled={!canManage || !enabled}
-              onChange={(e) => setLearnRate(e.target.value)}
-              aria-label={t(($) => $.routing.learn_rate_label)}
-            />
-          </SettingsRow>
-
-          <SettingsRow
-            label={t(($) => $.routing.learn_window_label)}
-            description={t(($) => $.routing.learn_window_description)}
-            size="code"
-          >
-            <Input
-              type="number"
-              min={1}
-              max={365}
-              step={1}
-              value={learnDays}
-              disabled={!canManage || !enabled}
-              onChange={(e) => setLearnDays(e.target.value)}
-              aria-label={t(($) => $.routing.learn_window_label)}
-            />
-          </SettingsRow>
-
         </SettingsCard>
         <p
           className="px-0.5 text-caption leading-5 text-muted-foreground"
@@ -667,8 +596,6 @@ export function RoutingTab() {
           {t(($) => $.routing.modes[routingMode(draft)])}
         </p>
       </SettingsSection>
-
-      <RoutingShadowSection wsId={workspace?.id ?? ""} canRun={canManage && analysisEnabled} />
 
       <RoutingDispatchSection wsId={workspace?.id ?? ""} canManage={canManage} />
 

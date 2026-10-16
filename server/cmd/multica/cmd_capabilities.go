@@ -75,9 +75,9 @@ var capabilityDomains = []struct {
 var readVerbs = map[string]bool{
 	"list": true, "ls": true, "get": true, "show": true, "view": true, "context": true, "history": true,
 	"search": true, "board": true, "children": true, "runs": true, "usage": true, "logs": true, "log": true,
-	"timeline": true, "mentions": true, "audit": true, "overview": true, "capabilities": true, "version": true,
+	"timeline": true, "mentions": true, "overview": true, "capabilities": true, "version": true,
 	"pull-requests": true, "events": true, "pending": true, "wait": true, "test": true, "check": true,
-	"linked-projects": true, "download": true, "whoami": true, "diff": true, "info": true, "tree": true,
+	"download": true, "whoami": true, "diff": true, "info": true, "tree": true,
 }
 
 var localRoots = map[string]bool{"daemon": true, "runtime": true, "config": true, "login": true, "setup": true, "update": true, "version": true, "auth": true}

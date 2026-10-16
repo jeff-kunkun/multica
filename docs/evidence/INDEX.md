@@ -35,7 +35,6 @@
 
 - DENE-1852（认证故障部分）：本机排队故障根因、先留现场再恢复、失效凭据断连及桌面端恢复；[本地验证记录](DENE-1852/auth-recovery.md)。未代表自动改派、通知、自启或并发上限已完成。
 
-- DENE-1811：跨工作区连通双向设置、CLI 实时同步与审计分页；[验收记录及四档 HTML 预览](DENE-1811/checkpoint.md)。
 
 - DENE-1804：外部 bot 自动入门，发钥匙说明 / `multica capabilities` / 设置页「复制接入说明」三处同源，拼错子命令给建议与 JSON 错误；[预览、1280/390 稿与真实 CLI 输出](DENE-1804/preview.html)。
 
@@ -57,7 +56,6 @@
 - DENE-1347：ACP 类 CLI 停一步续接插话（11 个 CLI 共用一段代码），Grok 原始协议实测通过，Kimi/Hermes 按 Kun 决定不实测；[实测记录](DENE-1347/README.md)，[菜单预览（含 390px）](DENE-1347/steer-menu-preview.html)。
 - DENE-1451：工作区领域列表、项目多领域、任务单领域、特化 = 基础角色 + 领域，路由与原话按任务领域落到特化；[预览与 1280/390 截图](DENE-1451/preview.html)。
 - DENE-1479：Web/Desktop 选智能体统一按领域排序（负责人、验收席、@ 提及、聊天、自动化、项目负责人），tarot 对口特化在前、Multica 魔改 基础角色在前；[1280/390 截图汇总](DENE-1479/index.html)。
-- DENE-1643：聊天挂连通工作区的只读参考项目（+ → 项目上下文 → 连通的项目（只读），失效标记，建连通页文案）；真实聊天页 375/390/768/1280 操作截图与服务端结果在 [live/](DENE-1643/live/steps.txt)（勾选、移除、取消共享与撤销后失效、逐个移除失效项），早期静态稿 [预览](DENE-1643/preview.html)。
 - DENE-1661：收口的知识声明要对上交付文件、聊天沉淀合进主线（`multica chat sediment`），项目记忆卡片新增「最近沉淀」，子任务收口条显示实际写入的文件；[预览](DENE-1661/preview.html)，[1280](DENE-1661/preview-1280.png) / [390](DENE-1661/preview-390.png) 截图。
 - DENE-1670：DENE-1659 的实页与完整链路验收——本地候选环境里跑真实 CLI → 服务端 → 数据库 → 页面的聊天沉淀（本地合入主线、远端未推送拒记、推送后记录），项目记忆卡片与收口条 375/390/768/1280 实页截图；[报告](DENE-1670/report.html)，复现脚本见报告内 scripts/。
 - DENE-1665：聊天开出的单自动记下来源聊天；聊天里开单卡（谁在做、为什么、实时状态，改给我 / 改给智能体 / 撤回），任务单显示「来自聊天」；`GET /api/chat/sessions/{id}/tickets` 与 `multica chat tickets`；[1280/390 截图](DENE-1665/preview.html)。
@@ -70,11 +68,9 @@
 - DENE-1680：老板层沉淀与记忆卫生——项目记忆卡片「最近沉淀」显示「汇总自 DENE-N」和每条改动的动作（新建/更新/待合并/标记已被取代），`multica project memory status` 同样列出来源；[375/390/768/1280 截图与 CLI 输出](DENE-1680/preview.html)。
 - DENE-1681：项目记忆卡片加沉淀与回流监控——近 14 天写入与删除行数（来源票 / 聊天）、收口没沉淀（声明无可沉淀 / 没做审计）、沉淀轮次与空转、聊天派单回流（已回报 / 无结论 / 进行中），每行可点回来源；`multica project memory monitor` 同一接口；[375/390/768/1280 截图与 CLI 输出](DENE-1681/preview.html)。
 - DENE-1709：手机网页（窄屏 + 触屏）底部导航「聊天 / 任务 / 新建 / 收件箱 / 更多」，打开默认进聊天，任务页左上角返回回到来源；[390/768/1280 截图](DENE-1709/preview.html)。
-- DENE-1671：连通「可托管」界面——设置里每条连通一行托管开关（服务端逐条答 `can_set_managed`，不能改的写原因），自动化详情「经连通的代办」，连通视图提示可让智能体代办；[375/768/1280 截图](DENE-1671/preview.html)。
 - DENE-1682：手机 App 聊天里听汇报的 Mermaid 进度图按三组清单显示、带项目的聊天进度条出现「听汇报」；无模拟器，附 390px 浅/深色 HTML 预览图：[预览](DENE-1682/preview.html)。
 - DENE-1678：PR 已合入且每个合入的 PR 合入的那个版本都审过（GitHub 对该提交的批准，或验收席在该提交时给的 `verdict: pass`）时跳过验收席直接完成；任务页「跳过验收」行、手机 App 头部、`issue close` 警告与 `issue context` 同一句原因；[真实任务详情页 375/390/768/1280 截图](DENE-1678/report.html)。
 - DENE-1719：聊天底栏和卡片显示本聊天跟进的已有票（新建 / 跟进 / 手动挂上），可手动挂上和取下，`multica chat tickets add|remove` 同一接口；[390/768/1280 截图](DENE-1719/preview.html)。
-- DENE-1722：路由从结果里学——升档、验收打回记为判低，同类票判低比例过阈值时新票上调一档（默认影子运行），`multica workspace routing learning` 查各类统计；[1280/390 截图](DENE-1722/preview.html)。
 - DENE-1721：干活中咨询强档席位——`multica issue consult` 同步问最强档一句（每张任务默认 3 次，设置 → 智能体权限可调），时间线一行可展开看问题和回答，Web/手机 App 同步；HTML 预览稿非真实页面截图：[1280/390 预览](DENE-1721/preview.html)。
 
 - DENE-1786：Grok 个人令牌 CLI 真机验收：[原始报告日志](https://ai.example.com/api/attachments/01a129b6-9502-7652-844c-e84d896735cb/download)，沙盒 DENE-1797；补测聊天附件的消息为 `01a129bf-1cc2-771e-b9a3-8582b957a37b`，最终回复 `01a129bf-4755-73f3-a371-3fcdc7901306`；执行信箱任务 `t-29af8208c2` 的校验回报为评论 `01a129bc-7250-731c-9ecb-f8b7b10f480a`。新进程登录通过，整机重置未测，不能据此声称全年在线。
@@ -98,9 +94,7 @@
 
 - DENE-1873：本地 stdio MCP 薄适配；[接入、工具与边界](../kun/fast-access-mcp.md)、[真实 SDK/编译后 CLI 验收及独立副本回滚附件](https://ai.example.com/api/attachments/01a12c68-be9d-7a4b-ba60-5e8288e18ff3/download)。2025-11-25 初始化与 2026-07-28 发现、九工具、权限/429/写超时查证、附件校验通过；相关 CLI 回归在隔离测试目录通过。广范围 CLI 测试受任务标记/配置环境干扰失败；未运行生产写入或新增界面验收。
 
-- DENE-1808：可托管聊天代发、新连通默认开托管（旧连通不变）；[桌面/手机 HTML 预览附件](https://ai.example.com/api/attachments/01a12a2c-418e-78c0-bef9-e084235a21f1/download)。[验证记录与验收结论](DENE-1808/README.md)：真实设置/聊天四档截图、开关提交及线上 WD 代发/叫醒已通过；Grok Bot 代 Kun 验收收单，原生截图按决定留到后续发版、不占用 Kun 前台。
 
-- DENE-1815：手机 App 连通设置、共享项目阅读、聊天只读参考项目与通知入口；[390px 手机源码实页五屏与验收 HTML](https://ai.example.com/api/attachments/01a12c05-8d5e-7b40-ae67-05569ebfd349/download)、[原图/点击记录/检查日志](https://ai.example.com/api/attachments/01a12c05-8f3a-7c62-a4a7-dee4d0b6abfa/download)。React Native Web 隔离验收数据；原生模拟器启动卡在系统迁移，原生构建未验证。
 
 ## Compact cross-workspace reads
 

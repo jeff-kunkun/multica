@@ -1,6 +1,5 @@
 "use client";
 
-import { linkedKey, linkedRows } from "../../projects/components/linked-project-rows";
 import { useRef, useState } from "react";
 import { ArrowLeftRight, FolderKanban, Image as ImageIcon, Plus, X } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
@@ -9,23 +8,15 @@ import {
   DropdownMenuTrigger,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
-  DropdownMenuGroup,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { toggleProjectId } from "@multica/core/chat/project-context";
-import type {
-  ChatLinkedProject,
-  ChatLinkedProjectRef,
-  LinkedProjectOption,
-  Project,
-} from "@multica/core/types";
+import type { Project } from "@multica/core/types";
 import { ProjectIcon } from "../../projects/components/project-icon";
-import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
 
 interface ChatAddMenuProps {
@@ -47,12 +38,6 @@ interface ChatAddMenuProps {
    *  project description. Selection stays enabled; the submenu only appends
    *  an explanatory hint so the user knows before choosing. */
   projectContextUnsupported?: boolean;
-  /** Read-only projects attached from linked workspaces (DENE-1643), stale
-   *  ones included so they can be unticked. */
-  linkedProjects?: ChatLinkedProject[];
-  linkedProjectOptions?: LinkedProjectOption[];
-  /** Called with the COMPLETE next linked set. */
-  onLinkedProjectsChange?: (refs: ChatLinkedProjectRef[]) => void;
   disabled?: boolean;
 }
 
@@ -69,9 +54,6 @@ export function ChatAddMenu({
   currentProjectId,
   onProjectsChange,
   projectContextUnsupported,
-  linkedProjects = [],
-  linkedProjectOptions = [],
-  onLinkedProjectsChange,
   disabled,
 }: ChatAddMenuProps) {
   const { t } = useT("chat");
@@ -89,17 +71,6 @@ export function ChatAddMenu({
   const visibleProjects =
     showAllProjects || focusedProjects.length === 0 ? projects : focusedProjects;
   const canExpand = !showAllProjects && visibleProjects.length < projects.length;
-
-  const linked = onLinkedProjectsChange ? linkedRows(linkedProjectOptions, linkedProjects) : [];
-  const attachedLinked = new Set(linkedProjects.map(linkedKey));
-  const linkedRefs = linkedProjects.map((item) => ({ link_id: item.link_id, project_id: item.project_id }));
-  const toggleLinked = (row: ReturnType<typeof linkedRows>[number]) =>
-    onLinkedProjectsChange?.(
-      attachedLinked.has(row.key)
-        ? linkedRefs.filter((ref) => linkedKey(ref) !== row.key)
-        : [...linkedRefs, row.ref],
-    );
-  const attachedCount = projectIds.length + linkedProjects.length;
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
@@ -138,9 +109,9 @@ export function ChatAddMenu({
               <DropdownMenuSubTrigger>
                 <FolderKanban />
                 <span className="flex-1">{t(($) => $.input.project_context)}</span>
-                {attachedCount > 0 && (
+                {projectIds.length > 0 && (
                   <span className="text-caption text-muted-foreground tabular-nums">
-                    {attachedCount}
+                    {projectIds.length}
                   </span>
                 )}
               </DropdownMenuSubTrigger>
@@ -171,41 +142,14 @@ export function ChatAddMenu({
                     {t(($) => $.input.switch_project)}
                   </DropdownMenuItem>
                 )}
-                {projects.length === 0 && linked.length === 0 && (
+                {projects.length === 0 && (
                   <div className="px-2 py-1.5 text-caption text-muted-foreground">
                     {t(($) => $.input.no_projects)}
                   </div>
                 )}
-                {linked.length > 0 && (
-                  <DropdownMenuGroup>
-                    {projects.length > 0 && <DropdownMenuSeparator />}
-                    <DropdownMenuLabel>{t(($) => $.input.linked_projects)}</DropdownMenuLabel>
-                    {linked.map((row) => (
-                      <DropdownMenuCheckboxItem
-                        key={row.key}
-                        checked={attachedLinked.has(row.key)}
-                        onCheckedChange={() => toggleLinked(row)}
-                        title={row.available ? undefined : t(($) => $.input.linked_project_stale_hint)}
-                      >
-                        <ProjectIcon project={row} size="md" />
-                        <span className={cn("min-w-0 flex-1 truncate", !row.available && "text-muted-foreground line-through")}>
-                          {row.title}
-                        </span>
-                        <span className="max-w-24 shrink-0 truncate text-caption text-muted-foreground">
-                          {row.available ? row.sourceName : t(($) => $.input.linked_project_stale)}
-                        </span>
-                      </DropdownMenuCheckboxItem>
-                    ))}
-                  </DropdownMenuGroup>
-                )}
-                {attachedCount > 0 && <DropdownMenuSeparator />}
-                {attachedCount > 0 && (
-                  <DropdownMenuItem
-                    onClick={() => {
-                      if (projectIds.length > 0) onProjectsChange([]);
-                      if (linkedProjects.length > 0) onLinkedProjectsChange?.([]);
-                    }}
-                  >
+                {projectIds.length > 0 && <DropdownMenuSeparator />}
+                {projectIds.length > 0 && (
+                  <DropdownMenuItem onClick={() => onProjectsChange([])}>
                     <X />
                     {t(($) => $.input.remove_all_project_context)}
                   </DropdownMenuItem>

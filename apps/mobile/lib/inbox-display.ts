@@ -97,7 +97,6 @@ export function getInboxNavigationTarget(
   historyToken: string,
 ) {
   if (!workspace) return null;
-  if (item.type.startsWith("workspace_link_")) return { pathname: "/[workspace]/workspace-links" as const, params: { workspace } };
   if (item.issue_id) {
     return {
       pathname: "/[workspace]/issue/[id]" as const,

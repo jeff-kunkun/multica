@@ -63,8 +63,7 @@ type Pick struct {
 // same ladder, facts and judge as the todo row, and writes nothing: there is
 // no slot to fill. A chat opened without a named agent asks it; so would any
 // other caller that must not choose a seat by itself. The 接着做 rule is not
-// consulted — a fresh chat relates to no earlier ticket — and 从结果里学 is
-// not, because nothing is recorded to learn from.
+// consulted — a fresh chat relates to no earlier ticket.
 //
 // An inactive workspace is ErrRoutingInactive. A judge that cannot be reached
 // is an error wrapping ErrJudgeUnavailable, counted on the breaker like a

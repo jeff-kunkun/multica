@@ -1,8 +1,6 @@
 import type { MachineQueueReason } from "./agent";
 import type { AgentTask } from "./agent";
 import type { Progress } from "./progress";
-import type { ChatLinkedProject } from "./workspace-link";
-
 /** Where a chat's ticket stands for the caller (DENE-1667). */
 export type ChatTicketPhase = "done" | "in_progress" | "waiting_you";
 
@@ -149,9 +147,6 @@ export interface ChatSession {
    *  because a server predating the set omits it — `chatSessionProjectIds`
    *  normalises that back to the single `project_id`. */
   project_ids?: string[];
-  /** Read-only projects shared from linked workspaces (DENE-1643). Never the
-   *  chat's own project; optional for older servers. */
-  linked_projects?: ChatLinkedProject[];
   title: string;
   title_locked?: boolean;
   progress?: Progress | null;

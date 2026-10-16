@@ -98,8 +98,7 @@ instead of help text, exit code 1.
 
 Use the relevant references in this skill and each command's `--help`:
 
-- `overview --output json` for the permission-filtered workspace map, including project/automation reference selections and availability.
-- `project linked-projects <id>` and `autopilot linked-projects <id>` read references; `--reference <link-id>:<project-id>` replaces them, `--clear` selects none, and autopilot `--inherit` restores project defaults.
+- `overview --output json` for the permission-filtered workspace map.
 - `issue list/search/get/context`, `issue comment list --full` for complete reads.
 - `chat list/search/history` for discovery; personal `chat new --agent ... --wait` on supported versions.
 - `chat send --session ... --attachment ./file` uploads local files and binds them to the user message through the ordinary chat API. Sends include runtime status/last_seen_at and an offline warning on stderr and in JSON; the message is already accepted, so the warning is not a retry instruction.
@@ -108,8 +107,6 @@ Use the relevant references in this skill and each command's `--help`:
 - `issue update/status/assign/label/close/rerun` for issue work.
 - `issue comment add/update/delete` and its attachment flags for comment work.
 - Agent/settings commands supported by the installed CLI for administration.
-- `workspace link create` enables managed access by default; use `--managed=false` to opt out. Existing links stay unchanged.
-- `chat list/send --linked <source>` is for viewer agents with task tokens and the run initiator’s own source chats. Personal-login Bots cannot use this path or borrow a task identity.
 
 Command availability is not proof that a personal login can use the endpoint.
 In particular, `chat open` may be the agent-only chat-spawn API, and

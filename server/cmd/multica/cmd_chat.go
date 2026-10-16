@@ -45,11 +45,10 @@ instruction with multica chat send --mode replace.`,
 }
 
 var chatListCmd = &cobra.Command{
-	Use:     "list",
-	Short:   "List chats visible to the task initiator (with --linked: only their own source chats)",
-	Example: "  multica chat list --linked studio --output json",
-	Args:    cobra.NoArgs,
-	RunE:    runChatDirectoryList,
+	Use:   "list",
+	Short: "List chats visible to the task initiator",
+	Args:  cobra.NoArgs,
+	RunE:  runChatDirectoryList,
 }
 
 var chatSearchCmd = &cobra.Command{
@@ -271,14 +270,6 @@ do not resend it. A genuine agent reply or completed run resets the chain.
 Human messages and server-verified --per-quote messages are exempt.
 Read or change the limit with multica settings get/set bot_wake_chain_limit.
 
-With --linked <source>, a viewer agent can send to the run initiator’s own chat
-through a managed link. Messages carry a forwarded-by label and enter the
-receiver brief as external content. Only queued text is supported; --wait is unavailable.
-JSON includes message_id, chat_session_id and linked_delivery provenance. A 403 means
-access was refused; inspect multica workspace link view <link-id>.
-
-  multica chat send --linked studio --session 019abcde-1234-7000-8000-000000000001 --content-file note.md --output json
-
   multica chat send --session <id|url> "Use the staging database instead" --mode steer
   multica chat send --session <id|url> --content-file ./msg.md --mode queue
   multica chat send --session <id|url> "算了，改成只改文案" --mode replace --wait
@@ -367,7 +358,6 @@ func init() {
 	}
 	chatCmd.AddCommand(chatOpenCmd)
 	chatCmd.AddCommand(chatSendCmd)
-	addLinkedFlag(chatListCmd, chatSendCmd)
 	chatCmd.AddCommand(chatHandoffCmd)
 	chatHandoffCmd.Flags().String("session", "", "Chat session id or URL (defaults to MULTICA_CHAT_SESSION_ID)")
 	chatHandoffCmd.Flags().String("to", "", "Agent to hand the chat to: name or id (required)")
@@ -676,7 +666,7 @@ func runChatDirectory(cmd *cobra.Command, keyword string) error {
 	}
 	var rows []map[string]any
 	if err := client.GetJSON(ctx, path, &rows); err != nil {
-		return linkedChatRefusal(cmd, err, "list chats")
+		return fmt.Errorf("list chats: %w", err)
 	}
 	listshape.Filter(rows, fields)
 	output, _ := cmd.Flags().GetString("output")
@@ -959,15 +949,6 @@ func runChatOpen(cmd *cobra.Command, _ []string) error {
 }
 
 func runChatSend(cmd *cobra.Command, args []string) error {
-	linked, _ := cmd.Flags().GetString(linkedFlag)
-	if strings.TrimSpace(linked) != "" {
-		attachments, _ := cmd.Flags().GetStringSlice("attachment")
-		wait, _ := cmd.Flags().GetBool("wait")
-		if len(attachments) > 0 || wait {
-			return fmt.Errorf("chat send --linked supports text only without --wait; remove --attachment and --wait, then inspect the returned message_id")
-		}
-	}
-
 	// No MULTICA_CHAT_SESSION_ID fallback: a chat run sending to the chat it
 	// is answering would queue a turn for itself.
 	session, _ := cmd.Flags().GetString("session")
@@ -976,9 +957,6 @@ func runChatSend(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("chat send: --session is required: %w", err)
 	}
 	mode, _ := cmd.Flags().GetString("mode")
-	if strings.TrimSpace(linked) != "" && mode != "queue" {
-		return fmt.Errorf("chat send --linked supports --mode queue only; remove --mode or pass --mode queue")
-	}
 	switch mode {
 	case "", "steer", "queue", "restart", "replace":
 	default:
@@ -1022,9 +1000,6 @@ func runChatSend(cmd *cobra.Command, args []string) error {
 		attachmentIDs = append(attachmentIDs, id)
 	}
 	urgent, _ := cmd.Flags().GetBool("urgent")
-	if urgent && strings.TrimSpace(linked) != "" {
-		return fmt.Errorf("chat send --urgent is not available with --linked")
-	}
 	path := "/api/chat/sessions/" + url.PathEscape(ref.ID) + "/messages"
 	body := map[string]any{"content": content, "attachment_ids": attachmentIDs, "per_quote": flagString(cmd, "per-quote")}
 	if mode != "" {
@@ -1034,9 +1009,6 @@ func runChatSend(cmd *cobra.Command, args []string) error {
 		body["urgent"] = true
 	}
 	if err := client.PostJSON(ctx, path, body, &out); err != nil {
-		if strings.TrimSpace(linked) != "" {
-			return linkedChatRefusal(cmd, err, "chat send")
-		}
 		if urgent {
 			if refused, uerr := urgentSendRefusal(err, output); refused {
 				return uerr
@@ -1273,15 +1245,6 @@ func withBotAttribution(author string, record map[string]any) string {
 func collectChatSendAttachments(cmd *cobra.Command) ([]pendingAttachment, error) {
 	paths, _ := cmd.Flags().GetStringSlice("attachment")
 	return collectLocalAttachments(cmd, paths)
-}
-
-// linkedChatRefusal preserves the server status and gives the supported next step.
-func linkedChatRefusal(cmd *cobra.Command, err error, verb string) error {
-	linked, _ := cmd.Flags().GetString(linkedFlag)
-	if strings.TrimSpace(linked) != "" {
-		return fmt.Errorf("%s: %w; inspect `multica workspace link view <link-id>` for this source", verb, err)
-	}
-	return fmt.Errorf("%s: %w", verb, err)
 }
 
 func runChatClearQueue(cmd *cobra.Command, args []string) error {

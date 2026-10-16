@@ -15,7 +15,6 @@ const AttachmentPreviewRoute = lazy(() => import("./pages/attachment-preview-pag
 const IssuesPage = lazy(() => import("@multica/views/issues/components").then((m) => ({ default: m.IssuesPage })));
 const ProjectsPage = lazy(() => import("@multica/views/projects/components").then((m) => ({ default: m.ProjectsPage })));
 const DashboardPage = lazy(() => import("@multica/views/dashboard").then((m) => ({ default: m.DashboardPage })));
-const LinkedWorkspacesPage = lazy(() => import("@multica/views/workspace-links").then((m) => ({ default: m.LinkedWorkspacesPage })));
 const AutopilotsPage = lazy(() => import("@multica/views/autopilots/components").then((m) => ({ default: m.AutopilotsPage })));
 const MyIssuesPage = lazy(() => import("@multica/views/my-issues").then((m) => ({ default: m.MyIssuesPage })));
 const SkillsPage = lazy(() => import("@multica/views/skills").then((m) => ({ default: m.SkillsPage })));
@@ -256,11 +255,6 @@ export const appRoutes: RouteObject[] = [
             path: "usage",
             element: <DashboardPage />,
             handle: { title: "Usage" },
-          },
-          {
-            path: "linked",
-            element: <LinkedWorkspacesPage />,
-            handle: { title: "Linked workspaces" },
           },
           {
             path: "settings",

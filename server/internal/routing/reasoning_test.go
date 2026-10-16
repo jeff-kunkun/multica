@@ -1,7 +1,6 @@
 package routing
 
 import (
-	"context"
 	"strings"
 	"testing"
 )
@@ -50,20 +49,6 @@ func TestReasoningLowConfidenceRaisesOnlyOneSafeTier(t *testing.T) {
 	}
 	if _, why := reasoningVerdict(&ReasoningDecision{Tier: "medium", SeatID: "invented", Confidence: 1, Reason: "test", Reviewer: ReviewerSeat}, Settings{}, DefaultLadder, seats); why == "" {
 		t.Fatal("invented seat accepted")
-	}
-}
-
-func TestShadowNeverWritesOrDispatches(t *testing.T) {
-	store, analyst := dispatchStore(t, "前端", nil)
-	analyst.record.Decision = &ReasoningDecision{Tier: "medium", SeatID: "m-codex", Confidence: 1, Reason: "同档可做", Reviewer: ReviewerNone}
-	r := newRouter(store, &fakeJudge{})
-	r.Analyst = analyst
-	result, err := r.CompareShadow(context.Background(), "ws", store.issue.ID)
-	if err != nil || result.Error != "" || result.Selected == nil || result.Selected.ID != "m-codex" {
-		t.Fatalf("%+v %v", result, err)
-	}
-	if len(store.assigns) != 0 || len(store.comments) != 0 || len(store.saved) != 0 {
-		t.Fatal("shadow mutated issue state")
 	}
 }
 

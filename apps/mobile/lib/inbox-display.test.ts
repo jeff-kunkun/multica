@@ -94,10 +94,6 @@ describe("getInboxDisplayTitle", () => {
 });
 
 describe("getInboxNavigationTarget", () => {
-  it("opens link notifications in workspace settings even without an issue", () => {
-    expect(getInboxNavigationTarget(item({ issue_id: null, type: "workspace_link_accepted" }), "acme", "h")).toEqual({ pathname: "/[workspace]/workspace-links", params: { workspace: "acme" } });
-    expect(getInboxNavigationTarget(item({ type: "workspace_link_request" }), null, "h")).toBeNull();
-  });
   it("opens issue-less quota notices in their workspace sheet", () => {
     expect(
       getInboxNavigationTarget(
