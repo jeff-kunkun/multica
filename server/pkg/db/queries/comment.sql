@@ -651,21 +651,6 @@ SELECT EXISTS (
 SELECT count(*) > 0 AS has_replied FROM comment
 WHERE parent_id = @parent_id AND author_type = 'agent' AND author_id = @agent_id;
 
--- name: HasRecentWatchdogComment :one
--- Generic "has this issue already received a system comment carrying <marker>
--- within the window" probe. Despite the name it is not tied to the removed
--- Stage 4 stagnation watchdog (DENE-520): its only remaining caller is the
--- completion-stall signal in internal/service/task_completion_stall.go, which
--- uses it as a repeat guard.
-SELECT EXISTS (
-    SELECT 1 FROM comment
-    WHERE issue_id = sqlc.arg('issue_id')
-      AND author_type = 'system'
-      AND deleted_at IS NULL
-      AND content LIKE '%' || sqlc.arg('marker') || '%'
-      AND created_at > sqlc.arg('since')::timestamptz
-) AS exists;
-
 -- name: LatestProgressUpdateMatches :one
 -- Repeat guard for server-written progress notes (DENE-1154): true when the
 -- newest live progress_update this author left on the issue already carries

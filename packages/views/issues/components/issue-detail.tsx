@@ -116,7 +116,6 @@ import { SubIssuesAgentWorkingChip } from "./sub-issues-agent-working-chip";
 import { SubIssueCloseStrip } from "./sub-issue-close-strip";
 import { IssueCloseRecordSection } from "./issue-close-record";
 import { IssueStateCardSection } from "./issue-state-card";
-import { IssueStallActionBanner } from "./issue-stall-action-banner";
 import { SubIssueBlockerBadge, SubIssueBlockerSummary, blockerBadgeState, useSubIssueBlockerData } from "./sub-issue-blocker-summary";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { IssuePropertyPills } from "./issue-property-pills";
@@ -3244,7 +3243,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           status it wrote, who continues and why. Renders nothing until the
           `close.*` record is complete. */}
       <IssueCloseRecordSection issue={issue} evidenceBody={closeEvidenceBody} />
-      <IssueStallActionBanner issue={issue} />
 
       {/* Parent issue — standalone section, only when the issue has a
           parent. Setting a parent is reachable via the issue actions menu;

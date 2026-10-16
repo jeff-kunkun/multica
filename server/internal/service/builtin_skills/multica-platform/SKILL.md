@@ -1,6 +1,6 @@
 ---
 name: multica-platform
-description: "Overview, ask, open a chat, consult, goal, inbox, sub-issue, wakeup, routing, close protocol, stall, driver, halt, mention, agent, specialisation, squad, autopilot, project, runtime, progress, state card, skill import, transfer, linked workspace, bot, GitHub App, status, env."
+description: "Overview, ask, open a chat, consult, goal, inbox, sub-issue, wakeup, routing, close protocol, driver, halt, mention, agent, specialisation, squad, autopilot, project, runtime, progress, state card, skill import, transfer, linked workspace, bot, GitHub App, status, env."
 user-invocable: false
 allowed-tools: Bash(multica *), Bash(git *), Bash(gh *)
 ---
@@ -34,7 +34,6 @@ See `references/overview.md` for filter semantics and examples.
 | `references/drivers.md` | Who drives an open issue (`driver` in `issue get` / `issue children`), the patrol's rerun-then-escalate, and `multica issue dispose` for one nobody drives |
 | `references/run-control.md` | Stopping issue/chat work with optional related targets, halt / resume, default wakeup merging, the chain budget, the run time limit, and explicit steer / queue / restart |
 | `references/wakeups.md` | Issue wakeups: events, conditions (`--until-*`), timers, check-ins, runaway protection |
-| `references/stall-actions.md` | Automatic stall actions: 24-hour keep announcements, parent auto-close, 7-day undo, and CLI/API commands |
 | `references/goals.md` | Task goals: draft a completion line, confirm the human lock, track budget, and finish a goal |
 | `references/sub-issues.md` | Sub-issues: todo vs backlog at create time, stages as barrier groups, promoting parked children |
 | `references/routing.md` | Automatic routing: which slots it fills at which status, the 验收席 field, who may pick an executor (`--per-quote`, `issue escalate`), domains (`multica domain`, project/issue `--domain`), what an `issue route` result means, why dispatch stopped |

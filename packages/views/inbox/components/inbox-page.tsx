@@ -112,7 +112,6 @@ import {
   isWorkspaceLinkNotice,
   useWorkspaceLinkNoticeTitle,
 } from "./workspace-link-notice";
-import { StallActionNotice } from "./stall-action-notice";
 import { useT } from "../../i18n";
 import { BoardProjectControls, InboxBoardLanes, LANE_TAG_CLASS } from "../../home/components/home-page";
 import type { InboxRowDecoration } from "./inbox-list-item";
@@ -794,7 +793,6 @@ function InboxActivityPageContent({ merged = false }: { merged?: boolean } = {})
     // newest one — keying on its id would remount IssueDetail on every event,
     // wiping the comment composer draft and resetting scroll position.
     <>
-    {detailItem.type === "issue_stall_action" ? <StallActionNotice item={detailItem} /> : null}
     {/* A doorbell request is pinned to the issue it was raised on, so the
         owner decides with the issue in view; the card sits above the detail
         and is keyed by the request so approving one never bleeds into the

@@ -375,8 +375,8 @@ var issueProgressCmd = &cobra.Command{
 	Long: `Report where this issue stands — the second line under its title on the
 board, in the list and on the detail page. Report when the state changes,
 not on every step. A close summary also writes this line; between yours and
-a close, the latest wins. The stall patrol's summary only fills in while
-neither exists.
+a close, the latest wins. The parking summary only fills in while neither
+exists.
 
   multica issue progress DENE-12 "API done, wiring the settings page"
   multica issue progress DENE-12 "Waiting on the design review" --tone waiting

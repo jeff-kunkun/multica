@@ -127,8 +127,7 @@ func ExplainedPause(conclusion string) bool {
 	return slices.Contains(ExplainedPauseConclusions, conclusion)
 }
 
-// ExplainedPauseConclusions is the set ExplainedPause accepts. The stall
-// patrol's SQL is built from it, so the two cannot drift (DENE-1183).
+// ExplainedPauseConclusions is the set ExplainedPause accepts.
 var ExplainedPauseConclusions = []string{ConclusionDeferred, ConclusionContinuing}
 
 // Complete reports whether all eight keys are present. A comment-only wrap-up

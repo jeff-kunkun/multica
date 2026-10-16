@@ -1307,32 +1307,6 @@ export function useRetryIssueRun(issueId: string) {
   });
 }
 
-export function useKeepIssueStall() {
-  const qc = useQueryClient();
-  const wsId = useWorkspaceId();
-  return useMutation({
-    mutationFn: (issueId: string) => api.keepIssueStall(issueId),
-    onSettled: (_data, _error, issueId) => {
-      void qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, issueId) });
-      void qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
-      void qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
-    },
-  });
-}
-
-export function useUndoIssueStall() {
-  const qc = useQueryClient();
-  const wsId = useWorkspaceId();
-  return useMutation({
-    mutationFn: (issueId: string) => api.undoIssueStall(issueId),
-    onSettled: (_data, _error, issueId) => {
-      void qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, issueId) });
-      void qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
-      void qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) });
-    },
-  });
-}
-
 /**
  * Add, rewrite or remove one of the state card's settled decisions
  * (DENE-1328). Awaits the server — an agent-authored decision may be refused

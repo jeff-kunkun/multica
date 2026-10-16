@@ -2336,7 +2336,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/children", h.ListChildrenByParents)
 				r.Get("/grouped", h.ListGroupedIssues)
 				r.Get("/", h.ListIssues)
-				r.Get("/stall-actions", h.ListStallActions)
 				// POST twin of GET /api/issues for oversized filter sets
 				// (agents-working ids facet) — see QueryIssues.
 				r.Post("/query", h.QueryIssues)
@@ -2426,9 +2425,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// Read-only shape gate `issue close` asks before a local
 					// merge; the outcome table lives only on the server (DENE-1183).
 					r.Post("/close/check", h.CheckCloseIssue)
-					r.Post("/stall/review", h.ReviewStallAction)
-					r.Post("/stall/keep", h.KeepStallAction)
-					r.Post("/stall/undo", h.UndoStallAction)
 					r.Post("/progress", h.WriteIssueProgress)
 					r.Get("/progress", h.ListIssueProgress)
 					// State card (DENE-1328): goal, decisions, close record,

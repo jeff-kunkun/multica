@@ -3,17 +3,64 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/parking"
 	"github.com/multica-ai/multica/server/internal/progress"
 	"github.com/multica-ai/multica/server/internal/routing"
 	"github.com/multica-ai/multica/server/internal/testutil"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
+
+// newParkingFixture builds one workspace with an agent and its runtime. The
+// pool helper skips the suite when no local Postgres is reachable, the same
+// way every other DB-backed service test does.
+func newParkingFixture(t *testing.T) (*testutil.Fixture, *TaskService, *events.Bus, string, string) {
+	t.Helper()
+	fx := testutil.New(newResolveOriginatorPool(t), "", "")
+	suffix := time.Now().UnixNano()
+	fx.UserID = fx.User(t, "Parking", fmt.Sprintf("parking-%d@multica.test", suffix))
+	fx.WorkspaceID = fx.Workspace(t, "Parking", fmt.Sprintf("parking-%d", suffix))
+	fx.Member(t, fx.WorkspaceID, fx.UserID, "owner")
+	runtimeID := fx.Runtime(t, "Parking runtime")
+	agentID := fx.Agent(t, "Parked executor", runtimeID, testutil.Cols{"work_enabled": true})
+
+	bus := events.New()
+	svc := &TaskService{Queries: db.New(fx.Pool), Bus: bus}
+	return fx, svc, bus, agentID, runtimeID
+}
+
+func parkingTestUUID(t *testing.T, raw string) pgtype.UUID {
+	t.Helper()
+	parsed, err := util.ParseUUID(raw)
+	if err != nil {
+		t.Fatalf("parse uuid %q: %v", raw, err)
+	}
+	return parsed
+}
+
+// completedTaskFor queues a run that already finished — the shape the /complete
+// callback hands to HandleCompletedTasks. The row is read back so the test
+// passes the same struct the production caller does.
+func completedTaskFor(t *testing.T, fx *testutil.Fixture, agentID, runtimeID, issueID string) db.AgentTaskQueue {
+	t.Helper()
+	taskID := fx.Task(t, agentID, testutil.Cols{
+		"issue_id":   issueID,
+		"runtime_id": runtimeID,
+		"status":     "completed",
+	})
+	task, err := db.New(fx.Pool).GetAgentTask(context.Background(), parkingTestUUID(t, taskID))
+	if err != nil {
+		t.Fatalf("load completed task: %v", err)
+	}
+	return task
+}
 
 type parkingRow struct {
 	state, category, stuckKind, summary, source, ownerType, ownerID string
@@ -61,7 +108,7 @@ func (f *fakeSummarizer) Summarize(_ context.Context, _ string, facts routing.Su
 // The record says so, and the owner hears about it once — not once per run.
 func TestParkingDoneButNotClosed(t *testing.T) {
 	ctx := context.Background()
-	fx, svc, _, agentID, runtimeID := newCompletionStallFixture(t)
+	fx, svc, _, agentID, runtimeID := newParkingFixture(t)
 	issueID := fx.Issue(t, "Merged but open", testutil.Cols{
 		"status": "in_progress", "assignee_type": "agent", "assignee_id": agentID,
 	})
@@ -88,9 +135,8 @@ func TestParkingDoneButNotClosed(t *testing.T) {
 		t.Fatalf("inbox items = %d, want 1", got)
 	}
 
-	// The stall signal queued a recovery run; it finishes the same way.
+	// A second run stops the same way.
 	again := completedTaskFor(t, fx, agentID, runtimeID, issueID)
-	fx.Exec(t, `UPDATE agent_task_queue SET status = 'cancelled' WHERE issue_id = $1 AND status IN ('queued','dispatched','running')`, issueID)
 	svc.HandleCompletedTasks(ctx, []db.AgentTaskQueue{again})
 	if got := parkingInboxCount(t, fx, issueID); got != 1 {
 		t.Fatalf("inbox items after a second identical stop = %d, want still 1", got)
@@ -101,7 +147,7 @@ func TestParkingDoneButNotClosed(t *testing.T) {
 // was refused. The agent's only words are the error, so the model phrases it.
 func TestParkingDeliveryStuck(t *testing.T) {
 	ctx := context.Background()
-	fx, svc, bus, agentID, runtimeID := newCompletionStallFixture(t)
+	fx, svc, bus, agentID, runtimeID := newParkingFixture(t)
 	var progressEvents int
 	bus.Subscribe(protocol.EventIssueUpdated, func(e events.Event) {
 		if p, ok := e.Payload.(map[string]any); ok && p["progress_changed"] == true {
@@ -124,7 +170,7 @@ func TestParkingDeliveryStuck(t *testing.T) {
 	sum := &fakeSummarizer{}
 	svc.ParkingSummarizer = sum
 
-	task, err := svc.Queries.GetAgentTask(ctx, stallTestUUID(t, taskID))
+	task, err := svc.Queries.GetAgentTask(ctx, parkingTestUUID(t, taskID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,7 +213,7 @@ func TestParkingDeliveryStuck(t *testing.T) {
 // DENE-807 / 750: blocked, the agent replied "已完成" and left no wait record.
 func TestParkingReplyWithoutCloseOnBlocked(t *testing.T) {
 	ctx := context.Background()
-	fx, svc, _, agentID, runtimeID := newCompletionStallFixture(t)
+	fx, svc, _, agentID, runtimeID := newParkingFixture(t)
 	issueID := fx.Issue(t, "Blocked, replied", testutil.Cols{
 		"status": "blocked", "assignee_type": "agent", "assignee_id": agentID,
 	})
@@ -194,7 +240,7 @@ func TestParkingReplyWithoutCloseOnBlocked(t *testing.T) {
 // never pushed to the inbox.
 func TestParkingIntentionalWaitIsNotUnexplained(t *testing.T) {
 	ctx := context.Background()
-	fx, svc, _, agentID, runtimeID := newCompletionStallFixture(t)
+	fx, svc, _, agentID, runtimeID := newParkingFixture(t)
 	closedAt := time.Now().Add(time.Minute).UTC().Format(time.RFC3339)
 	meta, _ := json.Marshal(map[string]any{
 		"block.needs_human": fx.UserID,

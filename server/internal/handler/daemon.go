@@ -5286,11 +5286,10 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	// task's agent capacity or serialization key is re-claimed immediately.
 	h.TaskService.NotifyTaskFinished(*task)
 
-	// Completion-path mirror of the failure sweep inside HandleFailedTasks: a
-	// run that ended cleanly does not imply the issue reached a terminal
-	// status, and until now nothing observed that combination. Deliberately
-	// AFTER reconcileCommentsOnCompletion — that is what may enqueue the
-	// follow-up run which takes this issue off the stalled list.
+	// Parking record for the issue (DENE-881), the completion-path mirror of
+	// the one HandleFailedTasks writes. Deliberately AFTER
+	// reconcileCommentsOnCompletion: a follow-up run it queued reads as still
+	// running rather than as a stop.
 	h.TaskService.HandleCompletedTasks(r.Context(), []db.AgentTaskQueue{*task})
 
 	// The executor's status write to in_review usually lands while this run

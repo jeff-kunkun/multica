@@ -95,14 +95,7 @@ archived statuses remain readable via an explicit status filter.
   a failure wake clock the patrol acts on (a sweeper-reaped run may still roll it back to `todo`);
   the parent gets a note that only promises a wake when one was recorded (DENE-1339).
 - **Completed issue-triggered tasks** are the mirror case, and they write no
-  status at all: a run that reaches `/complete` cleanly while the issue is
-  still `in_progress` with nothing queued behind it leaves a system comment
-  carrying `completion-stall:run-completed-without-terminal-status`, naming the
-  current assignee and the parent issue, then queues one recovery run for that
-  same assignee, told to finish the work and close through the close protocol.
-  It never moves the issue. One issue gets at most one such
-  signal per 30 minutes, and an issue that still has a non-terminal child is
-  never signalled — dispatching sub-issues and staying `in_progress` is the
-  documented way to record that the work continues below. A run ending is therefore still not the issue ending,
-  and an agent that delivered part of its acceptance criteria must write the
-  status itself: leaving it `in_progress` just buys another run.
+  status at all: a run that reaches `/complete` cleanly only records the
+  issue's parking record. A run ending is therefore not the issue ending, and
+  an agent that delivered part of its acceptance criteria must write the
+  status itself.

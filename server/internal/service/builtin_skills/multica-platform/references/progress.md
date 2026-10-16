@@ -19,9 +19,8 @@ chat line is `working`.
 Who writes the line, and who wins:
 
 - **Issue:** your report and a `multica issue close --summary` are both
-  explicit, so the latest of the two wins. The stall patrol's summary fills
-  the line only while neither exists, and is red when the stall is
-  unexplained.
+  explicit, so the latest of the two wins. The parking summary fills the
+  line only while neither exists, and is red when the stop is unexplained.
 - **Chat:** your report for the current turn wins. Otherwise the platform
   writes one after each reply — a model summary, or the reply's first line
   when the deployment has no model configured.

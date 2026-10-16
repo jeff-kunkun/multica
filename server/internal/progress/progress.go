@@ -12,7 +12,7 @@ import (
 )
 
 // Sources, in display priority for issues: an agent's own line, then the
-// close summary, then the parking (stall patrol) summary. Agent and close
+// close summary, then the parking summary. Agent and close
 // lines are both explicit statements, so between them the latest wins; the
 // parking summary only fills in while neither exists. Chats use agent, then
 // a model recap of the latest turn ("model"), or the reply itself when the

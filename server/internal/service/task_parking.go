@@ -93,6 +93,21 @@ func (s *TaskService) RecordParking(ctx context.Context, issueID pgtype.UUID, ta
 	return rec, true
 }
 
+// HandleCompletedTasks is the completion-path mirror of the parking pass in
+// HandleFailedTasks: it records the parking record of every issue the runs
+// touched, once per issue. A finished run is not a finished issue, and this
+// path writes no status — the executor owns it through the close protocol.
+func (s *TaskService) HandleCompletedTasks(ctx context.Context, tasks []db.AgentTaskQueue) {
+	parked := make(map[string]bool)
+	for _, t := range tasks {
+		if !t.IssueID.Valid || parked[util.UUIDToString(t.IssueID)] {
+			continue
+		}
+		parked[util.UUIDToString(t.IssueID)] = true
+		s.RecordParking(ctx, t.IssueID, t)
+	}
+}
+
 func (s *TaskService) parkingInput(ctx context.Context, issue db.Issue) (parking.Input, error) {
 	in := parking.Input{
 		Status: issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status),
@@ -326,3 +341,27 @@ func (s *TaskService) recordParkingProgress(ctx context.Context, issue db.Issue,
 // parkingProgressSource tags progress copied from the parking summary. The
 // summary's own source (model / fixed wording) stays on the parking record.
 const parkingProgressSource = "parking"
+
+// hasOpenChildren reports whether the issue still has a non-terminal child.
+// An orchestrator that dispatched sub-issues leaves its parent in_progress
+// with nothing queued on it; that is "work continues below", not a stop.
+//
+// Failing open (returning false on a query error) keeps a missing children
+// read from hiding a genuine stop.
+func (s *TaskService) hasOpenChildren(ctx context.Context, issue db.Issue) bool {
+	children, err := s.Queries.ListChildIssues(ctx, issue.ID)
+	if err != nil {
+		slog.Warn("parking: list children failed",
+			"issue_id", util.UUIDToString(issue.ID), "error", err)
+		return false
+	}
+	for _, child := range children {
+		switch issuestatus.Effective(ctx, s.Queries, child.WorkspaceID, child.Status) {
+		case issuestatus.Done, issuestatus.Cancelled:
+			continue
+		default:
+			return true
+		}
+	}
+	return false
+}

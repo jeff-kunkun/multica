@@ -443,7 +443,7 @@ For GitLab, `glab ci status` can be used directly when it returns non-zero while
 
 ### Report progress
 
-`multica issue progress <issue-id> "<progress>" [--tone working|waiting|stuck|done] --output json` sets the line under the issue's title; `--history` reads earlier lines. Who wins between your line, a close summary and the stall patrol: `references/progress.md`.
+`multica issue progress <issue-id> "<progress>" [--tone working|waiting|stuck|done] --output json` sets the line under the issue's title; `--history` reads earlier lines. Who wins between your line, a close summary and the parking summary: `references/progress.md`.
 
 `multica issue context <issue-id>` prints the issue's state card — goal, settled decisions, where it stands, the last baton, and threads new since you were last here: `references/state-card.md`.
 
