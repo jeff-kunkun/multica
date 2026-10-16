@@ -2171,6 +2171,15 @@ func (h *Handler) resolveCommentTriggerEnqueue(ctx context.Context, issue db.Iss
 			); terminal {
 				return status, reason
 			}
+			// Record the obligation even when it came from another thread.
+			// A claim may have won the merge race, so its delivered set is fixed.
+			registered, err := h.registerPlannedCommentForActiveTask(ctx, issue, trigger.Agent.ID, triggerCommentID, getHeadSha())
+			if err != nil {
+				return DispatchBlocked, ReasonInternalError
+			}
+			if registered {
+				return DispatchDeferred, ReasonDeferred
+			}
 			// No same-head QUEUED row to fold into (merge missed). The two paths
 			// resolve differently.
 			if !lostRace {
@@ -2178,43 +2187,11 @@ func (h *Handler) resolveCommentTriggerEnqueue(ctx context.Context, issue db.Iss
 				// it is newer than the task and completion reconcile covers it by
 				// timestamp; MUL-4195 leaves the claimed task untouched. Defer to
 				// the active task, or enqueue fresh if it has since finished.
-				active, activeErr := h.hasActiveTaskForIssueAndAgent(ctx, issue.ID, trigger.Agent.ID, triggerCommentID)
+				active, activeErr := h.hasActiveTaskForIssueAndAgent(ctx, issue.ID, trigger.Agent.ID)
 				if status, reason, enqueueFresh := decidePostMergeMiss(active, activeErr); !enqueueFresh {
 					return status, reason
 				}
 				// enqueueFresh → fall through to the enqueue below.
-			} else {
-				// (c) A lost INSERT race needs a recorded obligation: the losing
-				// comment can PREDATE the winner, which completion reconcile's
-				// `created_at > since` window cannot see. Register it as a planned (undelivered) input on a same-head
-				// CLAIM-RECEIPT task (dispatched/running/waiting; queued is excluded
-				// — it must fold through the atomic merge above), turning the drop
-				// into a bounded follow-up (#5914, Elon round 2).
-				registered, err := h.registerPlannedCommentForActiveTask(ctx, issue, trigger.Agent.ID, triggerCommentID, getHeadSha())
-				if err != nil {
-					slog.Warn("register planned comment failed",
-						"issue_id", uuidToString(issue.ID), "agent_id", uuidToString(trigger.Agent.ID), "error", err)
-					return DispatchBlocked, ReasonInternalError
-				}
-				if registered {
-					return DispatchDeferred, ReasonDeferred
-				}
-				// (d) No same-head QUEUED task to fold (merge missed) and no
-				// same-head CLAIM-RECEIPT task to register on. Do NOT try to defer
-				// off a classification of the current active tasks: a snapshot only
-				// proves state NOW, and a DIFFERENT-head task's reconcile covering
-				// this comment can be defeated by a newer blocker that appears after
-				// the snapshot but before that task completes (its replay collides
-				// with the blocker and completion reconcile discards the failure —
-				// Elon round 7). Every success-shaped outcome must be backed by a
-				// COMPLETED write, never a prediction. So just fall through to a
-				// fresh enqueue: if the unique slot is still occupied — necessarily
-				// by a different-head task we can neither fold into nor durably cover
-				// — the insert re-raises ErrDuplicatePendingTask and we re-loop,
-				// converging to a truthful non-success; if the slot is free, the
-				// enqueue creates the covering task. (The occupant's own completion
-				// reconcile still replays this comment best-effort in the common
-				// no-blocker case; we simply never PROMISE it.)
 			}
 		}
 		if err := h.enqueueSingleCommentTrigger(ctx, issue, triggerCommentID, trigger); err != nil {
@@ -2300,11 +2277,10 @@ func commentEnqueueFailureReason(err error) DispatchReasonCode {
 // duplicate) AND must not report a success — "cannot confirm whether a run is
 // active" is never the same as "a run is active". See decidePostMergeMiss for
 // the decision.
-func (h *Handler) hasActiveTaskForIssueAndAgent(ctx context.Context, issueID, agentID, threadCommentID pgtype.UUID) (bool, error) {
-	active, err := h.Queries.HasActiveTaskForIssueAndAgentInThread(ctx, db.HasActiveTaskForIssueAndAgentInThreadParams{
-		ThreadCommentID: threadCommentID,
-		IssueID:         issueID,
-		AgentID:         agentID,
+func (h *Handler) hasActiveTaskForIssueAndAgent(ctx context.Context, issueID, agentID pgtype.UUID) (bool, error) {
+	active, err := h.Queries.HasActiveTaskForIssueAndAgent(ctx, db.HasActiveTaskForIssueAndAgentParams{
+		IssueID: issueID,
+		AgentID: agentID,
 	})
 	if err != nil {
 		slog.Warn("has active task for issue+agent check failed",
@@ -2598,7 +2574,7 @@ func (h *Handler) enqueueSingleCommentTrigger(ctx context.Context, issue db.Issu
 // never named by the user, so a no-route there is not a silent no-op.
 func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issue, content string, parentComment *db.Comment, actorType, actorID string, opts commentTriggerComputeOptions) ([]commentAgentTrigger, []commentMentionTarget) {
 	// A persisted comment determines its thread; previews use the parent.
-	// A new top-level preview has no thread yet and cannot merge with a queue.
+	// Queue coalescing is issue-scoped, including a new top-level preview.
 	opts.ThreadCommentID = opts.ExcludeTriggerCommentID
 	if !opts.ThreadCommentID.Valid && parentComment != nil {
 		opts.ThreadCommentID = parentComment.ID
@@ -2809,26 +2785,19 @@ func (h *Handler) routeAssigneeFallback(ctx context.Context, issue db.Issue, aut
 }
 
 func (h *Handler) hasPendingTaskForIssueAndAgent(ctx context.Context, issueID, agentID pgtype.UUID, opts commentTriggerComputeOptions) (bool, error) {
-	if !opts.ThreadCommentID.Valid {
-		return false, nil
-	}
-	// Key dedup on the reviewed head so re-pushing to the PR mid-review
-	// invalidates dedup and a fresh run enqueues against the new HEAD (TEN-356).
-	headSha := h.TaskService.ResolveIssueReviewSHAParam(ctx, issueID)
 	if opts.ExcludeTriggerCommentID.Valid {
-		return h.Queries.HasPendingTaskForIssueAndAgentExcludingTriggerCommentInThread(ctx, db.HasPendingTaskForIssueAndAgentExcludingTriggerCommentInThreadParams{
-			ThreadCommentID:         opts.ThreadCommentID,
+		return h.Queries.HasPendingTaskForIssueAndAgentExcludingTriggerComment(ctx, db.HasPendingTaskForIssueAndAgentExcludingTriggerCommentParams{
 			IssueID:                 issueID,
 			AgentID:                 agentID,
 			ExcludeTriggerCommentID: opts.ExcludeTriggerCommentID,
-			HeadSha:                 headSha,
+			HeadSha:                 h.TaskService.ResolveIssueReviewSHAParam(ctx, issueID),
 		})
 	}
-	return h.Queries.HasPendingTaskForIssueAndAgentInThread(ctx, db.HasPendingTaskForIssueAndAgentInThreadParams{
-		ThreadCommentID: opts.ThreadCommentID,
-		IssueID:         issueID,
-		AgentID:         agentID,
-		HeadSha:         headSha,
+	// Threads share one active turn. Review HEAD still gates the queued merge;
+	// a request against a new HEAD waits for the existing turn to complete.
+	return h.Queries.HasActiveTaskForIssueAndAgent(ctx, db.HasActiveTaskForIssueAndAgentParams{
+		IssueID: issueID,
+		AgentID: agentID,
 	})
 }
 

@@ -198,6 +198,10 @@ WHERE agent_id = @agent_id
 ORDER BY created_at DESC, id DESC
 LIMIT @page_limit;
 
+-- name: LockIssueCommentEnqueue :exec
+-- Serialize comment admission across threads without locking owner rows.
+SELECT pg_advisory_xact_lock(hashtextextended(sqlc.arg(lock_key)::text, 0));
+
 -- name: CreateAgentTask :one
 -- Fenced against workspace teardown: lock_task_owner_rows (migration 284)
 -- locks the owners' workspace rows in the writer's own transaction and returns
@@ -1624,7 +1628,6 @@ WHERE id = (
     SELECT t.id FROM agent_task_queue t
     WHERE t.context->>'wakeup_id' IS NULL AND t.issue_id = @issue_id
       AND t.agent_id = @agent_id
-      AND t.comment_thread_id IS NOT DISTINCT FROM comment_thread_root_id(@new_trigger_comment_id::uuid)
       AND (
           t.status = 'queued'
       )
@@ -1640,6 +1643,7 @@ WHERE id = (
     ORDER BY t.created_at DESC
     LIMIT 1
 )
+AND status = 'queued'
 RETURNING id, coalesced_comment_ids;
 
 -- name: RegisterPlannedCommentForActiveTask :one
@@ -1679,7 +1683,6 @@ WHERE id = (
     SELECT t.id FROM agent_task_queue t
     WHERE t.context->>'wakeup_id' IS NULL AND t.issue_id = @issue_id
       AND t.agent_id = @agent_id
-      AND t.comment_thread_id IS NOT DISTINCT FROM comment_thread_root_id(@comment_id::uuid)
       AND t.status IN ('dispatched', 'running', 'waiting_local_directory')
       AND (
           COALESCE(sqlc.narg('head_sha')::text, '') = ''
@@ -1917,7 +1920,7 @@ LIMIT @max_per_tick;
 -- reconcile to schedule the guaranteed follow-up, and only enqueues fresh when
 -- NO active task exists.
 SELECT count(*) > 0 AS has_active FROM agent_task_queue
-WHERE issue_id = $1 AND agent_id = $2
+WHERE context->>'wakeup_id' IS NULL AND issue_id = $1 AND agent_id = $2
   AND (
     status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
   );

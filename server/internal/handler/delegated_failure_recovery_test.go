@@ -118,8 +118,8 @@ func TestUpdateComment_RequeuesDelegatedFailureRecoverySurvivor(t *testing.T) {
 		Scan(&activeTasks, &recoveryCovered); err != nil {
 		t.Fatalf("read rebuilt coordinator task: %v", err)
 	}
-	// Rebuilding an old cross-thread batch preserves both independent runs.
-	if activeTasks != 2 || !recoveryCovered {
-		t.Fatalf("rebuilt active tasks/recovery coverage = %d/%v, want 2/true", activeTasks, recoveryCovered)
+	// Rebuilding an old cross-thread batch preserves recovery in one run.
+	if activeTasks != 1 || !recoveryCovered {
+		t.Fatalf("rebuilt active tasks/recovery coverage = %d/%v, want 1/true", activeTasks, recoveryCovered)
 	}
 }

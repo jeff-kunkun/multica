@@ -3912,7 +3912,7 @@ func (q *Queries) HasActiveTaskForIssue(ctx context.Context, issueID pgtype.UUID
 
 const hasActiveTaskForIssueAndAgent = `-- name: HasActiveTaskForIssueAndAgent :one
 SELECT count(*) > 0 AS has_active FROM agent_task_queue
-WHERE issue_id = $1 AND agent_id = $2
+WHERE context->>'wakeup_id' IS NULL AND issue_id = $1 AND agent_id = $2
   AND (
     status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
   )
@@ -5822,6 +5822,16 @@ func (q *Queries) LockAgentTaskStartClaim(ctx context.Context, arg LockAgentTask
 	return i, err
 }
 
+const lockIssueCommentEnqueue = `-- name: LockIssueCommentEnqueue :exec
+SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))
+`
+
+// Serialize comment admission across threads without locking owner rows.
+func (q *Queries) LockIssueCommentEnqueue(ctx context.Context, lockKey string) error {
+	_, err := q.db.Exec(ctx, lockIssueCommentEnqueue, lockKey)
+	return err
+}
+
 const markAgentTaskWaitingLocalDirectory = `-- name: MarkAgentTaskWaitingLocalDirectory :one
 UPDATE agent_task_queue
 SET status = 'waiting_local_directory',
@@ -6016,7 +6026,6 @@ WHERE id = (
     SELECT t.id FROM agent_task_queue t
     WHERE t.context->>'wakeup_id' IS NULL AND t.issue_id = $10
       AND t.agent_id = $11
-      AND t.comment_thread_id IS NOT DISTINCT FROM comment_thread_root_id($1::uuid)
       AND (
           t.status = 'queued'
       )
@@ -6032,6 +6041,7 @@ WHERE id = (
     ORDER BY t.created_at DESC
     LIMIT 1
 )
+AND status = 'queued'
 RETURNING id, coalesced_comment_ids
 `
 
@@ -6958,7 +6968,6 @@ WHERE id = (
     SELECT t.id FROM agent_task_queue t
     WHERE t.context->>'wakeup_id' IS NULL AND t.issue_id = $2
       AND t.agent_id = $3
-      AND t.comment_thread_id IS NOT DISTINCT FROM comment_thread_root_id($1::uuid)
       AND t.status IN ('dispatched', 'running', 'waiting_local_directory')
       AND (
           COALESCE($4::text, '') = ''

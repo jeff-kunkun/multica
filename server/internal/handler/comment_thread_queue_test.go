@@ -11,7 +11,7 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-func TestCommentThreadQueuesMergeAndExecuteIndependently(t *testing.T) {
+func TestCommentThreadsShareOneAgentRun(t *testing.T) {
 	ctx := context.Background()
 	runtimeID := dbfx.Runtime(t, "thread queue runtime")
 	agentID := dbfx.Agent(t, "thread queue agent", runtimeID)
@@ -38,30 +38,19 @@ func TestCommentThreadQueuesMergeAndExecuteIndependently(t *testing.T) {
 		}
 	}
 	enqueue(rootA, false, DispatchQueued)
-	// Even a stale pending hint from another thread must not merge or defer B.
-	enqueue(rootB, true, DispatchQueued)
+	enqueue(rootB, true, DispatchCoalesced)
 	enqueue(replyA, true, DispatchCoalesced)
 	enqueue(nestedA, true, DispatchCoalesced)
 	tasks, err := testHandler.Queries.ListTasksByIssue(ctx, parseUUID(issueID))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tasks) != 2 {
-		t.Fatalf("got %d runs, want one per thread", len(tasks))
+	if len(tasks) != 1 {
+		t.Fatalf("got %d runs, want one per issue and agent", len(tasks))
 	}
-	var a, b db.AgentTaskQueue
-	for _, task := range tasks {
-		switch uuidToString(task.CommentThreadID) {
-		case rootA:
-			a = task
-		case rootB:
-			b = task
-		default:
-			t.Fatalf("wrong thread scope: %s", uuidToString(task.CommentThreadID))
-		}
-	}
-	if uuidToString(a.TriggerCommentID) != nestedA || len(a.CoalescedCommentIds) != 2 || len(b.CoalescedCommentIds) != 0 {
-		t.Fatalf("wrong input batches: A=%+v B=%+v", a.TriggerCommentID, b.CoalescedCommentIds)
+	a := tasks[0]
+	if uuidToString(a.TriggerCommentID) != nestedA || len(a.CoalescedCommentIds) != 3 {
+		t.Fatalf("wrong merged input batch: trigger=%+v coalesced=%+v", a.TriggerCommentID, a.CoalescedCommentIds)
 	}
 	claim := db.ClaimAgentTaskParams{AgentID: parseUUID(agentID), RuntimeID: parseUUID(runtimeID), PrepareLeaseSecs: 60, RuntimeStaleSecs: 120}
 	claimed, err := testHandler.Queries.ClaimAgentTask(ctx, claim)
@@ -74,10 +63,10 @@ func TestCommentThreadQueuesMergeAndExecuteIndependently(t *testing.T) {
 	if _, err := testHandler.Queries.ClaimAgentTask(ctx, claim); !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("another thread ran concurrently on the same issue: %v", err)
 	}
-	// A new instruction after execution starts belongs to a successor run.
-	dbfx.Exec(t, "UPDATE agent_task_queue SET status='running', started_at=now(), delivered_comment_ids=ARRAY[$2::uuid,$3::uuid,$4::uuid] WHERE id=$1", uuidToString(a.ID), rootA, replyA, nestedA)
-	followupA := dbfx.Comment(t, issueID, "A follow-up", testutil.Cols{"parent_id": rootA})
-	enqueue(followupA, false, DispatchQueued)
+	// A run without live input records the follow-up until completion.
+	dbfx.Exec(t, "UPDATE agent_task_queue SET status='running', started_at=now(), delivered_comment_ids=ARRAY[$2::uuid,$3::uuid,$4::uuid,$5::uuid] WHERE id=$1", uuidToString(a.ID), rootA, replyA, nestedA, rootB)
+	followupA := dbfx.Comment(t, issueID, agentMention("Agent", agentID)+" A follow-up", testutil.Cols{"parent_id": rootA})
+	enqueue(followupA, false, DispatchDeferred)
 	dbfx.Exec(t, "UPDATE agent_task_queue SET status='completed', completed_at=now() WHERE id=$1", uuidToString(a.ID))
 	completed, err := testHandler.Queries.GetAgentTask(ctx, a.ID)
 	if err != nil {
@@ -88,15 +77,18 @@ func TestCommentThreadQueuesMergeAndExecuteIndependently(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tasks) != 3 {
-		t.Fatalf("completion duplicated another thread: got %d tasks", len(tasks))
+	if len(tasks) != 2 {
+		t.Fatalf("completion must create one follow-up: got %d tasks", len(tasks))
 	}
+	// An older/manual queue in another thread still retains its explicit
+	// row-specific rerun and stop behavior.
+	bID := dbfx.Task(t, agentID, testutil.Cols{"runtime_id": runtimeID, "issue_id": issueID, "trigger_comment_id": rootB})
 	// A row-specific rerun replaces only A's pending successor.
 	rerun, err := testHandler.TaskService.RerunIssue(ctx, issue.ID, a.ID, pgtype.UUID{}, parseUUID(testUserID), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	other, err := testHandler.Queries.GetAgentTask(ctx, b.ID)
+	other, err := testHandler.Queries.GetAgentTask(ctx, parseUUID(bID))
 	if err != nil || other.Status != "queued" {
 		t.Fatalf("rerun disturbed thread B: %s / %v", other.Status, err)
 	}
@@ -106,7 +98,7 @@ func TestCommentThreadQueuesMergeAndExecuteIndependently(t *testing.T) {
 	if _, err := testHandler.TaskService.CancelTask(ctx, rerun.ID); err != nil {
 		t.Fatal(err)
 	}
-	other, err = testHandler.Queries.GetAgentTask(ctx, b.ID)
+	other, err = testHandler.Queries.GetAgentTask(ctx, parseUUID(bID))
 	if err != nil || other.Status != "queued" {
 		t.Fatalf("stop disturbed thread B: %s / %v", other.Status, err)
 	}

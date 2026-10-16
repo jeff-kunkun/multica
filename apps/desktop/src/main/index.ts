@@ -841,7 +841,10 @@ if (!gotTheLock) {
     createWindow();
 
     setupAutoUpdater(() => mainWindow);
-    setupDaemonManager(() => mainWindow);
+    setupDaemonManager(
+      () => mainWindow,
+      runtimeConfigResult.ok ? runtimeConfigResult.config.apiUrl : undefined,
+    );
     setupLocalDirectory(() => mainWindow);
     setupFullDiskAccess();
 

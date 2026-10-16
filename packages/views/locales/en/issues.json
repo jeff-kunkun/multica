@@ -4,6 +4,8 @@
     "stop": "Stop",
     "stopping": "Stopping...",
     "queued": "Waiting for an available agent.",
+    "office_offline": "Office offline",
+    "office_offline_hint": "Office offline · open the Office app on the agent's device to reconnect.",
     "starting": "Preparing the agent session.",
     "waiting_directory": "Waiting for another run to release the working directory.",
     "thinking": "Thinking",
