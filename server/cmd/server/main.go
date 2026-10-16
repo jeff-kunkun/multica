@@ -683,6 +683,8 @@ func main() {
 	go heartbeatScheduler.Run(sweepCtx)
 	go runDBStatsLogger(sweepCtx, "primary", pool)
 	go botevents.NewDeliverer(queries).Run(sweepCtx)
+	h.RegisterRelay(bus)
+	go h.RunStallSweep(sweepCtx)
 	if replicaPool != nil {
 		go runDBStatsLogger(sweepCtx, "replica", replicaPool)
 	}
