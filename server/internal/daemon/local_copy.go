@@ -34,9 +34,11 @@ import (
 var errCloneUnsupported = errors.New("copy-on-write clone not supported on this volume")
 
 const (
-	// localCopyDisableFileName under ~/.multica switches every local_directory
-	// task back to running directly in the user's folder. Checked per task, so
-	// creating or deleting it takes effect on the next run without a restart.
+	// localCopyDisableFileName under ~/.multica switches local_directory tasks
+	// back to running directly in the user's folder: every folder when the
+	// file is empty, otherwise only the folders it lists, one absolute path per
+	// line. Checked per task, so editing it takes effect on the next run
+	// without a restart.
 	localCopyDisableFileName = "local-directory-direct"
 	localCopyRunsDirName     = ".multica-runs"
 	localCopyBackupRetention = 7 * 24 * time.Hour
@@ -58,14 +60,30 @@ type localRunCopy struct {
 	TaskID   string
 }
 
-// localCopyDisabled reports whether the user turned the private copy off.
-func localCopyDisabled() bool {
+// localCopyDisabled reports whether the user turned the private copy off for
+// orig. Listing a folder suits one too large to clone quickly: a folder of a
+// million files takes minutes to clone and merge back on every run.
+func localCopyDisabled(orig string) bool {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return false
 	}
-	_, err = os.Stat(filepath.Join(home, ".multica", localCopyDisableFileName))
-	return err == nil
+	data, err := os.ReadFile(filepath.Join(home, ".multica", localCopyDisableFileName))
+	if err != nil {
+		return false
+	}
+	listed := false
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		listed = true
+		if filepath.Clean(line) == filepath.Clean(orig) {
+			return true
+		}
+	}
+	return !listed
 }
 
 func localCopyFolderLock(orig string) *sync.Mutex {
@@ -89,7 +107,7 @@ func localCopyKey(task Task) string {
 // the copy is switched off or the volume cannot clone; the caller then runs
 // in orig directly, as before.
 func prepareLocalRunCopy(task Task, orig string, logger *slog.Logger) (*localRunCopy, error) {
-	if localCopyDisabled() {
+	if localCopyDisabled(orig) {
 		return nil, nil
 	}
 	runsRoot := filepath.Join(filepath.Dir(orig), localCopyRunsDirName, filepath.Base(orig))
