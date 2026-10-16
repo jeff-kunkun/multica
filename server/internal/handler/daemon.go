@@ -3448,6 +3448,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		}
 		resp.LinkedProjects = linkedProjects
 		h.applyClaimChatCounts(r.Context(), &projectCtx, task, issue.WorkspaceID)
+		if len(projectCtx.Projects) > 0 {
+			projectCtx.Projects[0].Resources = append(projectCtx.Projects[0].Resources, h.crossProjectReadonlyResources(r.Context(), issue)...)
+		}
 		projectCtx.applyTo(&resp)
 
 		// Load every planned input as one chronological, de-duplicated set.

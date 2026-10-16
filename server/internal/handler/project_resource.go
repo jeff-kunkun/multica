@@ -85,6 +85,8 @@ func validateAndNormalizeResourceRefWithOptions(resourceType string, ref json.Ra
 		return validateGithubRepoRef(ref)
 	case "local_directory":
 		return validateLocalDirectoryRefWithOptions(ref, allowLegacyWorktreeRename)
+	case "readonly_directory":
+		return validateReadonlyDirectoryRef(ref)
 	default:
 		return nil, fmt.Errorf("unknown resource_type %q", resourceType)
 	}
@@ -1565,4 +1567,61 @@ func (h *Handler) applyClaimChatCounts(ctx context.Context, out *claimProjectCon
 		}
 		out.Projects[i].ChatCount = n
 	}
+}
+
+// readonlyDirectoryRef is the JSONB shape of resource_type=readonly_directory:
+// an extra directory on one daemon's machine that the agent may read but is
+// never handed as its working directory.
+type readonlyDirectoryRef struct {
+	DaemonID  string `json:"daemon_id"`
+	LocalPath string `json:"local_path"`
+}
+
+func validateReadonlyDirectoryRef(ref json.RawMessage) (json.RawMessage, error) {
+	var payload readonlyDirectoryRef
+	if err := json.Unmarshal(ref, &payload); err != nil {
+		return nil, fmt.Errorf("invalid readonly_directory payload: %w", err)
+	}
+	payload.LocalPath = strings.TrimSpace(payload.LocalPath)
+	if payload.LocalPath == "" || !isAbsoluteLocalPath(payload.LocalPath) {
+		return nil, errors.New("readonly_directory: local_path must be an absolute path")
+	}
+	payload.DaemonID = strings.TrimSpace(payload.DaemonID)
+	if payload.DaemonID == "" {
+		return nil, errors.New("readonly_directory: daemon_id is required")
+	}
+	return json.Marshal(payload)
+}
+
+// crossProjectReadonlyResources returns the readonly_directory resources an
+// issue inherits from its parent issue's project when that project differs
+// from its own: the parent project's own readonly_directory resources plus its
+// local_directory path, re-typed as read-only so the daemon never treats it as
+// a second working directory. Errors degrade to no extras — they only widen
+// what the agent can read, so they must not block a claim.
+func (h *Handler) crossProjectReadonlyResources(ctx context.Context, issue db.Issue) []ProjectResourceData {
+	if !issue.ParentIssueID.Valid {
+		return nil
+	}
+	parent, err := h.Queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: issue.ParentIssueID, WorkspaceID: issue.WorkspaceID})
+	if err != nil || !parent.ProjectID.Valid || parent.ProjectID == issue.ProjectID {
+		return nil
+	}
+	rows, err := h.Queries.ListProjectResourcesInWorkspace(ctx, db.ListProjectResourcesInWorkspaceParams{ProjectID: parent.ProjectID, WorkspaceID: issue.WorkspaceID})
+	if err != nil {
+		return nil
+	}
+	var out []ProjectResourceData
+	for _, row := range rows {
+		if row.ResourceType != "local_directory" && row.ResourceType != "readonly_directory" {
+			continue
+		}
+		var ref readonlyDirectoryRef
+		if json.Unmarshal(row.ResourceRef, &ref) != nil || ref.LocalPath == "" {
+			continue
+		}
+		raw, _ := json.Marshal(ref)
+		out = append(out, ProjectResourceData{ID: uuidToString(row.ID), ResourceType: "readonly_directory", ResourceRef: raw, Label: row.Label.String})
+	}
+	return out
 }
