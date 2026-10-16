@@ -1498,7 +1498,7 @@ func TestInjectRuntimeConfigClaude(t *testing.T) {
 		// DENE-1329 verb map: reads are one line per verb, flags in --help.
 		"`issue get | list | children`",
 		"`issue comment list | add`",
-		"multica issue close <id>",
+		"Leave the status true with `multica issue status`",
 		// Skills are listed by on-disk slug: that is the directory
 		// writeSkillFiles creates and the only identifier the model can
 		// actually invoke (MUL-5529).
@@ -1760,7 +1760,7 @@ func TestInjectRuntimeConfigNoSkills(t *testing.T) {
 	}
 
 	s := string(content)
-	if !strings.Contains(s, "multica issue close <id>") {
+	if !strings.Contains(s, "multica issue comment add") {
 		t.Error("should reference multica CLI even without skills")
 	}
 	if strings.Contains(s, "## Skills") {
