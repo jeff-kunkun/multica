@@ -50,7 +50,7 @@ func backendResumeContinuityNotice(task Task) string {
 // Returns "" when none of the blocks apply.
 func perTurnContextBlocks(task Task, opts promptOpts) string {
 	var b strings.Builder
-	b.WriteString(buildLocalDirectoriesBlock(opts.localDirectories))
+	b.WriteString(buildLocalDirectoriesBlock(opts.localDirectories, opts.localRunCopy))
 	if task.PriorSessionResumeUnavailable {
 		b.WriteString(sessionContinuityNoticeFor(task))
 	}
@@ -63,6 +63,7 @@ func perTurnContextBlocks(task Task, opts promptOpts) string {
 // common BuildPrompt(task, provider) call sites stay unchanged.
 type promptOpts struct {
 	localDirectories []localDirectoryAssignment
+	localRunCopy     string
 }
 
 // PromptOption tunes per-turn prompt copy with run-scoped context.
@@ -77,20 +78,34 @@ func WithLocalDirectories(dirs []localDirectoryAssignment) PromptOption {
 	return func(o *promptOpts) { o.localDirectories = dirs }
 }
 
-// buildLocalDirectoriesBlock warns a local_directory turn that its working
-// directory is shared live, and points code changes at a worktree of its own:
-// switching branches in the shared checkout would yank the tree out from under
-// every other task (and the user) working in it. When the project has more
-// than one folder on this machine it lists them all, since the agent only
-// starts in the first.
-func buildLocalDirectoriesBlock(dirs []localDirectoryAssignment) string {
+// WithLocalRunCopy marks a local_directory turn that works in a private clone
+// of dirs[0] which is merged back when the run ends (DENE-2159).
+func WithLocalRunCopy(workDir string) PromptOption {
+	return func(o *promptOpts) { o.localRunCopy = workDir }
+}
+
+// buildLocalDirectoriesBlock tells a local_directory turn how its working
+// directory relates to the user's folder. In a private copy it edits freely
+// and is told how merge-back works. Without one the folder is shared live, so
+// code changes go to a worktree of its own: switching branches in the shared
+// checkout would yank the tree out from under every other task (and the user)
+// working in it. When the project has more than one folder on this machine it
+// lists them all, since the agent only starts in the first.
+func buildLocalDirectoriesBlock(dirs []localDirectoryAssignment, runCopy string) string {
 	if len(dirs) == 0 {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString("## Shared working directory\n\n")
-	b.WriteString("Your working directory is the user's own folder, and other tasks on this machine may be running in it at the same time.\n\n")
-	b.WriteString("If it is a git repository and you need to change code, create your own branch in a separate git worktree (`git worktree add <path> -b <branch>`) and work there. Do not switch branches, reset, or stash in the original checkout.\n\n")
+	if runCopy != "" {
+		b.WriteString("## Private copy of the user's folder\n\n")
+		fmt.Fprintf(&b, "Your working directory `%s` is a private copy of the user's folder `%s`, made for this run. Edit files here directly; do not create git worktrees inside it. When the run ends, your changes are merged back into the original folder automatically and this copy is removed.\n\n", runCopy, dirs[0].AbsPath)
+		b.WriteString("Other tasks may change the original folder while you work. If you and another task changed the same lines of a file, your version is kept and theirs is backed up, so before finishing, if that matters, compare the files you changed with the original folder and merge in their changes yourself. Refer to files by their path in the original folder.\n\n")
+		b.WriteString("If it is a git repository: commits on a new branch are carried back to the original repository, and you can push them from here. Commits on the checked-out branch arrive in the original folder as uncommitted changes.\n\n")
+	} else {
+		b.WriteString("## Shared working directory\n\n")
+		b.WriteString("Your working directory is the user's own folder, and other tasks on this machine may be running in it at the same time.\n\n")
+		b.WriteString("If it is a git repository and you need to change code, create your own branch in a separate git worktree (`git worktree add <path> -b <branch>`) and work there. Do not switch branches, reset, or stash in the original checkout.\n\n")
+	}
 	if len(dirs) > 1 {
 		b.WriteString("This project has these folders on this machine; you start in the first. To use another, cd into it yourself:\n\n")
 		for _, dir := range dirs {

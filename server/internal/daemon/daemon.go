@@ -7036,6 +7036,22 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			}
 		}
 	}
+	// The task works in a private clone of the user's folder and merges back
+	// when it ends, so tasks sharing a folder neither queue nor edit under each
+	// other (DENE-2159). Registered before the sidecar cleanup below, so that
+	// cleanup runs first and the merge-back never carries the brief or sidecars
+	// into the user's folder.
+	var runCopy *localRunCopy
+	if localAssignment != nil && env == nil {
+		rc, copyErr := prepareLocalRunCopy(task, localAssignment.AbsPath, taskLog)
+		switch {
+		case copyErr != nil:
+			taskLog.Warn("local_directory: private copy failed; running in the folder directly", "error", copyErr)
+		case rc != nil:
+			runCopy = rc
+			defer rc.Finish(taskLog)
+		}
+	}
 	if env == nil {
 		var err error
 		prepParams := execenv.PrepareParams{
@@ -7059,6 +7075,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}
 		if localAssignment != nil {
 			prepParams.LocalWorkDir = localAssignment.AbsPath
+			if runCopy != nil {
+				prepParams.LocalWorkDir = runCopy.Work
+			}
 		}
 		env, err = d.prepareExecutionEnvironment(prepareCtx, prepParams)
 		if err != nil {
@@ -7199,6 +7218,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var promptOptions []PromptOption
 	if localAssignment != nil {
 		promptOptions = append(promptOptions, WithLocalDirectories(localDirs))
+		if runCopy != nil {
+			promptOptions = append(promptOptions, WithLocalRunCopy(runCopy.Work))
+		}
 	}
 	prompt := BuildPrompt(task, provider, promptOptions...)
 
