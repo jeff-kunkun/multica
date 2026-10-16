@@ -26,8 +26,10 @@ const (
 	DefaultPollInterval = 30 * time.Second
 	// DefaultWSClaimPollInterval is the upper bound for missed-event safety
 	// polls while task availability and claims use a healthy WebSocket. The
-	// poller applies downward-only jitter before each sleep.
-	DefaultWSClaimPollInterval = 3 * time.Minute
+	// poller applies downward-only jitter before each sleep. Kept short: when a
+	// task-available push is missed, this poll is the only thing that starts the
+	// task, so a long value shows up as a 2-4 minute wait before the agent starts.
+	DefaultWSClaimPollInterval = 15 * time.Second
 	DefaultHeartbeatInterval   = 15 * time.Second
 	// DefaultAgentTimeout is the optional absolute wall-clock cap on a single
 	// agent run. 0 = no cap: a run is bounded only by the inactivity watchdog

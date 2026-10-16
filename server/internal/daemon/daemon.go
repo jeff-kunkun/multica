@@ -5240,7 +5240,7 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 // cadence is only safe when this exact claim response came from a server that
 // opted into scheduling hints; a missing hint covers old servers and uncertain
 // WS claims, both of which retain the normal fallback cadence. Downward-only
-// jitter keeps the default below the server's 3-minute empty-claim cache TTL
+// jitter keeps the default below the server's empty-claim cache TTL
 // while preventing an idle fleet from polling in lockstep.
 func (d *Daemon) taskClaimPollInterval(result claimTasksResult) time.Duration {
 	if !d.wsRPC.supportsRPCV1() || !result.ClaimedOverWS || !result.ClaimPollHintSupported {
