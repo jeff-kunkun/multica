@@ -1,31 +1,13 @@
 /**
- * "Is there a Multica page behind this one?" for the web navigation adapter.
- *
- * Callers that want to step back (deleting an issue returns the user to the
- * list they opened it from) must not step back off the app when the current
- * page was opened cold — a shared link, a pasted URL, a new tab.
- *
- * The Navigation API answers this directly: its `entries()` spans just the
- * contiguous same-origin run around the current entry, so arriving from an external site reports `canGoBack` false
- * even though the browser technically has somewhere to go. `history.length`
- * is no substitute — it counts other origins' entries too.
- *
- * Browsers without that API (Safari before 26.2) get the answer from the
- * history entries themselves: every committed `pushState` / `replaceState`
- * goes through `installInAppHistoryDepth`, which stamps the entry's state
- * with how many app entries sit behind it. A push is one deeper
- * than the entry it leaves, a replace keeps the depth, and an entry the app
- * never wrote (a cold load, a pasted URL, arriving from another site) reads
- * as depth 0. The stamp lives on the entry, so Back, Forward and reload all
- * read the depth of the entry actually showing.
- *
- * Counting the adapter's own `router.push` calls instead is not a fallback: a
- * push is a request, not a committed history entry. Next drops it to
- * `replaceState` when the canonical URL is unchanged (`app-router.js`, the
- * `pendingPush && href !== canonicalUrl` branch), and pushes can also be
- * superseded or abandoned mid-transition. The stamp is written by the
- * history call that commits, so it cannot claim an entry that does not exist.
- * Anything it cannot read is depth 0, and callers take their fallback path.
+ * Determine whether web navigation has a safe in-app back destination.
+ * Use Navigation API entries for committed same-origin history. history.length
+ * includes external entries, and counting router.push requests includes navigations
+ * that may be replaced or abandoned. Browsers without the Navigation API (Safari
+ * before 26.2) read the depth `installInAppHistoryDepth` stamps on every committed
+ * `pushState` / `replaceState` entry: a push is one deeper than the entry it
+ * leaves, a replace keeps the depth, and an entry the app never wrote reads as
+ * depth 0. Return false when the browser cannot prove a destination so callers
+ * use their fallback instead of leaving the app.
  */
 
 /** Minimal shape of the Navigation API — not in TypeScript's DOM lib yet. */

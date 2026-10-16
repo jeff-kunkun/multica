@@ -280,7 +280,9 @@
       "prompt": "`multica project board --output json`로 워크스페이스의 미종료 티켓 전체를 읽고 막힌 일, 진행할 일, 정리할 일로 나눠 알려 주세요. 변경 전에는 확인을 받아 주세요.",
       "prompt_project": "`multica project board {{id}} --output json`로 \"{{name}}\" 프로젝트의 미종료 티켓 전체를 읽고 변경 전에는 확인을 받아 주세요.",
       "prompt_projects": "다음 프로젝트의 미종료 티켓 전체를 읽어 주세요: {{names}}. `multica project board {{ids}} --output json`을 사용하고 변경 전에는 확인을 받아 주세요."
-    }
+    },
+    "uploading": "업로드가 완료된 후 대화 시작 예시를 사용해 주세요.",
+    "draft_in_progress": "대화 시작 예시를 사용하려면 먼저 초안을 보내거나 지워 주세요."
   },
   "onboarding_cards": {
     "aria_label": "시작 방법",

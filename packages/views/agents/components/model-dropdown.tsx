@@ -42,6 +42,7 @@ export function ModelDropdown({
   agentId,
   value,
   onChange,
+  onAutomaticChange = onChange,
   disabled,
 }: {
   runtimeId: string | null;
@@ -50,6 +51,8 @@ export function ModelDropdown({
   agentId?: string | null;
   value: string;
   onChange: (value: string) => void;
+  /** Automatic value cleanup, separate from explicit user selections. */
+  onAutomaticChange?: (value: string) => void;
   disabled?: boolean;
 }) {
   const { t } = useT("agents");
@@ -87,9 +90,9 @@ export function ModelDropdown({
   // persist a ghost configuration that never takes effect.
   useEffect(() => {
     if (!supported && value !== "") {
-      onChange("");
+      onAutomaticChange("");
     }
-  }, [supported, value, onChange]);
+  }, [supported, value, onAutomaticChange]);
 
   const filtered = useMemo(() => {
     if (!search.trim()) return grouped;

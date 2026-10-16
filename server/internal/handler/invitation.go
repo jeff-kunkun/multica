@@ -53,10 +53,8 @@ func invitationToResponse(inv db.WorkspaceInvitation) InvitationResponse {
 	}
 }
 
-// ---------------------------------------------------------------------------
 // CreateInvitation replaces the old "instant-add" CreateMember flow.
 // POST /api/workspaces/{id}/members  (same endpoint, new behaviour)
-// ---------------------------------------------------------------------------
 
 func (h *Handler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 	workspaceID := workspaceIDFromURL(r, "id")
@@ -248,10 +246,8 @@ func (h *Handler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, resp)
 }
 
-// ---------------------------------------------------------------------------
 // ListWorkspaceInvitations — pending invitations for a workspace (admin view).
 // GET /api/workspaces/{id}/invitations
-// ---------------------------------------------------------------------------
 
 func (h *Handler) ListWorkspaceInvitations(w http.ResponseWriter, r *http.Request) {
 	workspaceID := workspaceIDFromURL(r, "id")
@@ -290,10 +286,8 @@ func (h *Handler) ListWorkspaceInvitations(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// ---------------------------------------------------------------------------
 // RevokeInvitation — admin cancels a pending invitation.
 // DELETE /api/workspaces/{id}/invitations/{invitationId}
-// ---------------------------------------------------------------------------
 
 func (h *Handler) RevokeInvitation(w http.ResponseWriter, r *http.Request) {
 	workspaceID := workspaceIDFromURL(r, "id")
@@ -358,10 +352,8 @@ func (h *Handler) RevokeInvitation(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// ---------------------------------------------------------------------------
 // GetMyInvitation — get a single invitation by ID (for the invite accept page).
 // GET /api/invitations/{id}
-// ---------------------------------------------------------------------------
 
 func (h *Handler) GetMyInvitation(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
@@ -405,10 +397,8 @@ func (h *Handler) GetMyInvitation(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// ---------------------------------------------------------------------------
 // ListMyInvitations — current user's pending invitations across all workspaces.
 // GET /api/invitations
-// ---------------------------------------------------------------------------
 
 func (h *Handler) ListMyInvitations(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
@@ -453,10 +443,8 @@ func (h *Handler) ListMyInvitations(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// ---------------------------------------------------------------------------
 // AcceptInvitation — user accepts a pending invitation.
 // POST /api/invitations/{id}/accept
-// ---------------------------------------------------------------------------
 
 func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
@@ -638,10 +626,8 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, memberResp)
 }
 
-// ---------------------------------------------------------------------------
 // DeclineInvitation — user declines a pending invitation.
 // POST /api/invitations/{id}/decline
-// ---------------------------------------------------------------------------
 
 func (h *Handler) DeclineInvitation(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)

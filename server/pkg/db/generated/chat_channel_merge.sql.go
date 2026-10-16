@@ -322,7 +322,7 @@ func (q *Queries) GetQueuedChannelChatMergeTarget(ctx context.Context, arg GetQu
 }
 
 const listUnownedChannelChatMessagesForMerge = `-- name: ListUnownedChannelChatMessagesForMerge :many
-SELECT message.id, message.chat_session_id, message.role, message.content, message.task_id, message.created_at, message.failure_reason, message.elapsed_ms, message.message_kind, message.channel_media_pending_until, message.channel_ingested, message.quick_actions, message.channel_context_revision, message.channel_outbound_type, message.channel_outbound_installation_id, message.channel_outbound_chat_id, message.channel_outbound_message_ids, message.sender_user_id, message.linked_session_id, message.via_bot_id, message.via_bot_name, message.wake_root_id, message.wake_hop, message.superseded_at, message.superseded_by_message_id, message.on_behalf_of_user_id FROM chat_message message
+SELECT message.id, message.chat_session_id, message.role, message.content, message.task_id, message.created_at, message.failure_reason, message.elapsed_ms, message.message_kind, message.channel_media_pending_until, message.channel_ingested, message.quick_actions, message.channel_context_revision, message.channel_outbound_type, message.channel_outbound_installation_id, message.channel_outbound_chat_id, message.channel_outbound_message_ids, message.sender_user_id, message.channel_typing_settled, message.linked_session_id, message.via_bot_id, message.via_bot_name, message.wake_root_id, message.wake_hop, message.superseded_at, message.superseded_by_message_id, message.on_behalf_of_user_id FROM chat_message message
 WHERE message.chat_session_id = $1
   AND message.role = 'user'
   AND message.task_id IS NULL
@@ -383,6 +383,7 @@ func (q *Queries) ListUnownedChannelChatMessagesForMerge(ctx context.Context, ar
 			&i.ChannelOutboundChatID,
 			&i.ChannelOutboundMessageIds,
 			&i.SenderUserID,
+			&i.ChannelTypingSettled,
 			&i.LinkedSessionID,
 			&i.ViaBotID,
 			&i.ViaBotName,

@@ -35,6 +35,7 @@ Use `Makefile`, workspace `package.json` files, and `pnpm-workspace.yaml` for cu
 - Regenerate sqlc with `make sqlc` after SQL changes.
 - Allocate a migration with `make migration-new NAME=...`: it takes the next number after the latest on `origin/kun` (never after your branch's local files) and creates the empty up/down pair; run `make migration-lint` before opening the PR. A migration must keep the previous release working against the new schema (expand, then contract); one that cannot says `-- zero-downtime: unsafe` in its up file. See `docs/kun/migration-numbering.md`.
 - Run the narrowest useful checks while iterating, then broaden when risk warrants it. Report what actually ran and any skipped checks.
+- Use names, types, and tests to express behavior. Keep comments for non-obvious rationale and constraints; remove superseded plans and incident narratives when updating code. Preserve tool directives and mixed-version contracts.
 
 Run these from the repository root:
 

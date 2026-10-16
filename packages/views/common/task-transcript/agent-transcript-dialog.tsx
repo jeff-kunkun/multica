@@ -1773,7 +1773,9 @@ function StepInspector({
         ? t(($) => $.transcript.kind_thinking)
         : step.kind === "skill"
           ? t(($) => $.transcript.kind_skill)
-          : t(($) => $.transcript.kind_error);
+          : step.kind === "text"
+            ? t(($) => $.transcript.kind_text)
+            : t(($) => $.transcript.kind_error);
 
   return (
     <aside className="flex w-[26rem] shrink-0 flex-col border-l bg-muted/25">

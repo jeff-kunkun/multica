@@ -76,9 +76,7 @@ import { useProjectStatusLabels } from "./labels";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { ShareScopeDialog, ShareScopeTrigger } from "../../common/share-scope-dialog";
 
-// ---------------------------------------------------------------------------
 // Property row — sidebar property display
-// ---------------------------------------------------------------------------
 
 function PropRow({
   label,
@@ -97,9 +95,7 @@ function PropRow({
   );
 }
 
-// ---------------------------------------------------------------------------
 // ProjectDetail
-// ---------------------------------------------------------------------------
 
 export function ProjectDetail({ projectId }: { projectId: string }) {
   const { t } = useT("projects");

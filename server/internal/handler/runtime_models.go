@@ -10,15 +10,14 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
-// ---------------------------------------------------------------------------
 // Model list request store
-// ---------------------------------------------------------------------------
 //
 // The server cannot call the daemon directly (the daemon is behind the user's
 // NAT and only polls the server). So "list models for this runtime" uses a
@@ -338,9 +337,7 @@ func modelListRequestTerminal(status ModelListStatus) bool {
 	return status == ModelListCompleted || status == ModelListFailed || status == ModelListTimeout
 }
 
-// ---------------------------------------------------------------------------
 // Handlers
-// ---------------------------------------------------------------------------
 
 func cloneModelListEnv(overlay map[string]string) map[string]string {
 	if len(overlay) == 0 {
@@ -492,7 +489,8 @@ func (h *Handler) InitiateListModels(w http.ResponseWriter, r *http.Request) {
 
 	req, err := h.ModelListStore.Create(r.Context(), resolvedRuntimeID, envOverlay)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to enqueue model list request: "+err.Error())
+		slog.Warn("enqueue model list request failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to enqueue model list request")
 		return
 	}
 	h.requestDaemonPendingWork(resolvedRuntimeID, protocol.PendingWorkKindModelList)
@@ -577,7 +575,8 @@ func (h *Handler) GetModelListRequest(w http.ResponseWriter, r *http.Request) {
 
 	req, err := h.ModelListStore.Get(r.Context(), requestID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load request: "+err.Error())
+		slog.Warn("load request failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to load request")
 		return
 	}
 	if req == nil || req.RuntimeID != uuidToString(rt.ID) {
@@ -602,7 +601,8 @@ func (h *Handler) ReportModelListResult(w http.ResponseWriter, r *http.Request) 
 	// run was a retry, and the original report already landed).
 	existing, err := h.ModelListStore.Get(r.Context(), requestID)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to load request: "+err.Error())
+		slog.Warn("load request failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to load request")
 		return
 	}
 	if existing == nil || existing.RuntimeID != runtimeID {

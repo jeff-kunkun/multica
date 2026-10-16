@@ -41,8 +41,7 @@ import {
 } from "react-native";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
-import { router } from "expo-router";
-import { useFocusEffect, useIsFocused } from "@react-navigation/native";
+import { router, useFocusEffect, useIsFocused } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type {
   Agent,

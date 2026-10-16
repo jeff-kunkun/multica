@@ -974,7 +974,7 @@ func (c *APIClient) uploadAttachment(ctx context.Context, fileData []byte, filen
 
 	var result AttachmentResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return AttachmentResponse{}, fmt.Errorf("decode upload response: %w", err)
+		return AttachmentResponse{}, fmt.Errorf("decode upload response: %w", wrapBodyRead(req, err))
 	}
 	c.keepLocalCopy(ctx, result.ID, filename, fileData)
 	return result, nil

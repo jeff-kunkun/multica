@@ -259,11 +259,11 @@ func (r *restartSteerRun) session() *Session {
 	return r.current
 }
 
-func (r *restartSteerRun) toolActivity() (int32, time.Time) {
+func (r *restartSteerRun) toolActivity() (int32, time.Duration) {
 	if s := r.session(); s.ToolActivity != nil {
 		return s.ToolActivity()
 	}
-	return 0, time.Time{}
+	return 0, 0
 }
 
 func (r *restartSteerRun) interruptBackgroundTools() bool {

@@ -29,9 +29,7 @@ const FILE_CARD_MARKDOWN_RE = new RegExp(
 );
 
 
-// ---------------------------------------------------------------------------
 // React NodeView — thin wrapper, all rendering lives in <Attachment>
-// ---------------------------------------------------------------------------
 
 export function FileCardView({ node, editor, deleteNode }: NodeViewProps) {
   const href = (node.attrs.href as string) || "";
@@ -53,9 +51,7 @@ export function FileCardView({ node, editor, deleteNode }: NodeViewProps) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // Tiptap Node Extension
-// ---------------------------------------------------------------------------
 
 export const FileCardExtension = Node.create({
   name: "fileCard",

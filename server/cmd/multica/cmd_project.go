@@ -355,9 +355,7 @@ func init() {
 	projectMemoryInstructionClearCmd.Flags().String("output", "table", "Output format: table or json")
 }
 
-// ---------------------------------------------------------------------------
 // Project commands
-// ---------------------------------------------------------------------------
 
 func runProjectList(cmd *cobra.Command, _ []string) error {
 	client, err := newAPIClient(cmd)
@@ -1117,9 +1115,7 @@ func writeProjectMemoryInstruction(cmd *cobra.Command, text string) error {
 	return nil
 }
 
-// ---------------------------------------------------------------------------
 // Project resource commands
-// ---------------------------------------------------------------------------
 
 func runProjectResourceList(cmd *cobra.Command, args []string) error {
 	client, err := newAPIClient(cmd)
@@ -1685,9 +1681,7 @@ func summarizeResourceRef(raw any) string {
 	return ""
 }
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 func formatLead(project map[string]any, actors actorDisplayLookup) string {
 	lType := strVal(project, "lead_type")

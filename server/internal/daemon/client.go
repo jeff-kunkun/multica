@@ -306,8 +306,9 @@ func (c *Client) ResolveRemoteMCPCredential(ctx context.Context, daemonToken, ta
 // starvation. It budgets the claim's DB work only: delivering the response is
 // bounded separately (batchClaimResponseWait) because a batch of tasks with long
 // chat context is megabytes and a lossy link needs far longer than the DB does
-// (DENE-1611).
-const batchClaimRequestTimeout = 5 * time.Second
+// (DENE-1611). The value is shared with the server (protocol) so it can leave
+// room inside it for claim recovery (MUL-7658).
+const batchClaimRequestTimeout = protocol.DaemonBatchClaimRequestTimeout
 
 // batchClaimResponseWait is how long the daemon waits for a batch claim's
 // response to arrive, covering transfer as well as execution. A response that

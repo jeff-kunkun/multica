@@ -83,9 +83,7 @@ export function StepRuntimeConnect({
   );
 }
 
-// ============================================================
 // Fancy desktop view
-// ============================================================
 
 type Phase = "scanning" | "found" | "empty";
 
@@ -292,9 +290,7 @@ function FancyView({
   );
 }
 
-// ------------------------------------------------------------
 // Phase views (inline — all three share the same 620px column)
-// ------------------------------------------------------------
 
 function ScanningView() {
   const { t } = useT("onboarding");
@@ -551,9 +547,7 @@ function EmptyCard({
   );
 }
 
-// ------------------------------------------------------------
 // Card components
-// ------------------------------------------------------------
 
 function SkeletonRuntimeCard() {
   return (

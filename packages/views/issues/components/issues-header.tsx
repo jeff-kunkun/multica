@@ -79,7 +79,7 @@ import type {
   ProjectStatus,
   WorkingAgentSummary,
 } from "@multica/core/types";
-import { formatActorRef, isActorPropertyType, isFilterablePropertyType, isScalarPropertyType, propertyFilterValueKey, PROPERTY_FILTER_OP_SYMBOLS, PROPERTY_FILTER_OPS_BY_TYPE, type PropertyFilterOp, type PropertyFilterValue } from "@multica/core/types";
+import { formatActorRef, isActorPropertyType, isFilterablePropertyType, isListPropertyType, isScalarPropertyType, propertyFilterValueKey, PROPERTY_FILTER_OP_SYMBOLS, PROPERTY_FILTER_OPS_BY_TYPE, type PropertyFilterOp, type PropertyFilterValue } from "@multica/core/types";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { useProjectStatusLabels } from "../../projects/components/labels";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -138,9 +138,7 @@ type LocalDateRange = {
   to?: Date;
 };
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 function getActiveFilterCount(
   state: {
@@ -323,9 +321,7 @@ function useFilterCounts(
   );
 }
 
-// ---------------------------------------------------------------------------
 // Scope config
-// ---------------------------------------------------------------------------
 
 const SCOPE_VALUES: IssuesScope[] = ["all", "members", "agents"];
 
@@ -336,9 +332,7 @@ const CONTROL_BUTTON_CLASS =
 const CONTROL_BUTTON_ACTIVE_CLASS =
   "h-8 w-8 gap-1 bg-brand px-0 text-white hover:bg-brand/90 md:h-7 md:w-auto md:px-2.5";
 
-// ---------------------------------------------------------------------------
 // Actor sub-menu content (shared between Assignee and Creator)
-// ---------------------------------------------------------------------------
 
 function ActorSubContent({
   counts,
@@ -523,9 +517,7 @@ function ActorSubContent({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Project sub-menu content
-// ---------------------------------------------------------------------------
 
 function ProjectSubContent({
   counts,
@@ -624,9 +616,7 @@ function ProjectSubContent({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Project quick filter (toolbar level)
-// ---------------------------------------------------------------------------
 
 /**
  * The project filter promoted out of the Filter menu (DENE-499). It opens the
@@ -740,7 +730,6 @@ function IssueProjectFilterMenu({
 }
 
 // Project status sub-menu content
-// ---------------------------------------------------------------------------
 
 function ProjectStatusSubContent({
   selected,
@@ -780,9 +769,7 @@ function ProjectStatusSubContent({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Label sub-menu content
-// ---------------------------------------------------------------------------
 
 function LabelSubContent({
   counts,
@@ -924,10 +911,11 @@ function PropertyFilterOptions({
     actorId: undefined as string | undefined,
   };
   // Scalar value state lives at the top level so the hooks stay unconditional
-  // (Rules of Hooks): it is only rendered for text / number / date / url, but
-  // must be declared regardless of which branch runs. The draft syncs to the
-  // committed scalar member whenever that changes, so a filter cleared or
-  // rewritten elsewhere cannot be written back from a stale input.
+  // (Rules of Hooks): it is only rendered for text / number / date / url and
+  // the list types (equality-only input), but must be declared regardless of
+  // which branch runs. The draft syncs to the committed scalar member whenever
+  // that changes, so a filter cleared or rewritten elsewhere cannot be written
+  // back from a stale input.
   const committedMember = selected.find((member) => member !== NO_PROPERTY_VALUE);
   const committedScalar =
     typeof committedMember === "object" ? committedMember.value : (committedMember ?? "");
@@ -972,9 +960,9 @@ function PropertyFilterOptions({
     noValueOption,
   ];
 
-  if (isScalarPropertyType(property.type)) {
+  if (isScalarPropertyType(property.type) || isListPropertyType(property.type)) {
     const placeholder =
-      property.type === "url"
+      property.type === "url" || property.type === "multi_url"
         ? t(($) => $.pickers.custom_property.url_placeholder)
         : property.type === "number"
           ? t(($) => $.pickers.custom_property.number_placeholder)
@@ -994,6 +982,12 @@ function PropertyFilterOptions({
       if (op === "after") return t(($) => $.pickers.custom_property.op_after);
       return PROPERTY_FILTER_OP_SYMBOLS[op] ?? op;
     };
+    // List types are equality-only: their PROPERTY_FILTER_OPS_BY_TYPE entry is
+    // empty by design, and looking it up needs the scalar narrowing anyway
+    // (IssueProperty.type is a lenient string).
+    const scalarOps = isScalarPropertyType(property.type)
+      ? (PROPERTY_FILTER_OPS_BY_TYPE[property.type] ?? [])
+      : [];
     const opButtons: { op: PropertyFilterOp | "is"; label: string }[] = [
       {
         op: "is",
@@ -1002,7 +996,7 @@ function PropertyFilterOptions({
             ? "="
             : t(($) => $.pickers.custom_property.op_is),
       },
-      ...(PROPERTY_FILTER_OPS_BY_TYPE[property.type] ?? []).map((op) => ({
+      ...scalarOps.map((op) => ({
         op,
         label: scalarOperatorLabel(op),
       })),
@@ -1172,9 +1166,7 @@ function PropertyFilterOptions({
   );
 }
 
-// ---------------------------------------------------------------------------
 // Date sub-menu content
-// ---------------------------------------------------------------------------
 
 function DateSubContent({
   value,
@@ -1296,9 +1288,7 @@ function DateSubContent({
   );
 }
 
-// ---------------------------------------------------------------------------
 // ViewRefreshIndicator
-// ---------------------------------------------------------------------------
 
 /**
  * Neutral "view is revalidating" slot for the header controls cluster.
@@ -1323,9 +1313,7 @@ export function ViewRefreshIndicator({ active }: { active: boolean }) {
   );
 }
 
-// ---------------------------------------------------------------------------
 // IssuesHeader
-// ---------------------------------------------------------------------------
 
 export function IssuesHeader({
   scopedIssues,

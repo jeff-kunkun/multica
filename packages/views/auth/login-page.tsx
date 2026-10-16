@@ -27,9 +27,7 @@ import { paths } from "@multica/core/paths";
 import type { User } from "@multica/core/types";
 import { useT } from "../i18n";
 
-// ---------------------------------------------------------------------------
 // Types
-// ---------------------------------------------------------------------------
 
 interface GoogleAuthConfig {
   clientId: string;
@@ -68,9 +66,7 @@ interface LoginPageProps {
   extra?: ReactNode;
 }
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 // Mirrors the server's minPasswordSignupPasswordLen (auth_password.go).
 const MIN_PASSWORD_LEN = 8;
@@ -101,9 +97,7 @@ export function validateCliCallback(cliCallback: string): boolean {
   }
 }
 
-// ---------------------------------------------------------------------------
 // Component
-// ---------------------------------------------------------------------------
 
 export function LoginPage({
   logo,
@@ -409,9 +403,7 @@ export function LoginPage({
     window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
   };
 
-  // -------------------------------------------------------------------------
   // CLI confirm step
-  // -------------------------------------------------------------------------
 
   if (step === "cli_confirm" && existingUser) {
     return (
@@ -453,9 +445,7 @@ export function LoginPage({
     );
   }
 
-  // -------------------------------------------------------------------------
   // Code verification step
-  // -------------------------------------------------------------------------
 
   if (step === "code") {
     return (
@@ -525,9 +515,7 @@ export function LoginPage({
     );
   }
 
-  // -------------------------------------------------------------------------
   // Forgot password step
-  // -------------------------------------------------------------------------
 
   if (step === "reset") {
     return (
@@ -625,9 +613,7 @@ export function LoginPage({
     );
   }
 
-  // -------------------------------------------------------------------------
   // Email / password step
-  // -------------------------------------------------------------------------
 
   return (
     <div className="flex min-h-svh flex-col items-center justify-center overflow-y-auto px-4 py-[max(1.5rem,env(safe-area-inset-top))] pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:flex-row">

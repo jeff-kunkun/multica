@@ -220,7 +220,7 @@ export function ChatWindow() {
   } | null>(null);
   const [convertedGoal, setConvertedGoal] = useState<{ issueId: string; title: string } | null>(null);
   const nextConversationStarterRequestIdRef = useRef(0);
-  const prefillConversationStarter = useCallback(
+  const sendConversationStarter = useCallback(
     (prompt: string) => {
       setConversationStarterRequest({
         id: ++nextConversationStarterRequestIdRef.current,
@@ -1107,7 +1107,7 @@ export function ChatWindow() {
         <EmptyState
           agent={activeAgent}
           hasSessions={sessions.length > 0}
-          onPickPrompt={prefillConversationStarter}
+          onPickPrompt={sendConversationStarter}
           customizeHref={customizeConversationStartersHref}
         />
       )}

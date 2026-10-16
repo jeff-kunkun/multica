@@ -841,6 +841,7 @@ export const EMPTY_ISSUE_PROPERTIES_RESPONSE: IssuePropertiesResponse = {
 
 export interface AppConfigResponse {
   cdn_domain: string;
+  attachment_public_url?: string;
   // True when the CDN domain serves private content via time-bounded signed
   // URLs (CloudFront signing) — raw storage URLs on that domain are NOT
   // publicly fetchable and must not be used as native media sources
@@ -891,7 +892,6 @@ export interface AppConfigResponse {
   server_version?: string;
 }
 
-// ---------------------------------------------------------------------------
 // Schemas for the highest-risk API endpoints — those whose responses drive
 // the issue detail page (timeline, comments, subscribers) and the issues
 // list. These are the surfaces that white-screened in #2143 / #2147 / #2192.
@@ -917,7 +917,6 @@ export interface AppConfigResponse {
 // literal unions, which would defeat the leniency above. `parseWithFallback`
 // returns the parsed value cast to the caller-supplied `T`, so the strict
 // type still flows out at the call site; the schema only guards shape.
-// ---------------------------------------------------------------------------
 
 const ReactionSchema = z.object({
   id: z.string(),
@@ -1148,6 +1147,7 @@ export const EMPTY_REFRESH_SESSION_RESPONSE: RefreshSessionResponse = {
 
 export const AppConfigSchema = z.object({
   cdn_domain: z.string().default(""),
+  attachment_public_url: OptionalStringSchema,
   cdn_signed: BooleanWithDefaultSchema(false),
   allow_signup: BooleanWithDefaultSchema(true),
   google_client_id: OptionalStringSchema,
@@ -1171,6 +1171,7 @@ export const AppConfigSchema = z.object({
 
 export const EMPTY_APP_CONFIG: AppConfigResponse = {
   cdn_domain: "",
+  attachment_public_url: "",
   cdn_signed: false,
   allow_signup: true,
   google_client_id: "",
@@ -2036,11 +2037,9 @@ export const EMPTY_CLOUD_RUNTIME_NODE: CloudRuntimeNode = {
   updated_at: "",
 };
 
-// ---------------------------------------------------------------------------
 // Runtime schemas. `plan_limits` is a progressive daemon capability: malformed
 // optional quota data is discarded without hiding an otherwise usable runtime
 // row, while the established runtime identity fields remain validated.
-// ---------------------------------------------------------------------------
 
 export const PlanLimitWindowSchema = z.object({
   name: z.string(),
@@ -2247,7 +2246,6 @@ export const AgentListSchema: z.ZodType<Agent[]> = z
  */
 export const EMPTY_AGENT_LIST: Agent[] = [];
 
-// ---------------------------------------------------------------------------
 // Workspace dashboard schemas
 //
 // The dashboard hits three independent rollup endpoints. Each returns a flat
@@ -2256,7 +2254,6 @@ export const EMPTY_AGENT_LIST: Agent[] = [];
 // String fields default to "" (no enum narrowing) to survive future model /
 // agent ID drift, and so a single null from tz-aware SQL bucketing fails
 // only that row instead of dropping the whole array to the `[]` fallback.
-// ---------------------------------------------------------------------------
 
 // Cost split carried by every usage row. `cost_usd_ticks` is what the provider
 // itself charged for the rows behind this aggregate (1e-10 USD); the
@@ -2375,12 +2372,10 @@ export const DashboardFailureByAgentListSchema = z.array(
   DashboardFailureByAgentSchema,
 );
 
-// ---------------------------------------------------------------------------
 // Runtime usage schemas — the runtime-detail page's four usage endpoints
 // (`/api/runtimes/:id/usage*`). Same leniency rules as the dashboard
 // schemas above: numbers default to 0, strings to "", `.loose()` passes
 // unknown fields.
-// ---------------------------------------------------------------------------
 
 const RuntimeUsageSchema = z.object({
   runtime_id: z.string().default(""),
@@ -2430,10 +2425,8 @@ const RuntimeUsageByHourSchema = z.object({
 
 export const RuntimeUsageByHourListSchema = z.array(RuntimeUsageByHourSchema);
 
-// ---------------------------------------------------------------------------
 // Agent task responses. The base object stays loose so daemon/runtime fields
 // can drift while task-list consumers still validate the fields they render.
-// ---------------------------------------------------------------------------
 
 // Human attribution (MUL-4302 §9): who an agent run is accountable to, and how
 // that human was resolved. Every field is defensive so a departed member, an
@@ -2982,6 +2975,7 @@ export const StoredAgentDraftSchema = z.object({
   member_ids: z.array(z.string()).catch([]),
   team_ids: z.array(z.string()).catch([]),
   applied_message_id: z.string().nullable().catch(null),
+  dismissed_message_id: z.string().nullish().catch(null),
 }).loose();
 
 /**
@@ -3408,7 +3402,6 @@ export const SquadMemberStatusListResponseSchema = z.object({
 
 export const EMPTY_SQUAD_MEMBER_STATUS_LIST = { members: [] };
 
-// ---------------------------------------------------------------------------
 // Structured error body — POST /api/workspaces/:wsId/issues 409 conflict.
 //
 // When the server detects an active issue with the same title in the same
@@ -3428,7 +3421,6 @@ export const EMPTY_SQUAD_MEMBER_STATUS_LIST = { members: [] };
 //     so a future server-side rename of `status` must not knock this branch
 //     out. `.loose()` lets the field pass through unchanged for any other
 //     consumer.
-// ---------------------------------------------------------------------------
 
 export const DuplicateIssueErrorBodySchema = z.object({
   code: z.literal("active_duplicate_issue"),
@@ -3450,14 +3442,12 @@ export interface DuplicateIssueErrorBody {
   };
 }
 
-// ---------------------------------------------------------------------------
 // Webhook delivery schemas — backing the Autopilot Deliveries section. Enums
 // (`status`, `signature_status`, `provider`) are kept as `z.string()` so a
 // future server-side value (e.g. a Stripe provider, a new dedupe state)
 // degrades to a generic UI fallback rather than collapsing the list into
 // the empty array. `.loose()` lets unknown fields pass through, matching
 // the rule used by every other endpoint here.
-// ---------------------------------------------------------------------------
 
 const WebhookDeliverySchema = z.object({
   id: z.string(),
@@ -3504,13 +3494,11 @@ export const EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE: ListWebhookDeliveriesRespon
   total: 0,
 };
 
-// ---------------------------------------------------------------------------
 // Autopilot list schema. Enums (`status`, `execution_mode`, `trigger_kinds`,
 // `last_run_status`) stay `z.string()` so future server-side values degrade
 // to a generic UI fallback. The three derived fields (trigger_kinds /
 // next_run_at / last_run_status) are list-endpoint-only and absent on older
 // servers — optional by contract, the list renders "—" without them.
-// ---------------------------------------------------------------------------
 
 const AutopilotListItemSchema = z.object({
   id: z.string(),
@@ -3639,7 +3627,6 @@ export const EMPTY_WEBHOOK_DELIVERY: WebhookDelivery = {
   created_at: "",
 };
 
-// ---------------------------------------------------------------------------
 // User (`/api/me` GET + PATCH). The auth store and Settings → Account both
 // trust this shape — a drift here would knock both surfaces out. Kept
 // lenient by the same rules as IssueSchema: enums stay `z.string()`,
@@ -3648,7 +3635,6 @@ export const EMPTY_WEBHOOK_DELIVERY: WebhookDelivery = {
 // MUL-2406; the server emits `""` when unset (NOT NULL DEFAULT ''), so
 // the schema defaults to `""` too — keeps the type tight without
 // breaking older backends that don't return the column yet.
-// ---------------------------------------------------------------------------
 
 export const UserSchema = z.object({
   id: z.string(),
@@ -3680,13 +3666,11 @@ export const EMPTY_USER: User = {
   updated_at: "",
 };
 
-// ---------------------------------------------------------------------------
 // Cross-workspace unread inbox summary (`/api/inbox/unread-summary` GET).
 // One entry per workspace the user belongs to that has unread items; the
 // sidebar derives the workspace-switcher dot from it. Lenient per the usual
 // rules so a future field addition can't blank the dot — on malformed JSON
 // parseWithFallback returns the empty list, which simply hides the dot.
-// ---------------------------------------------------------------------------
 
 export const InboxUnreadSummarySchema = z.array(
   z
@@ -3699,7 +3683,6 @@ export const InboxUnreadSummarySchema = z.array(
 
 export const EMPTY_INBOX_UNREAD_SUMMARY: InboxWorkspaceUnread[] = [];
 
-// ---------------------------------------------------------------------------
 // Inbox items (`/api/inbox` and `/api/inbox/archived` GET).
 // Lenient per the usual rules: `severity` / `type` / `recipient_type` stay
 // `z.string()` so a notification kind this client doesn't know yet still
@@ -3709,7 +3692,6 @@ export const EMPTY_INBOX_UNREAD_SUMMARY: InboxWorkspaceUnread[] = [];
 // empty list — the affected view then reads as empty rather than white-
 // screening the inbox. Both endpoints share this boundary because they return
 // the same row shape and both feed the status/priority filter UI.
-// ---------------------------------------------------------------------------
 
 export const InboxItemListSchema = z.array(
   z
@@ -3752,7 +3734,6 @@ export const ArchivedInboxFacetsSchema = z.object({
 
 export const EMPTY_INBOX_ITEMS: InboxItem[] = [];
 
-// ---------------------------------------------------------------------------
 // Billing schemas (cloud-billing proxy surface)
 //
 // All billing JSON we receive comes from multica-cloud verbatim — we proxy
@@ -3922,7 +3903,6 @@ export const EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE: CreateBillingPortalSe
   url: "",
 };
 
-// ---------------------------------------------------------------------------
 // Workspace subscriptions (`/api/cloud-subscriptions/*`)
 //
 // These schemas are the compatibility boundary with multica-cloud. Three rules
@@ -4218,7 +4198,6 @@ export const CreateWorkspaceSubscriptionPortalResponseSchema = z
     }),
   );
 
-// ---------------------------------------------------------------------------
 // Runtime model discovery (`POST /api/runtimes/:id/models`,
 // `GET /api/runtimes/:id/models/:requestId`). Both endpoints return the same
 // request record, and the UI drives a state machine off `status`, so the two
@@ -4234,7 +4213,6 @@ export const CreateWorkspaceSubscriptionPortalResponseSchema = z
 //
 // `cached` / `cached_at` are additive markers for a snapshot served from the
 // server-side catalog cache (MUL-5444); an older backend omits them.
-// ---------------------------------------------------------------------------
 
 const RuntimeModelThinkingLevelSchema = z.object({
   value: z.string(),

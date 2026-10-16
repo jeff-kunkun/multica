@@ -215,7 +215,7 @@ func (q *Queries) ListRecoveredChatMergeSuccessors(ctx context.Context, taskID p
 }
 
 const listUndeliveredMergedChatMessages = `-- name: ListUndeliveredMergedChatMessages :many
-SELECT m.id, m.chat_session_id, m.role, m.content, m.task_id, m.created_at, m.failure_reason, m.elapsed_ms, m.message_kind, m.channel_media_pending_until, m.channel_ingested, m.quick_actions, m.channel_context_revision, m.channel_outbound_type, m.channel_outbound_installation_id, m.channel_outbound_chat_id, m.channel_outbound_message_ids, m.sender_user_id, m.linked_session_id, m.via_bot_id, m.via_bot_name, m.wake_root_id, m.wake_hop, m.superseded_at, m.superseded_by_message_id, m.on_behalf_of_user_id FROM chat_task_supplement s
+SELECT m.id, m.chat_session_id, m.role, m.content, m.task_id, m.created_at, m.failure_reason, m.elapsed_ms, m.message_kind, m.channel_media_pending_until, m.channel_ingested, m.quick_actions, m.channel_context_revision, m.channel_outbound_type, m.channel_outbound_installation_id, m.channel_outbound_chat_id, m.channel_outbound_message_ids, m.sender_user_id, m.channel_typing_settled, m.linked_session_id, m.via_bot_id, m.via_bot_name, m.wake_root_id, m.wake_hop, m.superseded_at, m.superseded_by_message_id, m.on_behalf_of_user_id FROM chat_task_supplement s
 JOIN chat_message m ON m.id = s.chat_message_id
 WHERE s.task_id = $1 AND s.followup_task_id = s.task_id
   AND s.status != 'delivered' AND s.recovered_into_task_id IS NULL
@@ -253,6 +253,7 @@ func (q *Queries) ListUndeliveredMergedChatMessages(ctx context.Context, taskID 
 			&i.ChannelOutboundChatID,
 			&i.ChannelOutboundMessageIds,
 			&i.SenderUserID,
+			&i.ChannelTypingSettled,
 			&i.LinkedSessionID,
 			&i.ViaBotID,
 			&i.ViaBotName,

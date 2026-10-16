@@ -286,7 +286,9 @@
       "prompt": "Dresse le panorama des tickets ouverts de l’espace de travail avec `multica project board --output json`, puis regroupe-les en bloqués, à faire avancer et à clôturer. Demande confirmation avant toute modification.",
       "prompt_project": "Dresse le panorama des tickets ouverts du projet « {{name}} » avec `multica project board {{id}} --output json`, puis regroupe-les en bloqués, à faire avancer et à clôturer. Demande confirmation avant toute modification.",
       "prompt_projects": "Dresse le panorama des tickets ouverts de ces projets : {{names}}. Utilise `multica project board {{ids}} --output json`, puis demande confirmation avant toute modification."
-    }
+    },
+    "uploading": "Attendez la fin des téléversements avant d’utiliser une amorce.",
+    "draft_in_progress": "Envoyez ou effacez votre brouillon avant d’utiliser une amorce."
   },
   "onboarding_cards": {
     "aria_label": "Façons de démarrer",

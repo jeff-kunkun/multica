@@ -28,12 +28,10 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
-// IssueService is the single service-layer entry point for creating issues.
-// Both the HTTP `POST /issues` handler and the future Lark `/issue` command
-// call into Create so that duplicate guard, issue numbering, attachment
-// linking, broadcast, analytics, and agent/squad enqueue stay aligned. The
-// service deliberately does NOT depend on http.Request — callers parse
-// their own transport and pass a fully-resolved IssueCreateParams.
+// IssueService is the shared issue-creation entry point for HTTP and channel
+// callers. It keeps numbering, duplicate guards, attachments, broadcasts,
+// analytics, and agent/squad enqueue aligned. Callers resolve transport inputs
+// into IssueCreateParams; the service does not depend on http.Request.
 type IssueService struct {
 	Queries   *db.Queries
 	TxStarter TxStarter

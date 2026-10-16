@@ -649,11 +649,11 @@ export function ChatPage() {
     const { text } = queuedPrompt;
     setQueuedPrompt(null);
     if ((!c.activeAgent && !c.routedPick) || !c.isAgentRuntimeBound) {
-      c.prefillConversationStarter(text);
+      c.sendConversationStarter(text);
       return;
     }
     void c.handleSend(text).then((sent) => {
-      if (!sent) c.prefillConversationStarter(text);
+      if (!sent) c.sendConversationStarter(text);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- send once the new chat and its agent are in place
   }, [queuedPrompt, c.activeSessionId, c.activeAgent, c.routedPick, c.agentsSettled, c.isAgentRuntimeBound]);
@@ -874,7 +874,7 @@ export function ChatPage() {
         <EmptyState
           agent={c.activeAgent}
           hasSessions={c.sessions.length > 0}
-          onPickPrompt={c.prefillConversationStarter}
+          onPickPrompt={c.sendConversationStarter}
           customizeHref={c.customizeConversationStartersHref}
           onStartAlignment={() =>
             openAlignIssue(

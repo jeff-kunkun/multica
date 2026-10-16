@@ -170,9 +170,7 @@ export function StepPlatformFork({
   );
 }
 
-// ------------------------------------------------------------
 // Fork cards
-// ------------------------------------------------------------
 
 function ForkPrimary({ onClick }: { onClick: () => void }) {
   const { t } = useT("onboarding");
@@ -255,9 +253,7 @@ function ForkAlt({
   );
 }
 
-// ------------------------------------------------------------
 // CLI install dialog
-// ------------------------------------------------------------
 
 /**
  * Modal dialog for the CLI install path. Contains the real install

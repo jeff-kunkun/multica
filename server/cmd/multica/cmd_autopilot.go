@@ -197,9 +197,7 @@ func init() {
 	autopilotTriggerUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 }
 
-// ---------------------------------------------------------------------------
 // Autopilot commands
-// ---------------------------------------------------------------------------
 
 func runAutopilotList(cmd *cobra.Command, _ []string) error {
 	client, err := newAPIClient(cmd)
@@ -1072,9 +1070,7 @@ func resolveAutopilotSubscriberInputs(ctx context.Context, client *cli.APIClient
 	return inputs, nil
 }
 
-// ---------------------------------------------------------------------------
 // Helpers
-// ---------------------------------------------------------------------------
 
 // uuidRegexp matches a canonical UUID (8-4-4-4-12 hex).
 var uuidRegexp = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
