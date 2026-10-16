@@ -625,7 +625,7 @@ const MessageBubble = memo(function MessageBubble({
             data-superseded={superseded ? "" : undefined}
             className={cn(
               "rounded-2xl bg-muted px-3.5 py-2 text-body break-words",
-              superseded && "text-muted-foreground opacity-70",
+              superseded && "text-muted-foreground",
             )}
           >
             <MessageAuthor senderId={message.sender_user_id} creatorId={creatorId} />

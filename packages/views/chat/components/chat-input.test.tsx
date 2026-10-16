@@ -535,6 +535,7 @@ describe("ChatInput conversation starter send", () => {
       undefined,
       expect.any(Function),
       [],
+      undefined,
     );
   });
 

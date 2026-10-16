@@ -318,7 +318,7 @@ describe("ChatInput draft isolation across a composer switch (real debounce)", (
 
     rerender(element({ onSend, conversationStarterRequest: { id: 1, content: prompt } }));
     await act(async () => {});
-    expect(onSend).toHaveBeenCalledWith(prompt, undefined, expect.any(Function), []);
+    expect(onSend).toHaveBeenCalledWith(prompt, undefined, expect.any(Function), [], undefined);
     expect(store().inputDrafts["__new__"]).toBe(prompt);
   });
 

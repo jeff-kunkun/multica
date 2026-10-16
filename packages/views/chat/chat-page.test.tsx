@@ -188,7 +188,7 @@ vi.mock("./components/use-chat-controller", async () => {
       handleRestoreDraftConsumed: vi.fn(),
       focusInputRequest: 0,
       handleSend: mockHandleSend,
-      prefillConversationStarter: mockPrefill,
+      sendConversationStarter: mockPrefill,
       handleStop: vi.fn(),
       handleUploadFile: vi.fn(),
       handleNewChat: () => mockSetActiveSession(null),
