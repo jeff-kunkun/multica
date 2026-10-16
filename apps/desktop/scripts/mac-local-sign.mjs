@@ -29,5 +29,18 @@ export default async function sign(opts) {
     );
   }
   const { signAsync } = loadOsxSign();
-  await signAsync({ ...opts, identity, keychain, identityValidation: false });
+  // A self-signed identity is never notarized, so it needs no secure
+  // timestamp. Asking Apple's timestamp server once per file fails the whole
+  // build whenever one of those hundreds of requests is dropped.
+  const optionsForFile = opts.optionsForFile;
+  await signAsync({
+    ...opts,
+    identity,
+    keychain,
+    identityValidation: false,
+    optionsForFile: (filePath) => ({
+      ...optionsForFile?.(filePath),
+      timestamp: "none",
+    }),
+  });
 }
