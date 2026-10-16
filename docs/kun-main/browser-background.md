@@ -12,7 +12,9 @@ Pieces on Kun's Mac (`~/.agents/vd/`, not in this repo):
 
 Why a broker: Chrome's remote debugging (`chrome://inspect/#remote-debugging`, 127.0.0.1 only) asks
 "Allow remote debugging?" for every new connection. The broker connects once; Kun clicks Allow once per Chrome
-launch; agents never open their own connection. Unanswered prompts stack and block, so never connect to
+launch; agents never open their own connection.
+The broker listens on 127.0.0.1 only and has no authentication: any process on this Mac can drive Kun's Chrome
+through it. Never expose port 9339 beyond loopback (no `0.0.0.0` bind, port forward, tunnel or proxy). Unanswered prompts stack and block, so never connect to
 Chrome's DevTools port directly. The `Chrome-Tarot` profile on port 9235 is separate and stays as is.
 
 Rules for every agent that operates Kun's browser:
