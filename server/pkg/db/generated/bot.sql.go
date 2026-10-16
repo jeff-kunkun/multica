@@ -231,6 +231,20 @@ func (q *Queries) GetActivePersonalAccessTokenForUser(ctx context.Context, userI
 	return i, err
 }
 
+const getLatestCommentTextForIssue = `-- name: GetLatestCommentTextForIssue :one
+SELECT content FROM comment
+WHERE issue_id = $1
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+func (q *Queries) GetLatestCommentTextForIssue(ctx context.Context, issueID pgtype.UUID) (string, error) {
+	row := q.db.QueryRow(ctx, getLatestCommentTextForIssue, issueID)
+	var content string
+	err := row.Scan(&content)
+	return content, err
+}
+
 const getWorkspaceBot = `-- name: GetWorkspaceBot :one
 SELECT id, workspace_id, user_id, name, can_release, webhook_url, webhook_secret, webhook_cursor, webhook_failures, webhook_next_attempt_at, webhook_last_error, created_by, created_at, webhook_headers FROM workspace_bot
 WHERE id = $1 AND workspace_id = $2
@@ -441,6 +455,70 @@ func (q *Queries) ListBotWebhookReceivers(ctx context.Context, botID pgtype.UUID
 			&i.NextAttemptAt,
 			&i.LastError,
 			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listStalledIssuesForBot = `-- name: ListStalledIssuesForBot :many
+SELECT i.id, i.workspace_id, i.number, i.title, i.status, i.assignee_type, i.assignee_id,
+       w.issue_prefix, GREATEST(COALESCE(i.last_activity_at, i.updated_at), i.updated_at)::timestamptz AS activity_at
+FROM issue i
+JOIN workspace w ON w.id = i.workspace_id
+WHERE i.status IN ('in_progress', 'in_review')
+  AND GREATEST(COALESCE(i.last_activity_at, i.updated_at), i.updated_at) < $1
+  AND EXISTS (SELECT 1 FROM workspace_bot b WHERE b.workspace_id = i.workspace_id)
+  AND NOT EXISTS (
+    SELECT 1 FROM agent_task_queue t
+    WHERE t.issue_id = i.id AND t.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred'))
+  AND NOT EXISTS (
+    SELECT 1 FROM bot_event e
+    WHERE e.workspace_id = i.workspace_id AND e.type = 'issue:alert'
+      AND e.payload->>'kind' = 'stalled' AND e.payload->>'issue_id' = i.id::text
+      AND e.created_at > GREATEST(COALESCE(i.last_activity_at, i.updated_at), i.updated_at))
+ORDER BY i.updated_at
+LIMIT 50
+`
+
+type ListStalledIssuesForBotRow struct {
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	Number       int32              `json:"number"`
+	Title        string             `json:"title"`
+	Status       string             `json:"status"`
+	AssigneeType pgtype.Text        `json:"assignee_type"`
+	AssigneeID   pgtype.UUID        `json:"assignee_id"`
+	IssuePrefix  string             `json:"issue_prefix"`
+	ActivityAt   pgtype.Timestamptz `json:"activity_at"`
+}
+
+// In-progress / in-review issues with no activity since $1 and no live agent
+// task, in workspaces that have a Bot, not yet alerted since that activity.
+func (q *Queries) ListStalledIssuesForBot(ctx context.Context, before pgtype.Timestamptz) ([]ListStalledIssuesForBotRow, error) {
+	rows, err := q.db.Query(ctx, listStalledIssuesForBot, before)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListStalledIssuesForBotRow{}
+	for rows.Next() {
+		var i ListStalledIssuesForBotRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Number,
+			&i.Title,
+			&i.Status,
+			&i.AssigneeType,
+			&i.AssigneeID,
+			&i.IssuePrefix,
+			&i.ActivityAt,
 		); err != nil {
 			return nil, err
 		}

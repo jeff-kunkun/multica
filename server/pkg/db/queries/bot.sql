@@ -164,3 +164,29 @@ UPDATE bot_webhook_receiver SET
     next_attempt_at = sqlc.arg('next_attempt_at'),
     last_error = sqlc.arg('last_error')
 WHERE id = sqlc.arg('id');
+-- name: ListStalledIssuesForBot :many
+-- In-progress / in-review issues with no activity since $1 and no live agent
+-- task, in workspaces that have a Bot, not yet alerted since that activity.
+SELECT i.id, i.workspace_id, i.number, i.title, i.status, i.assignee_type, i.assignee_id,
+       w.issue_prefix, GREATEST(COALESCE(i.last_activity_at, i.updated_at), i.updated_at)::timestamptz AS activity_at
+FROM issue i
+JOIN workspace w ON w.id = i.workspace_id
+WHERE i.status IN ('in_progress', 'in_review')
+  AND GREATEST(COALESCE(i.last_activity_at, i.updated_at), i.updated_at) < sqlc.arg('before')
+  AND EXISTS (SELECT 1 FROM workspace_bot b WHERE b.workspace_id = i.workspace_id)
+  AND NOT EXISTS (
+    SELECT 1 FROM agent_task_queue t
+    WHERE t.issue_id = i.id AND t.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred'))
+  AND NOT EXISTS (
+    SELECT 1 FROM bot_event e
+    WHERE e.workspace_id = i.workspace_id AND e.type = 'issue:alert'
+      AND e.payload->>'kind' = 'stalled' AND e.payload->>'issue_id' = i.id::text
+      AND e.created_at > GREATEST(COALESCE(i.last_activity_at, i.updated_at), i.updated_at))
+ORDER BY i.updated_at
+LIMIT 50;
+
+-- name: GetLatestCommentTextForIssue :one
+SELECT content FROM comment
+WHERE issue_id = $1
+ORDER BY created_at DESC
+LIMIT 1;
