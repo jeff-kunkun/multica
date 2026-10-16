@@ -407,11 +407,6 @@ func (h *Handler) CloseIssue(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
-		// The summary word for word: the progress line is clipped, the
-		// report's latest_summary is not (DENE-1691).
-		if err := setIssueMetaStringTx(ctx, qtx, updated, keyLatestSummary, summary); err != nil {
-			return err
-		}
 		if lineMerge != nil {
 			if _, err := service.RecordDeliveryMerge(ctx, qtx, *line, lineMerge.DeliveryMergeReport); err != nil {
 				return err

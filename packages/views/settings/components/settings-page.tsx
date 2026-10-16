@@ -28,7 +28,6 @@ import {
   Zap,
   FolderKanban,
   Link2,
-  Network,
   Bot,
   BotMessageSquare,
 } from "lucide-react";
