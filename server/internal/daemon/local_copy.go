@@ -138,6 +138,9 @@ func prepareLocalRunCopy(task Task, orig string, logger *slog.Logger) (*localRun
 	if err := cloneTree(orig, c.Base); err != nil {
 		_ = os.RemoveAll(dir)
 		if errors.Is(err, errCloneUnsupported) {
+			// Leave no empty .multica-runs behind on volumes that cannot clone.
+			_ = os.Remove(runsRoot)
+			_ = os.Remove(filepath.Dir(runsRoot))
 			return nil, nil
 		}
 		return nil, fmt.Errorf("clone folder: %w", err)
