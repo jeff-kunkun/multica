@@ -166,6 +166,7 @@ The two-way sync with the kun-line instance (`server/internal/mirror`, see
 not accommodate it, and nothing outside it may depend on it.
 
 Browser
-- Operate Kun's Chrome only through the background CDP channel; never raise the window or move the real mouse.
-  Only a page that needs Kun's own click may be brought forward, with a notification to Kun.
+- Office agents work on the "Office Agents" virtual display, in Kun's own Chrome, through the one CDP broker
+  (`~/.agents/vd/vd.mjs`); never connect to Chrome's DevTools port directly, raise a window or move the real mouse.
+  Only a page that needs Kun's own click may be brought to his screen, with a notification to Kun.
   See `docs/kun-main/browser-background.md`.
