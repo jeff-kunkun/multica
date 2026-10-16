@@ -16,9 +16,9 @@ import (
 
 // RoutingReceipt is the one answer to "who got this and why", returned by the
 // writes that pick an agent on the caller's behalf — opening a chat without
-// naming an agent, creating a ticket without an executor, turning a chat into
-// a goal (DENE-1834). Source is the same closed word the ticket's 自动选派
-// comment prints, plus 人工 for a seat the caller named itself. Every field
+// naming an agent, creating a ticket without an executor (DENE-1834). Source
+// is the same closed word the ticket's 自动选派 comment prints, plus 人工 for
+// a seat the caller named itself. Every field
 // means what it says without a second lookup.
 type RoutingReceipt struct {
 	// Source is why this agent: 原话 / 人工 / 档位 / 兜底 / 接着做 / 负载, or

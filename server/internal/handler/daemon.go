@@ -3583,7 +3583,6 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		}
 
 		// Resolve the prior agent session / workdir to resume.
-		freshSession := false
 		if task.RerunOfTaskID.Valid {
 			// Manual retry: resume precisely from the source task the user
 			// clicked, NOT the most-recent (agent, issue) row — a parallel task
@@ -3649,11 +3648,10 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			}); err == nil && prior.SessionID.Valid {
 				// Cold and thick (DENE-1331): the cache is gone and the
 				// context is large, so the run starts a new session in the
-				// same working directory and opens with the state card. An
-				// automatic retry continues its parent's session regardless.
-				if prior.RuntimeID == task.RuntimeID && !task.RetryOfTaskID.Valid && h.sessionTooColdAndThick(r.Context(), *task, prior.SessionID.String) {
-					freshSession = true
-				} else if prior.RuntimeID == task.RuntimeID {
+				// same working directory. An automatic retry continues its
+				// parent's session regardless.
+				coldAndThick := prior.RuntimeID == task.RuntimeID && !task.RetryOfTaskID.Valid && h.sessionTooColdAndThick(r.Context(), *task, prior.SessionID.String)
+				if prior.RuntimeID == task.RuntimeID && !coldAndThick {
 					resp.PriorSessionID = prior.SessionID.String
 					// Same rule as the rerun path: date the deltas from the run
 					// this session belongs to. GetLastTaskSession skips poisoned
@@ -3749,12 +3747,6 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 					}
 				}
 			}
-		}
-
-		// The state card this run opens with, now that the session is known.
-		// A run continuing its interrupted session already has everything.
-		if !(task.RetryOfTaskID.Valid && !task.ForceFreshSession && task.SessionID.Valid) {
-			resp.IssueHandoffCard, resp.IssueStateCardReason = h.stateCardForRun(r.Context(), issue, agent, *task, resp.WakeupID != "", freshSession)
 		}
 	}
 
@@ -4122,7 +4114,6 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			resp.QuickCreatePrompt = qc.Prompt
 			resp.QuickCreatePriority = qc.Priority
 			resp.QuickCreateDueDate = qc.DueDate
-			resp.QuickCreateGoalMode = qc.GoalMode
 			resp.QuickCreateAttachmentIDs = append([]string(nil), qc.AttachmentIDs...)
 			resp.ThreadName = qc.Prompt
 			resp.WorkspaceID = qc.WorkspaceID
@@ -5117,10 +5108,6 @@ type TaskCompleteRequest struct {
 	// SessionResumeDropped: the claim pointed this run at a session and the
 	// daemon started a fresh one instead (DENE-1345). Older daemons omit it.
 	SessionResumeDropped bool `json:"session_resume_dropped,omitempty"`
-	// GoalChecks lets newer daemons report which locked completion-line checks
-	// they verified during this run. Older daemons omit it; the server keeps the
-	// existing check state and still owns continuation decisions.
-	GoalChecks []map[string]any `json:"goal_checks,omitempty"`
 }
 
 // sanitizeTaskCompleteRequest / sanitizeTaskFailRequest scrub every

@@ -6,7 +6,6 @@
     "empty_description": "Les tâches que vous créez ou qui vous sont assignées apparaîtront ici."
   },
   "header": {
-    "set_as_goal": "Définir comme objectif",
     "scope": {
       "all_label": "Toutes",
       "all_description": "Qui me sont assignées, que j'ai créées, ou qui impliquent mes agents et mes squads",
@@ -38,9 +37,7 @@
     "view_board_short": "Tableau",
     "view_list_short": "Liste",
     "view_swimlane_short": "Couloirs",
-    "sort_manual": "Manuel",
-    "new_goal": "新建目标",
-    "only_goals": "只看目标"
+    "sort_manual": "Manuel"
   },
   "errors": {
     "move_failed": "Échec du déplacement de la tâche"

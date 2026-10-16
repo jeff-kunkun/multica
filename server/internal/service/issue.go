@@ -103,7 +103,6 @@ type IssueCreateParams struct {
 	// used by the standalone PUT path, then inserts the complete bag atomically.
 	Properties     map[pgtype.UUID]json.RawMessage
 	AllowDuplicate bool
-	GoalMode       bool
 	// AssigneeSource & co record whose decision the executor is (DENE-1033;
 	// routing.Source*). Written in the create transaction, so the executor is
 	// never visible unlabelled. Empty leaves the record unset. SourceAgent with
@@ -583,11 +582,6 @@ func (s *IssueService) createInTx(ctx context.Context, tx pgx.Tx, qtx *db.Querie
 		issue, err = qtx.SetIssueOriginChatSession(ctx, db.SetIssueOriginChatSessionParams{ID: issue.ID, WorkspaceID: p.WorkspaceID, ChatSessionID: p.OriginChatSessionID})
 		if err != nil {
 			return issueCreateTxOutcome{}, fmt.Errorf("set issue origin chat: %w", err)
-		}
-	}
-	if p.GoalMode {
-		if _, goalErr := qtx.CreateIssueGoal(ctx, db.CreateIssueGoalParams{IssueID: issue.ID, WorkspaceID: p.WorkspaceID, CreatedByType: p.CreatorType, CreatedByID: p.CreatorID}); goalErr != nil {
-			return issueCreateTxOutcome{}, fmt.Errorf("create goal draft: %w", goalErr)
 		}
 	}
 	if p.AssigneeSource != "" {

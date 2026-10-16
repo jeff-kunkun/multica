@@ -31,7 +31,7 @@ When to ask (a ticket gets a few, 3 by default — spend them well):
   - when you are stuck between two approaches you cannot judge yourself
 Do not ask for things you can look up, and do not consult instead of working.
 
-The advisor sees the issue, its state card and your question — not your
+The advisor sees the issue and your question — not your
 working copy. Paste the code, diff or error that matters into the question,
 best through --question-file.
 

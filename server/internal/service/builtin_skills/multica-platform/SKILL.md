@@ -1,6 +1,6 @@
 ---
 name: multica-platform
-description: "Overview, ask, open a chat, consult, goal, inbox, sub-issue, wakeup, routing, close protocol, driver, halt, mention, agent, specialisation, squad, autopilot, project, runtime, progress, state card, skill import, transfer, bot, GitHub App, status, env."
+description: "Overview, ask, open a chat, consult, inbox, sub-issue, wakeup, routing, close protocol, driver, halt, mention, agent, specialisation, squad, autopilot, project, runtime, progress, skill import, transfer, bot, GitHub App, status, env."
 user-invocable: false
 allowed-tools: Bash(multica *), Bash(git *), Bash(gh *)
 ---
@@ -34,10 +34,8 @@ See `references/overview.md` for filter semantics and examples.
 | `references/drivers.md` | Who drives an open issue (`driver` in `issue get` / `issue children`), the patrol's rerun-then-escalate, and `multica issue dispose` for one nobody drives |
 | `references/run-control.md` | Stopping issue/chat work with optional related targets, halt / resume, default wakeup merging, the chain budget, the run time limit, and explicit steer / queue / restart |
 | `references/wakeups.md` | Issue wakeups: events, conditions (`--until-*`), timers, check-ins, runaway protection |
-| `references/goals.md` | Task goals: draft a completion line, confirm the human lock, track budget, and finish a goal |
 | `references/sub-issues.md` | Sub-issues: todo vs backlog at create time, stages as barrier groups, promoting parked children |
 | `references/routing.md` | Automatic routing: which slots it fills at which status, the 验收席 field, who may pick an executor (`--per-quote`, `issue escalate`), domains (`multica domain`, project/issue `--domain`), what an `issue route` result means, why dispatch stopped |
-| `references/state-card.md` | Picking up an issue: `multica issue context` (goal, decisions, where it stands, last baton, what changed since you), and writing decisions with `--decision` |
 | `references/close-protocol.md` | Closing an issue: the eight `close.*` keys, conclusion / status / next owner / wake decision tables, blocked-close fields, dispatcher stage promotion |
 | `references/mentions.md` | Writing a `mention://` link: which types enqueue a run, which are inert, why one silently did nothing; a comment that "Woke no one" |
 | `references/agents.md` | Creating, copying or debugging an agent definition: fields, skill binding |
@@ -51,7 +49,7 @@ See `references/overview.md` for filter semantics and examples.
 | `references/runtimes.md` | Runtimes, daemons, `repo checkout`, and the task CLI boundary |
 | `references/inbox.md` | The user asks about their inbox or what is stuck: `multica inbox board` (optionally `--project`) and the fixed five-part answer |
 | `references/consult.md` | Asking a strong-tier seat one question while you keep the ticket (`multica issue consult`): when to ask, the per-issue limit, cost, refusal codes |
-| `references/chats.md` | The chat directory and transcripts (`chat list` / `search` / `history`), messaging a running chat (`chat send` modes, `--urgent`), `chat handoff`, `chat to-goal` |
+| `references/chats.md` | The chat directory and transcripts (`chat list` / `search` / `history`), messaging a running chat (`chat send` modes, `--urgent`), `chat handoff` |
 | `references/chat-spawn.md` | Opening a chat with another agent from a chat (`multica chat open`): task-or-chat table, limits, refusal codes |
 | `references/transfer.md` | `multica transfer export` / `import` / `bind-runtimes`, and the kun `/transfer/*` endpoints |
 | `references/skill-import.md` | Importing a skill into this workspace from a URL or a local archive |
@@ -118,11 +116,9 @@ once the ticket is past `todo` (details in `references/routing.md`).
 Custom statuses do not inherit built-in automation behavior. For status side
 effects read `references/status-effects.md`; for API field meanings, `references/issues.md`.
 
-**Catch up with the state card; Comment reads stay bounded.** `multica issue
-context <id>` lists the goal, settled decisions, where it stands, the last
-handoff and the threads new since your last run; expand one with
-`--thread <thread-id> --tail 30`. A wider read scans roots first
-(`--roots-only --summary --compact`), never one unbounded pull; when the
+**Comment reads stay bounded.** Scan roots first
+(`--roots-only --summary --compact`), then expand a thread with
+`--thread <thread-id> --tail 30`, never one unbounded pull; when the
 per-turn message hands you a `--since` delta, that read is the bounded scan. The brief is a verb map: comment-body rules live in
 `multica issue comment add --help`, title and body style in `issue create
 --help`, outcomes and `--verdict pass` / `--verdict hold` in `issue close --help`.

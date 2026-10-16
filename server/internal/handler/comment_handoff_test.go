@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/multica-ai/multica/server/internal/statecard"
 	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
@@ -38,7 +37,7 @@ func TestCreateCommentModeHandoff(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	t.Run("stops the running agent, writes the card, starts the mentioned one fresh", func(t *testing.T) {
+	t.Run("stops the running agent, starts the mentioned one fresh", func(t *testing.T) {
 		f := newHandoffFixture(t)
 		var created CommentResponse
 		postModeComment(t, f.issueID, agentMention(f.nameB, f.agentB)+" 接着把前端做完", commentModeHandoff).
@@ -51,31 +50,10 @@ func TestCreateCommentModeHandoff(t *testing.T) {
 		if status != "cancelled" {
 			t.Fatalf("A's run = %s, want cancelled", status)
 		}
-		var bTask string
 		var fresh bool
-		dbfx.QueryRow(t, `SELECT id, force_fresh_session FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'`, f.issueID, f.agentB).Scan(&bTask, &fresh)
+		dbfx.QueryRow(t, `SELECT force_fresh_session FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'`, f.issueID, f.agentB).Scan(&fresh)
 		if !fresh {
 			t.Fatal("B's run must open a new session")
-		}
-
-		issue, err := testHandler.Queries.GetIssue(t.Context(), parseUUID(f.issueID))
-		if err != nil {
-			t.Fatal(err)
-		}
-		meta := issueMetaStrings(issue.Metadata)
-		if meta[statecard.KeyHandoffTo] != f.nameB || !strings.Contains(meta[statecard.KeyHandoffSummary], "接着把前端做完") {
-			t.Fatalf("handoff note = %v", meta)
-		}
-		agentB, _ := testHandler.Queries.GetAgent(t.Context(), parseUUID(f.agentB))
-		task, _ := testHandler.Queries.GetAgentTask(t.Context(), parseUUID(bTask))
-		if card, reason := testHandler.stateCardForRun(t.Context(), issue, agentB, task, false, false); reason != stateCardReasonHandoff || !strings.Contains(card, "接着把前端做完") {
-			t.Fatalf("B's first run gets no handoff card: %q (%s)", card, reason)
-		}
-		// A is not named by the handoff; it was stopped by it, so its next
-		// run opens with the card as a baton, not as the one handed to.
-		agentA, _ := testHandler.Queries.GetAgent(t.Context(), parseUUID(f.agentID))
-		if _, reason := testHandler.stateCardForRun(t.Context(), issue, agentA, task, false, false); reason == stateCardReasonHandoff {
-			t.Fatal("an agent the handoff does not name is not the one handed to")
 		}
 	})
 

@@ -5,7 +5,6 @@ import { useQuery } from "@tanstack/react-query";
 import { useDefaultLayout, type Layout } from "react-resizable-panels";
 import { ArrowLeft, MoreHorizontal } from "lucide-react";
 import { useAuthStore } from "@multica/core/auth";
-import { openGoalCompletion } from "@multica/core/modals";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
   decodeIssueDraftInput,
@@ -163,21 +162,13 @@ export function IssueDraftPage({ draftId }: { draftId: string }) {
   );
   const droppedSeats = session.assignmentWarnings.length > 0;
   const navigatedToIssueRef = useRef<string | null>(null);
-  const openedGoalRef = useRef<string | null>(null);
   useEffect(() => {
     if (!landingIssueId) return;
     if (droppedSeats) return;
     if (navigatedToIssueRef.current === landingIssueId) return;
     navigatedToIssueRef.current = landingIssueId;
     navigation.replace(paths.issueDetail(landingIssueId));
-    if (session.draft?.goal_mode && openedGoalRef.current !== landingIssueId) {
-      openedGoalRef.current = landingIssueId;
-      openGoalCompletion({
-        issueId: landingIssueId,
-        title: session.draft.title,
-      });
-    }
-  }, [droppedSeats, landingIssueId, navigation, paths, session.draft]);
+  }, [droppedSeats, landingIssueId, navigation, paths]);
 
   if (session.missing) return null;
 

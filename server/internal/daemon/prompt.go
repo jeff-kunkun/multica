@@ -355,11 +355,6 @@ func buildIssueContextBlock(task Task) string {
 				fmt.Fprintf(&b, "- [%s] %s\n", c.ID, strings.ReplaceAll(strings.TrimSpace(c.Content), "\n", " "))
 			}
 		}
-	} else if strings.TrimSpace(task.IssueHandoffCard) != "" {
-		// The state card below lists the threads that moved; the full
-		// summary list would say the same at many times the size.
-		b.WriteString("Comment threads: see the state card below; expand one with `--thread <id> --tail 30`.\n")
-		writeTriggerThread(&b, task.IssueTriggerThread)
 	} else {
 		if len(task.IssueCommentSummaries) > 0 {
 			b.WriteString("Comment thread summaries:\n")
@@ -495,12 +490,6 @@ func BuildPrompt(task Task, provider string, options ...PromptOption) string {
 			}
 			body += block
 		}
-		if card := strings.TrimSpace(task.IssueHandoffCard); card != "" {
-			if !strings.HasSuffix(body, "\n\n") {
-				body += "\n"
-			}
-			body += stateCardHeading(task.IssueStateCardReason) + card + "\n\n"
-		}
 	}
 	// Run-scoped context is appended, never prepended: everything ahead of it
 	// is stable across runs of a resumed session, and appending keeps it after
@@ -512,22 +501,6 @@ func BuildPrompt(task Task, provider string, options ...PromptOption) string {
 		body += blocks
 	}
 	return body
-}
-
-// stateCardHeading introduces the state card a run opens with, worded for
-// why the server sent it (DENE-1331). An empty reason is a handoff: older
-// servers send the card for nothing else.
-func stateCardHeading(reason string) string {
-	switch reason {
-	case "baton":
-		return "## State card\n\nSomeone else closed or handed off this issue since your last run. Start from the state card below.\n\n"
-	case "wakeup":
-		return "## State card\n\nWhere this issue stands as the wakeup fires:\n\n"
-	case "fresh_session":
-		return "## Fresh session\n\nYour earlier session on this issue sat idle past the prompt-cache window with a large context, so this run starts a new session in the same working directory. Files and branch are as you left them; what was settled and what you last said are in the state card below.\n\n"
-	default:
-		return "## Handoff\n\nThis issue was just handed to you. Start from the state card below; earlier comments are background.\n\n"
-	}
 }
 
 func shouldContinueInterruptedSession(task Task) bool {
@@ -542,7 +515,7 @@ func buildPromptBody(task Task, provider string) string {
 		var b strings.Builder
 		fmt.Fprintf(&b, "You are running as a local coding agent for a Multica workspace.\n\nYour assigned issue ID is: %s\n\n[WAKEUP]\n%s\n\n", task.IssueID, task.HandoffNote)
 		fmt.Fprintf(&b, "Start by running `multica issue get %s --output json`, then read current run/comment state. Decide whether the instruction's goal is met; the trigger reports a fact, not business completion. This is an ordinary run with normal result delivery, except where the [WAKEUP] block offers a check-in.\n", task.IssueID)
-		fmt.Fprintf(&b, "Read the state card with `multica issue context %s`; expand a thread it lists with `multica issue comment list %s --thread <id> --tail 30`.\n", task.IssueID, task.IssueID)
+		fmt.Fprintf(&b, "Scan comment threads with `multica issue comment list %s --roots-only --summary --compact --output json`, then expand relevant threads with `--thread <id> --tail 30`.\n", task.IssueID)
 		if task.WakeupSystemRule != "" {
 			// Platform rules belong to the issue, not to a run; members manage them.
 			fmt.Fprintf(&b, "This wakeup is the platform's sub-issue rule for this issue. Do not try to change or disable it; members manage it on the issue.\n")
@@ -580,10 +553,9 @@ func buildPromptBody(task Task, provider string) string {
 		fmt.Fprintf(&b, "> %s\n\n", task.HandoffNote)
 	}
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then complete it.\n", task.IssueID)
-	// Workflow step 1 owns the catch-up rule for every issue turn: the state
-	// card replaced the mandatory comment scan (DENE-1329); this line only
-	// hands over the command.
-	fmt.Fprintf(&b, "Then read the state card: `multica issue context %s`.\n", task.IssueID)
+	// Workflow step 1 owns the catch-up rule for every issue turn; this line
+	// only hands over the commands.
+	fmt.Fprintf(&b, "Then scan the comment threads with `multica issue comment list %s --roots-only --summary --compact --output json` and expand what matters with `--thread <thread-id> --tail 30`.\n", task.IssueID)
 	return b.String()
 }
 
@@ -709,9 +681,6 @@ func buildQuickCreatePrompt(task Task) string {
 
 	if task.QuickCreateDueDate != "" {
 		fmt.Fprintf(&b, "- **due-date**: required for this run. Pass `--due-date %s`; the quick-create selection is authoritative.\n\n", task.QuickCreateDueDate)
-	}
-	if task.QuickCreateGoalMode {
-		b.WriteString("- **goal**: required for this run. Pass `--goal` so the server creates one editable draft goal. Do not invent generic completion checks: the human must write and confirm the completion line in the shared panel before execution starts.\n\n")
 	}
 
 	// project — pinned by the modal when the user picked one, otherwise
@@ -891,9 +860,9 @@ func buildCommentPrompt(task Task, provider string) string {
 	//                            server all produce that same zero, and none of
 	//                            them looked (NewCommentsDeltaKnown).
 	//
-	// These hints carry this turn's facts and exact commands; the state card
+	// These hints carry this turn's facts and exact commands; the roots scan
 	// (workflow step 1) is the issue-wide catch-up. Final fallback (no trigger
-	// id, shouldn't happen here): the state card.
+	// id, shouldn't happen here): plain read.
 	var hint string
 	if resumed {
 		hint = execenv.BuildNewCommentsHint(task.IssueID, task.TriggerCommentID, task.TriggerThreadID, task.NewCommentsSince, task.NewCommentCount)
@@ -911,7 +880,7 @@ func buildCommentPrompt(task Task, provider string) string {
 	if hint != "" {
 		b.WriteString(hint)
 	} else {
-		fmt.Fprintf(&b, "Read the discussion: `multica issue context %s` lists the threads that moved; expand one with `multica issue comment list %s --thread <thread-id> --tail 30`.\n\n", task.IssueID, task.IssueID)
+		fmt.Fprintf(&b, "Read the discussion: scan with `multica issue comment list %s --roots-only --summary --compact --output json`, then expand what matters with `--thread <thread-id> --tail 30`.\n\n", task.IssueID)
 	}
 	// Reply routing. When this run coalesced comments spanning MORE THAN ONE
 	// root thread, answer each thread in its own thread instead of dumping one

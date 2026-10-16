@@ -3,7 +3,6 @@
 - [项目词汇表](../CONTEXT.md)
 - [架构决定](adr/)
 - [统一带选项提问的架构决定](adr/0001-option-questions.md)
-- [目标任务的完成线与服务端续跑](adr/0002-goal-mode.md)
 - [路由派票的执行席归属与来源可见性](adr/0003-routing-executor-ownership.md)
 - [Web/Desktop 移动适配先抽共享外壳再修页面](adr/0005-mobile-web-shell.md)
 - [备用运行时只能显式配置、同主人同提供商，不自动按系列挪](adr/0009-fallback-runtime-explicit-same-owner.md)

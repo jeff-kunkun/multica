@@ -381,12 +381,11 @@ func TestCommentHintsCarryNoModality(t *testing.T) {
 			}
 		}
 	}
-	// Cold has no server-computed delta, so it hands over the state card,
-	// which lists the threads that moved (DENE-1329 replaced the roots-only
-	// scan). Warm has one, so it hands over the read that IS the answer — a
+	// Cold has no server-computed delta, so it hands over the roots scan.
+	// Warm has one, so it hands over the read that IS the answer — a
 	// single issue-wide `--since` (MUL-7344). Both are unconditional commands.
-	if !strings.Contains(hints["cold"], "multica issue context ") {
-		t.Errorf("cold hint must hand over the state card:\n%s", hints["cold"])
+	if !strings.Contains(hints["cold"], "`--roots-only --summary`") {
+		t.Errorf("cold hint must hand over the roots scan:\n%s", hints["cold"])
 	}
 	if !strings.Contains(hints["warm"], "--since 2026-05-28T11:00:00Z --compact --output json") {
 		t.Errorf("warm hint must hand over the issue-wide delta read:\n%s", hints["warm"])
@@ -473,8 +472,8 @@ func TestSessionContinuityNoticeLivesOutsideBrief(t *testing.T) {
 	}
 	// It still has to say what genuinely went missing, or the agent silently
 	// assumes it remembers work it no longer has — and where the record lives
-	// (DENE-1329 merged the four notices into "read the state card first").
-	for _, want := range []string{"your memory of the turns that did not come back is gone", "Read the state card first: `multica issue context <id>`"} {
+	// (DENE-1329 merged the four notices into "read the record first").
+	for _, want := range []string{"your memory of the turns that did not come back is gone", "Read the comments first: `multica issue comment list <id> --roots-only --summary"} {
 		if !strings.Contains(SessionContinuityNoticeIssue, want) {
 			t.Errorf("issue variant missing %q:\n%s", want, SessionContinuityNoticeIssue)
 		}

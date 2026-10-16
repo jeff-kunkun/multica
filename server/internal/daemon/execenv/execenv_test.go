@@ -1498,7 +1498,7 @@ func TestInjectRuntimeConfigClaude(t *testing.T) {
 		// DENE-1329 verb map: reads are one line per verb, flags in --help.
 		"`issue get | list | children`",
 		"`issue comment list | add`",
-		"multica issue context <id>",
+		"multica issue close <id>",
 		// Skills are listed by on-disk slug: that is the directory
 		// writeSkillFiles creates and the only identifier the model can
 		// actually invoke (MUL-5529).
@@ -1625,7 +1625,6 @@ func TestInjectRuntimeConfigAvailableCommandsCoreOnly(t *testing.T) {
 		"## Commands",
 		"`multica <command> --help`",
 		"`issue get | list | children`",
-		"`issue context <id>`",
 		"`issue comment list | add`",
 		"bodies via `--content-file`",
 		"`issue create | update | assign`",
@@ -1763,7 +1762,7 @@ func TestInjectRuntimeConfigNoSkills(t *testing.T) {
 	}
 
 	s := string(content)
-	if !strings.Contains(s, "multica issue context <id>") {
+	if !strings.Contains(s, "multica issue close <id>") {
 		t.Error("should reference multica CLI even without skills")
 	}
 	if strings.Contains(s, "## Skills") {
@@ -6096,12 +6095,11 @@ func TestInjectRuntimeConfigBriefKeepsStaticCatchUpRead(t *testing.T) {
 	s := string(data)
 
 	// MUL-5442 cross-channel dedup: the full command with the real issue id
-	// moved to the per-turn message (every issue variant carries it). Since
-	// DENE-1329 the brief's catch-up is the state card plus one bounded
-	// thread read.
+	// moved to the per-turn message (every issue variant carries it). The
+	// brief's catch-up is the roots scan plus a bounded thread read.
 	for _, want := range []string{
-		"Read the state card with `multica issue context <id>`",
-		"`issue comment list <id> --thread <thread-id> --tail 30`",
+		"`issue comment list <id> --roots-only --summary`",
+		"`--thread <thread-id> --tail 30`",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("brief must keep the bounded catch-up read %q\n---\n%s", want, s)
@@ -6184,12 +6182,11 @@ func TestInjectRuntimeConfigBriefOmitsResumedThreadAnchor(t *testing.T) {
 	}
 }
 
-// TestInjectRuntimeConfigAssignmentTriggerReadsStateCardFirst pins that the
-// assignment-triggered Workflow keeps catch-up mandatory and bounded: since
-// DENE-1329 the first read is the state card (`multica issue context`), which
-// lists the threads that moved, replacing the mandatory roots-only scan. Older
-// context stays reachable through the CLI's own --help.
-func TestInjectRuntimeConfigAssignmentTriggerReadsStateCardFirst(t *testing.T) {
+// TestInjectRuntimeConfigAssignmentTriggerScansRootsFirst pins that the
+// assignment-triggered Workflow keeps catch-up bounded: the first read is the
+// roots scan, then a per-thread drill-down. Older context stays reachable
+// through the CLI's own --help.
+func TestInjectRuntimeConfigAssignmentTriggerScansRootsFirst(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
@@ -6203,12 +6200,11 @@ func TestInjectRuntimeConfigAssignmentTriggerReadsStateCardFirst(t *testing.T) {
 	s := string(data)
 
 	for _, want := range []string{
-		"1. Read the state card with `multica issue context <id>`",
-		"threads with comments new since your last run",
+		"1. Read the issue, then the comments: scan the threads with `issue comment list <id> --roots-only --summary`",
 		"--thread <thread-id> --tail 30",
 	} {
 		if !strings.Contains(s, want) {
-			t.Errorf("assignment Workflow regressed state-card catch-up, missing %q\n---\n%s", want, s)
+			t.Errorf("assignment Workflow regressed bounded catch-up, missing %q\n---\n%s", want, s)
 		}
 	}
 	for _, banned := range []string{
@@ -6218,7 +6214,6 @@ func TestInjectRuntimeConfigAssignmentTriggerReadsStateCardFirst(t *testing.T) {
 		"`--recent` is a way to read the full history",
 		"you may switch to",
 		"switch to `--recent",
-		// The retired mandatory scan must not come back beside the card.
 		"this is mandatory, not optional",
 		"scan every thread cheaply",
 	} {
@@ -6234,7 +6229,7 @@ func TestInjectRuntimeConfigAssignmentTriggerReadsStateCardFirst(t *testing.T) {
 // it handed every run the issue's whole history; its semantics live in
 // `multica issue comment list --help` (pinned by
 // TestIssueCommentListHelpCarriesReadContract in cmd/multica), and the brief
-// names only the state card plus a bounded per-thread drill-down.
+// names only the roots scan plus a bounded per-thread drill-down.
 func TestInjectRuntimeConfigCatchUpStaysBounded(t *testing.T) {
 	t.Parallel()
 
@@ -6249,7 +6244,7 @@ func TestInjectRuntimeConfigCatchUpStaysBounded(t *testing.T) {
 	s := string(data)
 
 	for _, want := range []string{
-		"multica issue context <id>",
+		"--roots-only --summary",
 		"--thread <thread-id> --tail 30",
 	} {
 		if !strings.Contains(s, want) {
@@ -6376,7 +6371,7 @@ func TestBriefCarriesNoMetadataGuidance(t *testing.T) {
 				return
 			}
 			for _, want := range []string{
-				"1. Read the state card with `multica issue context <id>`",
+				"1. Read the issue, then the comments: scan the threads with `issue comment list <id> --roots-only --summary`",
 				"4. Finish with `multica issue close <id>",
 			} {
 				if !strings.Contains(s, want) {

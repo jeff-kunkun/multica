@@ -147,7 +147,6 @@ export function useSettingsSearchIndex(
         tab: "agent-permissions",
         anchor: "chat-issue",
         title: t(($) => $.agent_permissions.chat_issue_label),
-        description: t(($) => $.agent_permissions.chat_issue_description),
       },
       {
         tab: "agent-permissions",

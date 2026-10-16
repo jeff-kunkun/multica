@@ -25,7 +25,7 @@ import (
 // question and waits for the advice. The advisor gets a short issue-less run
 // whose context names the consult; the ticket, its executor and its status
 // never change. The run's tokens land on the advisor's own usage (so its
-// quota sees them) and, when the ticket has a goal, on the goal budget.
+// quota sees them).
 const (
 	ConsultContextType = "consult"
 	// MaxConsultQuestionRunes bounds what an asker may send; paste the code
@@ -173,21 +173,16 @@ func (s *TaskService) RequestConsult(ctx context.Context, req ConsultRequest) (d
 
 // RenderConsultPrompt is the advisor's whole brief: who asks, the ticket, the
 // question and the rules of the reply.
-func RenderConsultPrompt(identifier, title, description, stateCard, question string) string {
+func RenderConsultPrompt(identifier, title, description, question string) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "You are a senior advisor. The agent working %s is asking you one question. It keeps the ticket; you only advise.\n\n", identifier)
 	b.WriteString("Rules:\n")
 	b.WriteString("- Reply with your advice as your final message. That message is the only thing the asker receives.\n")
-	b.WriteString("- Do not change code, files, tickets, comments or status. Your platform credential is read-only; `multica issue get/context/comment list` work if you need more background.\n")
+	b.WriteString("- Do not change code, files, tickets, comments or status. Your platform credential is read-only; `multica issue get` and `multica issue comment list` work if you need more background.\n")
 	fmt.Fprintf(&b, "- Be direct and specific: a recommendation, the risks you see, and what to check. Stay under %d characters.\n\n", MaxConsultAnswerRunes/2)
 	fmt.Fprintf(&b, "## Ticket %s: %s\n\n", identifier, title)
 	if desc := strings.TrimSpace(description); desc != "" {
 		b.WriteString(truncateFallbackCommentBody(desc, 6000))
-		b.WriteString("\n\n")
-	}
-	if card := strings.TrimSpace(stateCard); card != "" {
-		b.WriteString("## Where it stands\n\n")
-		b.WriteString(truncateFallbackCommentBody(card, 6000))
 		b.WriteString("\n\n")
 	}
 	b.WriteString("## Question\n\n")
@@ -196,8 +191,8 @@ func RenderConsultPrompt(identifier, title, description, stateCard, question str
 	return b.String()
 }
 
-// finishConsult records the advisor run's outcome on the consult, charges
-// the ticket's goal budget and writes the timeline entry. It runs once per
+// finishConsult records the advisor run's outcome on the consult and writes
+// the timeline entry. It runs once per
 // consult: FinishIssueConsult only moves a pending row.
 func (s *TaskService) finishConsult(ctx context.Context, task db.AgentTaskQueue, cc ConsultContext, answer, failure string) {
 	consultID, err := util.ParseUUID(cc.ConsultID)
@@ -236,15 +231,6 @@ func (s *TaskService) finishConsult(ctx context.Context, task db.AgentTaskQueue,
 	}
 	if consult.WorkspaceID != workspaceID {
 		return
-	}
-	// A consult spends the ticket's goal budget like any run of it, but it is
-	// not a round: only tokens and time count, runs_used stays.
-	if tokens > 0 || duration > 0 {
-		if _, err := s.Queries.UpdateIssueGoalUsage(ctx, db.UpdateIssueGoalUsageParams{
-			IssueID: consult.IssueID, WorkspaceID: consult.WorkspaceID, TokensUsed: tokens, DurationSecondsUsed: duration,
-		}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			slog.Warn("consult: goal usage update failed", "consult_id", cc.ConsultID, "error", err)
-		}
 	}
 	s.recordConsultActivity(ctx, consult)
 }

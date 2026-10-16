@@ -4,21 +4,16 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
-	"time"
-	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/service"
-	"github.com/multica-ai/multica/server/internal/statecard"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -28,10 +23,6 @@ import (
 // an explicit named handoff and uses the same mention queue as comments.
 type HandoffIssueRequest struct {
 	To string `json:"to"`
-	// Summary is what the next owner needs to know; it becomes the state
-	// card's 上一棒交代 (DENE-1328). Decisions go to its 已拍板 list.
-	Summary   string   `json:"summary,omitempty"`
-	Decisions []string `json:"decisions,omitempty"`
 }
 
 type HandoffIssueResponse struct {
@@ -66,20 +57,7 @@ func (h *Handler) HandoffIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "--to is required")
 		return
 	}
-	summary := strings.TrimSpace(sanitizeNullBytes(req.Summary))
-	if utf8.RuneCountInString(summary) > statecard.MaxBatonLen {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf("--summary 最多 %d 字：写下一棒要知道的，细节放评论", statecard.MaxBatonLen))
-		return
-	}
-	decisions, msg := h.prepareDecisions(r.Context(), issue, req.Decisions)
-	if msg != "" {
-		writeError(w, http.StatusBadRequest, msg)
-		return
-	}
-	// The baton note lands once the handoff itself has been decided, whatever
-	// the target: the next owner reads it from the state card.
 	finish := func(resp HandoffIssueResponse) {
-		h.recordHandoff(r, issue, resp, summary, decisions)
 		actorType, actorID := h.resolveActor(r, requestUserID(r), uuidToString(issue.WorkspaceID))
 		h.followIssueFromChatTask(r, actorType, actorID, issue)
 		writeJSON(w, http.StatusOK, resp)
@@ -173,9 +151,6 @@ func (h *Handler) HandoffIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	authorType, authorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
 	content := "交棒给 " + agent.Name + "：" + " [@" + agent.Name + "](mention://agent/" + uuidToString(agent.ID) + ")"
-	if summary != "" {
-		content = "交棒给 " + agent.Name + "：" + summary + " [@" + agent.Name + "](mention://agent/" + uuidToString(agent.ID) + ")"
-	}
 	authorUUID, err := util.ParseUUID(authorID)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid actor")
@@ -230,38 +205,4 @@ func (h *Handler) handoffSetInReview(w http.ResponseWriter, r *http.Request) boo
 	w.WriteHeader(rec.Code)
 	_, _ = io.Copy(w, rec.Result().Body)
 	return false
-}
-
-// recordHandoff writes the handoff note and decisions for the state card.
-// A duplicate handoff still records them: the words are for whoever runs
-// next, and that run is already underway.
-func (h *Handler) recordHandoff(r *http.Request, issue db.Issue, resp HandoffIssueResponse, summary string, decisions []string) {
-	ctx := r.Context()
-	actorType, actorID := h.resolveActor(r, requestUserID(r), uuidToString(issue.WorkspaceID))
-	if len(decisions) > 0 {
-		if err := insertDecisions(ctx, h.Queries, issue, decisions, statecard.SourceHandoff, actorType, actorID); err != nil {
-			slog.Warn("handoff: write decisions failed", "issue_id", uuidToString(issue.ID), "error", err)
-		}
-	}
-	// Every handoff rewrites the latest conclusion, an empty one included,
-	// so the report never shows a line from before this handoff.
-	h.setIssueMetaString(ctx, issue, statecard.KeyLatestSummary, summary)
-	if summary != "" {
-		to := resp.TargetName
-		if to == "" || to == resp.TargetID {
-			to = resp.Target
-		}
-		for key, value := range map[string]string{
-			statecard.KeyHandoffSummary: summary,
-			statecard.KeyHandoffTo:      to,
-			statecard.KeyHandoffByType:  actorType,
-			statecard.KeyHandoffByID:    actorID,
-			statecard.KeyHandoffAt:      time.Now().UTC().Format(time.RFC3339),
-		} {
-			h.setIssueMetaString(ctx, issue, key, value)
-		}
-	}
-	if summary != "" || len(decisions) > 0 {
-		h.publishStateCardChanged(ctx, issue, actorType, actorID)
-	}
 }

@@ -187,7 +187,7 @@ agent B, `comment add` takes two more modes:
 
 | Mode | What happens |
 | --- | --- |
-| `handoff` | Every run on the issue whose agent the comment does not wake stops (your own run is spared). The comment becomes the state card's handoff note, and B starts a new session that opens with that card. |
+| `handoff` | Every run on the issue whose agent the comment does not wake stops (your own run is spared). B starts a new session that opens with the comment. |
 | `parallel` | A keeps going; B starts its own run alongside it. |
 
 ```bash

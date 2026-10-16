@@ -92,7 +92,6 @@
     "project_context_unsupported": "La description du projet ne s'appliquera pas — le daemon de cet agent doit être mis à jour",
     "remove_all_project_context": "Retirer tout le contexte de projet",
     "switch_project": "Passer à un autre projet…",
-    "to_goal": "转成目标任务",
     "mode_menu": "Mode d'envoi",
     "mode_steer": "Intervenir",
     "mode_steer_desc": "Lu après cette étape",

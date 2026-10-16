@@ -26,12 +26,6 @@ func runIssueHandoff(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("--to is required")
 	}
 	body := map[string]any{"to": target}
-	if summary, _ := cmd.Flags().GetString("summary"); summary != "" {
-		body["summary"] = summary
-	}
-	if decisions, _ := cmd.Flags().GetStringArray("decision"); len(decisions) > 0 {
-		body["decisions"] = decisions
-	}
 	var out map[string]any
 	if err := client.PostJSON(ctx, "/api/issues/"+url.PathEscape(ref.ID)+"/handoff", body, &out); err != nil {
 		return fmt.Errorf("handoff issue: %w", err)

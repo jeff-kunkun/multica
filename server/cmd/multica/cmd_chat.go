@@ -124,27 +124,13 @@ and queued_behind_N.
 	RunE: runChatProgress,
 }
 
-var chatToGoalCmd = &cobra.Command{
-	Use:   "to-goal",
-	Short: "Turn the current chat into a goal task",
-	Long: `Turn the current chat into a goal task. With routing on, the executor is
-picked by routing like any ticket, not inherited from the chat; the result
-is printed as "routing" (source, agent, tier, reason). With routing off the
-chat's agent keeps it (人工).
-
-  multica chat to-goal --session <id> --output table
-`,
-	Args: cobra.NoArgs,
-	RunE: runChatToGoal,
-}
-
 var chatTicketsCmd = &cobra.Command{
 	Use:   "tickets",
 	Short: "List the issues a chat opened or follows",
 	Long: `List a chat's tickets, in the order they joined it, each with its source:
 
   created  opened from this chat — by its agent's "issue create" or
-           "plan apply", or by turning the chat into a goal
+           "plan apply"
   auto     followed: this chat's run changed its status or assignee,
            commented on it, handed it off or closed it (naming an issue in a
            reply does not count)
@@ -344,9 +330,6 @@ func init() {
 	chatCmd.AddCommand(chatHistoryCmd)
 	chatCmd.AddCommand(chatThreadCmd)
 	chatCmd.AddCommand(chatProgressCmd)
-	chatCmd.AddCommand(chatToGoalCmd)
-	chatToGoalCmd.Flags().String("session", "", "Chat session id or URL (defaults to MULTICA_CHAT_SESSION_ID)")
-	chatToGoalCmd.Flags().String("output", "json", "Output format: table or json")
 	chatCmd.AddCommand(chatTitleCmd)
 	chatCmd.AddCommand(chatTicketsCmd)
 	chatTicketsCmd.Flags().String("session", "", "Chat session id or URL (defaults to MULTICA_CHAT_SESSION_ID)")
@@ -530,37 +513,6 @@ func chatTicketResult(t map[string]any) string {
 		return "-"
 	}
 	return strings.Join(parts, " · ")
-}
-
-func runChatToGoal(cmd *cobra.Command, _ []string) error {
-	session := os.Getenv("MULTICA_CHAT_SESSION_ID")
-	if raw, _ := cmd.Flags().GetString("session"); strings.TrimSpace(raw) != "" {
-		session = raw
-	}
-	ref, err := parseChatSessionLinkRef(session)
-	if err != nil {
-		return fmt.Errorf("chat to-goal: session is required (or set MULTICA_CHAT_SESSION_ID): %w", err)
-	}
-	client, err := newAPIClient(cmd)
-	if err != nil {
-		return err
-	}
-	ctx, cancel := cli.APIContext(context.Background())
-	defer cancel()
-	var out map[string]any
-	if err := client.PostJSON(ctx, "/api/chat/sessions/"+url.PathEscape(ref.ID)+"/to-goal", nil, &out); err != nil {
-		return fmt.Errorf("convert chat to goal: %w", err)
-	}
-	output, _ := cmd.Flags().GetString("output")
-	if output == "table" {
-		issue, _ := out["issue"].(map[string]any)
-		fmt.Printf("Goal task: %v\n", issue["identifier"])
-		if routing, ok := out["routing"].(map[string]any); ok {
-			fmt.Println(routingReceiptLine(routing))
-		}
-		return nil
-	}
-	return cli.PrintJSON(os.Stdout, out)
 }
 
 func runChatProgress(cmd *cobra.Command, args []string) error {

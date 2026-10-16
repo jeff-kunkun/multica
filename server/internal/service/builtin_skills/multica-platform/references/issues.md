@@ -10,9 +10,6 @@ Product contracts the runtime brief does not fully encode.
 - [Incorrect to correct](#incorrect-to-correct)
 Closing is its own contract; read `references/close-protocol.md` for its `close.*` keys, decision tables, and dispatcher promotion rules.
 Who drives an open issue, and the `issue dispose` command for one nobody drives, are in `references/drivers.md`; stopping every run on an issue and the run limits are in `references/run-control.md`.
-Create a goal task with `multica issue create --title "..." --goal`. This
-creates a draft completion line with starter checks; a human must edit and
-confirm it through the shared goal panel before execution begins.
 `multica issue wait <id> --output json` is the read-only status view for a
 blocked issue's wait. It reports the wait condition, optional `wait_probe`,
 deadline, last probe status (`ready`, `pending`, or `failed`), check timestamp,
@@ -210,8 +207,6 @@ comment rather than repeating the edit.
 
 `issue list` reads one page at a time, with a server maximum of 100 issues.
 
-Pass `--goal` to keep only issues that have a completion-line goal:
-`multica issue list --goal --output json`.
 Advance `--offset` by the number of issues actually returned. If the server
 cannot count matching issues, it returns `failed to count issues` as an error;
 do not treat that failure as an empty or complete list. Older servers can
@@ -444,8 +439,6 @@ For GitLab, `glab ci status` can be used directly when it returns non-zero while
 ### Report progress
 
 `multica issue progress <issue-id> "<progress>" [--tone working|waiting|stuck|done] --output json` sets the line under the issue's title; `--history` reads earlier lines. Who wins between your line, a close summary and the parking summary: `references/progress.md`.
-
-`multica issue context <issue-id>` prints the issue's state card — goal, settled decisions, where it stands, the last baton, and threads new since you were last here: `references/state-card.md`.
 
 `multica issue title <issue-id> --suggest "<title>" --output json` stores a pending title suggestion for a human-created issue. It does not rename the issue; the issue page's adopt action is the only writer that applies it.
 

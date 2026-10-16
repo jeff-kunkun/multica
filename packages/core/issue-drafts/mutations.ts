@@ -141,14 +141,13 @@ export function useStartIssueDraft(wsId: string) {
        * picker is in (see `encodeIssueDraftCapabilities`).
        */
       capabilities?: string[];
-      goalMode?: boolean;
     }): Promise<StartIssueDraftResult> => {
       const request = input.request.trim();
       const session = await api.createIssueDraftSession({
         runtime_id: input.runtimeId,
         model: input.model?.trim() || undefined,
         thinking_level: input.thinkingLevel?.trim() || undefined,
-        draft: seedDraft(request, input.projectId, input.parentIssueId, input.goalMode),
+        draft: seedDraft(request, input.projectId, input.parentIssueId),
         capabilities: input.capabilities,
       });
       const draftId = session.session_id;
@@ -382,14 +381,12 @@ function seedDraft(
   request: string,
   projectId?: string,
   parentIssueId?: string,
-  goalMode?: boolean,
 ): Partial<IssueDraftPayload> {
   return {
     title: "",
     description: request,
     status: "",
     priority: "",
-    ...(goalMode ? { goal_mode: true } : {}),
     // A sub-issue records an explicit project, including null when the user
     // left it empty, so confirm does not inherit the parent back. A top-level
     // alignment still omits the field when there is no project.

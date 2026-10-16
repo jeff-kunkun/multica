@@ -139,7 +139,7 @@ func loadIssue(t *testing.T, queries *db.Queries, issueID string) db.Issue {
 // Every issue:updated shape production sends must reach the stream. The
 // payloads below come from the real constructors, not hand-built look-alikes:
 // the first version only read handler.IssueResponse and so lost every
-// background status change (task service, progress, state card) that sends the
+// background status change (task service, progress) that sends the
 // service.IssueToMapResolved map.
 func TestActivityStreamListenersReadEveryIssueUpdatedShape(t *testing.T) {
 	queries := db.New(testPool)

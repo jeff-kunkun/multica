@@ -945,10 +945,10 @@ func TestSessionContinuityNoticeMatchesSurface(t *testing.T) {
 		wantMentions string
 	}{
 		{
-			name:         "issue rebuilds from the state card",
+			name:         "issue rebuilds from its comments",
 			task:         Task{IssueID: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"},
 			tellUser:     false,
-			wantMentions: "multica issue context",
+			wantMentions: "multica issue comment list",
 		},
 		{
 			// Slack has a history reader, so the conversation is recoverable —

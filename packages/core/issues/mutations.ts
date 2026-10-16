@@ -47,7 +47,6 @@ import type {
   MoveIssueRequest,
   UpdateIssueRequest,
 } from "../types";
-import type { CreateIssueGoalInput, IssueGoal } from "../types";
 import type { CommentSendMode, TimelineEntry, IssueSubscriber, Reaction } from "../types";
 import { sortTimelineEntriesAsc } from "./timeline-sort";
 import { applyCommentDeletion, removeCommentSubtree } from "./comment-deletion";
@@ -171,22 +170,6 @@ function useIssueCreateMutation<TVariables>(
 
 export function useCreateIssue() {
   return useIssueCreateMutation((data: CreateIssueRequest) => api.createIssue(data));
-}
-
-/** The single goal-opening action used by every UI entry point. */
-export function useOpenIssueGoal() {
-  const qc = useQueryClient();
-  const wsId = useWorkspaceId();
-  return useMutation<IssueGoal, unknown, { issueId: string; input: CreateIssueGoalInput }>({
-    mutationFn: async ({ issueId, input }) => {
-      const draft = await api.createIssueGoal(issueId, input);
-      return api.confirmIssueGoal(issueId).then((locked) => locked ?? draft);
-    },
-    onSuccess: (_goal, variables) => {
-      void qc.invalidateQueries({ queryKey: issueKeys.goal(wsId, variables.issueId) });
-      void qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, variables.issueId) });
-    },
-  });
 }
 
 export function useCreateCommentSubIssue() {
@@ -1305,29 +1288,4 @@ export function useRetryIssueRun(issueId: string) {
     mutationFn: (taskId: string) => api.rerunIssue(issueId, taskId),
     onSuccess: () => client.invalidateQueries({ queryKey: issueKeys.tasks(issueId) }),
   });
-}
-
-/**
- * Add, rewrite or remove one of the state card's settled decisions
- * (DENE-1328). Awaits the server — an agent-authored decision may be refused
- * — then refetches the card.
- */
-export function useIssueDecisionMutations(issueId: string, workspaceId: string) {
-  const client = useQueryClient();
-  const onSettled = () =>
-    client.invalidateQueries({ queryKey: issueKeys.context(workspaceId, issueId) });
-  const add = useMutation({
-    mutationFn: (text: string) => api.createIssueDecision(issueId, text),
-    onSettled,
-  });
-  const edit = useMutation({
-    mutationFn: ({ id, text }: { id: string; text: string }) =>
-      api.updateIssueDecision(issueId, id, text),
-    onSettled,
-  });
-  const remove = useMutation({
-    mutationFn: (id: string) => api.deleteIssueDecision(issueId, id),
-    onSettled,
-  });
-  return { add, edit, remove };
 }

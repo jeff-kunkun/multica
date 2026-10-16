@@ -442,11 +442,8 @@ func issueCloseLong() string {
 		"files on this branch first. The CLI sends the paths git says it changes\n" +
 		"(against the parent's delivery branch, else the nearest main line) and the\n" +
 		"server refuses a slot no delivered file writes.\n\n" +
-		"Repeat --decision \"...\" for each decision this round settled; it joins the\n" +
-		"state card's 已拍板 list that `multica issue context <id>` shows the next owner.\n" +
 		"--summary is the round's conclusion (结论) — what got done, or where it is\n" +
-		"stuck and who must do what; proof goes in --evidence. It becomes the card's\n" +
-		"上一棒交代.\n\n" +
+		"stuck and who must do what; proof goes in --evidence.\n\n" +
 		"Acceptance seat: pass with --outcome done --verdict pass when the checks this\n" +
 		"change owns are green and no named person still owes a decision\n" +
 		"(close.conclusion=awaiting_human). A check already red on the base branch is\n" +
@@ -485,11 +482,7 @@ var issueHandoffCmd = &cobra.Command{
 		"  --to dispatcher   let routing pick the next owner\n" +
 		"  --to <agent>      a named agent (name or id)\n\n" +
 		"A close already hands over what it closes: `issue close --outcome in_review`\n" +
-		"routes the acceptance seat itself. --summary is the conclusion (结论): what got\n" +
-		"done, or where it is stuck and who must do what next. It is the state card's\n" +
-		"上一棒交代; repeat --decision\n" +
-		"for each settled decision.\n" +
-		"Both are read back with `multica issue context <id>`. The response reports target_name,\n" +
+		"routes the acceptance seat itself. The response reports target_name,\n" +
 		"run_created and duplicate — quote them, do not restate them from memory.",
 	Args: exactArgs(1),
 	RunE: runIssueHandoff,
@@ -571,9 +564,8 @@ reason and the modes that work; nothing is posted.
 When another agent is running and you @ a different one, choose how the
 @agent joins:
 
-  handoff   stop every other agent's run here, write the comment into the
-            state card as the handoff note, and start the @agent in a new
-            session that opens with that card (your own run is not stopped)
+  handoff   stop every other agent's run here and start the @agent in a new
+            session that opens with this comment (your own run is not stopped)
   parallel  leave the running agent alone; the @agent starts its own run
 
   multica issue comment add <issue-id> --content-file ./take-over.md --mode handoff`,
@@ -877,7 +869,6 @@ func init() {
 	issueListCmd.Flags().String("direction", "", "Sort direction (asc or desc); requires --sort to be a non-position column or a property sort (position is always ascending)")
 	issueListCmd.Flags().String("fields", "", "JSON output only: comma-separated list of issue fields to include (e.g. id,title,status,priority). Filtering happens client-side after the full response is fetched, so this shrinks CLI output size and agent context cost, not network/server-side cost. Omit for the full issue object (default, unchanged). Valid fields: "+strings.Join(validIssueFields, ", "))
 	issueListCmd.Flags().Bool("resolve-properties", false, resolvePropertiesHelp)
-	issueListCmd.Flags().Bool("goal", false, "Only list issues with a completion-line goal")
 
 	// issue get
 	issueGetCmd.Flags().String("output", "json", "Output format: table or json")
@@ -909,7 +900,6 @@ func init() {
 	issueCreateCmd.Flags().String("due-date", "", "Due date (calendar day, YYYY-MM-DD)")
 	issueCreateCmd.Flags().String("waiting-for", "", "What this backlog issue is waiting for, one line (80 chars max). Required when an agent puts an issue in backlog; nothing to wait for means use todo")
 	issueCreateCmd.Flags().Bool("allow-duplicate", false, "Allow creating an issue even when an active duplicate exists")
-	issueCreateCmd.Flags().Bool("goal", false, "Create a draft completion-line goal for this issue")
 	issueCreateCmd.Flags().String("routing-facts", "", `Routing facts as JSON, so routing skips the analysis call: {"scope":"small|module|cross_module","clarity":"clear|vague","risk":"low|medium|high","needs_human":false,"summary":"..."}`)
 	issueCreateCmd.Flags().Bool("routing-wait", true, "Wait for routing to pick the executor and print it as \"routing\" (who, why, tier). Default on for people and bot keys, off inside an agent run; =false returns at once and routing fills the slot in the background")
 	issueCreateCmd.Flags().String("output", "json", "Output format: table or json")
@@ -1088,9 +1078,6 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 	}
 	if v, _ := cmd.Flags().GetString("priority"); v != "" {
 		params.Set("priority", v)
-	}
-	if goal, _ := cmd.Flags().GetBool("goal"); goal {
-		params.Set("goal", "true")
 	}
 	params.Set("limit", fmt.Sprintf("%d", limit))
 	if offset > 0 {
@@ -1937,9 +1924,6 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	if v, _ := cmd.Flags().GetBool("allow-duplicate"); v {
 		body["allow_duplicate"] = true
 	}
-	if v, _ := cmd.Flags().GetBool("goal"); v {
-		body["goal_mode"] = true
-	}
 	if v, _ := cmd.Flags().GetString("routing-facts"); strings.TrimSpace(v) != "" {
 		var facts map[string]any
 		if err := json.Unmarshal([]byte(v), &facts); err != nil {
@@ -2600,15 +2584,12 @@ func registerIssueCloseFlags(cmd *cobra.Command) {
 	cmd.Flags().String("pr", "", "Pull or merge request URL to register with this close. A verified link is stored; an unverifiable link still closes and is marked 未核实")
 	cmd.Flags().Bool("knowledge-none", false, "Declare this close wrote no qualified project memory")
 	cmd.Flags().StringArray("knowledge", nil, "Project-memory change as <key>[:<action>[:<entry>]]=<summary>; action is new, update, merge or supersede (required on a boss-layer sediment round); repeat for each change")
-	cmd.Flags().StringArray("decision", nil, "A decision settled this round, added to the state card's 已拍板 list (one line, 300 chars max; repeat for each)")
 	cmd.Flags().String("output", "json", "Output format: table or json")
 }
 
 // registerIssueHandoffFlags wires `issue handoff`; shared with its tests.
 func registerIssueHandoffFlags(cmd *cobra.Command) {
 	cmd.Flags().String("to", "", "reviewer, dispatcher, or an agent name/id (required)")
-	cmd.Flags().String("summary", "", "One-line conclusion (结论): what got done, or where it is stuck and who must do what next. Shown as the state card's 上一棒交代; details go in a comment (300 chars max)")
-	cmd.Flags().StringArray("decision", nil, "A decision settled this round, added to the state card's 已拍板 list (repeat for each)")
 	cmd.Flags().String("output", "table", "Output format: table or json")
 }
 
@@ -2662,9 +2643,6 @@ func runIssueClose(cmd *cobra.Command, args []string) error {
 	}
 	if verdict != "" {
 		body["verdict"] = verdict
-	}
-	if decisions, _ := cmd.Flags().GetStringArray("decision"); len(decisions) > 0 {
-		body["decisions"] = decisions
 	}
 	if closeprotocol.KnowledgeMustShip(outcome, verdict) {
 		// The knowledge the audit claims has to ship with this delivery

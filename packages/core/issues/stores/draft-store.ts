@@ -38,8 +38,6 @@ export interface IssueCreateShared {
   projectId?: string;
   priority: IssuePriority;
   dueDate: string | null;
-  /** Keep target mode in the shared slot so manual and agent faces agree. */
-  goalMode?: boolean;
   /** Uploads for the dialog (placeholders + completed), referenced by the
    *  manual description OR the agent prompt markdown. A single pool so an
    *  image survives a mode switch from either side; each submit path sends
@@ -111,7 +109,6 @@ const emptyShared = (): IssueCreateShared => ({
   projectId: undefined,
   priority: "none",
   dueDate: null,
-  goalMode: false,
   attachments: [],
 });
 
@@ -198,7 +195,6 @@ function migrateDraft(raw: unknown): IssueCreateDraft {
         projectId: d.projectId as string | undefined,
         priority: (d.priority as IssuePriority) ?? "none",
         dueDate: (d.dueDate as string | null) ?? null,
-        goalMode: d.goalMode === true,
         // Legacy builds persisted bare Attachment rows; normalize wraps them
         // as `uploaded` placeholders (and drops stale `uploading` ones).
         attachments: normalizeStoredUploads(d.attachments),
@@ -228,7 +224,6 @@ function migrateDraft(raw: unknown): IssueCreateDraft {
     shared: {
       ...emptyShared(),
       ...sharedRaw,
-      goalMode: sharedRaw.goalMode === true,
       // Pre-L2 nested drafts stored bare Attachment rows; every load also
       // drops `uploading` placeholders (bytes are gone).
       attachments: normalizeStoredUploads(sharedRaw.attachments),

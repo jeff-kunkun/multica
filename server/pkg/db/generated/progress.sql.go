@@ -80,6 +80,36 @@ func (q *Queries) CreateIssueProgress(ctx context.Context, arg CreateIssueProgre
 	return err
 }
 
+const getLatestIssueProgressBySource = `-- name: GetLatestIssueProgressBySource :one
+SELECT id, workspace_id, issue_id, text, source, tone, author_type, author_id, created_at FROM issue_progress
+WHERE issue_id = $1 AND workspace_id = $2 AND source = $3
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+type GetLatestIssueProgressBySourceParams struct {
+	IssueID     pgtype.UUID `json:"issue_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Source      string      `json:"source"`
+}
+
+func (q *Queries) GetLatestIssueProgressBySource(ctx context.Context, arg GetLatestIssueProgressBySourceParams) (IssueProgress, error) {
+	row := q.db.QueryRow(ctx, getLatestIssueProgressBySource, arg.IssueID, arg.WorkspaceID, arg.Source)
+	var i IssueProgress
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.Text,
+		&i.Source,
+		&i.Tone,
+		&i.AuthorType,
+		&i.AuthorID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const listChatRecapMessages = `-- name: ListChatRecapMessages :many
 (SELECT m.role, m.content, m.created_at, m.failure_reason, m.message_kind
  FROM chat_message m

@@ -2202,7 +2202,6 @@
     "description": "実行中のエージェントが作成できるものと実行時間。管理者のみ変更できます。",
     "create_title": "作成",
     "chat_issue_label": "チャットでタスクを作成",
-    "chat_issue_description": "ゴールへの変換を含みます。",
     "issue_issue_label": "タスクでタスクを作成",
     "issue_issue_description": "サブタスクとプランを含みます。",
     "chat_chat_label": "チャットでチャットを作成",

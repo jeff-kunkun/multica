@@ -2218,7 +2218,6 @@
     "description": "What agents can create while running, and how long they can run. Only admins can change this.",
     "create_title": "Create",
     "chat_issue_label": "Create issues in chats",
-    "chat_issue_description": "Includes turning a chat into a goal.",
     "issue_issue_label": "Create issues in issues",
     "issue_issue_description": "Includes sub-issues and plans.",
     "chat_chat_label": "Create chats in chats",

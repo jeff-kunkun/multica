@@ -1379,9 +1379,6 @@ export function useRealtimeSync(
         if (payload.progress_changed) {
           qc.invalidateQueries({ queryKey: issueKeys.progress(wsId, issue.id) });
         }
-        // The state card derives from status, the close record, handoff and
-        // decisions, all of which arrive as issue:updated (DENE-1328).
-        qc.invalidateQueries({ queryKey: issueKeys.context(wsId, issue.id) });
         // A chat's ticket card shows its issues' status and executor (DENE-1665).
         qc.invalidateQueries({ queryKey: chatKeys.ticketsAll(wsId) });
       }
@@ -1514,7 +1511,6 @@ export function useRealtimeSync(
       // updated_at, so the other comment events below deliberately do not.
       const wsId = getCurrentWsId();
       if (wsId) {
-        qc.invalidateQueries({ queryKey: issueKeys.context(wsId, comment.issue_id) });
         // A reply closes the viewer's open call on the issue (DENE-880).
         qc.invalidateQueries({ queryKey: homeKeys.all(wsId) });
         invalidateUpdatedAtSortedIssueLists(qc, wsId);

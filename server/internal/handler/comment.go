@@ -2125,7 +2125,6 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	triggerCtx := r.Context()
 	if handoffMode {
 		resp.HandoffStoppedTaskIDs = h.stopForCommentHandoff(r, issue, modeTriggers, authorType, authorID)
-		h.recordCommentHandoff(r, issue, comment.Content, modeTriggers)
 		triggerCtx = withFreshCommentSession(triggerCtx)
 	}
 	// The comment is already saved; a blocked mention must not fail the whole

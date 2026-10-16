@@ -6,7 +6,6 @@
     "empty_description": "Issues you create or are assigned to will appear here."
   },
   "header": {
-    "set_as_goal": "Set as goal",
     "scope": {
       "all_label": "All",
       "all_description": "Assigned to me, created by me, or involving my agents and squads",
@@ -38,9 +37,7 @@
     "view_board_short": "Board",
     "view_list_short": "List",
     "view_swimlane_short": "Swimlane",
-    "sort_manual": "Manual",
-    "new_goal": "New goal",
-    "only_goals": "Only goals"
+    "sort_manual": "Manual"
   },
   "errors": {
     "move_failed": "Failed to move issue"

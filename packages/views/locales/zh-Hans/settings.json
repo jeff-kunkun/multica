@@ -2202,7 +2202,6 @@
     "description": "智能体运行时能新建什么、能跑多久。仅管理员可修改。",
     "create_title": "新建",
     "chat_issue_label": "在聊天中新建任务",
-    "chat_issue_description": "含转成目标。",
     "issue_issue_label": "在任务中新建任务",
     "issue_issue_description": "含子任务与计划。",
     "chat_chat_label": "在聊天中新建聊天",

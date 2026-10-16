@@ -323,3 +323,19 @@ func (h *Handler) DeleteIssueMetadataKey(w http.ResponseWriter, r *http.Request)
 	})
 	writeJSON(w, http.StatusOK, map[string]any{"metadata": metadata, "issue_revision": updated.Revision})
 }
+
+// issueMetaStrings flattens issue metadata to strings, the shape
+// closeprotocol reads.
+func issueMetaStrings(raw []byte) map[string]string {
+	out := map[string]string{}
+	for k, v := range parseIssueMetadata(raw) {
+		switch t := v.(type) {
+		case string:
+			out[k] = t
+		case nil:
+		default:
+			out[k] = fmt.Sprint(t)
+		}
+	}
+	return out
+}

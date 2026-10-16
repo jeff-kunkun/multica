@@ -78,10 +78,6 @@ export function useIssueRealtime(
         qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, issueId) });
         qc.invalidateQueries({ queryKey: issueKeys.timeline(wsId, issueId) });
       };
-      // The state card is derived from status, close/handoff records and
-      // comments — any of those moving makes it stale.
-      const invalidateContext = () =>
-        qc.invalidateQueries({ queryKey: issueKeys.context(wsId, issueId) });
 
       // Task-query invalidation — separate from detail/timeline so the
       // AgentActivityRow + RunsSheet can refresh without forcing a full
@@ -113,7 +109,6 @@ export function useIssueRealtime(
           patchIssueDetail(qc, wsId, payload.issue);
           patchMyIssuesList(qc, wsId, payload.issue);
           patchIssuesList(qc, wsId, payload.issue);
-          invalidateContext();
         }),
         ws.on("issue:deleted", (payload) => {
           if (payload.issue_id !== issueId) return;
@@ -143,7 +138,6 @@ export function useIssueRealtime(
             commentToTimelineEntry(payload.comment),
           );
           onIssueAuxiliaryRevision(qc, wsId, issueId, payload.issue_revision);
-          invalidateContext();
         }),
         ws.on("comment:updated", (payload) => {
           if (payload.comment.issue_id !== issueId) return;
@@ -245,7 +239,6 @@ export function useIssueRealtime(
         // ----- Reconnect -----
         ws.onReconnect(() => {
           invalidateIssueAfterReconnect(qc, wsId, issueId);
-          invalidateContext();
         }),
       ];
     },

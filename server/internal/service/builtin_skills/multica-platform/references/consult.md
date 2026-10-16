@@ -18,7 +18,7 @@ multica issue consult <id> --resume <consult-id>   # the wait ran out; the answe
 | Stuck between two approaches | both options and what you cannot judge |
 
 A ticket gets a few consults (3 by default; Settings → Routing → Consults per issue; the permission to consult remains in Agent permissions). Do not ask for what you can look up, and do not consult instead of
-working. The advisor sees the issue, its state card and your question — not
+working. The advisor sees the issue and your question — not
 your working copy — so paste the code, diff or error that matters.
 
 ## Who answers
@@ -29,8 +29,7 @@ a fallback. Never you. The seat's daemon must be online and new enough to run co
 
 ## Cost
 
-The advisor's tokens and time are added to the issue's goal budget (no run is
-counted) and to the advisor seat's own usage. Each consult leaves one line on
+The advisor's tokens and time are added to the advisor seat's own usage. Each consult leaves one line on
 the issue timeline — advisor, cost, and on expand the question and the answer.
 
 ## Refusals

@@ -4,39 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/jackc/pgx/v5/pgtype"
-
-	"github.com/multica-ai/multica/server/internal/statecard"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
-
-func TestHandoffSummaryFromComment(t *testing.T) {
-	got := handoffSummaryFromComment("[@孙悟饭](mention://agent/abc) 接着做\n\n  前端部分")
-	if got != "@孙悟饭 接着做 前端部分" {
-		t.Fatalf("summary = %q", got)
-	}
-	long := handoffSummaryFromComment(strings.Repeat("字", statecard.MaxBatonLen*2))
-	if len([]rune(long)) > statecard.MaxBatonLen+1 {
-		t.Fatalf("summary not clipped: %d runes", len([]rune(long)))
-	}
-}
-
-func TestHandoffNamesAgent(t *testing.T) {
-	var id pgtype.UUID
-	_ = id.Scan("11111111-1111-1111-1111-111111111111")
-	agent := db.Agent{ID: id, Name: "Gohan"}
-	for to, want := range map[string]bool{
-		"gohan":                                true,
-		"孙悟天、Gohan":                            true,
-		"11111111-1111-1111-1111-111111111111": true,
-		"Goten":                                false,
-		"":                                     false,
-	} {
-		if got := handoffNamesAgent(to, agent); got != want {
-			t.Fatalf("handoffNamesAgent(%q) = %v, want %v", to, got, want)
-		}
-	}
-}
 
 func TestBuildChatHandoffOpening(t *testing.T) {
 	rows := []db.ChatMessage{ // newest first

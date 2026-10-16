@@ -1,10 +1,8 @@
 package handler
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/jackc/pgx/v5"
@@ -13,66 +11,6 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
 )
-
-func convertChatForTest(t *testing.T, sessionID string) string {
-	t.Helper()
-	req := withURLParam(withChatTestWorkspaceCtx(t, newRequest(http.MethodPost, "/api/chat/sessions/"+sessionID+"/to-goal", nil)), "sessionId", sessionID)
-	w := httptest.NewRecorder()
-	testHandler.ConvertChatSessionToGoal(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("convert: status=%d body=%s", w.Code, w.Body.String())
-	}
-	var resp struct {
-		Issue struct {
-			ID string `json:"id"`
-		} `json:"issue"`
-	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatal(err)
-	}
-	return resp.Issue.ID
-}
-
-func TestChatConversionTransfersExecutionAndIsIdempotent(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-	agentID := createHandlerTestAgent(t, "Conversion execution agent", []byte("[]"))
-	sessionID := createHandlerTestChatSession(t, agentID)
-	seedGoalChatMessage(t, sessionID, "Finish the release", "user")
-	dbfx.Exec(t, `UPDATE chat_session SET title=$1 WHERE id=$2`, t.Name(), sessionID)
-	queuedID := dbfx.Task(t, agentID, testutil.Cols{"chat_session_id": sessionID, "status": "queued", "runtime_id": testRuntimeID})
-	runningID := dbfx.Task(t, agentID, testutil.Cols{"chat_session_id": sessionID, "status": "running", "runtime_id": testRuntimeID})
-	issueID := convertChatForTest(t, sessionID)
-	dbfx.Cleanup(t, `DELETE FROM issue WHERE id=$1`, issueID)
-	dbfx.Cleanup(t, `DELETE FROM issue_goal WHERE issue_id=$1`, issueID)
-	if repeatID := convertChatForTest(t, sessionID); repeatID != issueID {
-		t.Fatalf("repeat created %s instead of %s", repeatID, issueID)
-	}
-	var convertedIssueID string
-	dbfx.QueryRow(t, `SELECT converted_issue_id FROM chat_session WHERE id=$1`, sessionID).Scan(&convertedIssueID)
-	if convertedIssueID != issueID {
-		t.Fatalf("conversion points to %s, want %s", convertedIssueID, issueID)
-	}
-	for _, taskID := range []string{queuedID, runningID} {
-		var status string
-		dbfx.QueryRow(t, `SELECT status FROM agent_task_queue WHERE id=$1`, taskID).Scan(&status)
-		if status != "cancelled" {
-			t.Fatalf("original chat task %s status=%s", taskID, status)
-		}
-	}
-	var bridgeCount int
-	dbfx.QueryRow(t, `SELECT count(*) FROM chat_message WHERE chat_session_id=$1 AND message_kind='goal_link'`, sessionID).Scan(&bridgeCount)
-	if bridgeCount != 1 {
-		t.Fatalf("conversion wrote %d link messages", bridgeCount)
-	}
-	sendChatWithMode(t, sessionID, "continue the same task", "").Want(http.StatusConflict)
-	var laterCount int
-	dbfx.QueryRow(t, `SELECT count(*) FROM chat_message WHERE chat_session_id=$1 AND content='continue the same task'`, sessionID).Scan(&laterCount)
-	if laterCount != 0 {
-		t.Fatal("converted chat persisted a second execution input")
-	}
-}
 
 func TestOrdinaryChatIssueProvenanceDoesNotConvertChat(t *testing.T) {
 	if testHandler == nil {
@@ -98,17 +36,10 @@ func TestChatConversionFencesHistoricalFailureRetries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	issueID := convertChatForTest(t, f.sessionID)
-	dbfx.Cleanup(t, `DELETE FROM issue WHERE id=$1`, issueID)
-	dbfx.Cleanup(t, `DELETE FROM issue_goal WHERE issue_id=$1`, issueID)
-	var stopped bool
-	dbfx.QueryRow(t, `SELECT coalesce((context->>'work_stopped')::boolean,false) FROM agent_task_queue WHERE id=$1`, f.headID).Scan(&stopped)
-	if !stopped {
-		t.Fatal("conversion left its historical failed retry source unfenced")
-	}
-	// Model a legacy conversion whose old task lacks the marker: session
-	// ownership itself must fence both application and SQL retry paths.
-	dbfx.Exec(t, `UPDATE agent_task_queue SET context=coalesce(context,'{}'::jsonb)-'work_stopped' WHERE id=$1`, f.headID)
+	// Model a chat converted before conversion was removed: session ownership
+	// alone must fence both application and SQL retry paths.
+	issueID := dbfx.Issue(t, "Converted chat issue", testutil.Cols{"origin_chat_session_id": f.sessionID})
+	dbfx.Exec(t, `UPDATE chat_session SET converted_issue_id=$1 WHERE id=$2`, issueID, f.sessionID)
 	if retry, err := testHandler.TaskService.MaybeRetryFailedTask(t.Context(), stale); err != nil {
 		t.Fatal(err)
 	} else if retry != nil {

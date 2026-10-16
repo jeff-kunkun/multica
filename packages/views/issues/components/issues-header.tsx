@@ -21,7 +21,6 @@ import {
   UserMinus,
   UserPen,
   Waves,
-  Target,
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Spinner } from "@multica/ui/components/ui/spinner";
@@ -1325,7 +1324,6 @@ export function IssuesHeader({
   search,
   onSearchChange,
   saveViewScope = { kind: "workspace" },
-  onNewGoal,
 }: {
   scopedIssues: Issue[];
   /** See IssueSurfaceController.workingAgents — the surface-scoped projection
@@ -1347,10 +1345,8 @@ export function IssuesHeader({
    *  default; the project-detail fallback passes its project scope; `null`
    *  hides the save affordance entirely. */
   saveViewScope?: SaveViewScope | null;
-  onNewGoal?: () => void;
 }) {
   const { t } = useT("issues");
-  const { t: tMyIssues } = useT("my-issues");
   const [saveViewOpen, setSaveViewOpen] = useState(false);
   const headerWsId = useWorkspaceId();
   const viewListScope: IssueViewScope | null = saveViewScope
@@ -1519,17 +1515,6 @@ export function IssuesHeader({
             onToggle={toggleAgentRunningFilter}
             agents={workingAgents}
           />
-          {onNewGoal && (
-            <>
-              <Button variant="default" size="sm" className="hidden gap-1 bg-brand text-brand-foreground hover:bg-brand/90 sm:inline-flex" onClick={onNewGoal}>
-                <Target className="size-3.5" aria-hidden="true" />
-                {tMyIssues(($) => $.header.new_goal)}
-              </Button>
-              <Button variant="default" size="icon-sm" className="bg-brand text-brand-foreground hover:bg-brand/90 sm:hidden" onClick={onNewGoal} aria-label={tMyIssues(($) => $.header.new_goal)}>
-                <Target className="size-3.5" aria-hidden="true" />
-              </Button>
-            </>
-          )}
           <IssueDisplayControls
             scopedIssues={scopedIssues}
             allowGantt={allowGantt}

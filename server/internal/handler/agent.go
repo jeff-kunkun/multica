@@ -996,52 +996,44 @@ type AgentTaskResponse struct {
 	// CheckoutPaths is the issue's checkout_paths metadata: repo-relative
 	// directories this task wants on disk. Empty (and absent on old servers)
 	// checks out the whole repository.
-	CheckoutPaths           string                `json:"checkout_paths,omitempty"`
-	IssueCommentSummaries   []IssueContextComment `json:"issue_comment_summaries,omitempty"`
-	IssueTriggerThread      []IssueContextComment `json:"issue_trigger_thread,omitempty"`
-	IssueNewComments        []IssueContextComment `json:"issue_new_comments,omitempty"`
-	IssueSubIssues          []SubIssueRef         `json:"issue_sub_issues,omitempty"` // the task issue's sub-issues; non-empty tells the run it holds a coordinator (DENE-812)
-	IssueContextGeneratedAt string                `json:"issue_context_generated_at,omitempty"`
-	IssueContextTruncated   bool                  `json:"issue_context_truncated,omitempty"`
-	// IssueHandoffCard is the rendered state card a run opens with: the first
-	// run of an agent the issue was just handed to (DENE-1350), a run after
-	// someone else closed or handed off, a wakeup, or a run whose old session
-	// was set aside (DENE-1331); empty otherwise. IssueStateCardReason says
-	// which; empty reads as a handoff, the only reason older servers send.
-	IssueHandoffCard         string               `json:"issue_handoff_card,omitempty"`
-	IssueStateCardReason     string               `json:"issue_state_card_reason,omitempty"`
-	ChatSessionID            string               `json:"chat_session_id,omitempty"`             // non-empty for chat tasks
-	ChatChannelType          string               `json:"chat_channel_type,omitempty"`           // "slack" when the chat session is backed by an IM channel; empty for a web-only chat. Makes the agent channel-aware (read history from the channel, not Multica)
-	ChatChannelDeliversFiles bool                 `json:"chat_channel_delivers_files,omitempty"` // server capability: THIS deployment can put a file the agent produced into THIS conversation — the adapter goes back for the bound attachment AND object storage exists to go back to. Absent/false on a server predating it, which is the safe reading: the agent is told to describe its file in words. Never inferred daemon-side from chat_channel_type; see handler.Handler.channelDeliversFiles
-	ChatType                 string               `json:"chat_type,omitempty"`                   // channel_chat_session_binding.chat_type — "group" for a shared room, "p2p" for a 1:1 with the bot. Lets the per-turn prompt tell the agent who else can read its replies; empty for a web-only chat
-	ChatInThread             bool                 `json:"chat_in_thread,omitempty"`              // true when the latest @mention was a thread reply; tells the agent to start with `multica chat thread` vs `multica chat history`
-	ChatTitleRequested       bool                 `json:"chat_title_requested,omitempty"`        // workspace names chats through the runtime and this chat has no runtime title yet; the prompt asks the agent to run `multica chat title`
-	ChatDispatchedIssues     []string             `json:"chat_dispatched_issues,omitempty"`      // DENE-1672: the tasks this chat dispatched, one receipt line each, newest first
-	ChatMessage              string               `json:"chat_message,omitempty"`                // user message for chat tasks
-	ChatMessageAttachments   []ChatAttachmentMeta `json:"chat_message_attachments,omitempty"`    // attachments on the user message — agent calls `multica attachment download <id>` per entry
-	ChatIntro                bool                 `json:"chat_intro,omitempty"`                  // legacy compatibility for historical is_agent_intro sessions; new agent creation no longer creates these chats
-	AutopilotRunID           string               `json:"autopilot_run_id,omitempty"`            // non-empty for autopilot-spawned tasks
-	AutopilotID              string               `json:"autopilot_id,omitempty"`                // autopilot that spawned this task
-	AutopilotTitle           string               `json:"autopilot_title,omitempty"`             // autopilot title used as task context
-	AutopilotDescription     string               `json:"autopilot_description,omitempty"`       // autopilot description used as task prompt
-	AutopilotSource          string               `json:"autopilot_source,omitempty"`            // manual, schedule, webhook, or api
-	AutopilotTriggerPayload  json.RawMessage      `json:"autopilot_trigger_payload,omitempty"`   // optional trigger payload for webhook/api runs
-	QuickCreatePrompt        string               `json:"quick_create_prompt,omitempty"`         // user's natural-language input for quick-create tasks
-	ConsultPrompt            string               `json:"consult_prompt,omitempty"`              // DENE-1721: the advisor's whole prompt for a consult run
-	QuickCreatePriority      string               `json:"quick_create_priority,omitempty"`       // explicit priority selected in quick-create
-	QuickCreateDueDate       string               `json:"quick_create_due_date,omitempty"`       // explicit calendar due date selected in quick-create
-	QuickCreateGoalMode      bool                 `json:"quick_create_goal_mode,omitempty"`
-	QuickCreateAttachmentIDs []string             `json:"quick_create_attachment_ids,omitempty"` // attachment ids uploaded in the quick-create prompt and bound on issue create
-	QuickCreateSourceContext json.RawMessage      `json:"quick_create_source_context,omitempty"` // immutable historical context for source-context quick-create
-	WakeupID                 string               `json:"wakeup_id,omitempty"`
-	WakeupSystemRule         string               `json:"wakeup_system_rule,omitempty"`      // set when a platform rule (e.g. child_done) started the run
-	WakeupJoined             string               `json:"wakeup_joined,omitempty"`           // wakeups that fired while this run waited to start and joined it instead of queuing their own
-	HandoffNote              string               `json:"handoff_note,omitempty"`            // legacy assignment handoff instruction retained for installed clients; rendered by the daemon only in the per-turn prompt
-	SquadID                  string               `json:"squad_id,omitempty"`                // for quick-create tasks where the picker was a squad; Agent is still the resolved leader
-	SquadName                string               `json:"squad_name,omitempty"`              // display name for the picker squad
-	ParentIssueID            string               `json:"parent_issue_id,omitempty"`         // for quick-create tasks opened from "Add sub issue" — UUID of the parent issue the new issue should be filed under
-	ParentIssueIdentifier    string               `json:"parent_issue_identifier,omitempty"` // human-readable identifier (e.g. MUL-123) of the quick-create parent issue, resolved on claim for prompt context
-	ProjectExplicitNone      bool                 `json:"project_explicit_none,omitempty"`   // user cleared the project; the daemon prompt must pass an empty --project
+	CheckoutPaths            string                `json:"checkout_paths,omitempty"`
+	IssueCommentSummaries    []IssueContextComment `json:"issue_comment_summaries,omitempty"`
+	IssueTriggerThread       []IssueContextComment `json:"issue_trigger_thread,omitempty"`
+	IssueNewComments         []IssueContextComment `json:"issue_new_comments,omitempty"`
+	IssueSubIssues           []SubIssueRef         `json:"issue_sub_issues,omitempty"` // the task issue's sub-issues; non-empty tells the run it holds a coordinator (DENE-812)
+	IssueContextGeneratedAt  string                `json:"issue_context_generated_at,omitempty"`
+	IssueContextTruncated    bool                  `json:"issue_context_truncated,omitempty"`
+	ChatSessionID            string                `json:"chat_session_id,omitempty"`             // non-empty for chat tasks
+	ChatChannelType          string                `json:"chat_channel_type,omitempty"`           // "slack" when the chat session is backed by an IM channel; empty for a web-only chat. Makes the agent channel-aware (read history from the channel, not Multica)
+	ChatChannelDeliversFiles bool                  `json:"chat_channel_delivers_files,omitempty"` // server capability: THIS deployment can put a file the agent produced into THIS conversation — the adapter goes back for the bound attachment AND object storage exists to go back to. Absent/false on a server predating it, which is the safe reading: the agent is told to describe its file in words. Never inferred daemon-side from chat_channel_type; see handler.Handler.channelDeliversFiles
+	ChatType                 string                `json:"chat_type,omitempty"`                   // channel_chat_session_binding.chat_type — "group" for a shared room, "p2p" for a 1:1 with the bot. Lets the per-turn prompt tell the agent who else can read its replies; empty for a web-only chat
+	ChatInThread             bool                  `json:"chat_in_thread,omitempty"`              // true when the latest @mention was a thread reply; tells the agent to start with `multica chat thread` vs `multica chat history`
+	ChatTitleRequested       bool                  `json:"chat_title_requested,omitempty"`        // workspace names chats through the runtime and this chat has no runtime title yet; the prompt asks the agent to run `multica chat title`
+	ChatDispatchedIssues     []string              `json:"chat_dispatched_issues,omitempty"`      // DENE-1672: the tasks this chat dispatched, one receipt line each, newest first
+	ChatMessage              string                `json:"chat_message,omitempty"`                // user message for chat tasks
+	ChatMessageAttachments   []ChatAttachmentMeta  `json:"chat_message_attachments,omitempty"`    // attachments on the user message — agent calls `multica attachment download <id>` per entry
+	ChatIntro                bool                  `json:"chat_intro,omitempty"`                  // legacy compatibility for historical is_agent_intro sessions; new agent creation no longer creates these chats
+	AutopilotRunID           string                `json:"autopilot_run_id,omitempty"`            // non-empty for autopilot-spawned tasks
+	AutopilotID              string                `json:"autopilot_id,omitempty"`                // autopilot that spawned this task
+	AutopilotTitle           string                `json:"autopilot_title,omitempty"`             // autopilot title used as task context
+	AutopilotDescription     string                `json:"autopilot_description,omitempty"`       // autopilot description used as task prompt
+	AutopilotSource          string                `json:"autopilot_source,omitempty"`            // manual, schedule, webhook, or api
+	AutopilotTriggerPayload  json.RawMessage       `json:"autopilot_trigger_payload,omitempty"`   // optional trigger payload for webhook/api runs
+	QuickCreatePrompt        string                `json:"quick_create_prompt,omitempty"`         // user's natural-language input for quick-create tasks
+	ConsultPrompt            string                `json:"consult_prompt,omitempty"`              // DENE-1721: the advisor's whole prompt for a consult run
+	QuickCreatePriority      string                `json:"quick_create_priority,omitempty"`       // explicit priority selected in quick-create
+	QuickCreateDueDate       string                `json:"quick_create_due_date,omitempty"`       // explicit calendar due date selected in quick-create
+	QuickCreateAttachmentIDs []string              `json:"quick_create_attachment_ids,omitempty"` // attachment ids uploaded in the quick-create prompt and bound on issue create
+	QuickCreateSourceContext json.RawMessage       `json:"quick_create_source_context,omitempty"` // immutable historical context for source-context quick-create
+	WakeupID                 string                `json:"wakeup_id,omitempty"`
+	WakeupSystemRule         string                `json:"wakeup_system_rule,omitempty"`      // set when a platform rule (e.g. child_done) started the run
+	WakeupJoined             string                `json:"wakeup_joined,omitempty"`           // wakeups that fired while this run waited to start and joined it instead of queuing their own
+	HandoffNote              string                `json:"handoff_note,omitempty"`            // legacy assignment handoff instruction retained for installed clients; rendered by the daemon only in the per-turn prompt
+	SquadID                  string                `json:"squad_id,omitempty"`                // for quick-create tasks where the picker was a squad; Agent is still the resolved leader
+	SquadName                string                `json:"squad_name,omitempty"`              // display name for the picker squad
+	ParentIssueID            string                `json:"parent_issue_id,omitempty"`         // for quick-create tasks opened from "Add sub issue" — UUID of the parent issue the new issue should be filed under
+	ParentIssueIdentifier    string                `json:"parent_issue_identifier,omitempty"` // human-readable identifier (e.g. MUL-123) of the quick-create parent issue, resolved on claim for prompt context
+	ProjectExplicitNone      bool                  `json:"project_explicit_none,omitempty"`   // user cleared the project; the daemon prompt must pass an empty --project
 	// RequestingUserName + RequestingUserProfileDescription mirror the user
 	// the agent is acting on behalf of (see daemon/types.go). v1 sources them
 	// from the runtime owner so they're populated for daemon runtimes and

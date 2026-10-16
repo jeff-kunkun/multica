@@ -2366,14 +2366,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/system-wakeups", h.ListIssueSystemWakeups)
 					r.Put("/system-wakeups/{rule}", h.UpdateIssueSystemWakeup)
 					r.Get("/active-task", h.GetActiveTaskForIssue)
-					// DENE-1051 goal completion line. One issue owns one goal;
-					// confirmation locks the checks and budget for agent actors.
-					r.Get("/goal", h.GetIssueGoal)
-					r.Post("/goal", h.CreateIssueGoal)
-					r.Post("/goal/confirm", h.ConfirmIssueGoal)
-					r.Post("/goal/budget", h.AppendIssueGoalBudget)
-					r.Post("/goal/finish", h.FinishIssueGoal)
-					r.Post("/goal/check/{check}", h.UpdateIssueGoalCheck)
 					r.Post("/tasks/{taskId}/cancel", h.CancelTask)
 					r.Post("/halt", h.HaltIssue)
 					r.Post("/resume", h.ResumeIssue)
@@ -2402,13 +2394,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/close/check", h.CheckCloseIssue)
 					r.Post("/progress", h.WriteIssueProgress)
 					r.Get("/progress", h.ListIssueProgress)
-					// State card (DENE-1328): goal, decisions, close record,
-					// last baton and the caller's own change list —
-					// `multica issue context`. Decisions are the only rows.
-					r.Get("/context", h.GetIssueContext)
-					r.Post("/decisions", h.CreateIssueDecision)
-					r.Patch("/decisions/{decisionId}", h.UpdateIssueDecision)
-					r.Delete("/decisions/{decisionId}", h.DeleteIssueDecision)
 					// PR state from the caller's gh, refreshed by `issue
 					// close` so the done gate sees merges without a GitHub App.
 					r.Post("/pull-requests/report", h.ReportIssuePullRequests)
@@ -2915,7 +2900,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/search", h.SearchChatMessages)
 				r.Route("/{sessionId}", func(r chi.Router) {
 					r.Get("/", h.GetChatSession)
-					r.Post("/to-goal", h.ConvertChatSessionToGoal)
 					r.Post("/stop", h.StopChatSession)
 					r.Get("/tickets", h.ListChatSessionTickets)
 					// Pin / take down by hand (DENE-1719) — `multica chat tickets add|remove`.

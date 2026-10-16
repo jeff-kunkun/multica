@@ -39,8 +39,8 @@ func seedDoneClose(t *testing.T, issueID, summary string) {
 }
 
 // A parent with three sub-tasks hears each one's conclusion (DENE-1679): the
-// child-done comment lists them, the state card carries them, and the
-// parent's receipt card in its source chat repeats them.
+// child-done comment lists them and the parent's receipt card in its source
+// chat repeats them.
 func TestParentReceivesChildReceipts(t *testing.T) {
 	ctx := context.Background()
 	agentID := createHandlerTestAgent(t, "Child Receipt Agent", []byte("[]"))
@@ -69,20 +69,6 @@ func TestParentReceivesChildReceipts(t *testing.T) {
 	for i, c := range conclusions {
 		if !strings.Contains(content, "mention://issue/"+children[i]+") 已完成："+c) {
 			t.Fatalf("child-done comment misses %q:\n%s", c, content)
-		}
-	}
-
-	// The state card lists them, in JSON and in text.
-	card := getIssueContextHTTP(t, parentID, "", "")
-	if len(card.Children) != 3 {
-		t.Fatalf("card children = %d, want 3: %+v", len(card.Children), card.Children)
-	}
-	for i, c := range conclusions {
-		if card.Children[i].Summary != c || card.Children[i].Status != "done" {
-			t.Fatalf("card child %d = %+v", i, card.Children[i])
-		}
-		if !strings.Contains(card.Text, c) {
-			t.Fatalf("card text misses %q:\n%s", c, card.Text)
 		}
 	}
 

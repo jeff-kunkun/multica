@@ -17,6 +17,5 @@ export function issueSurfaceGanttOptions(
     wsId,
     projectId,
     plan.queryFilter.assignee_types,
-    plan.queryFilter.goal_only === true,
   );
 }

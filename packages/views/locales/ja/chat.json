@@ -90,7 +90,6 @@
     "no_projects": "プロジェクトがまだありません",
     "switch_project": "他のプロジェクトに切り替え…",
     "project_context_unsupported": "プロジェクトの説明は適用されません——このエージェントのデーモンのアップグレードが必要です",
-    "to_goal": "转成目标任务",
     "mode_menu": "送信方法",
     "mode_steer": "割り込み",
     "mode_steer_desc": "このステップの後に読みます",

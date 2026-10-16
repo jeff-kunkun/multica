@@ -2,12 +2,9 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/multica-ai/multica/server/internal/statecard"
 	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
@@ -38,8 +35,7 @@ func TestSessionColdAndThick(t *testing.T) {
 }
 
 // The gate at the claim: a cold, thick session is set aside — no session id,
-// the working directory kept, the card in the opening message — and every
-// other quadrant resumes as before.
+// the working directory kept — and every other quadrant resumes as before.
 func TestClaimTask_ColdThickSessionStartsFresh(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -87,63 +83,10 @@ func TestClaimTask_ColdThickSessionStartsFresh(t *testing.T) {
 				if task.PriorSessionID != "" {
 					t.Fatalf("PriorSessionID = %q, want a new session", task.PriorSessionID)
 				}
-				if task.IssueStateCardReason != stateCardReasonFreshSession || !strings.Contains(task.IssueHandoffCard, "## 状态卡") {
-					t.Fatalf("fresh session opens without the card: reason %q card %q", task.IssueStateCardReason, task.IssueHandoffCard)
-				}
 				return
 			}
 			if task.PriorSessionID != "gate-session" {
 				t.Fatalf("PriorSessionID = %q, want gate-session resumed", task.PriorSessionID)
-			}
-			if task.IssueStateCardReason == stateCardReasonFreshSession {
-				t.Fatal("a resumed session must not be labelled fresh")
-			}
-		})
-	}
-}
-
-// A run after someone else handed off opens with the card; a run after the
-// agent's own handoff does not.
-func TestClaimTask_BatonOpensWithStateCard(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-	for i, own := range []bool{false, true} {
-		name := "someone else's baton"
-		if own {
-			name = "own baton"
-		}
-		t.Run(name, func(t *testing.T) {
-			ctx := context.Background()
-			agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
-			issueID := dbfx.Issue(t, "baton "+name, testutil.Cols{"status": "in_progress", "number": 81331 + i})
-			dbfx.Exec(t, `
-				INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at)
-				VALUES ($1, $2, $3, 'completed', 0, now() - interval '2 hours', now() - interval '110 minutes')
-			`, agentID, runtimeID, issueID)
-			by := "00000000-0000-0000-0000-0000000000aa"
-			if own {
-				by = agentID
-			}
-			meta, _ := json.Marshal(map[string]string{
-				statecard.KeyHandoffAt:      time.Now().Add(-time.Hour).UTC().Format(time.RFC3339),
-				statecard.KeyHandoffSummary: "审过了，缓存键要带 wsId",
-				statecard.KeyHandoffTo:      "reviewer",
-				statecard.KeyHandoffByType:  "agent",
-				statecard.KeyHandoffByID:    by,
-			})
-			dbfx.Exec(t, `UPDATE issue SET metadata = $2 WHERE id = $1`, issueID, meta)
-			dbfx.Exec(t, `INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority) VALUES ($1, $2, $3, 'queued', 0)`, agentID, runtimeID, issueID)
-
-			task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
-			if own {
-				if task.IssueHandoffCard != "" {
-					t.Fatalf("the agent's own baton must not open the run: %q", task.IssueHandoffCard)
-				}
-				return
-			}
-			if task.IssueStateCardReason != stateCardReasonBaton || !strings.Contains(task.IssueHandoffCard, "缓存键要带 wsId") {
-				t.Fatalf("baton run opens without the previous owner's words: reason %q card %q", task.IssueStateCardReason, task.IssueHandoffCard)
 			}
 		})
 	}

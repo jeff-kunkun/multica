@@ -4,10 +4,12 @@ import (
 	"context"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/closeprotocol"
+	"github.com/multica-ai/multica/server/internal/progress"
 	"github.com/multica-ai/multica/server/internal/receipt"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
@@ -33,7 +35,7 @@ func (h *Handler) issueReceipt(ctx context.Context, issue db.Issue, prefix strin
 	if closeprotocol.Complete(meta) && closeprotocol.StatusMatchesIssue(meta[closeprotocol.KeyStatus], issue.Status) && !closeprotocol.Superseded(meta) {
 		r.Conclusion = meta[closeprotocol.KeyConclusion]
 		r.ClosedAt = strings.TrimSpace(meta[closeprotocol.KeyAt])
-		r.Summary = receipt.Clip(h.closeNote(ctx, issue, meta).Summary, receipt.MaxSummary)
+		r.Summary = receipt.Clip(h.closeNote(ctx, issue, meta), receipt.MaxSummary)
 		r.Knowledge = knowledgeLine(meta[closeprotocol.KeyKnowledgeAudit])
 	}
 	if gh, vcsRows, err := h.loadDeliveryRows(ctx, issue.ID); err == nil {
@@ -49,9 +51,60 @@ func (h *Handler) issueReceipt(ctx context.Context, issue db.Issue, prefix strin
 	return r
 }
 
+// closeNote is the latest close's summary: its progress line when the line
+// belongs to this close, else the evidence comment's first paragraph.
+func (h *Handler) closeNote(ctx context.Context, issue db.Issue, meta map[string]string) string {
+	if !closeprotocol.Complete(meta) {
+		return ""
+	}
+	row, err := h.Queries.GetLatestIssueProgressBySource(ctx, db.GetLatestIssueProgressBySourceParams{
+		IssueID: issue.ID, WorkspaceID: issue.WorkspaceID, Source: progress.SourceClose,
+	})
+	if err == nil && row.CreatedAt.Valid && summaryBelongsToClose(row.CreatedAt.Time, meta[closeprotocol.KeyAt]) {
+		return row.Text
+	}
+	if id, err := parseUUIDStrict(strings.TrimSpace(meta[closeprotocol.KeyEvidenceCommentID])); err == nil {
+		if c, err := h.Queries.GetComment(ctx, id); err == nil && c.IssueID == issue.ID && !c.DeletedAt.Valid {
+			return firstParagraph(c.Content)
+		}
+	}
+	return ""
+}
+
+// summaryBelongsToClose reports whether a close progress line written at
+// progressAt was written by the close recorded at closeAt. The close writes
+// close.at inside its transaction and the progress line right after commit,
+// so a line from this close is never older than close.at; an older line is
+// a previous close's summary and must not be shown as this one's.
+func summaryBelongsToClose(progressAt time.Time, closeAt string) bool {
+	at, err := time.Parse(time.RFC3339, strings.TrimSpace(closeAt))
+	if err != nil {
+		return false
+	}
+	// close.at has second precision; allow the truncated second.
+	return !progressAt.Before(at)
+}
+
+// firstParagraph returns the first non-empty paragraph of a markdown body,
+// joined onto one line — the summary a close prepends to its evidence.
+func firstParagraph(body string) string {
+	var lines []string
+	for _, line := range strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			if len(lines) > 0 {
+				break
+			}
+			continue
+		}
+		lines = append(lines, strings.TrimLeft(line, "# "))
+	}
+	return strings.Join(lines, " ")
+}
+
 // childReceipts is the receipts of a parent's sub-tasks that keep accepts,
 // in creation order (DENE-1679). A parent reports for its children, so its
-// card, its state card and its child-done comment all list them.
+// card and its child-done comment both list them.
 func (h *Handler) childReceipts(ctx context.Context, parent db.Issue, keep func(db.Issue) bool) []receipt.Receipt {
 	children, err := h.Queries.ListChildIssues(ctx, parent.ID)
 	if err != nil {

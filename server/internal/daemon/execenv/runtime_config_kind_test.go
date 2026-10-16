@@ -338,7 +338,6 @@ func TestSlimQuickCreateAvailableCommands(t *testing.T) {
 		"multica repo checkout <url>",
 		// verb-map lines of the full Commands section (DENE-1329)
 		"`issue get | list | children`",
-		"`issue context <id>`",
 		"`issue comment list | add`",
 		"`issue close`",
 		"`issue handoff",

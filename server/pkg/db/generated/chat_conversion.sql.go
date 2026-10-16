@@ -11,72 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const getChatConvertedIssue = `-- name: GetChatConvertedIssue :one
-SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision, i.last_activity_at, i.triage_state, i.reviewer_type, i.reviewer_id, i.visibility, i.assignee_source, i.assignee_source_user_id, i.assignee_quote, i.progress_text, i.progress_source, i.progress_tone, i.progress_author_type, i.progress_author_id, i.progress_updated_at, i.duplicate_of_issue_id, i.domain_id, i.origin_chat_session_id, i.via_bot_id, i.via_bot_name, i.on_behalf_of_user_id FROM chat_session c
-JOIN issue i ON i.id = c.converted_issue_id AND i.workspace_id = c.workspace_id
-WHERE c.id = $1 AND c.workspace_id = $2
-`
-
-type GetChatConvertedIssueParams struct {
-	ChatSessionID pgtype.UUID `json:"chat_session_id"`
-	WorkspaceID   pgtype.UUID `json:"workspace_id"`
-}
-
-func (q *Queries) GetChatConvertedIssue(ctx context.Context, arg GetChatConvertedIssueParams) (Issue, error) {
-	row := q.db.QueryRow(ctx, getChatConvertedIssue, arg.ChatSessionID, arg.WorkspaceID)
-	var i Issue
-	err := row.Scan(
-		&i.ID,
-		&i.WorkspaceID,
-		&i.Title,
-		&i.Description,
-		&i.Status,
-		&i.Priority,
-		&i.AssigneeType,
-		&i.AssigneeID,
-		&i.CreatorType,
-		&i.CreatorID,
-		&i.ParentIssueID,
-		&i.AcceptanceCriteria,
-		&i.ContextRefs,
-		&i.Position,
-		&i.DueDate,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.Number,
-		&i.ProjectID,
-		&i.OriginType,
-		&i.OriginID,
-		&i.FirstExecutedAt,
-		&i.StartDate,
-		&i.Metadata,
-		&i.Stage,
-		&i.Properties,
-		&i.Revision,
-		&i.LastActivityAt,
-		&i.TriageState,
-		&i.ReviewerType,
-		&i.ReviewerID,
-		&i.Visibility,
-		&i.AssigneeSource,
-		&i.AssigneeSourceUserID,
-		&i.AssigneeQuote,
-		&i.ProgressText,
-		&i.ProgressSource,
-		&i.ProgressTone,
-		&i.ProgressAuthorType,
-		&i.ProgressAuthorID,
-		&i.ProgressUpdatedAt,
-		&i.DuplicateOfIssueID,
-		&i.DomainID,
-		&i.OriginChatSessionID,
-		&i.ViaBotID,
-		&i.ViaBotName,
-		&i.OnBehalfOfUserID,
-	)
-	return i, err
-}
-
 const getChatMergeTarget = `-- name: GetChatMergeTarget :one
 SELECT t.id, t.agent_id, t.issue_id, t.status, t.priority, t.dispatched_at, t.started_at, t.completed_at, t.result, t.error, t.created_at, t.context, t.runtime_id, t.session_id, t.work_dir, t.trigger_comment_id, t.chat_session_id, t.autopilot_run_id, t.attempt, t.max_attempts, t.parent_task_id, t.failure_reason, t.trigger_summary, t.force_fresh_session, t.is_leader_task, t.wait_reason, t.initiator_user_id, t.handoff_note, t.prepare_lease_expires_at, t.squad_id, t.runtime_mcp_overlay, t.escalation_for_task_id, t.fire_at, t.originator_user_id, t.runtime_connected_apps, t.coalesced_comment_ids, t.delivered_comment_ids, t.chat_input_task_id, t.chat_finalize_deferred_at, t.originator_source, t.delegated_from_task_id, t.retry_of_task_id, t.rerun_of_task_id, t.rule_version_id, t.trigger_evidence_kind, t.trigger_evidence_ref_id, t.accountable_user_id, t.session_rollout_missing, t.retired_session_id, t.quick_actions_disabled, t.regenerate_quick_actions_for, t.branch_name, t.durable_work_dir, t.channel_context_revision, t.comment_thread_id, t.cancelled_by_type, t.cancelled_by_id, t.cancelled_by_name, t.issue_snapshot, t.code_decision, t.failure_input_version, t.failure_fingerprint, t.work_thread_id, t.context_generation, t.context_message_limit, t.context_token_budget, t.continuity_break_reason, t.session_mode, t.resumed_from_task_id, t.session_break_reason, t.via_bot_id, t.via_bot_name, t.wake_root_id, t.wake_hop, t.wake_generation, t.wake_reserved, t.wake_human_quote, t.pickup_deadline_at, t.on_behalf_of_user_id FROM agent_task_queue t
 WHERE t.chat_session_id = $1
@@ -274,60 +208,6 @@ func (q *Queries) GetQueuedChatMergeTarget(ctx context.Context, chatSessionID pg
 		&i.WakeHumanQuote,
 		&i.PickupDeadlineAt,
 		&i.OnBehalfOfUserID,
-	)
-	return i, err
-}
-
-const setChatSessionConvertedIssue = `-- name: SetChatSessionConvertedIssue :one
-UPDATE chat_session c
-SET converted_issue_id = $1, updated_at = now()
-WHERE c.id = $2 AND c.workspace_id = $3
-  AND c.converted_issue_id IS NULL
-  AND EXISTS (SELECT 1 FROM issue i WHERE i.id = $1 AND i.workspace_id = c.workspace_id)
-RETURNING c.id, c.workspace_id, c.agent_id, c.creator_id, c.title, c.session_id, c.work_dir, c.status, c.created_at, c.updated_at, c.unread_since, c.runtime_id, c.last_read_at, c.is_agent_intro, c.pinned_at, c.project_id, c.explicitly_created_at, c.project_nudge_dismissed_at, c.visibility, c.title_locked, c.progress_text, c.progress_source, c.progress_tone, c.progress_author_type, c.progress_author_id, c.progress_updated_at, c.origin_type, c.origin_session_id, c.origin_task_id, c.origin_client_key, c.converted_issue_id
-`
-
-type SetChatSessionConvertedIssueParams struct {
-	IssueID       pgtype.UUID `json:"issue_id"`
-	ChatSessionID pgtype.UUID `json:"chat_session_id"`
-	WorkspaceID   pgtype.UUID `json:"workspace_id"`
-}
-
-func (q *Queries) SetChatSessionConvertedIssue(ctx context.Context, arg SetChatSessionConvertedIssueParams) (ChatSession, error) {
-	row := q.db.QueryRow(ctx, setChatSessionConvertedIssue, arg.IssueID, arg.ChatSessionID, arg.WorkspaceID)
-	var i ChatSession
-	err := row.Scan(
-		&i.ID,
-		&i.WorkspaceID,
-		&i.AgentID,
-		&i.CreatorID,
-		&i.Title,
-		&i.SessionID,
-		&i.WorkDir,
-		&i.Status,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.UnreadSince,
-		&i.RuntimeID,
-		&i.LastReadAt,
-		&i.IsAgentIntro,
-		&i.PinnedAt,
-		&i.ProjectID,
-		&i.ExplicitlyCreatedAt,
-		&i.ProjectNudgeDismissedAt,
-		&i.Visibility,
-		&i.TitleLocked,
-		&i.ProgressText,
-		&i.ProgressSource,
-		&i.ProgressTone,
-		&i.ProgressAuthorType,
-		&i.ProgressAuthorID,
-		&i.ProgressUpdatedAt,
-		&i.OriginType,
-		&i.OriginSessionID,
-		&i.OriginTaskID,
-		&i.OriginClientKey,
-		&i.ConvertedIssueID,
 	)
 	return i, err
 }

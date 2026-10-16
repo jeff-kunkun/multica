@@ -15,7 +15,6 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/routing"
 	"github.com/multica-ai/multica/server/internal/service"
-	"github.com/multica-ai/multica/server/internal/statecard"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -272,10 +271,6 @@ func (h *Handler) renderConsultPrompt(ctx context.Context, cc service.ConsultCon
 		return "", "", err
 	}
 	identifier := issueToResponse(issue, h.getIssuePrefix(ctx, issue.WorkspaceID)).Identifier
-	cardText := ""
-	if card, err := h.buildStateCard(ctx, issue, statecard.Caller{Type: "agent", ID: uuidToString(consult.AdvisorAgentID)}, sourceViewer{}, pgtype.UUID{}, nil); err == nil {
-		cardText = statecard.Render(card)
-	}
-	prompt := service.RenderConsultPrompt(identifier, issue.Title, issue.Description.String, cardText, consult.Question)
+	prompt := service.RenderConsultPrompt(identifier, issue.Title, issue.Description.String, consult.Question)
 	return prompt, "Consult · " + identifier, nil
 }

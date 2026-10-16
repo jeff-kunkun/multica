@@ -121,13 +121,11 @@ export const issueKeys = {
     wsId: string,
     projectId: string,
     assigneeTypes?: IssueAssigneeType[],
-    goalOnly = false,
   ) =>
     [
       ...issueKeys.projectGanttAll(wsId),
       projectId,
       assigneeTypes ?? null,
-      goalOnly,
     ] as const,
   /** Per-project issue shortlist behind the chat's @-picker (DENE-603). */
   projectPicker: (wsId: string, projectId: string, limit: number) =>
@@ -138,9 +136,6 @@ export const issueKeys = {
    *  recovery covers it. */
   progress: (wsId: string, id: string) =>
     [...issueKeys.all(wsId), "progress", id] as const,
-  /** State card (DENE-1328). Under `all(wsId)`, so reconnect recovery covers it. */
-  context: (wsId: string, id: string) =>
-    [...issueKeys.all(wsId), "context", id] as const,
   /** Resolve a bare issue identifier (e.g. "MUL-123") to an issue. */
   identifier: (wsId: string, identifier: string) =>
     [...issueKeys.all(wsId), "identifier", identifier] as const,
@@ -207,8 +202,6 @@ export const issueKeys = {
   tasksAll: () => ["issues", "tasks"] as const,
   /** Per-issue task list (issue-detail Execution log section). */
   tasks: (issueId: string) => [...issueKeys.tasksAll(), issueId] as const,
-  goalsAll: (wsId: string) => ["issues", wsId, "goals"] as const,
-  goal: (wsId: string, issueId: string) => [...issueKeys.goalsAll(wsId), issueId] as const,
   sourceContextPreview: (wsId: string, anchorCommentId: string) =>
     ["source-context", "preview", wsId, anchorCommentId] as const,
 };
@@ -233,7 +226,6 @@ export type MyIssuesFilter = Pick<
   | "creator_id"
   | "project_id"
   | "involves_user_id"
-  | "goal_only"
 >;
 
 /** Server-side contract for the flat table window. These facets must travel
@@ -411,7 +403,6 @@ export const PROJECT_GANTT_MAX_ISSUES = 10_000;
 async function fetchProjectGanttIssues(
   projectId: string,
   assigneeTypes?: IssueAssigneeType[],
-  goalOnly = false,
 ) {
   const issues = [];
   let offset = 0;
@@ -420,7 +411,6 @@ async function fetchProjectGanttIssues(
       project_id: projectId,
       scheduled: true,
       ...(assigneeTypes?.length ? { assignee_types: assigneeTypes } : {}),
-      ...(goalOnly ? { goal_only: true } : {}),
       limit: PROJECT_GANTT_PAGE_LIMIT,
       offset,
     });
@@ -451,11 +441,10 @@ export function projectGanttIssuesOptions(
   // The page's assignee-type tab narrows the Gantt exactly like every
   // other mode — same scope, same single mapping upstream.
   assigneeTypes?: IssueAssigneeType[],
-  goalOnly = false,
 ) {
   return queryOptions({
-    queryKey: issueKeys.projectGantt(wsId, projectId, assigneeTypes, goalOnly),
-    queryFn: () => fetchProjectGanttIssues(projectId, assigneeTypes, goalOnly),
+    queryKey: issueKeys.projectGantt(wsId, projectId, assigneeTypes),
+    queryFn: () => fetchProjectGanttIssues(projectId, assigneeTypes),
   });
 }
 
@@ -691,16 +680,6 @@ export function issueProgressHistoryOptions(wsId: string, issueId: string) {
   });
 }
 
-/** The issue state card for the viewer (DENE-1328). Any issue:updated or new
- *  comment on the issue invalidates it. */
-export function issueContextOptions(wsId: string, issueId: string) {
-  return queryOptions({
-    queryKey: issueKeys.context(wsId, issueId),
-    queryFn: () => api.getIssueContext(issueId),
-    enabled: !!wsId && !!issueId,
-  });
-}
-
 export function issueReactionsOptions(issueId: string) {
   return queryOptions({
     queryKey: issueKeys.reactions(issueId),
@@ -715,15 +694,6 @@ export function issueSubscribersOptions(issueId: string) {
   return queryOptions({
     queryKey: issueKeys.subscribers(issueId),
     queryFn: () => api.listIssueSubscribers(issueId),
-  });
-}
-
-export function issueGoalOptions(wsId: string, issueId: string) {
-  return queryOptions({
-    queryKey: issueKeys.goal(wsId, issueId),
-    queryFn: () => api.getIssueGoal(issueId),
-    enabled: !!wsId && !!issueId,
-    staleTime: 30_000,
   });
 }
 

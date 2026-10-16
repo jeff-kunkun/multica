@@ -7,8 +7,8 @@ import "fmt"
 // the agent's own comments; the unfiltered since read may return more rows.
 //
 // The issue-wide since read supplies the server-computed delta. The hint states
-// no modality: the issue-wide catch-up is the state card (workflow step 1,
-// DENE-1329). Keep per-run state in the user message rather than the stable
+// no modality: the issue-wide catch-up is the roots scan (workflow step 1).
+// Keep per-run state in the user message rather than the stable
 // brief.
 //
 // The since read has a 2000-comment cap. Use tail for bounded thread reads because
@@ -53,8 +53,8 @@ func BuildNewCommentsHint(issueID, triggerCommentID, triggerThreadID, newComment
 //
 // That zero is server-computed and issue-wide; the hint says so. Re-reading
 // the triggering thread in full stays the agent's own call — which threads to
-// expand is judgment, and the state card (workflow step 1) lists the ones that
-// moved (MUL-6984, DENE-1329).
+// expand is judgment, and the roots scan (workflow step 1) shows the ones
+// that moved (MUL-6984).
 //
 // The caller must reach this ONLY on Task.NewCommentsDeltaKnown. A zero count
 // on its own does not mean the delta is empty — a failed anchor read, a failed
@@ -85,8 +85,8 @@ func BuildResumedCommentsHint(issueID, triggerCommentID, triggerThreadID string)
 //
 // The session context is real, so the hint still says the trigger is injected
 // and offers the thread read. What it must not do is imply anything about the
-// rest of the issue: nothing here looked. It points at the state card,
-// which lists the threads that moved (DENE-1329).
+// rest of the issue: nothing here looked. It hands the roots scan over as a
+// command instead of waiving it (MUL-6984).
 func BuildResumedUnknownDeltaCommentsHint(issueID, triggerCommentID, triggerThreadID string) string {
 	threadID := activeThreadID(triggerThreadID, triggerCommentID)
 	if issueID == "" {
@@ -95,15 +95,15 @@ func BuildResumedUnknownDeltaCommentsHint(issueID, triggerCommentID, triggerThre
 	if threadID == "" {
 		return fmt.Sprintf(
 			"You're resuming the prior session, and the triggering comment is already included above. "+
-				"This turn carries no issue-wide comment delta; the state card lists the threads that moved since your last run: "+
-				"`multica issue context %s`.\n\n",
+				"This turn carries no issue-wide comment delta; scan the threads: "+
+				"`multica issue comment list %s --roots-only --summary --compact --output json`.\n\n",
 			issueID,
 		)
 	}
 	return fmt.Sprintf(
 		"You're resuming the prior session, and the triggering comment is already included above. "+
-			"This turn carries no issue-wide comment delta; the state card lists the threads that moved since your last run: "+
-			"`multica issue context %s`. "+
+			"This turn carries no issue-wide comment delta; scan the threads: "+
+			"`multica issue comment list %s --roots-only --summary --compact --output json`. "+
 			"Triggering thread in full, if resumed memory is not enough for the reply: "+
 			"`multica issue comment list %s --thread %s --tail 30 --compact --output json`.\n\n",
 		issueID, issueID, threadID,
@@ -122,7 +122,7 @@ func BuildResumedUnknownDeltaCommentsHint(issueID, triggerCommentID, triggerThre
 // triggering CONVERSATION: `--thread <trigger> --tail 30` returns that thread's
 // root plus its 30 newest replies (root is always included, even at --tail 0)
 // — the context the triggering comment actually needs. The issue-wide view is
-// the state card; the hint deliberately does NOT name `--recent`, whose
+// the roots scan; the hint deliberately does NOT name `--recent`, whose
 // saturation trap and pagination live in `multica issue comment list --help`
 // (MUL-5372). Per-turn hints name only the
 // reads they actually want the agent to run, and state no modality: the
@@ -144,8 +144,8 @@ func BuildColdCommentsHint(issueID, triggerCommentID, triggerThreadID string) st
 		"The opening issue-context block is the server snapshot for this run. If it is marked truncated, fill the gap. Triggering thread: "+
 			"`multica issue comment list %s --thread %s --tail 30 --compact --output json` "+
 			"(that thread's root + its 30 newest replies). "+
-			"Other threads that moved are listed on the state card: `multica issue context %s`.\n\n",
-		issueID, threadID, issueID,
+			"Other threads: the same command with `--roots-only --summary` in place of `--thread ... --tail 30`.\n\n",
+		issueID, threadID,
 	)
 }
 

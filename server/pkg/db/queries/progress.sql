@@ -76,3 +76,10 @@ UNION ALL
 SELECT count(*)::int FROM chat_message
 WHERE chat_session_id = @chat_session_id AND role = 'assistant'
   AND failure_reason IS NULL AND message_kind <> 'no_response';
+
+
+-- name: GetLatestIssueProgressBySource :one
+SELECT * FROM issue_progress
+WHERE issue_id = @issue_id AND workspace_id = @workspace_id AND source = @source
+ORDER BY created_at DESC
+LIMIT 1;
