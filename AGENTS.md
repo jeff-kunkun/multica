@@ -164,3 +164,8 @@ wholesale, and delete removed features outright instead of hiding them.
 The two-way sync with the kun-line instance (`server/internal/mirror`, see
 `docs/kun-main/instance.md`) can be deleted as a whole; other changes need
 not accommodate it, and nothing outside it may depend on it.
+
+Browser
+- Operate Kun's Chrome only through the background CDP channel; never raise the window or move the real mouse.
+  Only a page that needs Kun's own click may be brought forward, with a notification to Kun.
+  See `docs/kun-main/browser-background.md`.
