@@ -38,6 +38,19 @@ browser login hands back to the right one. Its runtime override is
 The daemon it starts uses a profile named after the server host, separate from
 the kun-line app's.
 
+The Desktop main process restores daemon supervision from the saved Office
+profile when automatic start is enabled, even before the renderer restores its
+login. While the app stays open, unexpected exits and starts that never expose
+health are retried with the existing recovery backoff. An explicit Stop or
+logout disables recovery. Quitting honors the automatic-stop preference;
+installing an in-app update leaves the daemon running. Queued issue runs show
+"Office offline" when their runtime is offline.
+
+Comment mentions share one active run per issue and agent across threads.
+Queued comments merge into that run; running agents receive live input when
+supported, otherwise completion schedules one follow-up for the undelivered
+instructions. Explicit reruns and scheduled wakeups keep their own intent.
+
 ### Signing and Full Disk Access
 
 Agents started by Office need Full Disk Access. macOS never asks for it: the

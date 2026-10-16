@@ -966,7 +966,7 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		// from a later request against a new HEAD (TEN-356).
 		HeadSha: headShaText(s.ResolveIssueReviewSHA(ctx, issue.ID)),
 	}
-	task, err := s.Queries.CreateAgentTask(ctx, createParams)
+	task, err := s.createIssueCommentTask(ctx, createParams)
 	if err != nil {
 		// A concurrent enqueue for the same (issue, agent) won the race and the
 		// unique index rejected this insert. That is benign — a sibling run
@@ -974,7 +974,7 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		// sentinel the caller maps to a coalesced outcome / 409 rather than a
 		// 500 that leaks the raw constraint name (#5914). Mirrors the mention
 		// path in enqueueMentionTaskWithCommentPlan.
-		if isDuplicatePendingTaskErr(err) {
+		if errors.Is(err, ErrDuplicatePendingTask) || isDuplicatePendingTaskErr(err) {
 			slog.Debug("task enqueue coalesced: pending task already exists", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(issue.AssigneeID))
 			return db.AgentTaskQueue{}, ErrDuplicatePendingTask
 		}
@@ -1046,7 +1046,7 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 	}
 	originatorUserID := attr.UserID
 	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
-	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
+	task, err := s.createIssueCommentTask(ctx, db.CreateAgentTaskParams{
 		ID:                   dbid.NewV7(),
 		AgentID:              agentID,
 		RuntimeID:            agent.RuntimeID,
@@ -1075,7 +1075,7 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 		// already covers this target — so log it at debug and return a typed
 		// sentinel the caller maps to a coalesced outcome / 409 rather than a
 		// 500 that leaks the raw constraint name (#5914).
-		if isDuplicatePendingTaskErr(err) {
+		if errors.Is(err, ErrDuplicatePendingTask) || isDuplicatePendingTaskErr(err) {
 			slog.Debug("mention task enqueue coalesced: pending task already exists", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
 			return db.AgentTaskQueue{}, ErrDuplicatePendingTask
 		}
@@ -1088,6 +1088,33 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
 	s.NotifyTaskEnqueued(ctx, task)
 	return task, nil
+}
+
+// createIssueCommentTask admits one comment run per issue and agent, including
+// simultaneous top-level mentions. Manual reruns retain their explicit intent.
+func (s *TaskService) createIssueCommentTask(ctx context.Context, params db.CreateAgentTaskParams) (db.AgentTaskQueue, error) {
+	if !params.TriggerCommentID.Valid || params.RerunOfTaskID.Valid || params.ForceFreshSession.Bool {
+		return s.Queries.CreateAgentTask(ctx, params)
+	}
+	var task db.AgentTaskQueue
+	err := s.runInTx(ctx, func(qtx *db.Queries) error {
+		if err := qtx.LockIssueCommentEnqueue(ctx,
+			"issue-comment:"+util.UUIDToString(params.IssueID)+":"+util.UUIDToString(params.AgentID)); err != nil {
+			return err
+		}
+		active, err := qtx.HasActiveTaskForIssueAndAgent(ctx, db.HasActiveTaskForIssueAndAgentParams{
+			IssueID: params.IssueID, AgentID: params.AgentID,
+		})
+		if err != nil {
+			return err
+		}
+		if active {
+			return ErrDuplicatePendingTask
+		}
+		task, err = qtx.CreateAgentTask(ctx, params)
+		return err
+	})
+	return task, err
 }
 
 // ErrChatTaskAgentArchived signals that EnqueueChatTask refused to

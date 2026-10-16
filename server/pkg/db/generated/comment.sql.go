@@ -1342,8 +1342,9 @@ func (q *Queries) ListRecentThreadCommentsForIssue(ctx context.Context, arg List
 const listReconcilableCommentsForIssueSince = `-- name: ListReconcilableCommentsForIssueSince :many
 SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type, c.created_at, c.updated_at, c.parent_id, c.workspace_id, c.resolved_at, c.resolved_by_type, c.resolved_by_id, c.source_task_id, c.quick_action_id, c.via_plugin_id, c.revision, c.recovery_settled_at, c.deleted_at, c.suppressed_agent_ids FROM comment c
 WHERE c.issue_id = $1
-  AND (c.id = ANY($2::uuid[])
-       OR comment_thread_root_id(c.id) = $3::uuid)
+  AND ($2::uuid IS NULL
+       OR c.id = ANY($3::uuid[])
+       OR comment_thread_root_id(c.id) = $2::uuid)
   -- A deleted comment is no longer input, even when replies keep its row.
   AND c.deleted_at IS NULL
   -- A comment that steered this agent's running turn belongs to that turn,
@@ -1361,13 +1362,13 @@ WHERE c.issue_id = $1
   AND (
       (
           c.author_type IN ('member', 'agent')
-          AND (c.created_at > $5 OR c.id = ANY($2::uuid[]))
+          AND (c.created_at > $5 OR c.id = ANY($3::uuid[]))
       )
       OR (
           c.author_type = 'system'
           AND c.type = 'progress_update'
           AND c.source_task_id IS NOT NULL
-          AND c.id = ANY($2::uuid[])
+          AND c.id = ANY($3::uuid[])
       )
   )
 ORDER BY c.created_at ASC, c.id ASC
@@ -1375,8 +1376,8 @@ ORDER BY c.created_at ASC, c.id ASC
 
 type ListReconcilableCommentsForIssueSinceParams struct {
 	IssueID           pgtype.UUID        `json:"issue_id"`
-	PlannedCommentIds []pgtype.UUID      `json:"planned_comment_ids"`
 	CommentThreadID   pgtype.UUID        `json:"comment_thread_id"`
+	PlannedCommentIds []pgtype.UUID      `json:"planned_comment_ids"`
 	AgentID           pgtype.UUID        `json:"agent_id"`
 	Since             pgtype.Timestamptz `json:"since"`
 }
@@ -1410,8 +1411,8 @@ type ListReconcilableCommentsForIssueSinceParams struct {
 func (q *Queries) ListReconcilableCommentsForIssueSince(ctx context.Context, arg ListReconcilableCommentsForIssueSinceParams) ([]Comment, error) {
 	rows, err := q.db.Query(ctx, listReconcilableCommentsForIssueSince,
 		arg.IssueID,
-		arg.PlannedCommentIds,
 		arg.CommentThreadID,
+		arg.PlannedCommentIds,
 		arg.AgentID,
 		arg.Since,
 	)

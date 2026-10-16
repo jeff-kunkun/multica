@@ -25,6 +25,7 @@ import { daemonStatusAlive } from "../shared/daemon-types";
 import { ensureManagedCli, managedCliPath } from "./cli-bootstrap";
 import { decideVersionAction } from "./version-decision";
 import { isQuittingToInstallUpdate } from "./updater";
+import { createDaemonQuitHandler } from "./daemon-quit";
 import {
   deriveProfileName,
   profileArgs,
@@ -98,9 +99,11 @@ let cachedCliBinaryVersion: string | null | undefined = undefined;
 let pendingVersionRestart = false;
 let targetApiBaseUrl: string | null = null;
 let activeProfile: ActiveProfile | null = null;
+let lastDaemonId: string | undefined;
 // Recovery is intentionally process-local: it keeps a daemon alive while the
 // Desktop main process is running, but is not an OS service/watchdog.
 let desiredDaemonRunning = false;
+let daemonIntentRevision = 0;
 // Once a foreign-OS daemon (for example WSL2) is observed on this profile, do
 // not replace it with a native daemon if its forwarded health endpoint drops.
 let externalDaemonObserved = false;
@@ -165,8 +168,9 @@ function urlsMatch(a: string, b: string): boolean {
 }
 
 function sendStatus(status: DaemonStatus): void {
+  if (status.daemonId) lastDaemonId = status.daemonId;
   const win = getMainWindow();
-  win?.webContents.send("daemon:status", status);
+  win?.webContents.send("daemon:status", { ...status, daemonId: status.daemonId ?? lastDaemonId });
 }
 
 interface HealthPayload {
@@ -295,7 +299,7 @@ async function writeProfileConfig(
  * Returns the Desktop-owned profile for the current target API URL. Creates
  * the profile's config.json on demand with `server_url` pinned to the target.
  *
- * Returns `null` until the renderer reports its `apiUrl`. There is no profile
+ * Returns `null` until main or renderer supplies the validated `apiUrl`. There is no profile
  * to act on in that window, and callers must do nothing rather than reach for
  * the user's default CLI profile at `~/.multica/` — neither its files nor its
  * health port.
@@ -327,11 +331,13 @@ async function ensureActiveProfile(): Promise<ActiveProfile | null> {
 
 function invalidateActiveProfile(): void {
   activeProfile = null;
+  lastDaemonId = undefined;
   externalDaemonObserved = false;
   recoveryPolicy.reset();
 }
 
 function setDesiredDaemonRunning(desired: boolean, explicit = false): void {
+  daemonIntentRevision += 1;
   if (desiredDaemonRunning === desired && !explicit) return;
   desiredDaemonRunning = desired;
   recoveryPolicy.reset();
@@ -393,6 +399,12 @@ async function fetchHealth(): Promise<DaemonStatus> {
         state: "starting",
         profile: active.name,
       };
+    }
+    if (currentState === "starting" && startingSince !== null &&
+        Date.now() - startingSince >= DAEMON_START_EXEC_TIMEOUT_MS) {
+      console.warn("[daemon] startup health deadline exceeded; allowing recovery");
+      currentState = "stopped";
+      startingSince = null;
     }
     return {
       state:
@@ -1376,8 +1388,10 @@ function stopLogTail(): void {
 
 export function setupDaemonManager(
   windowGetter: () => BrowserWindow | null,
+  initialApiUrl?: string,
 ): void {
   getMainWindow = windowGetter;
+  targetApiBaseUrl = initialApiUrl ?? null;
 
   ipcMain.handle("daemon:set-target-api-url", async (_e, url: string) => {
     const normalized = url || null;
@@ -1504,28 +1518,33 @@ export function setupDaemonManager(
   // until the managed binary is on disk (instant on subsequent launches).
   currentState = "installing_cli";
   sendStatus({ state: "installing_cli" });
-  void lifecycleOperations.runBackground(() => bootstrapCli());
-
-  let isQuitting = false;
-  app.on("before-quit", (event) => {
-    if (isQuitting) return;
-    setDesiredDaemonRunning(false);
-    stopPolling();
-    stopLogTail();
-
-    loadPrefs().then(async (prefs) => {
-      if (prefs.autoStop && !isQuittingToInstallUpdate()) {
-        isQuitting = true;
-        event.preventDefault();
-        try {
-          // stopDaemon no-ops for an externally-managed daemon (WSL2 etc.), so
-          // this is safe and instant in that case — the guard lives there. #3916
-          await stopDaemon();
-        } catch {
-          // Best-effort stop on quit
-        }
-        app.quit();
-      }
-    });
+  const launchIntentRevision = daemonIntentRevision;
+  void lifecycleOperations.runBackground(async () => {
+    // A replacement app may open before the renderer restores its login.
+    // Supervise the saved Desktop profile from main, without borrowing the
+    // default CLI profile or overriding a Stop/logout received during startup.
+    const prefs = await loadPrefs();
+    const active = await ensureActiveProfile();
+    const config = active ? await readProfileConfig(active.name) : {};
+    if (daemonIntentRevision === launchIntentRevision && prefs.autoStart &&
+        typeof config.token === "string" && config.token.trim()) {
+      setDesiredDaemonRunning(true);
+      console.log("[daemon] restoring supervision for saved Desktop session");
+    }
+    await bootstrapCli();
   });
+
+  app.on("before-quit", createDaemonQuitHandler({
+    isInstallingUpdate: isQuittingToInstallUpdate,
+    stopSupervision: () => {
+      console.log("[daemon] Desktop quitting; stopping supervision");
+      setDesiredDaemonRunning(false);
+      stopPolling();
+      stopLogTail();
+    },
+    loadPrefs,
+    stop: () => lifecycleOperations.runForeground(() => stopDaemon()),
+    quit: () => app.quit(),
+    logError: (error) => console.warn("[daemon] stop on quit failed:", error),
+  }));
 }

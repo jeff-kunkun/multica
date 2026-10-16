@@ -6,7 +6,8 @@ import type { ReactNode } from "react";
 import { api } from "@multica/core/api";
 import { chatKeys } from "@multica/core/chat/queries";
 import { issueKeys } from "@multica/core/issues/queries";
-import type { AgentTask, TimelineEntry } from "@multica/core/types";
+import { runtimeKeys } from "@multica/core/runtimes/queries";
+import type { AgentRuntime, AgentTask, TimelineEntry } from "@multica/core/types";
 import type { TaskMessagePayload } from "@multica/core/types/events";
 import { renderWithI18n } from "../../test/i18n";
 import { InlineCommentRun } from "./inline-comment-run";
@@ -15,7 +16,7 @@ const dispatchReasonCodeMock = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/core/api", () => ({ api: {
   getIssue: vi.fn(), listTaskMessages: vi.fn(), cancelTask: vi.fn(), rerunIssue: vi.fn(),
-  listTasksByIssue: vi.fn(),
+  listTasksByIssue: vi.fn(), listRuntimes: vi.fn().mockResolvedValue([]),
 }, dispatchReasonCode: dispatchReasonCodeMock }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "workspace" }));
 vi.mock("@multica/core/workspace/hooks", () => ({ useActorName: () => ({ getActorName: () => "Reviewer" }) }));
@@ -51,6 +52,19 @@ function setup(initialTask: AgentTask, hasReply = false, presentation: "inline" 
 }
 
 describe("InlineCommentRun", () => {
+  it("shows office offline for a queued task and updates when its runtime reconnects", async () => {
+    vi.mocked(api.listRuntimes).mockResolvedValueOnce([
+      { id: "runtime", status: "offline" } as AgentRuntime,
+    ]);
+    const { client } = setup(task({ status: "queued" }));
+    expect(await screen.findByText(/Office offline · open/)).toBeInTheDocument();
+    expect(screen.queryByText("Waiting for an available agent.")).not.toBeInTheDocument();
+    act(() => client.setQueryData(runtimeKeys.list("workspace"), [
+      { id: "runtime", status: "online" },
+    ]));
+    expect(await screen.findByText("Waiting for an available agent.")).toBeInTheDocument();
+  });
+
   it("places a delivered steer between the steps it arrived between", async () => {
     vi.mocked(api.listTaskMessages).mockResolvedValue([
       { task_id: id, issue_id: "issue", seq: 1, type: "tool_use", tool: "exec_command", input: { command: "cat login.tsx" }, created_at: "2026-09-07T00:00:05Z" },

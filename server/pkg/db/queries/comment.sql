@@ -377,7 +377,8 @@ LIMIT 1;
 -- Ordered ASC so later comments coalesce onto the follow-up created by the first.
 SELECT c.* FROM comment c
 WHERE c.issue_id = @issue_id
-  AND (c.id = ANY(@planned_comment_ids::uuid[])
+  AND (sqlc.narg('comment_thread_id')::uuid IS NULL
+       OR c.id = ANY(@planned_comment_ids::uuid[])
        OR comment_thread_root_id(c.id) = sqlc.narg('comment_thread_id')::uuid)
   -- A deleted comment is no longer input, even when replies keep its row.
   AND c.deleted_at IS NULL
