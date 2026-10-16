@@ -194,6 +194,8 @@ export function useUpdateBot(wsId: string) {
       botId: string;
       name?: string;
       can_release?: boolean;
+      webhook_url?: string;
+      webhook_key?: string;
     }) => api.updateBot(botId, update),
     onSettled: invalidate,
   });

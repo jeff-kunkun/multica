@@ -8,9 +8,11 @@ import enSettings from "../../locales/en/settings.json";
 
 const mockCopyText = vi.hoisted(() => vi.fn(async () => true));
 const createdRef = vi.hoisted(() => ({ current: {} as Record<string, unknown> }));
+const botsRef = vi.hoisted(() => ({ current: [] as unknown[] }));
+const mockUpdateBot = vi.hoisted(() => vi.fn());
 
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: () => ({ data: [], isLoading: false, isError: false }),
+  useQuery: () => ({ data: botsRef.current, isLoading: false, isError: false }),
 }));
 vi.mock("@multica/core/api", () => ({ api: { getBaseUrl: () => "https://office.example" } }));
 vi.mock("@multica/core/paths", () => ({ useCurrentWorkspace: () => ({ id: "workspace-1" }) }));
@@ -23,7 +25,7 @@ vi.mock("@multica/core/workspace/mutations", () => {
       isPending: false,
       mutate: (_values: unknown, opts: { onSuccess: (bot: unknown) => void }) => opts.onSuccess(createdRef.current),
     }),
-    useUpdateBot: idle,
+    useUpdateBot: () => ({ mutate: mockUpdateBot, isPending: false }),
     useRotateBotToken: idle,
     useRevokeBotToken: idle,
     useDeleteBot: idle,
@@ -72,6 +74,7 @@ async function createGrok() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  botsRef.current = [];
 });
 
 describe("BotsTab — setup prompt", () => {
@@ -114,5 +117,25 @@ describe("BotsTab — new Bot form", () => {
     expect(within(dialog).getAllByRole("textbox")).toHaveLength(1);
     expect(within(dialog).getByLabelText("Name")).toBeInTheDocument();
     expect(within(dialog).queryByRole("switch")).not.toBeInTheDocument();
+  });
+});
+
+describe("BotsTab — edit", () => {
+  it("changes the push URL and keeps the stored key when the key field is blank", async () => {
+    botsRef.current = [{ ...bot, webhook_url: "https://old.example/hook", webhook_key_set: true }];
+    const user = userEvent.setup();
+    render(<BotsTab />, { wrapper: Wrapper });
+    await user.click(screen.getByRole("button", { name: "Actions for Grok" }));
+    await user.click(await screen.findByRole("menuitem", { name: "Edit" }));
+    const url = screen.getByLabelText("Push URL");
+    expect(url).toHaveValue("https://old.example/hook");
+    expect(screen.getByLabelText("Receiver key")).toHaveAttribute("placeholder", "Leave blank to keep the current key");
+    await user.clear(url);
+    await user.type(url, "https://new.example/hook");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    expect(mockUpdateBot).toHaveBeenCalledWith(
+      { botId: "bot-1", name: "Grok", webhook_url: "https://new.example/hook" },
+      expect.anything(),
+    );
   });
 });

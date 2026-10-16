@@ -217,7 +217,7 @@ export function BotsTab() {
         submitLabel={t(($) => $.bots.create)}
         pending={createBot.isPending}
         onClose={() => setCreateOpen(false)}
-        onSubmit={(name) =>
+        onSubmit={({ name }) =>
           createBot.mutate({ name }, {
             onSuccess: (bot) => {
               setCreateOpen(false);
@@ -234,12 +234,13 @@ export function BotsTab() {
         title={t(($) => $.bots.edit_title)}
         submitLabel={t(($) => $.bots.save)}
         initialName={editing?.name}
+        webhook={editing ? { url: editing.webhook_url, keySet: editing.webhook_key_set } : undefined}
         pending={updateBot.isPending}
         onClose={() => setEditing(null)}
-        onSubmit={(name) =>
+        onSubmit={(values) =>
           editing &&
           updateBot.mutate(
-            { botId: editing.id, name },
+            { botId: editing.id, ...values },
             {
               onSuccess: () => setEditing(null),
               onError: fail,
@@ -285,14 +286,16 @@ export function BotsTab() {
 }
 
 /**
- * Only the name is asked for: the Bot registers its own push address with
- * set_webhook, so everything else travels in the setup prompt.
+ * Creating asks only for the name: the Bot registers its own push address
+ * with set_webhook, so everything else travels in the setup prompt. Editing
+ * also exposes that push address so the owner can correct it by hand.
  */
 function BotFormDialog({
   open,
   title,
   submitLabel,
   initialName,
+  webhook,
   pending,
   onClose,
   onSubmit,
@@ -301,12 +304,17 @@ function BotFormDialog({
   title: string;
   submitLabel: string;
   initialName?: string;
+  /** Present when editing: the stored push address and whether a receiver key is set. */
+  webhook?: { url: string; keySet: boolean };
   pending: boolean;
   onClose: () => void;
-  onSubmit: (name: string) => void;
+  onSubmit: (values: { name: string; webhook_url?: string; webhook_key?: string }) => void;
 }) {
   const { t } = useT("settings");
   const [name, setName] = useState(initialName ?? "");
+  const [webhookUrl, setWebhookUrl] = useState(webhook?.url ?? "");
+  // The stored key is never sent back, so a blank field keeps it.
+  const [webhookKey, setWebhookKey] = useState("");
 
   const close = () => {
     if (initialName === undefined) setName("");
@@ -323,7 +331,12 @@ function BotFormDialog({
           className="space-y-4"
           onSubmit={(e) => {
             e.preventDefault();
-            onSubmit(name.trim());
+            const key = webhookKey.trim();
+            onSubmit({
+              name: name.trim(),
+              ...(webhook ? { webhook_url: webhookUrl.trim() } : {}),
+              ...(webhook && key ? { webhook_key: key } : {}),
+            });
           }}
         >
           <div className="space-y-1.5">
@@ -337,6 +350,32 @@ function BotFormDialog({
               onChange={(e) => setName(e.target.value)}
             />
           </div>
+          {webhook ? (
+            <>
+              <div className="space-y-1.5">
+                <Label htmlFor="bot-webhook-url">{t(($) => $.bots.webhook_url_label)}</Label>
+                <Input
+                  id="bot-webhook-url"
+                  type="url"
+                  autoComplete="off"
+                  value={webhookUrl}
+                  placeholder="https://"
+                  onChange={(e) => setWebhookUrl(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="bot-webhook-key">{t(($) => $.bots.webhook_key_label)}</Label>
+                <Input
+                  id="bot-webhook-key"
+                  type="password"
+                  autoComplete="off"
+                  value={webhookKey}
+                  placeholder={webhook.keySet ? t(($) => $.bots.webhook_key_keep) : undefined}
+                  onChange={(e) => setWebhookKey(e.target.value)}
+                />
+              </div>
+            </>
+          ) : null}
           <DialogFooter>
             <Button type="button" variant="ghost" onClick={close}>
               {t(($) => $.bots.cancel)}
