@@ -435,10 +435,10 @@ func (s *IssueService) createInTx(ctx context.Context, tx pgx.Tx, qtx *db.Querie
 			}
 		}
 	}
-	// A new issue is private unless it lands in a project, in which case it
-	// takes that project's current scope as its initial value and is then
-	// independent of it (DENE-698). Joining a shared project is how work
-	// becomes visible without anyone having to re-share each issue.
+	// A new issue in a project takes that project's current scope as its
+	// initial value, but never narrower than the project's people, and is then
+	// independent of it (DENE-698). Joining a project is how work becomes
+	// visible without anyone having to re-share each issue.
 	visibility := pgtype.Text{String: string(permission.DefaultVisibility), Valid: true}
 	var domainID pgtype.UUID
 	if p.CreatorType == "agent" {
@@ -457,8 +457,11 @@ func (s *IssueService) createInTx(ctx context.Context, tx pgx.Tx, qtx *db.Querie
 		if err != nil {
 			return issueCreateTxOutcome{}, ErrProjectNotFound
 		}
-		if permission.Visibility(project.Visibility).Valid() {
+		switch permission.Visibility(project.Visibility) {
+		case permission.VisibilityProject, permission.VisibilityWorkspace:
 			visibility = pgtype.Text{String: project.Visibility, Valid: true}
+		default:
+			visibility = pgtype.Text{String: string(permission.VisibilityProject), Valid: true}
 		}
 		domainID, err = issueDomainInProject(project, p.DomainID, p.DomainPinned)
 		if err != nil {

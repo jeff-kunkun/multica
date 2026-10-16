@@ -461,13 +461,11 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		Priority:    priority,
 		StartDate:   startDate,
 		DueDate:     dueDate,
-		// Every project starts private (DENE-698): zero trust, nothing shared to
-		// human friends until the owner shares it. An agent-created project is
-		// no exception — it records the agent's human owner as created_by, and
-		// because that owner (the workspace owner or the agent's owner) always
-		// sees their own private projects (canSeeProject), private is safe to
-		// keep as the default here too.
-		Visibility: pgtype.Text{String: string(permission.DefaultVisibility), Valid: true},
+		// Every project starts visible to its own people (DENE-2166): its
+		// members see it and the work in it, nobody else does until it is
+		// widened. An agent-created project is no exception — it records the
+		// agent's human owner as created_by, who always sees it.
+		Visibility: pgtype.Text{String: string(permission.VisibilityProject), Valid: true},
 	}
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	if actorType == "member" {

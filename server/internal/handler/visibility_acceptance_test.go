@@ -344,8 +344,8 @@ func TestAgentCreatedProjectKeepsOwnerVisibilityAfterPrivate(t *testing.T) {
 		Visibility string `json:"visibility"`
 	}
 	testutil.Call(t, testHandler.CreateProject, req).Want(201).JSON(&created)
-	if created.Visibility != "private" {
-		t.Fatalf("agent-created project visibility = %q, want private", created.Visibility)
+	if created.Visibility != "project" {
+		t.Fatalf("agent-created project visibility = %q, want project", created.Visibility)
 	}
 
 	setPrivate := withURLParam(newRequestAs(owner, "PUT", "/api/projects/"+created.ID+"/visibility",
