@@ -148,6 +148,21 @@ func TestLocalRunCopyDisabledBySwitchFile(t *testing.T) {
 	}
 }
 
+func TestLocalRunCopyDisabledOnlyForListedFolders(t *testing.T) {
+	orig, logger := newLocalCopyFixture(t, map[string]string{"a.txt": "a\n"})
+	switchFile := filepath.Join(os.Getenv("HOME"), ".multica", localCopyDisableFileName)
+
+	writeTestFile(t, switchFile, "# too large to clone\n/elsewhere/big-folder\n")
+	c := mustPrepareLocalRunCopy(t, Task{ID: "task-1", AgentID: "agent-1", IssueID: "issue-1"}, orig, logger)
+	c.Finish(logger)
+
+	writeTestFile(t, switchFile, "/elsewhere/big-folder\n"+orig+"/\n")
+	c, err := prepareLocalRunCopy(Task{ID: "task-2", AgentID: "agent-1", IssueID: "issue-1"}, orig, logger)
+	if err != nil || c != nil {
+		t.Fatalf("prepare for listed folder = (%v, %v), want (nil, nil)", c, err)
+	}
+}
+
 func TestLocalRunCopyMergesLeftoverBeforeNextRun(t *testing.T) {
 	orig, logger := newLocalCopyFixture(t, map[string]string{"a.txt": "a\n"})
 	task := Task{ID: "task-1", AgentID: "agent-1", IssueID: "issue-1"}
