@@ -66,6 +66,7 @@ func backendResumeContinuityNotice(task Task) string {
 // Returns "" when none of the blocks apply.
 func perTurnContextBlocks(task Task, opts promptOpts) string {
 	var b strings.Builder
+	b.WriteString(buildLocalRunCopyBlock(opts.localRunCopy, opts.localRunCopyOrig))
 	b.WriteString(buildSharedLocalDirectoryBlock(opts.sharedLocalDirectory))
 	b.WriteString(buildSharedWorkspaceBlock(opts.sharedWorkspace))
 	b.WriteString(buildWorktreeReplayConflictBlock(opts.worktreeReplayConflicts))
@@ -99,6 +100,8 @@ func buildJoinedWakeupsBlock(notes string) string {
 // common BuildPrompt(task, provider) call sites stay unchanged.
 type promptOpts struct {
 	sharedLocalDirectory     bool
+	localRunCopy             string
+	localRunCopyOrig         string
 	sharedWorkspace          bool
 	worktreeReplayConflicts  []string
 	replaySkippedNotice      string
@@ -120,6 +123,25 @@ type PromptOption func(*promptOpts)
 // has to be told (issue #7344).
 func WithSharedLocalDirectory() PromptOption {
 	return func(o *promptOpts) { o.sharedLocalDirectory = true }
+}
+
+// WithLocalRunCopy marks an in-place local_directory turn that works in a
+// private clone of the user's folder, merged back when the run ends
+// (DENE-2159).
+func WithLocalRunCopy(workDir, orig string) PromptOption {
+	return func(o *promptOpts) { o.localRunCopy, o.localRunCopyOrig = workDir, orig }
+}
+
+func buildLocalRunCopyBlock(workDir, orig string) string {
+	if workDir == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("## Private copy of the user's folder\n\n")
+	fmt.Fprintf(&b, "Your working directory `%s` is a private copy of the user's folder `%s`, made for this run. Edit files here directly; do not create git worktrees inside it. When the run ends, your changes are merged back into the original folder automatically and this copy is removed.\n\n", workDir, orig)
+	b.WriteString("Other tasks may change the original folder while you work. If you and another task changed the same lines of a file, your version is kept and theirs is backed up, so before finishing, if that matters, compare the files you changed with the original folder and merge in their changes yourself. Refer to files by their path in the original folder.\n\n")
+	b.WriteString("If it is a git repository: commits on a new branch are carried back to the original repository, and you can push them from here. Commits on the checked-out branch arrive in the original folder as uncommitted changes.\n\n")
+	return b.String()
 }
 
 // WithSharedWorkspace marks a task running against a local_directory in

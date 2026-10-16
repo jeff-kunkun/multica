@@ -40,6 +40,11 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
+	// The per-path mutex tests expect in-place tasks to queue; a private copy
+	// would let them skip it on an APFS temp dir. Tests that need the copy
+	// switch it back on.
+	localCopySupported = func(string) bool { return false }
+
 	code := m.Run()
 	_ = os.RemoveAll(scratchHome)
 	os.Exit(code)

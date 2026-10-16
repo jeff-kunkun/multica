@@ -6667,6 +6667,14 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 		return nil, false
 	}
 
+	// On a volume that can clone, an in-place task works in a private copy of
+	// the directory and merges back when it ends (DENE-2159), so it has nothing
+	// to queue for either.
+	if localCopySupported(assignment.AbsPath) {
+		taskLog.Info("local_directory: private copy, skipping path mutex")
+		return nil, false
+	}
+
 	// A conversation is not a second writer. Everything above still applied —
 	// the mode was checked, the path was validated, and the assignment stands,
 	// so this task keeps the user's directory as its working directory. Only
@@ -8818,6 +8826,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// decision, including a task whose server sent no decision, keeps the
 	// per-task directory below.
 	scratchDir, scratchRel, useScratch, scratchErr := d.taskSharedScratch(task)
+	var runCopy *localRunCopy
 	if scratchErr != nil {
 		return TaskResult{}, asEnvironmentSetupFailure(fmt.Errorf("shared scratch: %w", scratchErr))
 	}
@@ -9379,6 +9388,23 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		} else {
 			if localAssignment != nil {
 				prepParams.LocalWorkDir = localAssignment.AbsPath
+				// In place on a volume that can clone: work in a private copy
+				// and merge it back when the run ends (DENE-2159). Deferred
+				// before Prepare so the sidecar cleanup registered after it runs
+				// first and the merge-back never carries Multica's own files
+				// into the user's folder. Without a copy the task runs in the
+				// folder itself, unlocked — the same as a chat turn.
+				if !localAssignment.IsShared() && localCopySupported(localAssignment.AbsPath) {
+					rc, copyErr := prepareLocalRunCopy(task, localAssignment.AbsPath, taskLog)
+					switch {
+					case copyErr != nil:
+						taskLog.Warn("local_directory: private copy failed; running in the folder directly", "error", copyErr)
+					case rc != nil:
+						runCopy = rc
+						defer rc.Finish(taskLog)
+						prepParams.LocalWorkDir = rc.Work
+					}
+				}
 				// .multica/ is the daemon's own bookkeeping. In the user's
 				// directory it is either isolated up front or, for a git
 				// checkout whose runtime cannot take a brief from outside the
@@ -9669,6 +9695,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// notice is about the workspace's conventions, not about a lock this
 		// turn happens to skip.
 		promptOptions = append(promptOptions, WithSharedWorkspace())
+	} else if runCopy != nil {
+		promptOptions = append(promptOptions, WithLocalRunCopy(runCopy.Work, runCopy.Orig))
 	} else if localAssignment != nil && !localAssignment.UsesWorktree() && localDirectoryLockExempt(task) {
 		promptOptions = append(promptOptions, WithSharedLocalDirectory())
 	}
