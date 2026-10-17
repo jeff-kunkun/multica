@@ -940,8 +940,10 @@ func (h *Handler) DownloadAttachment(w http.ResponseWriter, r *http.Request) {
 // Serves an attachment INLINE (Content-Disposition: inline; text/html with an
 // explicit charset for HTML documents) under a sandboxing CSP, so a phone or
 // desktop browser renders the document in place — scripts and charts run —
-// instead of downloading it (DENE-2225). The original /download route above
-// is untouched and keeps forcing a file download.
+// instead of downloading it (DENE-2225). Non-HTML attachments keep their
+// stored Content-Type but are forced to download (attachment disposition);
+// only the HTML preview renders inline. The original /download route above is
+// untouched and keeps forcing a file download.
 //
 // Two credentials redeem it:
 //   - a preview capability (?exp=&sig=, minted by the authenticated
@@ -990,20 +992,25 @@ func (h *Handler) PreviewAttachment(w http.ResponseWriter, r *http.Request) {
 	// The capability travels in the query string; keep it out of the Referer
 	// when the document loads subresources.
 	w.Header().Set("Referrer-Policy", "no-referrer")
-	h.serveAttachmentBody(
-		w, r,
-		att, h.Storage.KeyFromURL(att.Url),
-		attachmentPreviewContentType(att.ContentType, att.Filename),
-		storage.InlineContentDisposition(att.Filename),
-		true,
-	)
+	contentType := attachmentPreviewContentType(att.ContentType, att.Filename)
+	// Only the HTML preview renders inline. Anything else keeps its stored
+	// type but is forced to download so the preview route never displays a
+	// non-HTML payload (SVG, plugin formats, sniffed binaries) in place.
+	disposition := storage.AttachmentContentDisposition(att.Filename)
+	if contentType == previewHTMLContentType {
+		disposition = storage.InlineContentDisposition(att.Filename)
+	}
+	h.serveAttachmentBody(w, r, att, h.Storage.KeyFromURL(att.Url), contentType, disposition, true)
 }
 
 // attachmentPreviewContentType picks the Content-Type for the inline preview
 // response. HTML is pinned to text/html; charset=utf-8 regardless of what the
 // upload sniffed (an octet-stream would download instead of render), matched
 // on both the stored type and the filename so a mislabeled upload still
-// previews. Everything else keeps its stored type.
+// previews. Everything else keeps its stored type (and downloads rather than
+// rendering inline — see PreviewAttachment).
+const previewHTMLContentType = "text/html; charset=utf-8"
+
 func attachmentPreviewContentType(contentType, filename string) string {
 	normalized := strings.ToLower(strings.TrimSpace(contentType))
 	if idx := strings.IndexByte(normalized, ';'); idx >= 0 {
@@ -1011,7 +1018,7 @@ func attachmentPreviewContentType(contentType, filename string) string {
 	}
 	ext := strings.ToLower(path.Ext(filename))
 	if normalized == "text/html" || ext == ".html" || ext == ".htm" {
-		return "text/html; charset=utf-8"
+		return previewHTMLContentType
 	}
 	if contentType != "" {
 		return contentType

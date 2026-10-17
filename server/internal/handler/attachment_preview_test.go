@@ -55,14 +55,14 @@ func previewCapabilityQuery(t *testing.T, attachmentID string, ttl time.Duration
 	return "?" + u.RawQuery
 }
 
-func requireSandboxPreviewHeaders(t *testing.T, header http.Header, wantContentType string) {
+func requireSandboxPreviewHeaders(t *testing.T, header http.Header, wantContentType, wantDispositionPrefix string) {
 	t.Helper()
 	if got, want := header.Get("Content-Type"), wantContentType; got != want {
 		t.Fatalf("Content-Type = %q, want %q", got, want)
 	}
 	disposition := header.Get("Content-Disposition")
-	if !strings.HasPrefix(disposition, "inline") {
-		t.Fatalf("Content-Disposition = %q, want it to start with inline", disposition)
+	if !strings.HasPrefix(disposition, wantDispositionPrefix) {
+		t.Fatalf("Content-Disposition = %q, want it to start with %s", disposition, wantDispositionPrefix)
 	}
 	if got, want := header.Get("Cache-Control"), "no-store"; got != want {
 		t.Fatalf("Cache-Control = %q, want %q", got, want)
@@ -100,7 +100,7 @@ func TestPreviewAttachment_CapabilityServesInlineHTML(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("capability preview = %d, body %s", w.Code, w.Body.String())
 	}
-	requireSandboxPreviewHeaders(t, w.Header(), "text/html; charset=utf-8")
+	requireSandboxPreviewHeaders(t, w.Header(), "text/html; charset=utf-8", "inline")
 	if w.Body.String() != string(body) {
 		t.Fatalf("preview body = %q, want the stored bytes", w.Body.String())
 	}
@@ -119,10 +119,10 @@ func TestPreviewAttachment_PinsHTMLContentTypeFromFilename(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("capability preview = %d, body %s", w.Code, w.Body.String())
 	}
-	requireSandboxPreviewHeaders(t, w.Header(), "text/html; charset=utf-8")
+	requireSandboxPreviewHeaders(t, w.Header(), "text/html; charset=utf-8", "inline")
 }
 
-func TestPreviewAttachment_NonHTMLKeepsStoredContentType(t *testing.T) {
+func TestPreviewAttachment_NonHTMLForcesAttachment(t *testing.T) {
 	_, id := previewTestSetup(t, "notes.md", "text/markdown", []byte("# notes"))
 
 	path := "/api/attachments/" + id + "/preview" + previewCapabilityQuery(t, id, 0)
@@ -132,7 +132,9 @@ func TestPreviewAttachment_NonHTMLKeepsStoredContentType(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("capability preview = %d, body %s", w.Code, w.Body.String())
 	}
-	requireSandboxPreviewHeaders(t, w.Header(), "text/markdown")
+	// Non-HTML never renders inline on /preview: stored type kept, forced
+	// download disposition (DENE-2225).
+	requireSandboxPreviewHeaders(t, w.Header(), "text/markdown", "attachment")
 }
 
 func TestPreviewAttachment_ExpiredCapabilityFallsBackToAuth(t *testing.T) {
@@ -154,7 +156,7 @@ func TestPreviewAttachment_ExpiredCapabilityFallsBackToAuth(t *testing.T) {
 	if w.Code != http.StatusOK {
 		t.Fatalf("expired capability with member session = %d, body %s", w.Code, w.Body.String())
 	}
-	requireSandboxPreviewHeaders(t, w.Header(), "text/html; charset=utf-8")
+	requireSandboxPreviewHeaders(t, w.Header(), "text/html; charset=utf-8", "inline")
 }
 
 // A signature minted for another intent (here: the forced-attachment download
@@ -268,7 +270,7 @@ func TestGetAttachmentByID_MintsPreviewURL(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("minted preview_url = %d, body %s", rec.Code, rec.Body.String())
 	}
-	requireSandboxPreviewHeaders(t, rec.Header(), "text/html; charset=utf-8")
+	requireSandboxPreviewHeaders(t, rec.Header(), "text/html; charset=utf-8", "inline")
 
 	// List-path responses never mint it: preview_url is a bearer link.
 	att := loadTestAttachment(t, id)
