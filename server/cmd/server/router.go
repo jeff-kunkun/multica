@@ -235,6 +235,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		CloudURL:                 strings.TrimSpace(os.Getenv("MULTICA_CLOUD_URL")),
 		AttachmentDownloadMode:   os.Getenv("ATTACHMENT_DOWNLOAD_MODE"),
 		AttachmentDownloadURLTTL: envDuration("ATTACHMENT_DOWNLOAD_URL_TTL", 30*time.Minute),
+		AttachmentPreviewURLTTL:  envDuration("ATTACHMENT_PREVIEW_URL_TTL", 30*24*time.Hour),
 		AttachmentFrameAncestors: origins,
 		LLMAPIKey:                strings.TrimSpace(os.Getenv("MULTICA_LLM_API_KEY")),
 		LLMBaseURL:               strings.TrimSpace(os.Getenv("MULTICA_LLM_BASE_URL")),
@@ -416,6 +417,20 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// The authenticated /api/attachments/{id}/download route below is
 	// unchanged — this one is purely additive.
 	r.Get("/api/attachments/{id}/signed-download", h.DownloadAttachmentWithCapability)
+
+	// Capability-authenticated attachment PREVIEW (DENE-2225). Public for the
+	// same reason as signed-download: the link is meant to be tapped in a
+	// phone browser that has no session here, so the preview capability in
+	// the query is the credential. It is minted by the AUTHENTICATED
+	// single-attachment endpoint (preview_url) and redemption serves the body
+	// inline under a sandboxing CSP — an opaque origin that can read neither
+	// cookies nor the API. Without (or with an expired) capability the route
+	// falls back to the caller's session, so a logged-in member can always
+	// open the bare /preview URL. OptionalAuth validates that session with
+	// the same code /download's auth applies and stamps identity headers
+	// itself — it is not client-supplied here — while leaving the capability
+	// path intact when there is no session (or only a stale one).
+	r.With(middleware.OptionalAuth(queries, patCache, cloudPATVerifier, cfSigner)).Get("/api/attachments/{id}/preview", h.PreviewAttachment)
 
 	// Avatar serving. Public for the same reason as the capability download
 	// above: the auth cookie is SameSite=Strict, so an auth-gated URL cannot

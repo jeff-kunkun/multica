@@ -102,6 +102,10 @@ type Config struct {
 	CloudURL                 string
 	AttachmentDownloadMode   string
 	AttachmentDownloadURLTTL time.Duration
+	// AttachmentPreviewURLTTL bounds how long a minted preview capability
+	// link (preview_url) stays redeemable. From ATTACHMENT_PREVIEW_URL_TTL;
+	// defaults to 30 days — see attachmentPreviewTTL.
+	AttachmentPreviewURLTTL time.Duration
 	// AttachmentFrameAncestors are trusted browser origins allowed to embed
 	// attachment preview responses. In production this should mirror the
 	// frontend/CORS origin allowlist so split app/api self-hosted deployments
