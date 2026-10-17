@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/multica-ai/multica/server/internal/middleware"
 )
 
 // previewTestSetup installs an in-memory seekable mockStorage (the local-disk
@@ -317,5 +318,70 @@ func TestAttachmentPreviewContentType(t *testing.T) {
 		if got := attachmentPreviewContentType(tc.contentType, tc.filename); got != tc.want {
 			t.Fatalf("attachmentPreviewContentType(%q, %q) = %q, want %q", tc.contentType, tc.filename, got, tc.want)
 		}
+	}
+}
+
+// servePreviewThroughRoute runs the composed public /preview chain — the real
+// OptionalAuth middleware in front of the handler, as router.go mounts it —
+// instead of the handler in isolation. The tests below are about the chain:
+// identity must come from a validated credential, never from the request.
+func servePreviewThroughRoute(w http.ResponseWriter, r *http.Request) {
+	middleware.OptionalAuth(nil, nil, nil, nil)(http.HandlerFunc(testHandler.PreviewAttachment)).ServeHTTP(w, r)
+}
+
+// The regression test for the auth bypass: a client-supplied X-User-ID naming a
+// real workspace member must not read the attachment. Before the fix the public
+// route trusted that header outright; now OptionalAuth strips it and the handler
+// sees no identity, so the member can neither be impersonated nor read.
+func TestPreviewAttachment_ForgedUserHeaderCannotRead(t *testing.T) {
+	_, id := previewTestSetup(t, "report.html", "text/html", []byte("<html></html>"))
+
+	req, w := newPreviewRouteRequest(t, "/api/attachments/"+id+"/preview", false)
+	// testUserID is the owner of the attachment's workspace, so this header
+	// is exactly what used to pass the membership check.
+	req.Header.Set("X-User-ID", testUserID)
+	servePreviewThroughRoute(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("forged X-User-ID read the attachment: %d, body %s", w.Code, w.Body.String())
+	}
+}
+
+// A bare /preview URL with a valid session must keep working — the route falls
+// back to session auth when there is no capability. The session is honoured
+// only because it validates through the same code /download uses.
+func TestPreviewAttachment_MemberSessionReadsBareURL(t *testing.T) {
+	_, id := previewTestSetup(t, "report.html", "text/html", []byte("<html></html>"))
+
+	req, w := newPreviewRouteRequest(t, "/api/attachments/"+id+"/preview", false)
+	req.Header.Set("Authorization", "Bearer "+refreshSessionToken(t, time.Hour, ""))
+	// A forged header alongside a real credential must lose to the token.
+	req.Header.Set("X-User-ID", "00000000-0000-0000-0000-000000000000")
+	servePreviewThroughRoute(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("bare /preview with a member session = %d, body %s", w.Code, w.Body.String())
+	}
+	requireSandboxPreviewHeaders(t, w.Header(), "text/html; charset=utf-8", "inline")
+}
+
+// A signed capability must still redeem with no session at all — the phone
+// share-link path. This is why a missing credential is anonymous rather than
+// rejected on this route.
+func TestPreviewAttachment_CapabilityRedeemsThroughMiddleware(t *testing.T) {
+	body := []byte("<html><body>shared</body></html>")
+	_, id := previewTestSetup(t, "report.html", "text/html", body)
+
+	req, w := newPreviewRouteRequest(t, "/api/attachments/"+id+"/preview"+previewCapabilityQuery(t, id, 0), false)
+	// Even with a bogus identity header attached, the capability is what grants.
+	req.Header.Set("X-User-ID", "00000000-0000-0000-0000-000000000000")
+	servePreviewThroughRoute(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("capability preview through OptionalAuth = %d, body %s", w.Code, w.Body.String())
+	}
+	requireSandboxPreviewHeaders(t, w.Header(), "text/html; charset=utf-8", "inline")
+	if w.Body.String() != string(body) {
+		t.Fatalf("preview body = %q, want the stored bytes", w.Body.String())
 	}
 }

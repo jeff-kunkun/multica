@@ -425,9 +425,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// single-attachment endpoint (preview_url) and redemption serves the body
 	// inline under a sandboxing CSP — an opaque origin that can read neither
 	// cookies nor the API. Without (or with an expired) capability the route
-	// falls back to ordinary session auth, so a logged-in member can always
-	// open the bare /preview URL.
-	r.Get("/api/attachments/{id}/preview", h.PreviewAttachment)
+	// falls back to the caller's session, so a logged-in member can always
+	// open the bare /preview URL. OptionalAuth validates that session with
+	// the same code /download's auth applies and stamps identity headers
+	// itself — it is not client-supplied here — while leaving the capability
+	// path intact when there is no session (or only a stale one).
+	r.With(middleware.OptionalAuth(queries, patCache, cloudPATVerifier, cfSigner)).Get("/api/attachments/{id}/preview", h.PreviewAttachment)
 
 	// Avatar serving. Public for the same reason as the capability download
 	// above: the auth cookie is SameSite=Strict, so an auth-gated URL cannot
