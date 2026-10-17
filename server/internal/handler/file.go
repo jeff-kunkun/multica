@@ -80,6 +80,17 @@ type AttachmentResponse struct {
 	// responses. Empty when the server cannot mint one for the object's storage
 	// mode; clients fall back to DownloadURL. (MUL follow-up to #6092 / #6713.)
 	AttachmentDownloadURL string `json:"attachment_download_url,omitempty"`
+	// PreviewURL is a credential-free URL that serves the attachment INLINE —
+	// Content-Disposition: inline, text/html; charset=utf-8 for HTML — under a
+	// CSP sandbox (opaque origin), so a phone browser renders the document
+	// in place instead of downloading it while the sandboxed document can
+	// neither read this deployment's cookies/tokens nor reach the API
+	// (connect-src 'none'). Minted ONLY by the single-attachment endpoint,
+	// like AttachmentDownloadURL: it is a bearer link with a multi-day TTL
+	// (ATTACHMENT_PREVIEW_URL_TTL) and must never be persisted or emitted in
+	// list responses. The route always proxy-streams, so this path works in
+	// every storage mode.
+	PreviewURL string `json:"preview_url,omitempty"`
 	// MarkdownURL is the durable, absolute-when-possible URL the client
 	// SHOULD persist into markdown bodies (issue descriptions, comments,
 	// chat messages). It is computed per deployment policy by
@@ -323,6 +334,10 @@ func (h *Handler) attachmentDownloadURLTTL() time.Duration {
 		return h.cfg.AttachmentDownloadURLTTL
 	}
 	return defaultAttachmentDownloadURLTTL
+}
+
+func (h *Handler) attachmentPreviewCapabilityTTL() time.Duration {
+	return attachmentPreviewTTL(h.cfg.AttachmentPreviewURLTTL)
 }
 
 // groupAttachments loads attachments for multiple comments and groups them by comment ID.
@@ -757,6 +772,11 @@ func (h *Handler) writeSignedAttachmentMetadata(w http.ResponseWriter, r *http.R
 		resp.AttachmentDownloadURL = attachmentDownloadCapabilityPath(resp.ID, time.Now())
 	}
 
+	// Preview capability (DENE-2225): minted for every storage mode because
+	// the /preview route always proxy-streams, never redirects. Same
+	// single-attachment-endpoint-only rule as AttachmentDownloadURL above.
+	resp.PreviewURL = attachmentPreviewCapabilityPath(resp.ID, time.Now(), h.attachmentPreviewCapabilityTTL())
+
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -913,6 +933,92 @@ func (h *Handler) DownloadAttachment(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// PreviewAttachment — GET /api/attachments/{id}/preview
+// ---------------------------------------------------------------------------
+//
+// Serves an attachment INLINE (Content-Disposition: inline; text/html with an
+// explicit charset for HTML documents) under a sandboxing CSP, so a phone or
+// desktop browser renders the document in place — scripts and charts run —
+// instead of downloading it (DENE-2225). The original /download route above
+// is untouched and keeps forcing a file download.
+//
+// Two credentials redeem it:
+//   - a preview capability (?exp=&sig=, minted by the authenticated
+//     single-attachment endpoint as preview_url) — the shareable path for a
+//     browser that never logged in here, and
+//   - an ordinary session (cookie / Authorization), which makes the bare
+//     /preview URL work for a logged-in member.
+//
+// Security posture: the sandbox CSP denies the document same-origin access —
+// document.cookie and storage throw, so this deployment's session cookie and
+// tokens are unreadable — and connect-src 'none' plus the locked
+// img/form/frame sources keep it from firing credentialed requests at the
+// API. allow-scripts keeps inline scripts (and CDN-loaded ones) running
+// inside that opaque origin. HTML is always proxied — never a cross-origin
+// redirect — because the sandbox header must ride the document response
+// itself.
+func (h *Handler) PreviewAttachment(w http.ResponseWriter, r *http.Request) {
+	attachmentID := chi.URLParam(r, "id")
+	query := r.URL.Query()
+	var att db.Attachment
+	if verifyAttachmentCapability(attachmentID, query.Get("exp"), query.Get("sig"), attachmentCapabilityPreviewIntent, time.Now()) {
+		attUUID, ok := parseUUIDOrBadRequest(w, attachmentID, "attachment id")
+		if !ok {
+			return
+		}
+		var err error
+		att, err = h.Queries.GetAttachmentByIDOnly(r.Context(), attUUID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, "attachment not found")
+			return
+		}
+	} else {
+		// No, stale, or forged capability: fall back to session auth with the
+		// exact 401/404 shape the download route uses.
+		var ok bool
+		att, ok = h.loadAttachmentForDownload(w, r)
+		if !ok {
+			return
+		}
+	}
+	if h.Storage == nil {
+		writeFeatureDisabled(w, "storage_not_configured", "storage not configured")
+		return
+	}
+
+	// The capability travels in the query string; keep it out of the Referer
+	// when the document loads subresources.
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	h.serveAttachmentBody(
+		w, r,
+		att, h.Storage.KeyFromURL(att.Url),
+		attachmentPreviewContentType(att.ContentType, att.Filename),
+		storage.InlineContentDisposition(att.Filename),
+		true,
+	)
+}
+
+// attachmentPreviewContentType picks the Content-Type for the inline preview
+// response. HTML is pinned to text/html; charset=utf-8 regardless of what the
+// upload sniffed (an octet-stream would download instead of render), matched
+// on both the stored type and the filename so a mislabeled upload still
+// previews. Everything else keeps its stored type.
+func attachmentPreviewContentType(contentType, filename string) string {
+	normalized := strings.ToLower(strings.TrimSpace(contentType))
+	if idx := strings.IndexByte(normalized, ';'); idx >= 0 {
+		normalized = strings.TrimSpace(normalized[:idx])
+	}
+	ext := strings.ToLower(path.Ext(filename))
+	if normalized == "text/html" || ext == ".html" || ext == ".htm" {
+		return "text/html; charset=utf-8"
+	}
+	if contentType != "" {
+		return contentType
+	}
+	return "application/octet-stream"
+}
+
 func (h *Handler) resolveAttachmentDownloadMode(rawURL string) attachmentDownloadMode {
 	switch h.attachmentDownloadMode() {
 	case attachmentDownloadModeCloudFront:
@@ -1000,6 +1106,23 @@ func (h *Handler) ServeLocalUpload(w http.ResponseWriter, r *http.Request) {
 //     RFC 7233 it is ignored and the full body is served (200), matching the
 //     seekable path's successful outcome rather than failing with 416.
 func (h *Handler) proxyAttachmentDownload(w http.ResponseWriter, r *http.Request, att db.Attachment, key string, forceAttachment bool) {
+	contentType := att.ContentType
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	disposition := storage.ContentDisposition(att.ContentType, att.Filename)
+	if forceAttachment {
+		// Download-intent capability (dl=1): override the media-aware inline
+		// disposition so the browser saves the file instead of previewing it.
+		disposition = storage.AttachmentContentDisposition(att.Filename)
+	}
+	h.serveAttachmentBody(w, r, att, key, contentType, disposition, false)
+}
+
+// serveAttachmentBody streams an attachment through the API with explicit
+// Content-Type / Content-Disposition headers. sandboxCSP swaps the standard
+// preview CSP for the sandboxing variant used by the inline preview route.
+func (h *Handler) serveAttachmentBody(w http.ResponseWriter, r *http.Request, att db.Attachment, key, contentType, disposition string, sandboxCSP bool) {
 	reader, err := h.Storage.GetReader(r.Context(), key)
 	if err != nil {
 		slog.Error("failed to open attachment for download", "id", uuidToString(att.ID), "key", key, "error", err)
@@ -1008,23 +1131,17 @@ func (h *Handler) proxyAttachmentDownload(w http.ResponseWriter, r *http.Request
 	}
 	defer reader.Close()
 
-	if att.ContentType != "" {
-		w.Header().Set("Content-Type", att.ContentType)
-	} else {
-		w.Header().Set("Content-Type", "application/octet-stream")
-	}
-	disposition := storage.ContentDisposition(att.ContentType, att.Filename)
-	if forceAttachment {
-		// Download-intent capability (dl=1): override the media-aware inline
-		// disposition so the browser saves the file instead of previewing it.
-		disposition = storage.AttachmentContentDisposition(att.Filename)
-	}
+	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Disposition", disposition)
 	// no-store predates Range support; keep it. Range/206 semantics are
 	// independent of caching — clients resume via Content-Range, not the cache.
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-	h.setAttachmentPreviewSecurityHeaders(w)
+	if sandboxCSP {
+		w.Header().Set("Content-Security-Policy", attachmentSandboxPreviewCSPHeader(h.cfg.AttachmentFrameAncestors))
+	} else {
+		h.setAttachmentPreviewSecurityHeaders(w)
+	}
 
 	// Seekable backends get full standard-library Range handling. A zero
 	// modTime disables Last-Modified / If-Modified-Since (we keep no-store);
@@ -1242,6 +1359,43 @@ func (h *Handler) setAttachmentPreviewSecurityHeaders(w http.ResponseWriter) {
 }
 
 func attachmentPreviewCSPHeader(frameAncestors []string) string {
+	return "default-src 'none'; " +
+		"img-src 'self' data:; " +
+		"media-src 'self'; " +
+		"frame-ancestors " + strings.Join(previewFrameAncestors(frameAncestors), " ") + "; " +
+		"object-src 'none'; " +
+		"base-uri 'none'; " +
+		"form-action 'none'"
+}
+
+// attachmentSandboxPreviewCSPHeader is the CSP for the inline HTML preview
+// route (DENE-2225). The `sandbox` directive (deliberately WITHOUT
+// allow-same-origin) puts the document into an opaque origin: cookies,
+// localStorage and any same-origin read are unavailable, which is the line
+// between "renders the report" and "reads the session". The source allowlists
+// keep self-contained report documents — inline scripts, inline styles,
+// data:/blob:/https: images, fonts and media — fully working while
+// connect-src 'none', object-src 'none', base-uri and form-action 'none' deny
+// credentialed fetch/XHR/WebSocket traffic, plugin content, and form posts
+// back at the API. No frame-ancestors value is '*' — embedding stays limited
+// to the configured trusted origins.
+func attachmentSandboxPreviewCSPHeader(frameAncestors []string) string {
+	return "sandbox allow-scripts allow-popups allow-modals allow-forms allow-downloads; " +
+		"default-src 'none'; " +
+		"script-src 'unsafe-inline' 'unsafe-eval' data: blob: https:; " +
+		"style-src 'unsafe-inline' data: blob: https:; " +
+		"img-src data: blob: https:; " +
+		"font-src data: blob: https:; " +
+		"media-src data: blob: https:; " +
+		"connect-src 'none'; " +
+		"frame-src 'none'; " +
+		"object-src 'none'; " +
+		"base-uri 'none'; " +
+		"form-action 'none'; " +
+		"frame-ancestors " + strings.Join(previewFrameAncestors(frameAncestors), " ")
+}
+
+func previewFrameAncestors(frameAncestors []string) []string {
 	ancestors := []string{"'self'"}
 	seen := map[string]struct{}{"'self'": {}}
 	for _, raw := range frameAncestors {
@@ -1255,13 +1409,7 @@ func attachmentPreviewCSPHeader(frameAncestors []string) string {
 		seen[source] = struct{}{}
 		ancestors = append(ancestors, source)
 	}
-	return "default-src 'none'; " +
-		"img-src 'self' data:; " +
-		"media-src 'self'; " +
-		"frame-ancestors " + strings.Join(ancestors, " ") + "; " +
-		"object-src 'none'; " +
-		"base-uri 'none'; " +
-		"form-action 'none'"
+	return ancestors
 }
 
 func normalizeFrameAncestorSource(raw string) (string, bool) {
