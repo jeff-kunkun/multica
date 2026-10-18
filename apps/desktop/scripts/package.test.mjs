@@ -9,6 +9,7 @@ import {
   DESCRIBE_ARGS,
   envWithLocalBins,
   normalizeGitVersion,
+  officeVdArgsForTarget,
   parsePackageArgs,
   resolveBuildMatrix,
   stripLeadingSeparator,
@@ -511,5 +512,16 @@ describe("useLocalMacSigning", () => {
       false,
     );
     expect(useLocalMacSigning({}, "linux")).toBe(false);
+  });
+});
+
+describe("officeVdArgsForTarget", () => {
+  it("builds the office tools for each macOS arch only", () => {
+    const arm = officeVdArgsForTarget({ platform: "mac", arch: "arm64" });
+    expect(arm.slice(0, 2)).toEqual(["--arch", "arm64"]);
+    expect(arm[3].endsWith(join("resources", "office-vd"))).toBe(true);
+    expect(officeVdArgsForTarget({ platform: "mac", arch: "x64" }).slice(0, 2)).toEqual(["--arch", "x64"]);
+    expect(officeVdArgsForTarget({ platform: "win", arch: "x64" })).toBe(null);
+    expect(officeVdArgsForTarget({ platform: "linux", arch: "arm64" })).toBe(null);
   });
 });

@@ -16,6 +16,8 @@ jobs:
             target: linux
           - os: windows-latest
             target: win
+          - os: macos-14
+            target: mac
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -52,6 +54,8 @@ jobs:
         working-directory: apps/desktop
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
+          # macOS: ad-hoc signature, not this runner's throwaway local identity.
+          MULTICA_MAC_LOCAL_SIGN: "0"
         run: node scripts/package.mjs --${{ matrix.target }} --x64 --arm64 --publish never
 
       - name: Upload Desktop artifacts (${{ matrix.target }})

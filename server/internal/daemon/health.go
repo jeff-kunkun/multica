@@ -87,7 +87,10 @@ type HealthResponse struct {
 	ReloadPendingReason string `json:"reload_pending_reason,omitempty"`
 	// Draining is true while a POST /drain lease keeps the daemon from
 	// claiming new tasks ahead of a restart.
-	Draining   bool              `json:"draining,omitempty"`
+	Draining bool `json:"draining,omitempty"`
+	// StopLatch reports the office stop latch as this daemon last read it. Its
+	// presence tells the desktop the daemon honors the latch at all.
+	StopLatch  *healthStopLatch  `json:"stop_latch,omitempty"`
 	Workspaces []healthWorkspace `json:"workspaces"`
 }
 
@@ -365,6 +368,7 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 
 			ReloadPendingReason: d.reloadPending(),
 			Draining:            d.draining(),
+			StopLatch:           d.stopLatchHealth(),
 			Workspaces:          wsList,
 		}
 		if reporter, ok := d.repoCache.(interface{ Activity() repocache.Activity }); ok {

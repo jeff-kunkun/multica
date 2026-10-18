@@ -87,6 +87,8 @@ const REASON_CLASS: Record<string, FailureClass> = {
   "agent_error.unknown": "other",
   agent_error: "other",
   manual: "other",
+  // The owner stopped agents on that device; a decision, not a fault.
+  device_stopped: "other",
   unclassified: "other",
 };
 

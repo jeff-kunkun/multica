@@ -42,6 +42,8 @@ function run(command, args, { shell = false, env = process.env } = {}) {
 const node = process.execPath;
 run(node, [join(here, "bundle-cli.mjs")]);
 run(node, [join(here, "brand-dev-electron.mjs")]);
+// macOS: the office virtual-screen tools; a no-op elsewhere.
+run(node, [join(here, "..", "native", "office-vd", "build.mjs")]);
 
 const isWin = process.platform === "win32";
 // electron-vite's bin lands in apps/desktop/node_modules/.bin under the

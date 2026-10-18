@@ -641,6 +641,9 @@ type Daemon struct {
 	// drainUntil (unix nanos) pauses claiming until that time; set by POST
 	// /drain. Independent of pauseClaims so the update barriers never see it.
 	drainUntil atomic.Int64
+	// stopLatch follows the office stop latch file (stop_latch.go): while it
+	// says stopped nothing is claimed and every registered run is cancelled.
+	stopLatch stopLatchMonitor
 
 	activeEnvRootsMu   sync.Mutex
 	activeEnvRootsCond *sync.Cond      // signalled when an in-flight env-root GC mutation finishes
@@ -2164,6 +2167,12 @@ func (d *Daemon) run(ctx context.Context, healthLn net.Listener) error {
 	// "starting" until d.ready is set after preflight, so a slow or *failing*
 	// preflight is never misreported as a started daemon. resolveAuth has
 	// already run, so a missing token still fails fast before we begin serving.
+	// Read the office stop latch before anything can claim, so a daemon that
+	// starts (or restarts) on a stopped Mac stays stopped from its first poll.
+	d.stopLatch.home = officeVDHome()
+	d.refreshStopLatch()
+	go d.stopLatchLoop(ctx)
+
 	go d.serveHealth(ctx, healthLn, time.Now())
 
 	// Renew the PAT before the first API call, then do the initial
@@ -4901,7 +4910,7 @@ func (d *Daemon) reportUpdateResultWithRetry(ctx context.Context, runtimeID, upd
 func (d *Daemon) tryEnterClaim() bool {
 	d.claimMu.Lock()
 	defer d.claimMu.Unlock()
-	if d.pauseClaims || d.draining() {
+	if d.pauseClaims || d.draining() || d.latchStopped() {
 		return false
 	}
 	d.claimsInFlight++
@@ -5453,6 +5462,17 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	}
 	provider := rt.Provider
 
+	// A claim already in flight when the owner pressed stop can still land
+	// here. It never starts; the server records why and does not retry it.
+	if d.latchStopped() {
+		d.logger.Info("office stop latch is set; not starting claimed task", "task", task.ID)
+		if err := d.reportTerminalTask(ctx, deviceStoppedReport(task.ID, "",
+			"office agents were stopped on this device by its owner before the run started")); err != nil {
+			d.logger.Error("fail task callback failed", "task", task.ID, "error", err)
+		}
+		return
+	}
+
 	// Task-scoped logger. The task id goes in whole: it is the key every
 	// other surface prints (task JSON, env-root ownership manifest, server
 	// logs), so a full id is what lets a log line be joined to them. An
@@ -5527,6 +5547,8 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	// deleted (404).
 	runCtx, runCancel := context.WithCancel(ctx)
 	defer runCancel()
+	latchRun, releaseLatchRun := d.registerLatchRun(task.ID, runCancel)
+	defer releaseLatchRun()
 
 	// Poll interval is d.cancelPollInterval (5s in production, reduced in tests
 	// via direct field override). Guard against zero so a misconfigured daemon
@@ -5578,6 +5600,15 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		}
 		return
 	default:
+	}
+
+	if latchRun.fired.Load() {
+		taskLog.Info("task stopped by the office stop latch", "error", err)
+		if failErr := d.reportTerminalTask(ctx, deviceStoppedReport(task.ID, result.WorkDir,
+			"office agents were stopped on this device by its owner; the run was cancelled")); failErr != nil {
+			taskLog.Error("fail task callback failed", "error", failErr)
+		}
+		return
 	}
 
 	if err != nil {

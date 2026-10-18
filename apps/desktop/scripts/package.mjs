@@ -307,6 +307,18 @@ export function resolveBuildMatrix(parsed, platform = process.platform, arch = p
   );
 }
 
+// The office virtual-screen tools (native/office-vd: vd-hold, the
+// ScreenCaptureKit helper, broker) ship only in macOS packages. Other
+// targets clear resources/office-vd so a Mac build earlier in the same
+// matrix never leaks Mac binaries into a Windows or Linux installer.
+const officeVdBuildScript = resolve(desktopRoot, "native", "office-vd", "build.mjs");
+const officeVdOut = resolve(desktopRoot, "resources", "office-vd");
+
+export function officeVdArgsForTarget(target) {
+  if (target.platform !== "mac") return null;
+  return ["--arch", target.arch, "--out", officeVdOut];
+}
+
 function formatTarget(target) {
   return `${PLATFORM_CONFIG[target.platform].label} ${target.arch}`;
 }
@@ -489,6 +501,16 @@ function main() {
         cwd: desktopRoot,
       },
     );
+
+    const officeVdArgs = officeVdArgsForTarget(target);
+    rmSync(officeVdOut, { recursive: true, force: true });
+    if (officeVdArgs) {
+      console.log(`[package] building office tools → ${formatTarget(target)}`);
+      execFileSync("node", [officeVdBuildScript, ...officeVdArgs], {
+        stdio: "inherit",
+        cwd: desktopRoot,
+      });
+    }
 
     const builderArgs = builderArgsForTarget(target, parsed, version, {
       disableMacNotarize,

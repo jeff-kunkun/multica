@@ -13,6 +13,8 @@ import { AgentOverviewSummary } from "./agent-overview-summary";
 import { ActorIssuesPanel } from "../../common/actor-issues-panel";
 import { useT } from "../../i18n";
 import { useNavigation } from "../../navigation";
+import { OfficeScreenPanel } from "../../office-screen";
+import { useLocalDaemonStatus } from "../../platform";
 
 export type DetailTab = "overview" | "work";
 
@@ -39,6 +41,7 @@ export function AgentOverviewPane({
 }: AgentOverviewPaneProps) {
   const { t } = useT("agents");
   const navigation = useNavigation();
+  const localDaemon = useLocalDaemonStatus();
   const urlView = navigation.searchParams.get("view");
   const [activeView, setActiveView] = useState<DetailTab>(() =>
     isDetailTab(urlView) ? urlView : "overview",
@@ -96,11 +99,17 @@ export function AgentOverviewPane({
           <div className={cn(PAGE_RAIL, PAGE_GUTTER, "py-4 sm:py-6")}>
             <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
               <ActivityTab agent={agent} showPerformance={false} />
-              <AgentOverviewSummary
-                agent={agent}
-                runtime={runtime}
-                owner={owner}
-              />
+              <div className="flex min-w-0 flex-col gap-6">
+                {/* This Mac's office screen, for agents that run here (DENE-2261). */}
+                {runtime?.daemon_id && runtime.daemon_id === localDaemon.daemonId && (
+                  <OfficeScreenPanel variant="card" />
+                )}
+                <AgentOverviewSummary
+                  agent={agent}
+                  runtime={runtime}
+                  owner={owner}
+                />
+              </div>
             </div>
           </div>
         )}

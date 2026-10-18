@@ -5,6 +5,12 @@ import type { RendererRouteContextInput } from "../shared/renderer-route-context
 import type { FreezeBreadcrumb } from "../shared/freeze-breadcrumb";
 import type { FullDiskAccessState } from "../shared/full-disk-access";
 import type {
+  OfficePagePreview,
+  OfficeResumeResult,
+  OfficeScreenFrame,
+  OfficeScreenState,
+} from "../shared/office-screen";
+import type {
   DesktopWindowContext,
   IssueWindowRequest,
 } from "../shared/issue-window";
@@ -90,6 +96,20 @@ interface DesktopAPI {
   getFullDiskAccess: () => Promise<FullDiskAccessState>;
   /** Open System Settings at Privacy & Security → Full Disk Access. */
   openFullDiskAccessSettings: () => Promise<void>;
+  /** Office stop latch, its receipts, and the virtual-display picture. */
+  officeScreen: {
+    getState: () => Promise<OfficeScreenState>;
+    subscribe: () => Promise<OfficeScreenState>;
+    unsubscribe: () => Promise<void>;
+    stop: () => Promise<OfficeScreenState>;
+    resume: (expectGeneration: number | null) => Promise<OfficeResumeResult>;
+    setViewEnabled: (enabled: boolean) => Promise<OfficeScreenState>;
+    requestPermission: () => Promise<OfficeScreenState>;
+    openPermissionSettings: () => Promise<void>;
+    pagePreviews: () => Promise<OfficePagePreview[]>;
+    onState: (callback: (state: OfficeScreenState) => void) => () => void;
+    onFrame: (callback: (frame: OfficeScreenFrame) => void) => () => void;
+  };
   /** Validate that a path is an existing readable+writable directory.
    *  Mirrors the daemon's runtime check so the user sees errors before submit. */
   validateLocalDirectory: (

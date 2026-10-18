@@ -4,6 +4,12 @@ import type { RuntimeConfigResult } from "../shared/runtime-config";
 import type { FreezeBreadcrumb } from "../shared/freeze-breadcrumb";
 import type { FullDiskAccessState } from "../shared/full-disk-access";
 import type {
+  OfficePagePreview,
+  OfficeResumeResult,
+  OfficeScreenFrame,
+  OfficeScreenState,
+} from "../shared/office-screen";
+import type {
   ManualUpdateCheckResult,
   UpdaterPreferences,
 } from "../shared/updater-types";
@@ -214,6 +220,38 @@ const desktopAPI = {
     ipcRenderer.invoke("system:full-disk-access"),
   openFullDiskAccessSettings: (): Promise<void> =>
     ipcRenderer.invoke("system:open-full-disk-access-settings"),
+  /** Office stop latch, its receipts, and the virtual-display picture. */
+  officeScreen: {
+    getState: (): Promise<OfficeScreenState> =>
+      ipcRenderer.invoke("office-screen:get-state"),
+    /** Start receiving state and frames; returns the current state. */
+    subscribe: (): Promise<OfficeScreenState> =>
+      ipcRenderer.invoke("office-screen:subscribe"),
+    unsubscribe: (): Promise<void> =>
+      ipcRenderer.invoke("office-screen:unsubscribe"),
+    stop: (): Promise<OfficeScreenState> =>
+      ipcRenderer.invoke("office-screen:stop"),
+    resume: (expectGeneration: number | null): Promise<OfficeResumeResult> =>
+      ipcRenderer.invoke("office-screen:resume", expectGeneration),
+    setViewEnabled: (enabled: boolean): Promise<OfficeScreenState> =>
+      ipcRenderer.invoke("office-screen:set-view-enabled", enabled),
+    requestPermission: (): Promise<OfficeScreenState> =>
+      ipcRenderer.invoke("office-screen:request-permission"),
+    openPermissionSettings: (): Promise<void> =>
+      ipcRenderer.invoke("office-screen:open-permission-settings"),
+    pagePreviews: (): Promise<OfficePagePreview[]> =>
+      ipcRenderer.invoke("office-screen:page-previews"),
+    onState: (callback: (state: OfficeScreenState) => void) => {
+      const handler = (_: unknown, state: OfficeScreenState) => callback(state);
+      ipcRenderer.on("office-screen:state", handler);
+      return () => ipcRenderer.removeListener("office-screen:state", handler);
+    },
+    onFrame: (callback: (frame: OfficeScreenFrame) => void) => {
+      const handler = (_: unknown, frame: OfficeScreenFrame) => callback(frame);
+      ipcRenderer.on("office-screen:frame", handler);
+      return () => ipcRenderer.removeListener("office-screen:frame", handler);
+    },
+  },
   validateLocalDirectory: (path: string) =>
     ipcRenderer.invoke("local-directory:validate", path),
   /** Listen for Cmd/Ctrl+W tab-close requests from the main process.

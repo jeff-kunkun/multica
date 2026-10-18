@@ -14,6 +14,7 @@ import { RefreshablePageIcon } from "../../layout/refreshable-page-icon";
 import { useT } from "../../i18n";
 import { IssueSurface } from "../surface/issue-surface";
 import { IssuesHeader } from "./issues-header";
+import { OfficeScreenPanel } from "../../office-screen";
 
 function IssuesSurfaceHeader({
   issues,
@@ -61,6 +62,8 @@ export function IssuesPage() {
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
+      {/* Desktop only: stop every agent on this Mac and watch their screen (DENE-2261). */}
+      <OfficeScreenPanel variant="bar" />
       <IssueSurface
         scope={{ type: "workspace", actorKind: scope }}
         modes={["board", "list", "table", "swimlane"]}

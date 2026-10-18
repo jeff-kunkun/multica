@@ -329,6 +329,17 @@ async function ensureActiveProfile(): Promise<ActiveProfile | null> {
   return activeProfile;
 }
 
+/**
+ * Raw /health of the daemon this app owns, or null when it isn't answering.
+ * The office stop button reads `stop_latch` from it as the receipt that every
+ * run on this Mac has exited (office-screen).
+ */
+export async function fetchOwnedDaemonHealth(): Promise<Record<string, unknown> | null> {
+  const active = await ensureActiveProfile();
+  if (!active) return null;
+  return (await fetchProfileHealth(active)) as unknown as Record<string, unknown> | null;
+}
+
 function invalidateActiveProfile(): void {
   activeProfile = null;
   lastDaemonId = undefined;

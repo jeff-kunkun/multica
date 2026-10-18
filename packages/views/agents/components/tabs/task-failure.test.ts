@@ -207,6 +207,7 @@ describe("run outcome", () => {
   it("reads a failed row with a cancellation reason as cancelled", () => {
     expect(isCancelledOutcome({ status: "failed", failure_reason: "cancelled" })).toBe(true);
     expect(isCancelledOutcome({ status: "failed", failure_reason: "user_cancelled" })).toBe(true);
+    expect(isCancelledOutcome({ status: "failed", failure_reason: "device_stopped" })).toBe(true);
     expect(isCancelledOutcome({ status: "cancelled" })).toBe(true);
     expect(isCancelledOutcome({ status: "failed", failure_reason: "timeout" })).toBe(false);
     expect(isCancelledOutcome({ status: "failed" })).toBe(false);
@@ -222,6 +223,7 @@ describe("run outcome", () => {
   it("labels a run once: reason first, then who cancelled it", () => {
     expect(runOutcomeLabel({ status: "failed", failure_reason: "cancelled" }, enT)).toBe("Cancelled by the system");
     expect(runOutcomeLabel({ status: "failed", failure_reason: null }, enT)).toBeNull();
+    expect(runOutcomeLabel({ status: "failed", failure_reason: "device_stopped" }, enT)).toBe("Stopped on its device by the owner");
     expect(runOutcomeLabel({
       status: "cancelled", failure_reason: "queued_expired", cancelled_by: { type: "system" },
     }, enT)).toBe("Expired in queue");

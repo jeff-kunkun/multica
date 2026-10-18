@@ -1,0 +1,13 @@
+[
+  { "name": "no file", "raw": null, "state": "running", "generation": 0, "readError": false },
+  { "name": "running", "raw": "{\"version\":1,\"state\":\"running\",\"generation\":5,\"changedAt\":\"2026-10-18T08:00:00.000Z\",\"source\":\"desktop\",\"reason\":\"resume\"}", "state": "running", "generation": 5, "readError": false },
+  { "name": "stopped", "raw": "{\"version\":1,\"state\":\"stopped\",\"generation\":6,\"changedAt\":\"2026-10-18T08:01:00.000Z\",\"source\":\"desktop\",\"reason\":\"stop\"}", "state": "stopped", "generation": 6, "readError": false },
+  { "name": "empty file", "raw": "", "state": "stopped", "generation": null, "readError": true },
+  { "name": "truncated json", "raw": "{\"version\":1,\"state\":\"runn", "state": "stopped", "generation": null, "readError": true },
+  { "name": "array", "raw": "[]", "state": "stopped", "generation": null, "readError": true },
+  { "name": "future version", "raw": "{\"version\":2,\"state\":\"running\",\"generation\":1}", "state": "stopped", "generation": null, "readError": true },
+  { "name": "unknown state", "raw": "{\"version\":1,\"state\":\"paused\",\"generation\":1}", "state": "stopped", "generation": null, "readError": true },
+  { "name": "negative generation", "raw": "{\"version\":1,\"state\":\"running\",\"generation\":-1}", "state": "stopped", "generation": null, "readError": true },
+  { "name": "fractional generation", "raw": "{\"version\":1,\"state\":\"running\",\"generation\":1.5}", "state": "stopped", "generation": null, "readError": true },
+  { "name": "string generation", "raw": "{\"version\":1,\"state\":\"running\",\"generation\":\"1\"}", "state": "stopped", "generation": null, "readError": true }
+]

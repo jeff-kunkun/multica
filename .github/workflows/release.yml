@@ -395,11 +395,14 @@ jobs:
       - name: Verify published chart
         run: helm show chart "$OCI_REGISTRY/multica" --version "$CHART_VERSION"
 
-  # Build the Desktop installers for Linux and Windows and upload them to
-  # the GitHub Release that the `release` job above just published. macOS
-  # Desktop continues to ship via the manual `release-desktop` skill so it
-  # can be signed + notarized with Apple Developer credentials that are
-  # not (yet) wired into CI.
+  # Build the Desktop installers and upload them to the GitHub Release that
+  # the `release` job above just published. Linux and Windows publish
+  # unsigned. macOS (arm64 + x64, with the office virtual-screen helpers from
+  # apps/desktop/native/office-vd) publishes only when the Apple Developer ID
+  # secrets are configured; without them it still builds an ad-hoc signed
+  # package as a workflow artifact so every release proves the Mac build, and
+  # the signed Mac release keeps shipping via the manual `release-desktop`
+  # skill.
   desktop:
     needs: release
     strategy:
@@ -410,6 +413,8 @@ jobs:
             target: linux
           - os: windows-latest
             target: win
+          - os: macos-14
+            target: mac
     runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
@@ -446,6 +451,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Package Desktop installers (${{ matrix.target }})
+        if: matrix.target != 'mac'
         working-directory: apps/desktop
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -460,3 +466,38 @@ jobs:
           # Windows signing later.
           CSC_IDENTITY_AUTO_DISCOVERY: "false"
         run: node scripts/package.mjs --${{ matrix.target }} --x64 --arm64 --publish always
+
+      - name: Package Desktop installers (mac)
+        if: matrix.target == 'mac'
+        working-directory: apps/desktop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EP_GH_IGNORE_TIME: "true"
+          # Developer ID signing + notarization. All optional: when absent the
+          # Mac package is built ad-hoc signed and kept as an artifact only,
+          # since an ad-hoc app must never reach the auto-update feed.
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -n "$CSC_LINK" ] && [ -n "$APPLE_TEAM_ID" ]; then
+            node scripts/package.mjs --mac --arm64 --x64 --publish always
+          else
+            echo "::warning::Apple Developer ID secrets not set; building an ad-hoc signed macOS package without publishing it."
+            unset CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID
+            CSC_IDENTITY_AUTO_DISCOVERY=false MULTICA_MAC_LOCAL_SIGN=0 \
+              node scripts/package.mjs --mac --arm64 --x64 --publish never
+          fi
+
+      - name: Upload macOS package
+        if: matrix.target == 'mac'
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-mac
+          path: |
+            apps/desktop/dist/**/*.dmg
+            apps/desktop/dist/**/*.zip
+          if-no-files-found: error

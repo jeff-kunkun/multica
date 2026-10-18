@@ -20,6 +20,7 @@ export const FAILURE_REASON_I18N_KEYS = {
   environment_prepare_failed: "environment_prepare_failed",
   invalid_task_identity: "invalid_task_identity",
   runtime_access_denied: "runtime_access_denied",
+  device_stopped: "device_stopped",
 
   // Agent process side — provider.
   "agent_error.provider_auth_or_access":
@@ -127,6 +128,8 @@ export function cancellationActorLabel(
 // stopped reads as cancelled even when its row carries status `failed`.
 const CANCELLATION_FAILURE_REASONS: ReadonlySet<string> = new Set([
   "cancelled",
+  // The device owner pressed stop on this Mac (office stop latch).
+  "device_stopped",
   "manual",
   "user_cancelled",
 ]);

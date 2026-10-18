@@ -192,6 +192,13 @@ const (
 	// settlement failures surface the same recovery guidance.
 	ReasonRuntimeAccessDenied Reason = "runtime_access_denied"
 
+	// ReasonDeviceStopped: the owner of the machine pressed the office stop
+	// button (DENE-2261), so the daemon refused to start the task or cancelled
+	// it mid-run. Deliberately NOT retryable: stopping means this work must not
+	// continue here, on another machine, or by itself after the owner allows
+	// new tasks again. Written by handleTask in daemon/daemon.go.
+	ReasonDeviceStopped Reason = "device_stopped"
+
 	// Agent process side: failure surfaced by the agent CLI / SDK as
 	// an error string. Classify(rawError) is responsible for picking
 	// the right sub-reason from the string. IsAgentError returns true
@@ -267,7 +274,7 @@ const (
 	ReasonAgentUnknown Reason = "agent_error.unknown"
 )
 
-// allReasons is the canonical ordered list of the 27 reasons. Order is
+// allReasons is the canonical ordered list of the 28 reasons. Order is
 // stable so callers (e.g. Prometheus collectors that pre-warm series via
 // AllReasons) can build deterministic label sets across restarts.
 //
@@ -291,6 +298,7 @@ var allReasons = []Reason{
 	ReasonEnvironmentPrepareFailed,
 	ReasonInvalidTaskIdentity,
 	ReasonRuntimeAccessDenied,
+	ReasonDeviceStopped,
 
 	// Agent process side: provider errors.
 	ReasonAgentProviderAuthOrAccess,

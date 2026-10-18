@@ -34,6 +34,7 @@ describe("failureClassOf", () => {
     expect(failureClassOf("codex_semantic_inactivity")).toBe("timeout");
     expect(failureClassOf("runtime_recovery")).toBe("runtime");
     expect(failureClassOf("manual")).toBe("other");
+    expect(failureClassOf("device_stopped")).toBe("other");
   });
 
   it("files a reason from a newer backend under 'other' instead of dropping it", () => {

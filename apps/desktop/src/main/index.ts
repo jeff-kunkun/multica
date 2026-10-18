@@ -8,6 +8,7 @@ import { setupAutoUpdater } from "./updater";
 import { setupDaemonManager } from "./daemon-manager";
 import { setupLocalDirectory } from "./local-directory";
 import { setupFullDiskAccess } from "./full-disk-access";
+import { setupOfficeScreen } from "./office-screen";
 import { openExternalSafely, downloadURLSafely } from "./external-url";
 import { installContextMenu } from "./context-menu";
 import { handleAppShortcut } from "./keyboard-shortcuts";
@@ -847,6 +848,7 @@ if (!gotTheLock) {
     );
     setupLocalDirectory(() => mainWindow);
     setupFullDiskAccess();
+    setupOfficeScreen();
 
     app.on("activate", () => {
       const window = ensureMainWindow();

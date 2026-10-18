@@ -314,6 +314,16 @@ func TestRuntimeCLITimeoutIsNotAutoRetried(t *testing.T) {
 	}
 }
 
+// TestDeviceStoppedIsNotAutoRetried pins DENE-2261: when the owner presses the
+// office stop button, the daemon fails its runs with device_stopped. A retry
+// would hand the work to another machine or bring it back after resume, which
+// is exactly what "stop" must not do.
+func TestDeviceStoppedIsNotAutoRetried(t *testing.T) {
+	if retryableReasons["device_stopped"] {
+		t.Error(`retryableReasons["device_stopped"] = true, want false: a stop must not come back as a retry`)
+	}
+}
+
 // TestEnvironmentPrepareFailureIsNotAutoRetried pins the retry posture for
 // #7913. The reason moved out of agent_error.* purely so the label is honest —
 // it must not quietly buy the failure a retry it never had. Its causes are the
