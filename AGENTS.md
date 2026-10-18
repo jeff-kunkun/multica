@@ -166,7 +166,8 @@ The two-way sync with the kun-line instance (`server/internal/mirror`, see
 not accommodate it, and nothing outside it may depend on it.
 
 Browser
-- Office agents work on the "Office Agents" virtual display, in Kun's own Chrome, through the one CDP broker
-  (`~/.agents/vd/vd.mjs`); never connect to Chrome's DevTools port directly, raise a window or move the real mouse.
-  Only a page that needs Kun's own click may be brought to his screen, with a notification to Kun.
-  See `docs/kun-main/browser-background.md`.
+- Office agents never take Kun's mouse, keyboard focus or foreground window. Web pages go through `ego-browser`
+  (ego lite, one background TaskSpace per task); native windows through the `cua-driver` MCP with background input
+  only. Never drive Kun's own Chrome, raise a window or move the real mouse.
+  When Kun must act, `task.handOff()` (web) or move the window into his view with `set_window_frame` (native), notify
+  him, and stop. The routing lives in the kun-agent-mono `browser` skill.
