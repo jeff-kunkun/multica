@@ -8,7 +8,8 @@ live only in `~/.agents/vd` (DENE-2261).
 | --- | --- |
 | `src/vd-hold.m` | Keeps the "Office Agents" virtual display (vendor 505, model 0x5644) alive; writes `state.json`. |
 | `broker.mjs` | One CDP connection to Chrome on `127.0.0.1:9339`; gates every request on the stop latch. |
-| `vd.mjs` | The agents' command line (`open`, `shot`, `close`, ...), always through the broker. |
+| `vd.mjs` | The agents' command line (`open`, `shot`, `look`, `bring`, `close`, ...), always through the broker. |
+| `handoff.mjs` | Handing a window to Kun without taking his focus (see below). |
 | `latch.mjs` | The device stop latch: format, reader, `stop` / `resume`, CLI. |
 | `src/screen-capture.swift` | ScreenCaptureKit helper the desktop app runs for the live picture. |
 
@@ -32,6 +33,21 @@ While stopped, the broker passes only read-only methods (`Target.getTargets`, `P
 and answers everything else with 423; the daemon claims nothing and cancels its runs, reporting them
 failed with `device_stopped`, which the server never retries. Requests carrying an `Origin` header are
 refused, so a web page can't drive Chrome through the broker.
+
+## Handing a window to Kun
+
+When an agent needs Kun (a login, a captcha), `vd.mjs look <targetId> <message>`:
+
+1. moves that one window to the bottom-right corner of his main screen with `Browser.setWindowBounds` only.
+   It never activates Chrome or the page, never moves the pointer and never sends input, so whatever he
+   is typing into keeps the keyboard;
+2. posts a notification. With `terminal-notifier` installed, clicking it runs `vd.mjs bring <targetId>`,
+   the only command that activates the window (`Target.activateTarget`). Without it, macOS's own
+   `osascript` notification can't run anything on click, so the text tells him to Cmd-Tab to Chrome.
+
+macOS can't put a window above his others without activating its app, so until he clicks the window may
+be covered by his current one. Both commands go through the broker and the latch: while stopped they exit
+4 before touching Chrome. `peek` no longer opens Preview unless `PEEK_OPEN=1`.
 
 ## Screen capture helper
 

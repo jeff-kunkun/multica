@@ -1,16 +1,18 @@
 // vd.mjs: office agents' browser on the virtual display, via Kun's everyday Chrome (CDP, 127.0.0.1).
 //   node vd.mjs open <url>             -> new window on the virtual display; prints targetId
 //   node vd.mjs shot <targetId> <png>  -> screenshot that tab
-//   node vd.mjs look <targetId> <msg>  -> needs Kun: move that window to his main screen, focus it, notify
+//   node vd.mjs look <targetId> <msg>  -> needs Kun: move that window to his main screen and notify; never focuses it
+//   node vd.mjs bring <targetId>       -> Kun clicked the notification: now activate that window
 //   node vd.mjs back <targetId>        -> move the window back to the virtual display
 //   node vd.mjs close <targetId>
 //   node vd.mjs state                  -> windows and visible tabs (for checks)
-//   node vd.mjs peek                   -> Kun wants to look: screenshots of agent pages, opened in Preview
+//   node vd.mjs peek                   -> screenshots of agent pages; opened in Preview only with PEEK_OPEN=1
 // While Kun has stopped the office agents (latch.mjs), every command except state/shot/peek exits 4
 // before touching Chrome, and every call carries the generation it started under, so a command that
 // was already running when Kun pressed stop is refused by the broker at its next step.
 import fs from 'fs'; import os from 'os'; import path from 'path'; import { execFileSync } from 'child_process';
 import { readLatch, vdHome } from './latch.mjs';
+import { bringWindow, handoffNotice, handoffWindow, notifyCommand } from './handoff.mjs';
 const home = os.homedir(), vdDir = vdHome();
 const brokerURL = `http://127.0.0.1:${process.env.OFFICE_VD_PORT || 9339}/`;
 // All CDP goes through broker.mjs (one approved connection), so agents never trigger Chrome's prompt.
@@ -45,11 +47,15 @@ const winOf = async t => (await send('Browser.getWindowForTarget', { targetId: t
       fs.writeFileSync(b, Buffer.from(s.data, 'base64')); console.log(b);
     } else if (cmd === 'look') {
       const main = JSON.parse(execFileSync('osascript', ['-l', 'JavaScript', '-e', 'ObjC.import("AppKit");const f=$.NSScreen.screens.objectAtIndex(0).frame;JSON.stringify({w:f.size.width,h:f.size.height})']).toString());
-      const w = Math.min(1400, main.w - 100), h = Math.min(900, main.h - 100);
-      await send('Browser.setWindowBounds', { windowId: await winOf(a), bounds: { left: Math.round((main.w - w) / 2), top: Math.round((main.h - h) / 2), width: w, height: h } });
-      await send('Target.activateTarget', { targetId: a });
-      execFileSync('osascript', ['-e', `display notification ${JSON.stringify(b || '请在这页操作')} with title "员工需要你点一下" sound name "Glass"`]);
+      const r = await handoffWindow(send, a, main);
+      const notifier = [process.env.OFFICE_VD_NOTIFIER, '/opt/homebrew/bin/terminal-notifier', '/usr/local/bin/terminal-notifier'].find(f => f && fs.existsSync(f));
+      const [bin, args] = notifyCommand(handoffNotice(b), { notifier, node: process.execPath, script: new URL(import.meta.url).pathname, targetId: a,
+        env: { OFFICE_VD_HOME: process.env.OFFICE_VD_HOME, OFFICE_VD_PORT: process.env.OFFICE_VD_PORT } });
+      if (process.env.OFFICE_VD_NOTIFY_DRY === '1') console.log(JSON.stringify({ bounds: r.bounds, notify: [bin, ...args] }));
+      else execFileSync(bin, args);
       console.log('shown to Kun');
+    } else if (cmd === 'bring') {
+      await bringWindow(send, a); console.log('brought');
     } else if (cmd === 'back') {
       await send('Browser.setWindowBounds', { windowId: await winOf(a), bounds: onVD() });
       // Make Kun's frontmost on-screen Chrome window the main window again, without activating Chrome,
@@ -79,7 +85,7 @@ end tell`], { timeout: 15000 });
         const f = `${dir}/${files.length + 1}-${t.title.replace(/[^\p{L}\p{N}]+/gu, '_').slice(0, 40)}.png`;
         fs.writeFileSync(f, Buffer.from(s.data, 'base64')); files.push(f);
       }
-      if (files.length && !process.env.PEEK_NO_OPEN) execFileSync('open', ['-a', 'Preview', ...files]);
+      if (files.length && process.env.PEEK_OPEN === '1') execFileSync('open', ['-a', 'Preview', ...files]);
       console.log(files.length ? files.join('\n') : 'no agent pages on the virtual display');
     } else if (cmd === 'close') {
       await send('Target.closeTarget', { targetId: a }); console.log('closed');
@@ -96,7 +102,7 @@ end tell`], { timeout: 15000 });
         if (v.result.value === 'visible') out[k].visible.push(t.title.slice(0, 50));
       }
       console.log(JSON.stringify(out, null, 1));
-    } else { console.error('usage: open|shot|look|back|peek|close|state'); process.exit(1); }
+    } else { console.error('usage: open|shot|look|bring|back|peek|close|state'); process.exit(1); }
     process.exit(0);
   } catch (e) { console.error(e.message); process.exit(1); }
 })();

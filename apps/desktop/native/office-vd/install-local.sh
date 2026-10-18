@@ -27,7 +27,7 @@ if [[ -d "$destination" ]]; then
 fi
 mkdir -p "$destination"
 
-for f in latch.mjs broker.mjs vd.mjs vd-hold screen-capture LICENSE.yomado README.md; do
+for f in latch.mjs broker.mjs vd.mjs handoff.mjs vd-hold screen-capture LICENSE.yomado README.md; do
   cp "$staging/$f" "$destination/$f.new"
   mv -f "$destination/$f.new" "$destination/$f"
 done

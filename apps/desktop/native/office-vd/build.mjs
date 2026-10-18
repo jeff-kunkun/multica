@@ -55,7 +55,7 @@ if (slices.length === 1) {
 }
 for (const s of slices) rmSync(s);
 
-for (const f of ['latch.mjs', 'broker.mjs', 'vd.mjs', 'LICENSE.yomado', 'README.md']) {
+for (const f of ['latch.mjs', 'broker.mjs', 'vd.mjs', 'handoff.mjs', 'LICENSE.yomado', 'README.md']) {
   copyFileSync(resolve(root, f), resolve(output, f));
 }
 chmodSync(resolve(output, 'vd-hold'), 0o755);
