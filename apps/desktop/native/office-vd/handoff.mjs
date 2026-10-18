@@ -6,9 +6,28 @@
 // Limit: macOS cannot raise a window above his others without activating its app, which would steal focus.
 // So until he clicks (or switches with Cmd-Tab / the Dock) the window may be covered by his current one.
 
+// main is his main screen {w, h}, optionally with visible: {x, y, w, h}, its visible frame (top-left
+// origin, without the menu bar and Dock), so the window never lands under the Dock. Without a visible
+// frame, a 32 pt band at the top is kept free for the menu bar (as yomado's AppWorkspacePolicy does).
+export function usableArea(main) {
+  const v = main.visible;
+  if (v && v.w > 0 && v.h > 0) return v;
+  const bar = Math.min(32, main.h - 1);
+  return { x: 0, y: bar, w: main.w, h: main.h - bar };
+}
+
 export function handoffBounds(main, { maxW = 1280, maxH = 820, margin = 100, inset = 16 } = {}) {
-  const width = Math.min(maxW, main.w - margin), height = Math.min(maxH, main.h - margin);
-  return { left: main.w - width - inset, top: main.h - height - inset, width, height, windowState: 'normal' };
+  const a = usableArea(main);
+  const width = Math.min(maxW, a.w - margin), height = Math.min(maxH, a.h - margin);
+  return { left: a.x + a.w - width - inset, top: a.y + a.h - height - inset, width, height, windowState: 'normal' };
+}
+
+// A successful setWindowBounds is not proof (after yomado's WindowRecoveryPolicy): Chrome may keep the
+// window fullscreen or clamp it. The frame read back must be where we asked, within 2 pt.
+export function landed(actual, want, epsilon = 2) {
+  if (!actual) return false;
+  return ['left', 'top', 'width', 'height'].every(k => Math.abs(actual[k] - want[k]) <= epsilon)
+    && (actual.windowState ?? 'normal') === 'normal';
 }
 
 // send(method, params) goes through the broker, so the stop latch applies: while stopped this is refused.
@@ -16,7 +35,9 @@ export async function handoffWindow(send, targetId, main) {
   const { windowId } = await send('Browser.getWindowForTarget', { targetId });
   const bounds = handoffBounds(main);
   await send('Browser.setWindowBounds', { windowId, bounds });
-  return { windowId, bounds };
+  let actual = null;
+  try { actual = (await send('Browser.getWindowBounds', { windowId })).bounds; } catch {}
+  return { windowId, bounds, actual, verified: landed(actual, bounds) };
 }
 
 // Only ever called from Kun's click on the notification (or by him on purpose).

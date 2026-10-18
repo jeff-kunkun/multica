@@ -10,7 +10,8 @@
 //     {"type":"heartbeat","seq":N}
 //
 // What it is allowed to show, re-checked every second:
-//   - only the display vd-hold created (vendor 505, model 0x5644, id from <vd home>/state.json),
+//   - only the display vd-hold created (vendor 505, model 0x5644, serial 0x56443201, id from
+//     <vd home>/state.json); yomado's virtual displays share vendor and model, so the serial decides,
 //     never the main display, so Kun's own screen can't end up in the picture;
 //   - only browser windows lying entirely on that display, and no more of them than the broker has
 //     registered as opened by agents (<vd home>/control/owned-targets.json). Anything it can't
@@ -27,6 +28,7 @@ import VideoToolbox
 
 let officeVendor: UInt32 = 505
 let officeModel: UInt32 = 0x5644
+let officeSerial: UInt32 = 0x56443201
 
 // MARK: decision (pure, testable through --decide)
 
@@ -42,6 +44,7 @@ struct Topology: Codable {
     var isMain: Bool
     var vendor: UInt32
     var model: UInt32
+    var serial: UInt32
     var frame: WindowInfo  // bounds of the virtual display; bundle/layer unused
     var windows: [WindowInfo]
     var owned: Int
@@ -58,7 +61,7 @@ func decide(_ t: Topology) -> Decision {
     func blocked(_ r: String) -> Decision { Decision(ok: false, reason: r, windowIndexes: []) }
     if !t.displayFound { return blocked("vd_missing") }
     if t.isMain { return blocked("vd_is_main") }
-    if t.vendor != officeVendor || t.model != officeModel { return blocked("not_office_display") }
+    if t.vendor != officeVendor || t.model != officeModel || t.serial != officeSerial { return blocked("not_office_display") }
     let vd = t.frame.rect
     var picked: [Int] = []
     for (i, w) in t.windows.enumerated() where w.bundle == t.browser && w.layer == 0 {
@@ -196,7 +199,11 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate {
         guard let content = content else {
             stop(); status("blocked", "content_unavailable", windows: 0, owned: 0); return
         }
-        let display = content.displays.first { $0.displayID == displayID }
+        // A display ID that is no longer in the active list can answer with another display's values.
+        var active = [CGDirectDisplayID](repeating: 0, count: 64)
+        var count: UInt32 = 0
+        let live = CGGetActiveDisplayList(64, &active, &count) == .success && active.prefix(Int(count)).contains(displayID)
+        let display = live ? content.displays.first { $0.displayID == displayID } : nil
         let b = CGDisplayBounds(displayID)
         let windows = content.windows
         let owned = ownedCount()
@@ -205,6 +212,7 @@ final class Capture: NSObject, SCStreamOutput, SCStreamDelegate {
             isMain: displayID == CGMainDisplayID(),
             vendor: CGDisplayVendorNumber(displayID),
             model: CGDisplayModelNumber(displayID),
+            serial: CGDisplaySerialNumber(displayID),
             frame: WindowInfo(bundle: "", layer: 0, x: b.origin.x, y: b.origin.y, width: b.width, height: b.height),
             windows: windows.map {
                 WindowInfo(bundle: $0.owningApplication?.bundleIdentifier ?? "", layer: $0.windowLayer,

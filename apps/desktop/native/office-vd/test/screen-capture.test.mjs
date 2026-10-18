@@ -12,7 +12,7 @@ const built = fs.existsSync(bin);
 
 const vd = { bundle: '', layer: 0, x: 1920, y: 1080, width: 1920, height: 1080 };
 const chrome = (x, y, w = 800, h = 600) => ({ bundle: 'com.google.Chrome', layer: 0, x, y, width: w, height: h });
-const base = { displayFound: true, isMain: false, vendor: 505, model: 0x5644, frame: vd, windows: [], owned: 0, browser: 'com.google.Chrome' };
+const base = { displayFound: true, isMain: false, vendor: 505, model: 0x5644, serial: 0x56443201, frame: vd, windows: [], owned: 0, browser: 'com.google.Chrome' };
 
 function decide(t) {
   const r = spawnSync(bin, ['--decide'], { input: JSON.stringify({ ...base, ...t }) });
@@ -42,6 +42,8 @@ test('never captures the main display or a display vd-hold did not create', { sk
   assert.equal(decide({ isMain: true, windows: [chrome(1960, 1120)], owned: 1 }).reason, 'vd_is_main');
   assert.equal(decide({ vendor: 1552, model: 41005, windows: [chrome(1960, 1120)], owned: 1 }).reason, 'not_office_display');
   assert.equal(decide({ displayFound: false }).reason, 'vd_missing');
+  // yomado's virtual displays use the same vendor and model (serial 0x594D0000 + n).
+  assert.equal(decide({ serial: 0x594D0001, windows: [chrome(1960, 1120)], owned: 1 }).reason, 'not_office_display');
 });
 
 test('an empty office display is fine and shows nothing', { skip: !built }, () => {

@@ -46,12 +46,14 @@ const winOf = async t => (await send('Browser.getWindowForTarget', { targetId: t
       const s = await send('Page.captureScreenshot', { format: 'png' }, sessionId);
       fs.writeFileSync(b, Buffer.from(s.data, 'base64')); console.log(b);
     } else if (cmd === 'look') {
-      const main = JSON.parse(execFileSync('osascript', ['-l', 'JavaScript', '-e', 'ObjC.import("AppKit");const f=$.NSScreen.screens.objectAtIndex(0).frame;JSON.stringify({w:f.size.width,h:f.size.height})']).toString());
+      // Main screen (the one with the menu bar) and its visible frame, converted to top-left coordinates.
+      const main = JSON.parse(execFileSync('osascript', ['-l', 'JavaScript', '-e', 'ObjC.import("AppKit");const s=$.NSScreen.screens.objectAtIndex(0),f=s.frame,v=s.visibleFrame;JSON.stringify({w:f.size.width,h:f.size.height,visible:{x:v.origin.x,y:f.size.height-v.origin.y-v.size.height,w:v.size.width,h:v.size.height}})']).toString());
       const r = await handoffWindow(send, a, main);
+      if (!r.verified) console.error(`window did not land where asked: wanted ${JSON.stringify(r.bounds)}, Chrome reports ${JSON.stringify(r.actual)}`);
       const notifier = [process.env.OFFICE_VD_NOTIFIER, '/opt/homebrew/bin/terminal-notifier', '/usr/local/bin/terminal-notifier'].find(f => f && fs.existsSync(f));
       const [bin, args] = notifyCommand(handoffNotice(b), { notifier, node: process.execPath, script: new URL(import.meta.url).pathname, targetId: a,
         env: { OFFICE_VD_HOME: process.env.OFFICE_VD_HOME, OFFICE_VD_PORT: process.env.OFFICE_VD_PORT } });
-      if (process.env.OFFICE_VD_NOTIFY_DRY === '1') console.log(JSON.stringify({ bounds: r.bounds, notify: [bin, ...args] }));
+      if (process.env.OFFICE_VD_NOTIFY_DRY === '1') console.log(JSON.stringify({ bounds: r.bounds, verified: r.verified, notify: [bin, ...args] }));
       else execFileSync(bin, args);
       console.log('shown to Kun');
     } else if (cmd === 'bring') {

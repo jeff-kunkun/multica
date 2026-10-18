@@ -13,9 +13,31 @@ static NSString *StatePath(void) {
     return [home stringByAppendingPathComponent:@"state.json"];
 }
 
+#define OFFICE_VD_SERIAL 0x56443201u
+
+// Some per-ID queries (CGDisplayBounds among them) answer for a display that no longer exists with a
+// fallback display's values, which could be Kun's main screen. Membership in the active display list is
+// the real existence check (from yomado, Watchdog.m DisplayActive).
+static BOOL DisplayActive(CGDirectDisplayID displayID) {
+    CGDirectDisplayID ids[64] = {0};
+    uint32_t count = 0;
+    if (CGGetActiveDisplayList(64, ids, &count) != kCGErrorSuccess) return NO;
+    for (uint32_t i = 0; i < count; i++) if (ids[i] == displayID) return YES;
+    return NO;
+}
+
+// state.json tells agents where to put their windows, so it is only written for a display that is live,
+// ours (serial) and not the main display. Otherwise it is removed: agents then have nowhere to go,
+// instead of being sent onto Kun's screen.
 static void WriteState(void) {
-    CGRect b = CGDisplayBounds(gDisplay.displayID);
-    NSDictionary *s = @{@"displayID": @(gDisplay.displayID), @"pid": @(getpid()),
+    CGDirectDisplayID d = gDisplay.displayID;
+    CGRect b = CGDisplayBounds(d);
+    if (!DisplayActive(d) || CGDisplaySerialNumber(d) != OFFICE_VD_SERIAL || CGDisplayIsMain(d) || CGRectIsEmpty(b)) {
+        fprintf(stderr, "virtual display %u not usable; removing state.json\n", d);
+        [[NSFileManager defaultManager] removeItemAtPath:StatePath() error:nil];
+        return;
+    }
+    NSDictionary *s = @{@"displayID": @(d), @"serial": @(OFFICE_VD_SERIAL), @"pid": @(getpid()),
                         @"x": @(b.origin.x), @"y": @(b.origin.y), @"width": @(b.size.width), @"height": @(b.size.height)};
     [[NSJSONSerialization dataWithJSONObject:s options:0 error:nil] writeToFile:StatePath() atomically:YES];
 }
@@ -25,7 +47,7 @@ int main(void) {
         [NSApplication sharedApplication];
         CGDirectDisplayID mainBefore = CGMainDisplayID();
         CGRect mainBounds = CGDisplayBounds(mainBefore);
-        gDisplay = [[VDVirtualDisplay alloc] initWithSerialNumber:0x56443201];
+        gDisplay = [[VDVirtualDisplay alloc] initWithSerialNumber:OFFICE_VD_SERIAL];
         NSError *err = nil;
         if (![gDisplay createWithWidth:1920 height:1080 hiDPI:NO name:@"Office Agents" error:&err]) {
             fprintf(stderr, "create failed: %s\n", err.localizedDescription.UTF8String); return 1;

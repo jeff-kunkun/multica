@@ -6,7 +6,7 @@ live only in `~/.agents/vd` (DENE-2261).
 
 | File | What it does |
 | --- | --- |
-| `src/vd-hold.m` | Keeps the "Office Agents" virtual display (vendor 505, model 0x5644) alive; writes `state.json`. |
+| `src/vd-hold.m` | Keeps the "Office Agents" virtual display (vendor 505, model 0x5644, serial 0x56443201) alive; writes `state.json` only while that display is live and not the main one. |
 | `broker.mjs` | One CDP connection to Chrome on `127.0.0.1:9339`; gates every request on the stop latch. |
 | `vd.mjs` | The agents' command line (`open`, `shot`, `look`, `bring`, `close`, ...), always through the broker. |
 | `handoff.mjs` | Handing a window to Kun without taking his focus (see below). |
@@ -38,9 +38,10 @@ refused, so a web page can't drive Chrome through the broker.
 
 When an agent needs Kun (a login, a captcha), `vd.mjs look <targetId> <message>`:
 
-1. moves that one window to the bottom-right corner of his main screen with `Browser.setWindowBounds` only.
-   It never activates Chrome or the page, never moves the pointer and never sends input, so whatever he
-   is typing into keeps the keyboard;
+1. moves that one window to the bottom-right corner of his main screen's visible frame (above the Dock,
+   below the menu bar) with `Browser.setWindowBounds` only, then reads the frame back and reports a move
+   that didn't land. It never activates Chrome or the page, never moves the pointer and never sends input,
+   so whatever he is typing into keeps the keyboard;
 2. posts a notification. With `terminal-notifier` installed, clicking it runs `vd.mjs bring <targetId>`,
    the only command that activates the window (`Target.activateTarget`). Without it, macOS's own
    `osascript` notification can't run anything on click, so the text tells him to Cmd-Tab to Chrome.
@@ -52,9 +53,18 @@ be covered by his current one. Both commands go through the broker and the latch
 ## Screen capture helper
 
 Streams JSON lines (`frame` / `status` / `heartbeat`) until its stdin closes. Every second it re-checks
-that it is looking at the office display (not the main display) and that every browser window there is
+that it is looking at the office display (in the active display list, vendor/model/serial ours, not the
+main display) and that every browser window there is
 one the broker registered in `control/owned-targets.json`; otherwise it stops the picture with a reason.
 `--check-permission` never prompts; `--request-permission` is only for an explicit click in the app.
+
+## Borrowed from yomado
+
+`src/VDVirtualDisplay.{h,m}` comes from [chekusu/yomado](https://github.com/chekusu/yomado) (MIT, see
+`LICENSE.yomado`). At b6737b0 we also took: the active-display-list existence check (`Watchdog.m`),
+read-back verification of a window move (`WindowRecoveryPolicy.h`) and placing inside the visible frame
+(`AppWorkspacePolicy.h`). yomado's virtual displays share our vendor and model, so the serial tells them
+apart. Not taken: anything that activates an app, changes the main display or turns other displays off.
 
 ## Build, test, install
 
