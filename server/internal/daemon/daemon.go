@@ -486,6 +486,7 @@ type Daemon struct {
 	mu           sync.Mutex
 	workspaces   map[string]*workspaceState
 	runtimeIndex map[string]Runtime // runtimeID -> Runtime for provider lookups
+	magpieRoutes magpieRouteProber
 	// profileLaunchSpecs maps a custom runtime profile_id -> the absolute
 	// executable path plus fixed launch args resolved for that profile
 	// (MUL-3284). Populated in registerRuntimesForWorkspace when a profile's
@@ -2291,6 +2292,7 @@ func (d *Daemon) run(ctx context.Context, healthLn net.Listener) error {
 	// workspace sync loop because that one runs on a thirty-minute consistency
 	// interval — far too slow for "install a CLI, see it under Runtimes".
 	go d.agentDiscoveryLoop(ctx)
+	go d.magpieRouteLoop(ctx)
 	go d.agentCLIUpdateLoop(ctx)
 
 	taskWakeups := make(chan taskWakeup, 256)
@@ -9978,6 +9980,17 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.Agent != nil {
 		customArgs = task.Agent.CustomArgs
 		mcpConfig = effectiveMcpConfig
+		// Magpie mode (a per-workspace switch the server reads) pins the CLI
+		// to one of the agent's magpie groups. The pin is the run's --model,
+		// so agent.model steps aside rather than adding a second one.
+		if task.MagpieGroupsEnabled {
+			var magpieGroup string
+			customArgs, magpieGroup = resolveMagpieGroupArgs(provider, customArgs, task.Agent.RuntimeConfig, task.MagpieGroup)
+			if magpieGroup != "" {
+				taskLog.Info("magpie group", "group", magpieGroup, "issue_choice", task.MagpieGroup, "replaced_model", model)
+				model = ""
+			}
+		}
 	}
 	if hermesOverlayActive {
 		// Stripped above, alongside the launch prefix. A skill-less hermes task

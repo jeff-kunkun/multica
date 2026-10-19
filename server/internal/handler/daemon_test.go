@@ -3174,6 +3174,8 @@ type claimRuntimeGuardTask struct {
 	ProjectDescription            string          `json:"project_description"`
 	ParentIssueID                 string          `json:"parent_issue_id"`
 	QuickCreateSourceContext      json.RawMessage `json:"quick_create_source_context"`
+	MagpieGroup                   string          `json:"magpie_group"`
+	MagpieGroupsEnabled           bool            `json:"magpie_groups_enabled"`
 }
 
 func claimTaskForRuntimeGuard(t *testing.T, runtimeID, daemonID string) *claimRuntimeGuardTask {

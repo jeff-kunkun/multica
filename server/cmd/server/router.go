@@ -1693,6 +1693,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/runtimes/{runtimeId}/tasks/{taskId}/skill-bundles/resolve", h.ResolveTaskSkillBundles)
 		r.Get("/runtimes/{runtimeId}/tasks/pending", h.ListPendingTasksByRuntime)
 		r.Post("/runtimes/{runtimeId}/update/{updateId}/result", h.ReportUpdateResult)
+		r.Post("/runtimes/{runtimeId}/magpie", h.ReportRuntimeMagpie)
 		r.Post("/runtimes/{runtimeId}/agent-cli/status", h.ReportAgentCLIStatus)
 		r.Post("/runtimes/{runtimeId}/model-catalog/refresh", h.RefreshRuntimeModelCatalog)
 		r.Post("/runtimes/{runtimeId}/models/{requestId}/result", h.ReportModelListResult)
@@ -1850,6 +1851,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/", h.GetWorkspace)
 					r.Get("/naming", h.GetWorkspaceNaming)
 					r.Get("/agent-spawn", h.GetWorkspaceAgentSpawn)
+					r.Get("/magpie", h.GetWorkspaceMagpie)
 					r.Get("/members", h.ListMembersWithUser)
 					r.Post("/leave", h.LeaveWorkspace)
 					// Listing GitHub installations is member-visible so the
@@ -1901,6 +1903,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
 					r.Put("/naming", h.UpdateWorkspaceNaming)
 					r.Put("/agent-spawn", h.UpdateWorkspaceAgentSpawn)
+					r.Put("/magpie", h.UpdateWorkspaceMagpie)
 					r.Put("/", h.UpdateWorkspace)
 					r.Patch("/", h.UpdateWorkspace)
 					// The re-check button. It makes an outbound request, so it

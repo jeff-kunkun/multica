@@ -869,7 +869,9 @@ type AgentTaskResponse struct {
 	// ProjectWorkflow is the issue's project workflow, when it has one other
 	// than the Default (MUL-7420). Absent keeps the brief unchanged.
 	ProjectWorkflow         *TaskProjectWorkflowData `json:"project_workflow,omitempty"`
-	ThreadName              string                   `json:"thread_name,omitempty"` // semantic title for provider-native session/thread history
+	ThreadName              string                   `json:"thread_name,omitempty"`           // semantic title for provider-native session/thread history
+	MagpieGroup             string                   `json:"magpie_group,omitempty"`          // issue metadata magpie_group; honoured only for a group in the agent's runtime_config.magpie_groups
+	MagpieGroupsEnabled     bool                     `json:"magpie_groups_enabled,omitempty"` // the workspace's magpie mode switch; off means no magpie group pin and an empty MagpieGroup
 	Status                  string                   `json:"status"`
 	Priority                int32                    `json:"priority"`
 	DispatchedAt            *string                  `json:"dispatched_at"`

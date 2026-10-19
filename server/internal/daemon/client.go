@@ -1249,6 +1249,12 @@ func (c *Client) Deregister(ctx context.Context, runtimeIDs []string, reasons ma
 	return c.postJSON(ctx, "/api/daemon/deregister", body, nil)
 }
 
+// ReportMagpieRoute stores a runtime's magpie route in its metadata; nil
+// removes it.
+func (c *Client) ReportMagpieRoute(ctx context.Context, runtimeID string, route *MagpieRoute) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/magpie", runtimeID), map[string]any{"magpie": route}, nil)
+}
+
 // RegisterResponse holds the server's response to a daemon registration.
 type RegisterResponse struct {
 	Runtimes     []Runtime       `json:"runtimes"`
