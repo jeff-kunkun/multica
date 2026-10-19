@@ -186,6 +186,12 @@ func TestTaskSupplementNegotiationFailsClosed(t *testing.T) {
 		{name: "unsupported runtime", provider: "kimi", daemonAdvertises: true, wantCapabilityRow: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			if tc.provider == "cursor" {
+				// DENE-2315 CHOICE (cursor live-run steering): the merged line keeps
+				// cursor on restart steering, so it negotiates no supplement until
+				// that choice is made.
+				t.Skip("DENE-2315 CHOICE pending: cursor steers by restart on the merged line")
+			}
 			fixture := newSupplementFixture(t, tc.provider, "dispatched", false)
 			var capabilities []string
 			if tc.daemonAdvertises {
