@@ -1304,6 +1304,36 @@ export const EMPTY_CREATE_FEEDBACK_RESPONSE: CreateFeedbackResponse = {
   created_at: "",
 };
 
+// `GET/PUT /api/workspaces/{id}/magpie`: the workspace's magpie mode switch.
+// Anything but an explicit `enabled: true` reads as off, the old behaviour.
+export const WorkspaceMagpieSchema = z.object({
+  enabled: z.boolean().catch(false).default(false),
+}).loose();
+
+export type WorkspaceMagpie = z.infer<typeof WorkspaceMagpieSchema>;
+
+export const EMPTY_WORKSPACE_MAGPIE: WorkspaceMagpie = { enabled: false };
+
+// `DELETE /api/agents/{id}` (magpie mode only): the server backs the agent's
+// full configuration up before deleting it, and only returns once both
+// happened.
+export const DeleteAgentResponseSchema = z.object({
+  agent_id: z.string(),
+  backup: z.object({
+    id: z.string(),
+    agent_name: z.string().default(""),
+    created_at: z.string().default(""),
+    env_key_count: z.number().default(0),
+  }).loose(),
+}).loose();
+
+export type DeleteAgentResponse = z.infer<typeof DeleteAgentResponseSchema>;
+
+export const EMPTY_DELETE_AGENT_RESPONSE: DeleteAgentResponse = {
+  agent_id: "",
+  backup: { id: "", agent_name: "", created_at: "", env_key_count: 0 },
+};
+
 export const CommentSchema = z.object({
   via_bot_id: z.string().nullish().catch(undefined),
   via_bot_name: z.string().nullish().catch(undefined),

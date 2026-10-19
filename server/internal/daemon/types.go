@@ -160,7 +160,9 @@ type Task struct {
 	IssueStatuses           []IssueStatusData     `json:"issue_statuses,omitempty"`
 	IssueStatusesOmitted    int                   `json:"issue_statuses_omitted,omitempty"`
 	ProjectWorkflow         *ProjectWorkflowData  `json:"project_workflow,omitempty"`
-	ThreadName              string                `json:"thread_name,omitempty"` // semantic title for provider-native session/thread history
+	ThreadName              string                `json:"thread_name,omitempty"`           // semantic title for provider-native session/thread history
+	MagpieGroup             string                `json:"magpie_group,omitempty"`          // issue metadata magpie_group; honoured only for a group in the agent's runtime_config.magpie_groups
+	MagpieGroupsEnabled     bool                  `json:"magpie_groups_enabled,omitempty"` // the workspace's magpie mode switch; off means no magpie group pin and an empty MagpieGroup
 	Agent                   *AgentData            `json:"agent,omitempty"`
 	ConnectedApps           []ConnectedAppData    `json:"connected_apps,omitempty"` // per-run app capabilities mounted through runtime MCP overlays
 	Repos                   []RepoData            `json:"repos,omitempty"`

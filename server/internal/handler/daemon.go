@@ -3241,6 +3241,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, failure
 		}
 		resp.ThreadName = issue.Title
+		resp.MagpieGroup = issueMagpieGroup(issue.Metadata)
 		issueNumber = issue.Number
 		if !issue.ParentIssueID.Valid {
 			if children, err := h.Queries.ListChildIssues(r.Context(), issue.ID); err == nil {
@@ -4283,7 +4284,14 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		if ws.Context.Valid {
 			resp.WorkspaceContext = ws.Context.String
 		}
+		// Magpie mode off: the daemon runs the agent as before, with no magpie
+		// group pin and no issue choice.
+		resp.MagpieGroupsEnabled = workspaceMagpieEnabled(ws.Settings)
+		if !resp.MagpieGroupsEnabled {
+			resp.MagpieGroup = ""
+		}
 	} else {
+		resp.MagpieGroup = ""
 		slog.Warn("task claim: failed to load workspace for context injection",
 			"task_id", uuidToString(task.ID),
 			"workspace_id", resp.WorkspaceID,

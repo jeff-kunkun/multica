@@ -40,6 +40,10 @@ import {
   EMPTY_CHAT_SESSION,
   EMPTY_PRIORITIZE_QUEUED_CHAT_TASK_RESPONSE,
   EMPTY_CREATE_FEEDBACK_RESPONSE,
+  WorkspaceMagpieSchema,
+  EMPTY_WORKSPACE_MAGPIE,
+  DeleteAgentResponseSchema,
+  EMPTY_DELETE_AGENT_RESPONSE,
   EMPTY_INBOX_ITEMS,
   EMPTY_INBOX_UNREAD_SUMMARY,
   EMPTY_SEARCH_PROJECTS_RESPONSE,
@@ -1084,6 +1088,65 @@ describe("CreateFeedbackResponseSchema", () => {
     expect(
       parseWithFallback(null, CreateFeedbackResponseSchema, EMPTY_CREATE_FEEDBACK_RESPONSE, ENDPOINT),
     ).toBe(EMPTY_CREATE_FEEDBACK_RESPONSE);
+  });
+});
+
+describe("WorkspaceMagpieSchema", () => {
+  const ENDPOINT = { endpoint: "GET /api/workspaces/{id}/magpie" };
+
+  it("reads an explicit switch", () => {
+    expect(
+      parseWithFallback({ enabled: true }, WorkspaceMagpieSchema, EMPTY_WORKSPACE_MAGPIE, ENDPOINT),
+    ).toMatchObject({ enabled: true });
+  });
+
+  it("treats a missing or malformed switch as off", () => {
+    expect(parseWithFallback({}, WorkspaceMagpieSchema, EMPTY_WORKSPACE_MAGPIE, ENDPOINT)).toMatchObject({
+      enabled: false,
+    });
+    expect(
+      parseWithFallback({ enabled: "yes" }, WorkspaceMagpieSchema, EMPTY_WORKSPACE_MAGPIE, ENDPOINT),
+    ).toMatchObject({ enabled: false });
+    expect(parseWithFallback(null, WorkspaceMagpieSchema, EMPTY_WORKSPACE_MAGPIE, ENDPOINT)).toBe(
+      EMPTY_WORKSPACE_MAGPIE,
+    );
+    expect(parseWithFallback("on", WorkspaceMagpieSchema, EMPTY_WORKSPACE_MAGPIE, ENDPOINT)).toBe(
+      EMPTY_WORKSPACE_MAGPIE,
+    );
+  });
+});
+
+describe("DeleteAgentResponseSchema", () => {
+  const ENDPOINT = { endpoint: "DELETE /api/agents/{id}" };
+
+  it("parses the backup and fills defaults", () => {
+    const parsed = parseWithFallback(
+      { agent_id: "a1", backup: { id: "b1" } },
+      DeleteAgentResponseSchema,
+      EMPTY_DELETE_AGENT_RESPONSE,
+      ENDPOINT,
+    );
+    expect(parsed).toMatchObject({
+      agent_id: "a1",
+      backup: { id: "b1", agent_name: "", created_at: "", env_key_count: 0 },
+    });
+  });
+
+  it("returns the empty fallback for malformed responses", () => {
+    expect(
+      parseWithFallback({ agent_id: "a1" }, DeleteAgentResponseSchema, EMPTY_DELETE_AGENT_RESPONSE, ENDPOINT),
+    ).toBe(EMPTY_DELETE_AGENT_RESPONSE);
+    expect(
+      parseWithFallback(
+        { agent_id: 1, backup: { id: "b1" } },
+        DeleteAgentResponseSchema,
+        EMPTY_DELETE_AGENT_RESPONSE,
+        ENDPOINT,
+      ),
+    ).toBe(EMPTY_DELETE_AGENT_RESPONSE);
+    expect(parseWithFallback(null, DeleteAgentResponseSchema, EMPTY_DELETE_AGENT_RESPONSE, ENDPOINT)).toBe(
+      EMPTY_DELETE_AGENT_RESPONSE,
+    );
   });
 });
 

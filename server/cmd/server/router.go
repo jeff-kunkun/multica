@@ -1708,6 +1708,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/runtimes/{runtimeId}/tasks/{taskId}/skill-bundles/resolve", h.ResolveTaskSkillBundles)
 		r.Get("/runtimes/{runtimeId}/tasks/pending", h.ListPendingTasksByRuntime)
 		r.Post("/runtimes/{runtimeId}/update/{updateId}/result", h.ReportUpdateResult)
+		r.Post("/runtimes/{runtimeId}/magpie", h.ReportRuntimeMagpie)
 		r.Post("/runtimes/{runtimeId}/agent-cli/status", h.ReportAgentCLIStatus)
 		r.Post("/runtimes/{runtimeId}/model-catalog/refresh", h.RefreshRuntimeModelCatalog)
 		r.Post("/runtimes/{runtimeId}/models/{requestId}/result", h.ReportModelListResult)
@@ -1865,6 +1866,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/", h.GetWorkspace)
 					r.Get("/naming", h.GetWorkspaceNaming)
 					r.Get("/agent-spawn", h.GetWorkspaceAgentSpawn)
+					r.Get("/magpie", h.GetWorkspaceMagpie)
 					r.Get("/members", h.ListMembersWithUser)
 					r.Post("/leave", h.LeaveWorkspace)
 					// Listing GitHub installations is member-visible so the
@@ -1916,6 +1918,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
 					r.Put("/naming", h.UpdateWorkspaceNaming)
 					r.Put("/agent-spawn", h.UpdateWorkspaceAgentSpawn)
+					r.Put("/magpie", h.UpdateWorkspaceMagpie)
 					r.Put("/", h.UpdateWorkspace)
 					r.Patch("/", h.UpdateWorkspace)
 					// The re-check button. It makes an outbound request, so it
@@ -2682,6 +2685,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Delete("/reactions", h.RemoveReaction)
 			})
 
+			// Backups written by agent deletes (magpie mode); restoring one
+			// re-creates the agent.
+			r.Route("/api/agent-backups", func(r chi.Router) {
+				r.Get("/", h.ListAgentBackups)
+				r.With(handler.RequireHumanActor).Post("/{backupId}/restore", h.RestoreAgentBackup)
+			})
+
 			// Agents
 			r.Route("/api/agents", func(r chi.Router) {
 				r.Get("/", h.ListAgents)
@@ -2701,6 +2711,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/access-passes/{passId}", h.RevokeAgentAccessPass)
 					r.Get("/", h.GetAgent)
 					r.Put("/", h.UpdateAgent)
+					// Real delete with backup; refused unless magpie mode is on.
+					r.With(handler.RequireHumanActor).Delete("/", h.DeleteAgent)
 					r.Post("/archive", h.ArchiveAgent)
 					r.Post("/restore", h.RestoreAgent)
 					// Bakes the base role's prompt into this specialisation and

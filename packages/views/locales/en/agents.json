@@ -228,7 +228,16 @@
     "assign_work": "Assign work",
     "more_actions_aria": "Agent actions",
     "updated": "Updated {{when}}",
-    "accounts_entry": "Accounts & sign-in"
+    "accounts_entry": "Accounts & sign-in",
+    "agent_deleted_toast": "Agent deleted; its configuration is backed up",
+    "delete_failed_toast": "The agent was not deleted",
+    "delete": "Delete",
+    "delete_dialog_title": "Delete \"{{name}}\"?",
+    "delete_dialog_description": "Its full configuration is backed up first, and nothing is deleted if the backup fails. Then the agent, its run history and its chats are removed for good.",
+    "delete_dialog_cancel": "Cancel",
+    "delete_dialog_confirm": "Delete",
+    "delete_dialog_active_runs_one": "It has {{count}} run in progress or queued; deleting cancels it. Its full configuration is backed up first, and nothing is deleted if the backup fails. Then the agent, its run history and its chats are removed for good.",
+    "delete_dialog_active_runs_other": "It has {{count}} runs in progress or queued; deleting cancels them. Its full configuration is backed up first, and nothing is deleted if the backup fails. Then the agent, its run history and its chats are removed for good."
   },
   "inspector": {
     "section_profile": "Profile",
@@ -303,7 +312,8 @@
     "series_readonly": "You do not have permission to change this agent.",
     "series_auto": "Automatic",
     "series_manual": "Manual",
-    "series_unknown": "Unclassified"
+    "series_unknown": "Unclassified",
+    "prop_cli": "CLI"
   },
   "overview": {
     "agent_context": "Agent",
@@ -1374,5 +1384,21 @@
     "selected_one": "{{count}} selected",
     "selected_other": "{{count}} selected",
     "clear_selection": "Clear selection"
+  },
+  "list": {
+    "working_one": "Working · {{count}}",
+    "working_other": "Working · {{count}}",
+    "needs_runtime": "No runtime",
+    "last_active": "Last active: {{when}}",
+    "current_work": "Working on"
+  },
+  "magpie": {
+    "unrouted": "Not on magpie",
+    "cli_models": "CLI's own models",
+    "edit_hint": "Change it in magpie",
+    "group_label": "magpie groups",
+    "save_failed": "Couldn't change the magpie groups",
+    "default": "Default",
+    "make_default": "Make default"
   }
 }

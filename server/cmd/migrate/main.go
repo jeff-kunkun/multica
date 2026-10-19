@@ -183,6 +183,7 @@ var concurrentIndexCleanups = map[string]string{
 	"765_plan_approver_member_index":                            "plan_approver_member_idx",
 	"766_plan_workspace_index":                                  "plan_workspace_idx",
 	"721_bot_webhook_receiver_name_index":                       "bot_webhook_receiver_bot_name",
+	"741_agent_backup_workspace_index":                          "idx_agent_backup_workspace_created",
 	"692_channel_typing_reaction_id_idx":                        "channel_typing_reaction_id_idx",
 	"693_channel_typing_reaction_retry_idx":                     "channel_typing_reaction_retry_idx",
 	"694_channel_typing_reaction_gc_idx":                        "channel_typing_reaction_gc_idx",

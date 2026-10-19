@@ -145,6 +145,8 @@ vi.mock("@multica/core/modals", () => ({
   }),
 }));
 vi.mock("@multica/core/paths", () => ({
+  // No workspace settings: magpie mode is off, the legacy page renders.
+  useCurrentWorkspace: () => null,
   useWorkspacePaths: () => ({
     agents: () => "/acme/agents",
     chat: () => "/acme/chat",

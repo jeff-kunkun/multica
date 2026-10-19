@@ -212,7 +212,15 @@
     "assign_work": "分配工作",
     "more_actions_aria": "智能体操作",
     "updated": "{{when}}更新",
-    "accounts_entry": "账号与登录"
+    "accounts_entry": "账号与登录",
+    "agent_deleted_toast": "智能体已删除，配置已备份",
+    "delete_failed_toast": "智能体没有删除",
+    "delete": "删除",
+    "delete_dialog_title": "删除「{{name}}」？",
+    "delete_dialog_description": "删除前会先完整备份它的配置，备份失败就不删。备份好后，智能体连同它的任务记录和对话一起彻底删除。",
+    "delete_dialog_cancel": "取消",
+    "delete_dialog_confirm": "删除",
+    "delete_dialog_active_runs_other": "它还有 {{count}} 个任务在跑或排队，删除会把它们取消。删除前会先完整备份它的配置，备份失败就不删。备份好后，智能体连同它的任务记录和对话一起彻底删除。"
   },
   "inspector": {
     "section_profile": "资料",
@@ -287,7 +295,8 @@
     "series_readonly": "你没有修改此智能体的权限。",
     "series_auto": "自动",
     "series_manual": "手动",
-    "series_unknown": "未分类"
+    "series_unknown": "未分类",
+    "prop_cli": "CLI"
   },
   "overview": {
     "agent_context": "智能体",
@@ -1340,5 +1349,20 @@
   "actions": {
     "selected_other": "已选 {{count}} 项",
     "clear_selection": "清除选择"
+  },
+  "list": {
+    "working_other": "处理中 · {{count}}",
+    "needs_runtime": "缺运行时",
+    "last_active": "最近活跃 {{when}}",
+    "current_work": "在做"
+  },
+  "magpie": {
+    "unrouted": "未接 magpie",
+    "cli_models": "CLI 自带模型",
+    "edit_hint": "在 magpie 里修改",
+    "group_label": "magpie 组",
+    "save_failed": "magpie 组没改成",
+    "default": "默认",
+    "make_default": "设为默认"
   }
 }

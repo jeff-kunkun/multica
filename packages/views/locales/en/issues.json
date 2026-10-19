@@ -566,7 +566,10 @@
     "title_suggestion_apply_failed": "Failed to apply title suggestion",
     "title_suggestion_dismiss_failed": "Failed to dismiss title suggestion",
     "from_chat": "From chat",
-    "from_chat_hidden": "From a chat you can't see"
+    "from_chat_hidden": "From a chat you can't see",
+    "magpie_group_default": "{{group}} (default)",
+    "magpie_group_save_failed": "Couldn't change the magpie group",
+    "prop_magpie_group": "magpie group"
   },
   "timeline": {
     "loading": "Loading..."

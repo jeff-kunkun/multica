@@ -148,6 +148,23 @@ func (q *Queries) CancelAgentTasksByRuntimeOrAgent(ctx context.Context, arg Canc
 	return items, nil
 }
 
+const clearAgentRuntimeMagpie = `-- name: ClearAgentRuntimeMagpie :execrows
+UPDATE agent_runtime
+SET metadata = metadata - 'magpie'
+WHERE id = $1
+  AND metadata->'magpie' IS NOT NULL
+`
+
+// Drops the magpie route once magpie is gone from the runtime's machine, or
+// the workspace turned magpie mode off.
+func (q *Queries) ClearAgentRuntimeMagpie(ctx context.Context, id pgtype.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, clearAgentRuntimeMagpie, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const countActiveAgentsByRuntime = `-- name: CountActiveAgentsByRuntime :one
 SELECT count(*) FROM agent WHERE runtime_id = $1 AND archived_at IS NULL
 `
@@ -1566,6 +1583,30 @@ func (q *Queries) SelectStaleOnlineRuntimes(ctx context.Context, staleSeconds fl
 	return items, nil
 }
 
+const setAgentRuntimeMagpie = `-- name: SetAgentRuntimeMagpie :execrows
+UPDATE agent_runtime
+SET metadata = metadata || jsonb_build_object('magpie', $2::jsonb)
+WHERE id = $1
+  AND metadata->'magpie' IS DISTINCT FROM $2::jsonb
+`
+
+type SetAgentRuntimeMagpieParams struct {
+	ID     pgtype.UUID `json:"id"`
+	Magpie []byte      `json:"magpie"`
+}
+
+// Stores the magpie route the daemon read for a built-in runtime. Touches the
+// row only when the route changed, so the daemon's once-a-minute report is a
+// no-op until magpie's routing actually moves; the affected row count tells
+// the handler whether to notify clients.
+func (q *Queries) SetAgentRuntimeMagpie(ctx context.Context, arg SetAgentRuntimeMagpieParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setAgentRuntimeMagpie, arg.ID, arg.Magpie)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const setAgentRuntimeOffline = `-- name: SetAgentRuntimeOffline :exec
 UPDATE agent_runtime
 SET status = 'offline', updated_at = now()
@@ -1990,10 +2031,12 @@ DO UPDATE SET
     status = EXCLUDED.status,
     device_info = EXCLUDED.device_info,
     -- Registration rebuilds metadata from the probe. cli_update is written by
-    -- the agent-CLI updater between registers; keep it or the page blanks
-    -- every time a version refresh upserts the row.
+    -- the agent-CLI updater between registers, and magpie by the daemon's
+    -- magpie loop (SetAgentRuntimeMagpie); keep both or the page blanks every
+    -- time a version refresh upserts the row.
     metadata = EXCLUDED.metadata || jsonb_strip_nulls(jsonb_build_object(
-        'cli_update', agent_runtime.metadata->'cli_update'
+        'cli_update', agent_runtime.metadata->'cli_update',
+        'magpie', agent_runtime.metadata->'magpie'
     )),
     owner_id = COALESCE(EXCLUDED.owner_id, agent_runtime.owner_id),
     last_seen_at = now(),

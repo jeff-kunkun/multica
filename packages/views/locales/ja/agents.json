@@ -204,7 +204,15 @@
     "assign_work": "作業を割り当てる",
     "more_actions_aria": "エージェントの操作",
     "updated": "{{when}}に更新",
-    "accounts_entry": "アカウントとログイン"
+    "accounts_entry": "アカウントとログイン",
+    "agent_deleted_toast": "エージェントを削除しました。設定はバックアップ済みです",
+    "delete_failed_toast": "エージェントは削除されませんでした",
+    "delete": "削除",
+    "delete_dialog_title": "「{{name}}」を削除しますか？",
+    "delete_dialog_description": "先に設定をすべてバックアップし、バックアップに失敗した場合は何も削除しません。その後、エージェントと実行履歴、チャットを完全に削除します。",
+    "delete_dialog_cancel": "キャンセル",
+    "delete_dialog_confirm": "削除",
+    "delete_dialog_active_runs_other": "実行中または待機中の実行が {{count}} 件あり、削除するとキャンセルされます。先に設定をすべてバックアップし、バックアップに失敗した場合は何も削除しません。その後、エージェントと実行履歴、チャットを完全に削除します。"
   },
   "inspector": {
     "section_profile": "プロフィール",
@@ -279,7 +287,8 @@
     "series_readonly": "このエージェントを変更する権限がありません。",
     "series_auto": "自動",
     "series_manual": "手動",
-    "series_unknown": "未分類"
+    "series_unknown": "未分類",
+    "prop_cli": "CLI"
   },
   "overview": {
     "agent_context": "エージェント",
@@ -1340,5 +1349,20 @@
   "actions": {
     "selected_other": "{{count}} 件選択中",
     "clear_selection": "選択を解除"
+  },
+  "list": {
+    "working_other": "作業中 · {{count}}",
+    "needs_runtime": "ランタイムなし",
+    "last_active": "最終アクティブ：{{when}}",
+    "current_work": "作業中の課題"
+  },
+  "magpie": {
+    "unrouted": "magpie 未接続",
+    "cli_models": "CLI 標準のモデル",
+    "edit_hint": "magpie で変更",
+    "group_label": "magpie グループ",
+    "save_failed": "magpie グループを変更できませんでした",
+    "default": "既定",
+    "make_default": "既定にする"
   }
 }

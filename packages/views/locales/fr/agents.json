@@ -172,7 +172,16 @@
     "assign_work": "Assigner du travail",
     "more_actions_aria": "Actions de l'agent",
     "updated": "Mis à jour {{when}}",
-    "accounts_entry": "Comptes et connexion"
+    "accounts_entry": "Comptes et connexion",
+    "agent_deleted_toast": "Agent supprimé ; sa configuration est sauvegardée",
+    "delete_failed_toast": "L'agent n'a pas été supprimé",
+    "delete": "Supprimer",
+    "delete_dialog_title": "Supprimer « {{name}} » ?",
+    "delete_dialog_description": "Sa configuration complète est d'abord sauvegardée, et rien n'est supprimé si la sauvegarde échoue. Ensuite, l'agent, son historique d'exécutions et ses discussions sont supprimés définitivement.",
+    "delete_dialog_cancel": "Annuler",
+    "delete_dialog_confirm": "Supprimer",
+    "delete_dialog_active_runs_one": "Il a {{count}} exécution en cours ou en attente ; la suppression l'annule. Sa configuration complète est d'abord sauvegardée, et rien n'est supprimé si la sauvegarde échoue. Ensuite, l'agent, son historique d'exécutions et ses discussions sont supprimés définitivement.",
+    "delete_dialog_active_runs_other": "Il a {{count}} exécutions en cours ou en attente ; la suppression les annule. Sa configuration complète est d'abord sauvegardée, et rien n'est supprimé si la sauvegarde échoue. Ensuite, l'agent, son historique d'exécutions et ses discussions sont supprimés définitivement."
   },
   "inspector": {
     "section_profile": "Profil",
@@ -247,7 +256,8 @@
     "series_readonly": "Vous ne pouvez pas modifier cet agent.",
     "series_auto": "Automatique",
     "series_manual": "Manuelle",
-    "series_unknown": "Non classée"
+    "series_unknown": "Non classée",
+    "prop_cli": "CLI"
   },
   "overview": {
     "agent_context": "Agent",
@@ -1374,5 +1384,21 @@
     "cooldown": "récupération dans {{when}}",
     "reason_manual": "Désactivé manuellement",
     "reason_upstream": "Échec en amont"
+  },
+  "list": {
+    "working_one": "En cours · {{count}}",
+    "working_other": "En cours · {{count}}",
+    "needs_runtime": "Aucun runtime",
+    "last_active": "Dernière activité : {{when}}",
+    "current_work": "En cours"
+  },
+  "magpie": {
+    "unrouted": "Hors magpie",
+    "cli_models": "Modèles propres au CLI",
+    "edit_hint": "À modifier dans magpie",
+    "group_label": "Groupes magpie",
+    "save_failed": "Impossible de changer les groupes magpie",
+    "default": "Par défaut",
+    "make_default": "Définir par défaut"
   }
 }

@@ -1,4 +1,8 @@
-import { deriveRuntimeHealth, type RuntimeHealth } from "@multica/core/runtimes";
+import {
+  deriveRuntimeHealth,
+  runtimeDisplayLabel,
+  type RuntimeHealth,
+} from "@multica/core/runtimes";
 import type { AgentRuntime } from "@multica/core/types";
 import { formatDeviceInfo } from "../utils";
 
@@ -68,6 +72,25 @@ const HEALTH_SEVERITY: Record<RuntimeHealth, number> = {
   offline: 2,
   long_offline: 3,
 };
+
+// True for a hostname that is only an IPv4/IPv6 address — what some
+// networks hand macOS as its hostname. It identifies nothing to a person.
+export function isAddressLikeName(name: string): boolean {
+  const value = name.trim();
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(value)) return true;
+  return value.includes(":") && /^[0-9a-f:.]+$/i.test(value);
+}
+
+// "Codex · Kun's MacBook Pro" — the CLI and the computer it runs on, for
+// one-line summaries outside the runtimes page. An address-shaped hostname
+// is dropped rather than shown.
+export function runtimeCliLabel(runtime: AgentRuntime): string {
+  if (runtime.custom_name?.trim()) return runtimeDisplayLabel(runtime);
+  const { base, hostname } = splitRuntimeName(runtime.name);
+  return hostname && !isAddressLikeName(hostname)
+    ? `${base} · ${hostname}`
+    : base;
+}
 
 export function splitRuntimeName(name: string): {
   base: string;
