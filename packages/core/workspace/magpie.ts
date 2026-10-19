@@ -8,6 +8,13 @@ import { workspaceKeys } from "./queries";
  * model. On adds magpie group selection, the read-only agents mirror and
  * real delete with backup.
  */
+export function isWorkspaceMagpieEnabled(settings: unknown): boolean {
+  if (!settings || typeof settings !== "object") return false;
+  const magpie = (settings as Record<string, unknown>).magpie;
+  if (!magpie || typeof magpie !== "object") return false;
+  return (magpie as Record<string, unknown>).enabled === true;
+}
+
 export function workspaceMagpieOptions(wsId: string) {
   return queryOptions({
     queryKey: [...workspaceKeys.all(wsId), "magpie"] as const,
