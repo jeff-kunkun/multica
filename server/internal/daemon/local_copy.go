@@ -94,6 +94,11 @@ func localCopyDisabled(orig string) bool {
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
+		if !filepath.IsAbs(line) {
+			// Not a folder list: an older switch file whose mere presence
+			// meant "run every folder directly". Keep that meaning.
+			return true
+		}
 		listed = true
 		if filepath.Clean(line) == filepath.Clean(orig) {
 			return true

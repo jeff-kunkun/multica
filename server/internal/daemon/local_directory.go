@@ -39,13 +39,14 @@ const localDirectoryResourceType = "local_directory"
 // mode hands isolation back to the workspace's own conventions and keeps only
 // what the daemon can guarantee: its own files never collide.
 //
-// On a volume that can clone (macOS APFS) the stored mode is ignored: every
-// task runs on a private copy-on-write copy of the directory and merges back
-// when it ends (DENE-2159), which gives worktree's isolation and shared's
-// concurrency at once. The stored value is left untouched in the database and
-// takes effect again where no copy can be made (Windows, Linux, non-APFS
-// volumes, folders listed in the local-directory-direct switch file). See
-// localDirectoryAssignment.mode.
+// With MULTICA_LOCAL_DIRECTORY_ALWAYS_CLONE=1 on the daemon, the stored mode
+// is ignored on a volume that can clone (macOS APFS): every task runs on a
+// private copy-on-write copy of the directory and merges back when it ends
+// (DENE-2159), which gives worktree's isolation and shared's concurrency at
+// once. The stored value is never rewritten and still applies where no copy
+// can be made (Windows, Linux, non-APFS volumes, folders listed in the
+// local-directory-direct switch file). The switch is off by default, so every
+// stored mode behaves as it always has. See localDirectoryAssignment.mode.
 const (
 	localDirectoryModeInPlace  = "in_place"
 	localDirectoryModeWorktree = "worktree"
@@ -97,10 +98,20 @@ func (a *localDirectoryAssignment) UsesWorktree() bool {
 	return a.mode() == localDirectoryModeWorktree
 }
 
-// mode is the execution mode this assignment actually runs in. A directory
-// the daemon can clone runs in_place on a private copy whatever the resource
-// stores, so worktree and shared rows written by the older UI keep working
-// without a data rewrite. Elsewhere the stored mode applies as before.
+// localDirectoryAlwaysCloneEnv is the daemon switch that makes every local
+// directory that can be cloned run in_place on a private copy, whatever mode
+// the resource stores. Off unless set to "1" or "true".
+const localDirectoryAlwaysCloneEnv = "MULTICA_LOCAL_DIRECTORY_ALWAYS_CLONE"
+
+func localDirectoryAlwaysClone() bool {
+	v := strings.TrimSpace(os.Getenv(localDirectoryAlwaysCloneEnv))
+	return v == "1" || strings.EqualFold(v, "true")
+}
+
+// mode is the execution mode this assignment actually runs in. With the
+// always-clone switch on, a directory the daemon can clone runs in_place on a
+// private copy whatever the resource stores, so worktree and shared rows keep
+// working without a data rewrite. Otherwise the stored mode applies.
 func (a *localDirectoryAssignment) mode() string {
 	if a == nil {
 		return ""
@@ -109,7 +120,7 @@ func (a *localDirectoryAssignment) mode() string {
 	if stored == "" || stored == localDirectoryModeInPlace {
 		return localDirectoryModeInPlace
 	}
-	if a.AbsPath != "" && localCopySupported(a.AbsPath) {
+	if localDirectoryAlwaysClone() && a.AbsPath != "" && localCopySupported(a.AbsPath) {
 		return localDirectoryModeInPlace
 	}
 	return stored

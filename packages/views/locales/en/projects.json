@@ -127,7 +127,7 @@
     "local_validate_not_writable": "Directory is not writable.",
     "local_validate_unsupported": "Local directories can only be picked on the desktop app.",
     "mode_dialog_title": "How should runs use this folder?",
-    "mode_dialog_description": "On a Mac APFS disk this choice is ignored: every run works on its own private copy at the same time and merges back when it ends, stopping for you if it changed the same lines as someone else. The choice applies on Windows, Linux and other disks.",
+    "mode_dialog_description": "This decides how you get an agent's work back, and whether runs on this folder can execute at the same time.",
     "mode_in_place_title": "Edit this folder directly",
     "mode_in_place_description": "One run at a time. Changes appear in your working copy as the agent makes them, ready for you to keep working on.",
     "mode_worktree_title": "Run in parallel, isolated",

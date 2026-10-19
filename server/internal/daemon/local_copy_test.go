@@ -285,6 +285,13 @@ func TestLocalRunCopyDisabledOnlyForListedFolders(t *testing.T) {
 	if err != nil || c != nil {
 		t.Fatalf("prepare for listed folder = (%v, %v), want (nil, nil)", c, err)
 	}
+
+	// Content that is not a folder list keeps the old meaning: off everywhere.
+	writeCopyTestFile(t, switchFile, "yes\n")
+	c, err = prepareLocalRunCopy(Task{ID: "task-3", AgentID: "agent-1", IssueID: "issue-1"}, orig, logger)
+	if err != nil || c != nil {
+		t.Fatalf("prepare with a non-list switch file = (%v, %v), want (nil, nil)", c, err)
+	}
 }
 
 func TestLocalRunCopyConflictedLeftoverIsSetAside(t *testing.T) {
@@ -452,12 +459,14 @@ func TestLocalRunCopyNoticeOnlyWithACopy(t *testing.T) {
 	}
 }
 
-// Not parallel: it swaps the package-level probe. Stored worktree and shared
-// rows run on a private copy where one can be made, and keep their mode where
-// it cannot; the stored value itself is never rewritten.
+// Not parallel: it swaps the package-level probe and sets the environment.
+// With the always-clone switch on, stored worktree and shared rows run on a
+// private copy where one can be made, and keep their mode where it cannot;
+// the stored value itself is never rewritten.
 func TestStoredExecutionModeIgnoredWhereACopyCanBeMade(t *testing.T) {
 	prev := localCopySupported
 	defer func() { localCopySupported = prev }()
+	t.Setenv(localDirectoryAlwaysCloneEnv, "1")
 
 	for _, stored := range []string{"", localDirectoryModeInPlace, localDirectoryModeWorktree, localDirectoryModeShared} {
 		a := &localDirectoryAssignment{AbsPath: "/u/folder", Ref: localDirectoryRef{ExecutionMode: stored}}
@@ -477,6 +486,22 @@ func TestStoredExecutionModeIgnoredWhereACopyCanBeMade(t *testing.T) {
 		}
 		if a.Ref.ExecutionMode != stored {
 			t.Errorf("stored mode rewritten to %q", a.Ref.ExecutionMode)
+		}
+	}
+}
+
+// Not parallel: it swaps the package-level probe. Without the switch every
+// stored mode keeps its old behaviour, clone or not.
+func TestStoredExecutionModeKeptByDefault(t *testing.T) {
+	prev := localCopySupported
+	defer func() { localCopySupported = prev }()
+	localCopySupported = func(string) bool { return true }
+	t.Setenv(localDirectoryAlwaysCloneEnv, "")
+
+	for _, stored := range []string{localDirectoryModeWorktree, localDirectoryModeShared} {
+		a := &localDirectoryAssignment{AbsPath: "/u/folder", Ref: localDirectoryRef{ExecutionMode: stored}}
+		if a.mode() != stored || !a.SkipsPathMutex() {
+			t.Errorf("stored %q with the switch off: mode = %q, want the stored mode", stored, a.mode())
 		}
 	}
 }
