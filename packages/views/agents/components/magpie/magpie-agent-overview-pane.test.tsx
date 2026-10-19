@@ -52,6 +52,8 @@ const baseAgent: Agent = {
   runtime_mode: "local",
   runtime_config: {},
   custom_args: [],
+  model: "",
+  skills: [],
   visibility: "workspace",
   permission_mode: "public_to",
   invocation_targets: [{ target_type: "workspace", target_id: null }],
