@@ -39,5 +39,5 @@ func contentSecurityPolicyForRequest(r *http.Request) string {
 
 func isAttachmentPreviewDocumentPath(path string) bool {
 	return strings.HasPrefix(path, "/api/attachments/") &&
-		(strings.HasSuffix(path, "/download") || strings.HasSuffix(path, "/content"))
+		(strings.HasSuffix(path, "/download") || strings.HasSuffix(path, "/content") || strings.HasSuffix(path, "/preview"))
 }

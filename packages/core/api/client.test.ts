@@ -1667,6 +1667,53 @@ describe("ApiClient", () => {
       expect(att.attachment_download_url).toContain("dl=1");
     });
 
+    it("passes preview_url through and tolerates a server that predates it", async () => {
+      const fetchMock = vi.fn()
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              id: "att-1",
+              workspace_id: "ws-b",
+              uploader_type: "member",
+              uploader_id: "u-1",
+              filename: "report.html",
+              url: "https://static.example.test/report.html",
+              download_url: "/api/attachments/att-1/signed-download?sig=abc",
+              preview_url: "/api/attachments/att-1/preview?exp=1800000060&sig=prev",
+              content_type: "text/html",
+              size_bytes: 64,
+              created_at: "2026-05-11T00:00:00Z",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+        )
+        .mockResolvedValueOnce(
+          new Response(
+            JSON.stringify({
+              id: "att-1",
+              workspace_id: "ws-b",
+              uploader_type: "member",
+              uploader_id: "u-1",
+              filename: "report.html",
+              url: "https://static.example.test/report.html",
+              download_url: "/api/attachments/att-1/signed-download?sig=abc",
+              content_type: "text/html",
+              size_bytes: 64,
+              created_at: "2026-05-11T00:00:00Z",
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+        );
+      vi.stubGlobal("fetch", fetchMock);
+      const client = new ApiClient("https://api.example.test");
+
+      const withPreview = await client.getAttachmentForDownload("att-1");
+      const withoutPreview = await client.getAttachmentForDownload("att-1");
+
+      expect(withPreview.preview_url).toBe("/api/attachments/att-1/preview?exp=1800000060&sig=prev");
+      expect(withoutPreview.preview_url).toBeUndefined();
+    });
+
     it("returns the parsed attachment for a well-formed response", async () => {
       vi.stubGlobal(
         "fetch",

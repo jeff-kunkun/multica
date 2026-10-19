@@ -19,6 +19,14 @@ export interface Attachment {
    */
   attachment_download_url?: string;
   /**
+   * Credential-free inline preview URL: serves the body with
+   * Content-Disposition: inline under a CSP sandbox, so a phone browser
+   * renders the document (scripts run) instead of downloading it. Bearer
+   * link with a multi-day TTL — never persist it. Optional: a server older
+   * than this field omits it.
+   */
+  preview_url?: string;
+  /**
    * Durable URL the client persists into markdown bodies.
    *
    * The server (`buildMarkdownURL` in server/internal/handler/file.go)
