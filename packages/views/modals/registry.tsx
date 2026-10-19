@@ -88,6 +88,7 @@ export function ModalRegistry() {
       break;
     case "private-link":
       activeModal = <PrivateLinkModal onClose={close} data={data} />;
+      break;
     case "issue-workflow-handoff":
       activeModal = <WorkflowHandoffModal onClose={close} data={data} />;
       break;
