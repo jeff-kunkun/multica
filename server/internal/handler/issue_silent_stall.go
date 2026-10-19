@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/blockwait"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
+	"github.com/multica-ai/multica/server/internal/issueworkflow"
 	"github.com/multica-ai/multica/server/internal/parking"
 	"github.com/multica-ai/multica/server/internal/routing"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -55,8 +56,8 @@ func reviewerIsAssigned(issue db.Issue) bool {
 //
 // Every refusal it returns is also kept in issue_rejection, so the parking
 // record (DENE-881) can say "送审被拒" after the run is gone.
-func (h *Handler) guardSilentStall(ctx context.Context, issue db.Issue, nextStatus string, actorType, actorID string, assigneeType pgtype.Text, assigneeID pgtype.UUID, reviewerType pgtype.Text, reviewerID pgtype.UUID, reviewerExplicit bool) statusTransition {
-	tr := h.decideSilentStall(ctx, issue, nextStatus, actorType, actorID, assigneeType, assigneeID, reviewerType, reviewerID, reviewerExplicit)
+func (h *Handler) guardSilentStall(ctx context.Context, issue db.Issue, projectID pgtype.UUID, nextStatus string, actorType, actorID string, assigneeType pgtype.Text, assigneeID pgtype.UUID, reviewerType pgtype.Text, reviewerID pgtype.UUID, reviewerExplicit bool) statusTransition {
+	tr := h.decideSilentStall(ctx, issue, projectID, nextStatus, actorType, actorID, assigneeType, assigneeID, reviewerType, reviewerID, reviewerExplicit)
 	if tr.refuse != "" {
 		h.recordRejection(ctx, issue, nextStatus, actorType, actorID, tr.refuse)
 	}
@@ -88,11 +89,14 @@ func (h *Handler) recordRejection(ctx context.Context, issue db.Issue, nextStatu
 	}
 }
 
-func (h *Handler) decideSilentStall(ctx context.Context, issue db.Issue, nextStatus string, actorType, actorID string, assigneeType pgtype.Text, assigneeID pgtype.UUID, reviewerType pgtype.Text, reviewerID pgtype.UUID, reviewerExplicit bool) statusTransition {
+func (h *Handler) decideSilentStall(ctx context.Context, issue db.Issue, projectID pgtype.UUID, nextStatus string, actorType, actorID string, assigneeType pgtype.Text, assigneeID pgtype.UUID, reviewerType pgtype.Text, reviewerID pgtype.UUID, reviewerExplicit bool) statusTransition {
 	var tr statusTransition
 	switch nextStatus {
 	case issuestatus.InReview:
 		if issue.Status == issuestatus.InReview {
+			return tr
+		}
+		if h.workflowOwnsReview(ctx, issue.WorkspaceID, projectID) {
 			return tr
 		}
 		if actorType == "agent" {
@@ -136,6 +140,22 @@ func (h *Handler) decideSilentStall(ctx context.Context, issue db.Issue, nextSta
 	default:
 		return tr
 	}
+}
+
+// workflowOwnsReview reports whether the project the write lands the issue in
+// runs a workflow its workspace adopted: a non-default one, or a default one
+// with handoffs. Such a workflow decides what in_review means and who takes
+// it (MUL-7420), so the acceptance-seat rule steps aside (DENE-2315).
+// Adopting a workflow needs project_workflows_v1, which is off by default, so
+// a workspace that never adopts one keeps the acceptance seat on every
+// in_review.
+func (h *Handler) workflowOwnsReview(ctx context.Context, workspaceID, projectID pgtype.UUID) bool {
+	def, _, err := issueworkflow.ForProject(ctx, h.Queries, workspaceID, projectID)
+	if err != nil {
+		slog.Warn("acceptance seat: load project workflow failed", "project_id", uuidToString(projectID), "error", err)
+		return false
+	}
+	return def != nil && (!def.IsDefault || def.HandsOffAnywhere())
 }
 
 func reviewerChosen(reviewerType pgtype.Text, reviewerID pgtype.UUID, explicit bool) bool {

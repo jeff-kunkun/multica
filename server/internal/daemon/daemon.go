@@ -9674,20 +9674,21 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// "start task failed: <…>" string and the same failure_reason
 	// taxonomy as before — see MUL-2946 for the classifier contract.
 	var taskCapabilities []string
-	// DENE-2315 CHOICE pending (cursor live-run steering): the old office
-	// steers Cursor by restart (cursor is listed in SteersByRestart, DENE-1349);
-	// upstream dfa8bdaa53 steers it in-process through a postToolUse hook relay
-	// (cursor-agent >= 2026.10.14, Unix only, issue tasks only). Both are kept:
-	// the restart path stays active and the hook path is compiled but only
-	// reachable once cursor leaves SteersByRestart.
+	// Cursor takes a mid-run message through the postToolUse hook relay when
+	// the run can have it (cursor-agent >= 2026.10.14, a daemon-managed
+	// workdir, Unix, an issue task), and by restart otherwise (DENE-1349).
+	// The choice is per run (DENE-2315).
 	var cursorHookCommand []string
 	supplementSupported := agent.SupportsTaskSupplement(provider, resolvedVersion) && (task.IssueID != "" || task.ChatSessionID != "")
-	if supplementSupported && provider == "cursor" && !agent.SteersByRestart(provider) {
-		cursorHookCommand, supplementSupported = cursorSupplementHookCommand(env)
+	steersByRestart := agent.SteersByRestart(provider)
+	if supplementSupported && provider == "cursor" && task.IssueID != "" && agent.CursorSupportsSupplementHook(resolvedVersion) {
+		if command, ok := cursorSupplementHookCommand(env); ok {
+			cursorHookCommand, steersByRestart = command, false
+		}
 	}
 	if supplementSupported {
 		taskCapabilities = append(taskCapabilities, protocol.DaemonCapabilityTaskSupplementV1)
-		if agent.SteersByRestart(provider) {
+		if steersByRestart {
 			taskCapabilities = append(taskCapabilities, protocol.DaemonCapabilitySteerRestartV1)
 		} else if agent.SteersByHandoff(provider) {
 			taskCapabilities = append(taskCapabilities, protocol.DaemonCapabilitySteerHandoffV1)

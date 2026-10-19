@@ -167,12 +167,6 @@ func SupportsTaskSupplement(provider, version string) bool {
 		// The steering extension (supplementext/pi.js) was verified against
 		// Pi 0.73.1; older releases are untested, so they keep queueing.
 		minimum = "0.73.0"
-	case "cursor":
-		// DENE-2315 CHOICE pending: unreachable while cursor steers by restart
-		// (SteersByRestart above); upstream's hook floor is kept for the switch.
-		// 2026.10.14 is the oldest build verified to forward postToolUse
-		// additional_context into the model turn in --print mode.
-		minimum = "2026.10.14"
 	default:
 		return false
 	}
@@ -186,6 +180,17 @@ func SupportsTaskSupplement(provider, version string) bool {
 		return detected.lessThan(ceiling)
 	}
 	return true
+}
+
+// CursorSupportsSupplementHook reports whether a Cursor build can take a
+// mid-run message in process through the postToolUse hook relay. A run that
+// can uses the hook; any other Cursor run steers by restart (DENE-2315).
+// 2026.10.14 is the oldest build verified to forward postToolUse
+// additional_context into the model turn in --print mode.
+func CursorSupportsSupplementHook(version string) bool {
+	detected, err := parseSemver(version)
+	floor, _ := parseSemver("2026.10.14")
+	return err == nil && !detected.lessThan(floor)
 }
 
 // versionRe matches version strings like "2.1.100", "v2.0.0", or

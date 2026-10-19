@@ -45,7 +45,8 @@ const restartSteerNotice = `[SESSION RESUMED] Your CLI process was stopped and r
 `
 
 func (b *restartSteerBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
-	if !opts.EnableTaskSupplement {
+	// A Cursor run with a hook relay reads messages in process (DENE-2315).
+	if !opts.EnableTaskSupplement || len(opts.CursorHookCommand) > 0 {
 		return b.inner.Execute(ctx, prompt, opts)
 	}
 	r := &restartSteerRun{

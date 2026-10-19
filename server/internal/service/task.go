@@ -5020,7 +5020,9 @@ func (s *TaskService) maybeLogClaimSlow(agentID pgtype.UUID, outcome string, sta
 // mid-run message. The daemon says which mode it offers; a provider outside
 // that mode's list gets no capability, so a run fails closed.
 var steerProviders = map[string][]string{
-	protocol.SteerModeSame:    {"codex", "claude", "grok"},
+	// Cursor reads in process when its run has the hook relay, and steers by
+	// restart otherwise; the daemon decides per run (DENE-2315).
+	protocol.SteerModeSame:    {"codex", "claude", "grok", "cursor"},
 	protocol.SteerModeRestart: {"cursor", "copilot", "codearts", "deveco", "antigravity", "openclaw"},
 	protocol.SteerModeHandoff: {"hermes", "kimi", "kiro", "qoder", "qoderclicn", "qwenpaw", "reasonix", "traecli", "zeroclaw", "devin", "dim", "mcode"},
 }

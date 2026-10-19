@@ -108,6 +108,22 @@ func TestRestartSteerWithoutNegotiationIsPlain(t *testing.T) {
 	<-s.Result
 }
 
+func TestRestartSteerLeavesCursorHookRunsAlone(t *testing.T) {
+	f := &fakeOneShot{}
+	s, err := WithRestartSteer("cursor", f).Execute(context.Background(), "task", ExecOptions{
+		EnableTaskSupplement: true, CursorHookCommand: []string{"multica", CursorHookHelperArg},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Supplement != nil {
+		t.Fatal("a Cursor run with the hook relay reads messages in process; restart must not take them")
+	}
+	f.endProcess(0)
+	drain(t, s)
+	<-s.Result
+}
+
 func TestRestartSteerResumesTheSameSession(t *testing.T) {
 	f := &fakeOneShot{}
 	s, err := WithRestartSteer("cursor", f).Execute(context.Background(), "task", ExecOptions{EnableTaskSupplement: true, SystemPrompt: "brief"})

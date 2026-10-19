@@ -4743,7 +4743,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	if statusActorType != "" {
 		_, actorIDForGuard = h.resolveActor(r, userID, workspaceID)
 	}
-	tr := h.guardSilentStall(r.Context(), prevIssue, statusKeyForGuard, statusActorType, actorIDForGuard, params.AssigneeType, params.AssigneeID, params.ReviewerType, params.ReviewerID, touchedReviewerType || touchedReviewerID)
+	tr := h.guardSilentStall(r.Context(), prevIssue, params.ProjectID, statusKeyForGuard, statusActorType, actorIDForGuard, params.AssigneeType, params.AssigneeID, params.ReviewerType, params.ReviewerID, touchedReviewerType || touchedReviewerID)
 	if tr.refuse != "" {
 		writeError(w, http.StatusConflict, tr.refuse)
 		return
@@ -4940,7 +4940,13 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		h.stopPreviousAssigneeRuns(r.Context(), prevIssue, issue, actorType, actorID)
 	}
 	if willRun {
-		h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, handoffNote)
+		runCtx := r.Context()
+		if handoff != nil {
+			// Entering a step is new work, not a wake to fold into the
+			// handler's running run (DENE-2315).
+			runCtx = service.WithSeparateIssueRun(runCtx)
+		}
+		h.dispatchIssueRun(runCtx, issue, trigger, actorType, actorID, handoffNote)
 	}
 
 	// Platform-driven parent notification: when this issue transitions into
@@ -5837,7 +5843,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 		}
-		batchTransition := h.guardSilentStall(r.Context(), prevIssue, batchStatusKey, batchActorType, batchActorID, params.AssigneeType, params.AssigneeID, params.ReviewerType, params.ReviewerID, false)
+		batchTransition := h.guardSilentStall(r.Context(), prevIssue, params.ProjectID, batchStatusKey, batchActorType, batchActorID, params.AssigneeType, params.AssigneeID, params.ReviewerType, params.ReviewerID, false)
 		if batchTransition.refuse != "" {
 			reject(issueID, batchTransition.refuse)
 			continue
@@ -5958,7 +5964,11 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			h.stopPreviousAssigneeRuns(r.Context(), prevIssue, issue, actorType, actorID)
 		}
 		if willRun {
-			h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, batchHandoffNote)
+			runCtx := r.Context()
+			if handoff != nil {
+				runCtx = service.WithSeparateIssueRun(runCtx)
+			}
+			h.dispatchIssueRun(runCtx, issue, trigger, actorType, actorID, batchHandoffNote)
 		}
 
 		// No status change — not even → cancelled — cancels active tasks here,

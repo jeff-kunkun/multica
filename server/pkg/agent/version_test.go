@@ -19,13 +19,22 @@ func TestTaskSupplementVersionGate(t *testing.T) {
 		{"codex", "", false}, {"claude", "dev", false},
 		// ACP stop-and-continue needs only session/cancel, so any version works.
 		{"kimi", "0.40.1", true}, {"hermes", "", true}, {"kiro", "dev", true},
-		// DENE-2315 CHOICE pending: upstream's hook-path rows (cursor
-		// 2026.10.16-e3cb207/2026.10.14 true, 2026.04.17-787b533 false) apply
-		// only once cursor leaves SteersByRestart; restart steering takes any version.
+		// Cursor steers by restart on any version; the hook floor is separate.
 		{"cursor", "2026.04.17-787b533", true},
 	} {
 		if got := SupportsTaskSupplement(tc.provider, tc.version); got != tc.want {
 			t.Errorf("%s %q: supported=%v, want %v", tc.provider, tc.version, got, tc.want)
+		}
+	}
+}
+
+func TestCursorSupportsSupplementHook(t *testing.T) {
+	for version, want := range map[string]bool{
+		"2026.10.16-e3cb207": true, "2026.10.14": true,
+		"2026.04.17-787b533": false, "": false, "dev": false,
+	} {
+		if got := CursorSupportsSupplementHook(version); got != want {
+			t.Errorf("%q: hook=%v, want %v", version, got, want)
 		}
 	}
 }
