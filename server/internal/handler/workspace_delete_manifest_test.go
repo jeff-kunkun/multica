@@ -166,6 +166,8 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"password_reset_audit":               workspaceDeleteDetach,
 	"personal_access_token":              workspaceDelete, // bot keys (659) cascade on workspace_id; personal rows have NULL and stay
 	"pinned_item":                        workspaceDelete,
+	"plan":                               workspaceDelete,
+	"plan_approver":                      workspaceDelete,
 	"plugin_installation":                workspaceDelete,
 	"plugin_hook_schedule":               workspaceDelete,
 	"plugin_invocation":                  workspaceDelete,

@@ -869,6 +869,7 @@ type AgentTaskResponse struct {
 	// ProjectWorkflow is the issue's project workflow, when it has one other
 	// than the Default (MUL-7420). Absent keeps the brief unchanged.
 	ProjectWorkflow         *TaskProjectWorkflowData `json:"project_workflow,omitempty"`
+	PlanFlow                bool                     `json:"plan_flow,omitempty"`   // the issue's workspace uses plan approval (has a plan or a plan approver), so its brief lists `plan propose`; absent keeps the brief unchanged. Mirror field: internal/daemon/types.go, same JSON name
 	ThreadName              string                   `json:"thread_name,omitempty"` // semantic title for provider-native session/thread history
 	Status                  string                   `json:"status"`
 	Priority                int32                    `json:"priority"`

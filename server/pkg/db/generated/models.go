@@ -2116,6 +2116,32 @@ type PinnedItem struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type Plan struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	Version     int32              `json:"version"`
+	AuthorType  string             `json:"author_type"`
+	AuthorID    pgtype.UUID        `json:"author_id"`
+	Goal        string             `json:"goal"`
+	OutOfScope  string             `json:"out_of_scope"`
+	Steps       []byte             `json:"steps"`
+	DoneWhen    string             `json:"done_when"`
+	Status      string             `json:"status"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+	CommentID   pgtype.UUID        `json:"comment_id"`
+	ApprovedBy  pgtype.UUID        `json:"approved_by"`
+	ApprovedAt  pgtype.Timestamptz `json:"approved_at"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type PlanApprover struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	UserID      pgtype.UUID        `json:"user_id"`
+	GrantedBy   pgtype.UUID        `json:"granted_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type PluginHookSchedule struct {
 	ID             pgtype.UUID        `json:"id"`
 	InstallationID pgtype.UUID        `json:"installation_id"`
