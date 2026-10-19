@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { IssuePlans, PlanApprover } from "../types/plan";
 import type {
   CreateRepoLinkResponse,
   ListRepoLinksResponse,
@@ -5108,3 +5109,70 @@ export const EMPTY_TEST_REPO_BINDING_RESPONSE: TestRepoBindingResponse = {
 export const BotWakeDeliveryStatsSchema = z.object({
   limited_count: z.number().int().nonnegative().safe().optional().catch(0).default(0),
 }).passthrough();
+
+// Plans (propose-then-approve). Unknown statuses pass through as
+// strings; malformed fields fall back so one bad row never hides the card.
+const nullableString = z.string().nullish().catch(null).transform((v) => v ?? null);
+
+export const PlanStepSchema = z
+  .object({
+    title: z.string().catch("").default(""),
+    assignee_type: z.string().catch("").default(""),
+    assignee_id: z.string().catch("").default(""),
+    issue_id: nullableString,
+  })
+  .loose();
+
+export const PlanSchema = z
+  .object({
+    id: z.string().default(""),
+    issue_id: z.string().catch("").default(""),
+    version: z.number().int().catch(0).default(0),
+    status: z.string().catch("").default(""),
+    author_type: z.string().catch("").default(""),
+    author_id: z.string().catch("").default(""),
+    goal: z.string().catch("").default(""),
+    out_of_scope: z.string().catch("").default(""),
+    steps: z.array(PlanStepSchema).catch([]).default([]),
+    done_when: z.string().catch("").default(""),
+    // null = general work outside any project.
+    project_id: nullableString,
+    comment_id: nullableString,
+    approved_by: nullableString,
+    approved_at: nullableString,
+    created_at: z.string().catch("").default(""),
+  })
+  .loose();
+
+export const IssuePlansSchema = z
+  .object({
+    plans: z.array(PlanSchema).catch([]).default([]),
+    can_approve: z.boolean().catch(false).default(false),
+  })
+  .loose();
+
+export const EMPTY_ISSUE_PLANS: IssuePlans = { plans: [], can_approve: false };
+
+export const ApprovePlanResponseSchema = z
+  .object({ plan: PlanSchema.nullish().catch(null).transform((v) => v ?? null) })
+  .loose();
+
+export const PlanApproverSchema = z
+  .object({
+    user_id: z.string().default(""),
+    name: z.string().catch("").default(""),
+    granted_by: z.string().catch("").default(""),
+    created_at: z.string().catch("").default(""),
+  })
+  .loose();
+
+export const PlanApproverListSchema = z
+  .object({ approvers: z.array(PlanApproverSchema).catch([]).default([]) })
+  .loose();
+
+export const EMPTY_PLAN_APPROVER: PlanApprover = {
+  user_id: "",
+  name: "",
+  granted_by: "",
+  created_at: "",
+};

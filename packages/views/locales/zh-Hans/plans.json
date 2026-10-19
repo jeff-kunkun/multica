@@ -1,0 +1,38 @@
+{
+  "plan": {
+    "title": "方案 v{{version}}",
+    "status_proposed": "待批准",
+    "status_approved": "已批准",
+    "status_superseded": "已被新版替代",
+    "project": "项目",
+    "general": "通用（不挂项目）",
+    "goal": "目标",
+    "out_of_scope": "不做什么",
+    "steps": "步骤",
+    "done_when": "怎样算完",
+    "approve": "批准",
+    "approving": "正在批准…",
+    "approve_failed": "没能批准方案",
+    "approve_disabled": "只有所有者或有批准权的人能批准",
+    "approved_by": "{{name}} 已批准",
+    "progress": "完成 {{done}}/{{total}}",
+    "cut": "请人砍一刀",
+    "cut_title": "请人砍一刀",
+    "cut_hint": "对方会在方案下面回复还能砍掉什么。",
+    "cut_message": "请看看这版方案还能砍掉什么，只砍不加。",
+    "cut_send": "去请",
+    "cut_failed": "没能发出请求",
+    "cut_sent": "已发出",
+    "cancel": "取消"
+  },
+  "approvers": {
+    "title": "批准权",
+    "description": "谁能批准方案。所有者始终可以。",
+    "owners": "所有者",
+    "add": "添加",
+    "add_placeholder": "选一位成员",
+    "remove": "移除",
+    "owner_only": "只有所有者能改",
+    "failed": "没能更新批准权"
+  }
+}

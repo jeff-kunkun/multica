@@ -15,6 +15,7 @@ import { getCurrentWsId, getCurrentSlug } from "../platform/workspace-storage";
 import { issueKeys } from "../issues/queries";
 import { homeKeys } from "../home/queries";
 import { projectKeys } from "../projects/queries";
+import { planKeys } from "../plans/queries";
 import { invalidateProjectMemberLists } from "../projects/member-queries";
 import { pinKeys } from "../pins/queries";
 import { autopilotKeys } from "../autopilots/queries";
@@ -1526,6 +1527,8 @@ export function useRealtimeSync(
         qc.invalidateQueries({ queryKey: homeKeys.all(wsId) });
         invalidateUpdatedAtSortedIssueLists(qc, wsId);
         invalidateLastActivitySortedIssueLists(qc, wsId);
+        // Proposing or approving a plan posts its card as a comment.
+        qc.invalidateQueries({ queryKey: planKeys.issue(wsId, comment.issue_id) });
         // A comment carries only the aggregate owner revision, not a full
         // Issue snapshot. Mark stale projections for an authoritative fetch
         // without making a later full snapshot look older than the cache.

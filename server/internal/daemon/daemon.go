@@ -8819,6 +8819,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		QuickCreatePrompt:                task.QuickCreatePrompt,
 		IsConsult:                        task.ConsultPrompt != "",
 		IsSquadLeader:                    taskIsSquadLeader(task),
+		PlanFlow:                         task.PlanFlow,
 		RequestingUserName:               task.RequestingUserName,
 		RequestingUserProfileDescription: task.RequestingUserProfileDescription,
 		InitiatorType:                    task.InitiatorType,

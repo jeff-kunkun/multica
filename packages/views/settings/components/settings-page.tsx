@@ -31,6 +31,7 @@ import {
   Link2,
   Bot,
   BotMessageSquare,
+  Stamp,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
@@ -74,6 +75,7 @@ import { McpTab } from "./mcp-tab";
 import { BillingTab } from "./billing-tab";
 import { ConfigTransferTab } from "./config-transfer-tab";
 import { ProjectSharingTab } from "./project-sharing-tab";
+import { ApproversTab } from "./approvers-tab";
 import { SETTINGS_ANCHOR_ATTR } from "./settings-layout";
 import { searchSettings } from "./settings-search";
 import { HighlightText } from "../../search/highlight-text";
@@ -220,6 +222,9 @@ export function SettingsPage({ extraDeviceTabs: deviceTabs = [] }: SettingsPageP
       wide: true,
     }),
     entry("routing", t(($) => $.page.tabs.routing), Route, <RoutingTab />),
+    // Plan approval rights: unlisted so workspaces that never use plans see
+    // no new page; owners open it by URL or use `multica plan approver`.
+    entry("approvers", t(($) => $.page.tabs.approvers), Stamp, <ApproversTab />),
     ...(reposAllowed
       ? [
           entry(

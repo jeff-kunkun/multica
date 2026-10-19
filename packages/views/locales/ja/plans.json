@@ -1,0 +1,38 @@
+{
+  "plan": {
+    "title": "プラン v{{version}}",
+    "status_proposed": "承認待ち",
+    "status_approved": "承認済み",
+    "status_superseded": "新しい版に置き換え済み",
+    "project": "プロジェクト",
+    "general": "全般（プロジェクトなし）",
+    "goal": "目標",
+    "out_of_scope": "やらないこと",
+    "steps": "ステップ",
+    "done_when": "完了の条件",
+    "approve": "承認",
+    "approving": "承認中…",
+    "approve_failed": "プランを承認できませんでした",
+    "approve_disabled": "オーナーまたは承認権のある人だけが承認できます",
+    "approved_by": "{{name}} が承認",
+    "progress": "{{done}}/{{total}} 完了",
+    "cut": "削れるところを聞く",
+    "cut_title": "削れるところを聞く",
+    "cut_hint": "相手はプランの下に、削れるものを返信します。",
+    "cut_message": "このプランを見て、さらに削れるものを教えてください。削るだけで、追加はしないでください。",
+    "cut_send": "依頼する",
+    "cut_failed": "依頼を送れませんでした",
+    "cut_sent": "依頼を送りました",
+    "cancel": "キャンセル"
+  },
+  "approvers": {
+    "title": "承認権",
+    "description": "プランを承認できる人。オーナーは常に承認できます。",
+    "owners": "オーナー",
+    "add": "追加",
+    "add_placeholder": "メンバーを選択",
+    "remove": "削除",
+    "owner_only": "オーナーだけが変更できます",
+    "failed": "承認権を更新できませんでした"
+  }
+}

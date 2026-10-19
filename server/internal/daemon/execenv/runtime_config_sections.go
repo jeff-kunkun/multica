@@ -219,7 +219,13 @@ func writeAvailableCommands(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("- `issue wakeup` — wait for a condition, then resume\n")
 	b.WriteString("- `chat list | search | history` — read chats\n")
 	b.WriteString("- `repo checkout <url>` — other repositories\n")
-	b.WriteString("- `attachment upload | download` — files\n\n")
+	b.WriteString("- `attachment upload | download` — files\n")
+	// Plan approval is opt-in per workspace; workspaces that never used it
+	// keep the brief byte-identical.
+	if ctx.PlanFlow {
+		b.WriteString("- `plan propose <issue>` — propose a plan when the issue asks for one, naming its project (`--project <id>`) or `--general`; nothing starts until it is approved\n")
+	}
+	b.WriteString("\n")
 	b.WriteString("Keep the user's Git identity; override via `git config --worktree`, never global.\n\n")
 	// Squad maintenance is squad-leader surface (MUL-5442). IsSquadLeader is a
 	// per-task role, so this costs byte-stability when the role flips; the

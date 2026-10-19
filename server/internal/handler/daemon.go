@@ -3431,6 +3431,13 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		// Project workflow (MUL-7420): best-effort, like the status catalog
 		// below — a failure degrades to the workspace-wide status rules.
 		resp.ProjectWorkflow = h.claimProjectWorkflow(r.Context(), issue, task)
+		// Plan approval is opt-in per workspace: best-effort, a failed check
+		// leaves the brief as it was.
+		if usesPlans, planErr := h.Queries.WorkspaceUsesPlans(r.Context(), issue.WorkspaceID); planErr != nil {
+			slog.Warn("claim: could not check plan usage", "workspace_id", uuidToString(issue.WorkspaceID), "error", planErr)
+		} else {
+			resp.PlanFlow = usesPlans
+		}
 
 		// Load every planned input as one chronological, de-duplicated set.
 		// The trigger is included here so the delivery receipt can only contain

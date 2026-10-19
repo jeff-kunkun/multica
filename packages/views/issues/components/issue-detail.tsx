@@ -210,6 +210,7 @@ import { useStickyComposer } from "../hooks/use-sticky-composer";
 import { ScrollToBottomButton } from "../../common/scroll-to-bottom-button";
 import { useUnseenCount } from "../../common/use-unseen-count";
 import { useScrolledAwayFromBottom } from "../../common/use-scroll-away-from-bottom";
+import { IssuePlanCard } from "../../plans/plan-card";
 import { FindBar } from "./find-bar";
 import {
   AnimatedRightSidebar,
@@ -4164,6 +4165,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           })()}
 
           <div className="my-8 border-t" />
+
+          <IssuePlanCard issueId={id} />
 
           {/* Activity / Comments */}
           <div>

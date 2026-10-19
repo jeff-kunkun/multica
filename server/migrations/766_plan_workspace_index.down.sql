@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS plan_workspace_idx;

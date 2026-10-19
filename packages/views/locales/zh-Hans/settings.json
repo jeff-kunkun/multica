@@ -441,7 +441,8 @@
       "routing": "路由",
       "project_sharing": "权限与共享",
       "agent_permissions": "智能体权限",
-      "bots": "群聊与 Bot"
+      "bots": "群聊与 Bot",
+      "approvers": "批准权"
     },
     "groups": {
       "personal": "个人",

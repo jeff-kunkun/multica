@@ -14,7 +14,7 @@ import (
 
 var planCmd = &cobra.Command{
 	Use:   "plan",
-	Short: "Build a staged issue tree from a plan file",
+	Short: "Build a staged issue tree from a plan file, or propose and approve issue plans",
 }
 
 var planApplyCmd = &cobra.Command{
