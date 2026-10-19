@@ -5,6 +5,7 @@ import type {
   RuntimeConfigSwitchResult,
 } from "../shared/runtime-config";
 import type { FreezeBreadcrumb } from "../shared/freeze-breadcrumb";
+import type { FullDiskAccessState } from "../shared/full-disk-access";
 import type {
   InstallerReadyPayload,
   ManualUpdateCheckResult,
@@ -250,6 +251,10 @@ const desktopAPI = {
   pickDirectory: (defaultPath?: string) =>
     ipcRenderer.invoke("local-directory:pick", defaultPath),
   /** Validate that a path is an existing readable+writable directory. */
+  getFullDiskAccess: (): Promise<FullDiskAccessState> =>
+    ipcRenderer.invoke("system:full-disk-access"),
+  openFullDiskAccessSettings: (): Promise<void> =>
+    ipcRenderer.invoke("system:open-full-disk-access-settings"),
   validateLocalDirectory: (path: string) =>
     ipcRenderer.invoke("local-directory:validate", path),
   /** Create a local Git repository in a plain folder. Nothing is uploaded. */

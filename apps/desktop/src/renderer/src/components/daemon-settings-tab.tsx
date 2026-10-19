@@ -11,6 +11,7 @@ import {
   SettingsTab,
 } from "@multica/views/settings";
 import { useT } from "@multica/views/i18n";
+import { useFullDiskAccess } from "@multica/views/platform";
 import { reauthenticateDaemon } from "../platform/daemon-reauth";
 import type { DaemonPrefs, DaemonStatus } from "../../../shared/daemon-types";
 import {
@@ -55,6 +56,8 @@ export function DaemonSettingsTab() {
   const [saving, setSaving] = useState(false);
   const [status, setStatus] = useState<DaemonStatus>({ state: "stopped" });
   const [reauthLoading, setReauthLoading] = useState(false);
+  const { access: diskAccess, openSettings: openDiskAccessSettings } =
+    useFullDiskAccess();
 
   useEffect(() => {
     window.daemonAPI.getPrefs().then(setPrefs);
@@ -138,6 +141,18 @@ export function DaemonSettingsTab() {
       )}
 
       <SettingsCard>
+        {diskAccess.status === "missing" && (
+          <SettingsRow
+            label={t(($) => $.desktop.daemon.disk_access)}
+            description={t(($) => $.desktop.daemon.disk_access_description, {
+              app: diskAccess.appName,
+            })}
+          >
+            <Button variant="outline" size="sm" onClick={openDiskAccessSettings}>
+              {t(($) => $.desktop.daemon.disk_access_open)}
+            </Button>
+          </SettingsRow>
+        )}
         <SettingsRow
           label={t(($) => $.desktop.daemon.auto_start_title)}
           description={t(($) => $.desktop.daemon.auto_start_description)}

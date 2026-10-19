@@ -13,6 +13,7 @@ import { setupLocalAttachments } from "./local-attachments";
 import { applyFallbackPathDirs } from "./path-fallback";
 import { setupWorkspaceTransfer } from "./workspace-transfer-ipc";
 import { configureLinuxFileDialogs } from "./linux-file-dialog";
+import { setupFullDiskAccess } from "./full-disk-access";
 import { openExternalSafely, downloadURLSafely } from "./external-url";
 import { installContextMenu } from "./context-menu";
 import { handleAppShortcut } from "./keyboard-shortcuts";
@@ -875,6 +876,7 @@ if (!gotTheLock) {
     setupSharedScratch();
     setupLocalAttachments();
     setupWorkspaceTransfer(() => mainWindow);
+    setupFullDiskAccess();
 
     app.on("activate", () => {
       const window = ensureMainWindow();

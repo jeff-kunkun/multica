@@ -13,6 +13,7 @@ import {
   parsePackageArgs,
   resolveBuildMatrix,
   stripLeadingSeparator,
+  useLocalMacSigning,
 } from "./package.mjs";
 
 describe("normalizeGitVersion", () => {
@@ -461,6 +462,28 @@ describe("builderArgsForTarget", () => {
     expect(test).not.toContain("-c.publish.channel=latest");
   });
 
+  it("adds the local sign hook only to macOS targets", () => {
+    const parsed = {
+      allPlatforms: false,
+      sharedArgs: [],
+      platformTargets: { mac: [], win: [], linux: [] },
+      requestedPlatforms: ["mac", "win"],
+      requestedArchs: ["arm64"],
+    };
+    expect(
+      builderArgsForTarget({ platform: "mac", arch: "arm64" }, parsed, null, {
+        hostPlatform: "darwin",
+        localMacSigning: true,
+      }),
+    ).toContain("-c.mac.sign=./scripts/mac-local-sign.mjs");
+    expect(
+      builderArgsForTarget({ platform: "win", arch: "arm64" }, parsed, null, {
+        hostPlatform: "darwin",
+        localMacSigning: true,
+      }).some((arg) => arg.startsWith("-c.mac.sign")),
+    ).toBe(false);
+  });
+
   it("defaults linux cross-builds to AppImage on non-Linux hosts", () => {
     expect(
       builderArgsForTarget(
@@ -561,5 +584,35 @@ describe("electron-builder.yml packaging config", () => {
     const entries = readFilesBlock(readFileSync(configPath, "utf-8"));
     expect(entries.length).toBeGreaterThan(0);
     expect(entries).toContain("!dist/**");
+  });
+});
+
+describe("useLocalMacSigning", () => {
+  it("stays ad-hoc unless MULTICA_MAC_LOCAL_SIGN=1 opts in", () => {
+    expect(useLocalMacSigning({}, "darwin")).toBe(false);
+    expect(useLocalMacSigning({ MULTICA_MAC_LOCAL_SIGN: "0" }, "darwin")).toBe(
+      false,
+    );
+    expect(useLocalMacSigning({ MULTICA_MAC_LOCAL_SIGN: "1" }, "darwin")).toBe(
+      true,
+    );
+  });
+
+  it("leaves release identities, notarized builds and other hosts alone", () => {
+    const optIn = { MULTICA_MAC_LOCAL_SIGN: "1" };
+    expect(useLocalMacSigning({ ...optIn, APPLE_TEAM_ID: "T" }, "darwin")).toBe(
+      false,
+    );
+    expect(useLocalMacSigning({ ...optIn, CSC_LINK: "x.p12" }, "darwin")).toBe(
+      false,
+    );
+    expect(useLocalMacSigning({ ...optIn, CSC_NAME: "Dev" }, "darwin")).toBe(
+      false,
+    );
+    // The release job imports CSC_LINK into a keychain and unsets CSC_LINK.
+    expect(
+      useLocalMacSigning({ ...optIn, CSC_KEYCHAIN: "/tmp/ci.keychain" }, "darwin"),
+    ).toBe(false);
+    expect(useLocalMacSigning(optIn, "linux")).toBe(false);
   });
 });

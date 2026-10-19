@@ -24,6 +24,11 @@
 // set `CSC_IDENTITY_AUTO_DISCOVERY=false` so electron-builder falls back to
 // an ad-hoc signature. Ad-hoc builds cannot install later updates.
 //
+// With MULTICA_MAC_LOCAL_SIGN=1, a macOS build without release credentials
+// (no CSC_LINK / CSC_NAME / CSC_KEYCHAIN / APPLE_TEAM_ID) is signed with this
+// Mac's fixed local identity instead of ad-hoc (scripts/mac-local-signing.sh +
+// scripts/mac-local-sign.mjs), so Full Disk Access survives local upgrades.
+//
 // The `normalizeGitVersion`, `deriveVersion`, and `DESCRIBE_ARGS` exports let
 // tests cover version derivation both as a pure string transform and as the
 // real `git describe` invocation against a throwaway repo.
@@ -343,6 +348,25 @@ export function publishChannelForTarget(version, platform, arch) {
   return prefix;
 }
 
+// Whether macOS targets get the fixed local signing identity
+// (scripts/mac-local-signing.sh) instead of the ad-hoc signature an
+// uncredentialed Mac build gets. Opt-in with MULTICA_MAC_LOCAL_SIGN=1, so the
+// default stays ad-hoc. Never used when a release identity is configured
+// (CSC_LINK / CSC_NAME, or the keychain the CI job imports as CSC_KEYCHAIN)
+// or the build is notarized (APPLE_TEAM_ID): those keep their own identity.
+export function useLocalMacSigning(
+  env = process.env,
+  hostPlatform = process.platform,
+) {
+  if (hostPlatform !== "darwin") return false;
+  if (env.MULTICA_MAC_LOCAL_SIGN !== "1") return false;
+  return (
+    !env.CSC_LINK && !env.CSC_NAME && !env.CSC_KEYCHAIN && !env.APPLE_TEAM_ID
+  );
+}
+
+export const LOCAL_MAC_SIGN_HOOK = "./scripts/mac-local-sign.mjs";
+
 export function builderArgsForTarget(
   target,
   parsed,
@@ -352,6 +376,7 @@ export function builderArgsForTarget(
     hostPlatform = process.platform,
     useScopedOutputDir = false,
     forceMacCodeSigning = false,
+    localMacSigning = false,
   } = {},
 ) {
   const builderArgs = [];
@@ -373,6 +398,9 @@ export function builderArgsForTarget(
       `-c.mac.hardenedRuntime=${disableMacNotarize ? "false" : "true"}`,
     );
     if (disableMacNotarize) builderArgs.push("-c.mac.gatekeeperAssess=false");
+  }
+  if (localMacSigning && target.platform === "mac") {
+    builderArgs.push(`-c.mac.sign=${LOCAL_MAC_SIGN_HOOK}`);
   }
   builderArgs.push(PLATFORM_CONFIG[target.platform].builderFlag);
   const requestedTargets = parsed.platformTargets[target.platform];
@@ -488,6 +516,27 @@ function main() {
 
   const useScopedOutputDir = buildMatrix.length > 1;
 
+  let builderEnv = envWithLocalBins();
+  const localMacSigning =
+    buildMatrix.some((target) => target.platform === "mac") &&
+    useLocalMacSigning();
+  if (localMacSigning) {
+    const [identity, keychain] = execFileSync(
+      "bash",
+      [resolve(here, "mac-local-signing.sh")],
+      { cwd: desktopRoot, encoding: "utf8", stdio: ["ignore", "pipe", "inherit"] },
+    )
+      .trim()
+      .split("\t");
+    console.log(`[package] macOS signing → "${identity}" (fixed local identity)`);
+    builderEnv = {
+      ...builderEnv,
+      CSC_IDENTITY_AUTO_DISCOVERY: "false",
+      MULTICA_MAC_SIGN_IDENTITY: identity,
+      MULTICA_MAC_SIGN_KEYCHAIN: keychain,
+    };
+  }
+
   // Step 3: for each requested target, build the matching CLI into
   // resources/bin/ and package that target in isolation.
   for (const target of buildMatrix) {
@@ -515,6 +564,7 @@ function main() {
       // CI step already imported and trusted (CSC_KEYCHAIN). Do not quietly
       // ship an ad-hoc build.
       forceMacCodeSigning: Boolean(process.env.CSC_LINK || process.env.CSC_KEYCHAIN),
+      localMacSigning,
     });
 
     // Step 4: invoke electron-builder for the current target only.
@@ -523,7 +573,7 @@ function main() {
     const result = spawnSync("electron-builder", builderArgs, {
       stdio: "inherit",
       cwd: desktopRoot,
-      env: envWithLocalBins(),
+      env: builderEnv,
       shell: true,
     });
 

@@ -61,6 +61,10 @@ export {
 } from "./use-local-daemon-status";
 export { useLocalDirectorySharedOverrides } from "./use-local-directory-shared-overrides";
 export {
+  useFullDiskAccess,
+  type FullDiskAccess,
+} from "./full-disk-access";
+export {
   ScrollRestorationProvider,
   useScrollRestorationAdapter,
   useRestoredScrollEntry,
