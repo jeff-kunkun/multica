@@ -44,6 +44,8 @@ type createBotConnectRequest struct {
 	Type       string `json:"type"`
 	WebhookURL string `json:"webhook_url"`
 	WebhookKey string `json:"webhook_key"`
+	// WebhookHeaders are optional extra headers sent with every push.
+	WebhookHeaders map[string]string `json:"webhook_headers"`
 	// ExpiresInDays is how long the collected key lasts; nil or 0 means it
 	// never expires (DENE-2041).
 	ExpiresInDays *int `json:"expires_in_days"`
@@ -164,26 +166,10 @@ func (h *Handler) StartBotConnect(w http.ResponseWriter, r *http.Request) {
 		}
 		keyDays = pgtype.Int4{Int32: int32(*req.ExpiresInDays), Valid: true}
 	}
-	var sealed []byte
-	{
-		if h.BotWakeSecrets == nil {
-			writeError(w, http.StatusServiceUnavailable, "webhook encryption unavailable")
-			return
-		}
-		if _, err := validateWakeURL(r.Context(), req.WebhookURL); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		if len(req.WebhookKey) > 4096 || strings.ContainsAny(req.WebhookKey, "\r\n") {
-			writeError(w, http.StatusBadRequest, "invalid webhook key")
-			return
-		}
-		plain, _ := json.Marshal(botWakeSecrets{req.WebhookURL, req.WebhookKey})
-		var err error
-		if sealed, err = h.BotWakeSecrets.Seal(plain); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to store webhook")
-			return
-		}
+	sealed, status, err := h.sealWakeWebhook(r.Context(), req.WebhookURL, req.WebhookKey, req.WebhookHeaders)
+	if err != nil {
+		writeError(w, status, err.Error())
+		return
 	}
 	claimBytes := make([]byte, 32)
 	if _, err := rand.Read(claimBytes); err != nil {

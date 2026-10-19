@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -250,7 +249,7 @@ func (w *OfficeEventWorker) recipients(ctx context.Context, ev db.OfficeEvent, c
 		return nil
 	}
 	gap := ""
-	ownerWorthy := class.MustRelay || class.Meaning == service.OfficeMeaningRoundDone || class.Meaning == service.OfficeMeaningFailed
+	ownerWorthy := class.MustRelay || class.Meaning == service.OfficeMeaningRoundDone || class.Meaning == service.OfficeMeaningFailed || class.Meaning == service.OfficeMeaningAlert
 	if ownerWorthy {
 		owners, err := w.owners(ctx, ev)
 		if err != nil {
@@ -502,7 +501,7 @@ func (w *OfficeEventWorker) push(ctx context.Context, d db.OfficeEventDelivery) 
 		w.block(d, officeBlockedStreamOff, "", false)
 		return
 	}
-	endpoint, key, reason := w.endpoint(ctx, d.BotID)
+	target, reason := w.endpoint(ctx, d.BotID)
 	if reason != "" {
 		w.block(d, reason, "", false)
 		return
@@ -522,7 +521,8 @@ func (w *OfficeEventWorker) push(ctx context.Context, d db.OfficeEventDelivery) 
 		w.retry(d, "encode payload failed")
 		return
 	}
-	outcome, detail := w.wake.deliver(ctx, endpoint, key, body)
+	outcome, detail := w.wake.deliver(ctx, target, body)
+	w.wake.fanOutReceivers(ctx, d.BotID, body)
 	switch outcome {
 	case "received":
 		next := time.Now().Add(service.OfficeReceiptTimeout(int(d.Attempts)))
@@ -540,24 +540,20 @@ func (w *OfficeEventWorker) push(ctx context.Context, d db.OfficeEventDelivery) 
 	}
 }
 
-func (w *OfficeEventWorker) endpoint(ctx context.Context, bot pgtype.UUID) (*url.URL, string, string) {
+func (w *OfficeEventWorker) endpoint(ctx context.Context, bot pgtype.UUID) (wakeTarget, string) {
 	wake, err := w.h.Queries.GetBotWake(ctx, bot)
-	if err != nil || len(wake.WebhookSecret) == 0 || w.h.BotWakeSecrets == nil {
-		return nil, "", officeBlockedNoWebhook
-	}
-	plain, err := w.h.BotWakeSecrets.Open(wake.WebhookSecret)
 	if err != nil {
-		return nil, "", officeBlockedNoWebhook
+		return wakeTarget{}, officeBlockedNoWebhook
 	}
-	var secret botWakeSecrets
-	if json.Unmarshal(plain, &secret) != nil {
-		return nil, "", officeBlockedNoWebhook
+	target, why := w.h.openWakeTarget(ctx, wake.WebhookSecret)
+	switch why {
+	case "":
+		return target, ""
+	case "webhook endpoint unavailable":
+		return wakeTarget{}, officeBlockedBadWebhook
+	default:
+		return wakeTarget{}, officeBlockedNoWebhook
 	}
-	endpoint, err := validateWakeURL(ctx, secret.URL)
-	if err != nil {
-		return nil, "", officeBlockedBadWebhook
-	}
-	return endpoint, secret.Key, ""
 }
 
 // uncertain: the request went out and the answer was lost, so the Bot may

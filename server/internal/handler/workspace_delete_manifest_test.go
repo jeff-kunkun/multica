@@ -40,6 +40,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"bot_wake_attempt":                workspaceDelete,
 	"bot_wake_event":                  workspaceDelete,
 	"bot_wake_watch":                  workspaceDelete,
+	"bot_webhook_receiver":            workspaceDelete,
 	"attachment":                      workspaceDelete,
 	"autopilot":                       workspaceDelete,
 	"autopilot_collaborator":          workspaceDelete,

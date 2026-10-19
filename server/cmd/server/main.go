@@ -771,6 +771,9 @@ func main() {
 	go runDelegatedFailureRecoverySweeper(sweepCtx, taskSvc)
 	go runPickupDeadlineSweeper(sweepCtx, taskSvc)
 	go runBlockWaitSweeper(sweepCtx, h)
+	// Hand-off and manager alerts; additive to the block-wait resumes above.
+	h.RegisterRelay(bus)
+	go h.RunStallSweep(sweepCtx)
 	// Seven-day runtime retention does not share the 30-second liveness tick:
 	// its bounded transactions run independently once per hour, so a slow GC
 	// round cannot delay offline detection or task recovery.

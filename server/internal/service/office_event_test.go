@@ -98,3 +98,16 @@ func TestOfficeDeliveryNeverGivesUp(t *testing.T) {
 		t.Fatal("receipt timeout")
 	}
 }
+
+func TestClassifyOfficeIssueAlertCarriesItsText(t *testing.T) {
+	got := ClassifyOffice(OfficeFacts{Family: "issue", EventType: "issue.alert", Changes: []OfficeChange{
+		{Field: "alert", New: "stalled"}, {Field: "text", New: "【停摆】DENE-1 x"},
+	}})
+	if got.Meaning != OfficeMeaningAlert || got.MustRelay || got.Summary != "【停摆】DENE-1 x" {
+		t.Fatalf("%+v", got)
+	}
+	got = ClassifyOffice(OfficeFacts{Family: "issue", EventType: "issue.alert", IssueKey: "DENE-1", Changes: []OfficeChange{{Field: "alert", New: "stuck"}}})
+	if got.Meaning != OfficeMeaningAlert || !strings.Contains(got.Summary, "提醒 stuck") {
+		t.Fatalf("%+v", got)
+	}
+}

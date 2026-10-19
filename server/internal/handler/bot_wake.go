@@ -8,6 +8,7 @@ import (
 	"errors"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -54,6 +55,87 @@ type BotWakeResponse struct {
 type botWakeSecrets struct {
 	URL string `json:"webhook_url"`
 	Key string `json:"webhook_key"`
+	// Headers ride along with every push, for receivers that want their own
+	// extra header (e.g. a routine id). Rows sealed before this field decode
+	// with none.
+	Headers map[string]string `json:"webhook_headers,omitempty"`
+}
+
+// wakeTarget is one opened push address: where to POST and what to send with it.
+type wakeTarget struct {
+	Endpoint *url.URL
+	Key      string
+	Headers  map[string]string
+}
+
+var wakeHeaderName = regexp.MustCompile(`^[A-Za-z0-9-]{1,64}$`)
+
+// Headers the office sets itself; a Bot's own headers never replace them.
+var reservedWakeHeaders = map[string]bool{"authorization": true, "content-type": true, "x-multica-event-id": true, "host": true, "content-length": true, "transfer-encoding": true, "connection": true}
+
+func validWakeHeaders(headers map[string]string) error {
+	if len(headers) > 10 {
+		return errors.New("webhook_headers allows at most 10 headers")
+	}
+	for name, value := range headers {
+		if !wakeHeaderName.MatchString(name) || strings.ContainsAny(value, "\r\n") || len(value) > 4096 {
+			return errors.New("webhook_headers must be plain header names with single-line values")
+		}
+		if reservedWakeHeaders[strings.ToLower(name)] {
+			return errors.New("webhook_headers cannot set " + name + "; use webhook_key for Authorization")
+		}
+	}
+	return nil
+}
+
+// sealWakeWebhook validates and seals one push address. Callers handle the
+// empty url+key (disconnect) case themselves.
+func (h *Handler) sealWakeWebhook(ctx context.Context, webhookURL, key string, headers map[string]string) ([]byte, int, error) {
+	if h.BotWakeSecrets == nil {
+		return nil, http.StatusServiceUnavailable, errors.New("webhook encryption unavailable")
+	}
+	if _, err := validateWakeURL(ctx, webhookURL); err != nil {
+		return nil, http.StatusBadRequest, err
+	}
+	if len(key) == 0 || len(key) > 4096 || strings.ContainsAny(key, "\r\n") {
+		return nil, http.StatusBadRequest, errors.New("invalid webhook key")
+	}
+	if err := validWakeHeaders(headers); err != nil {
+		return nil, http.StatusBadRequest, err
+	}
+	if len(headers) == 0 {
+		headers = nil
+	}
+	plain, _ := json.Marshal(botWakeSecrets{URL: webhookURL, Key: key, Headers: headers})
+	sealed, err := h.BotWakeSecrets.Seal(plain)
+	if err != nil {
+		return nil, http.StatusInternalServerError, errors.New("failed to store webhook")
+	}
+	return sealed, 0, nil
+}
+
+// openWakeTarget opens a sealed push address. The returned reason is one of
+// the stable pending/blocked reasons the callers already record.
+func (h *Handler) openWakeTarget(ctx context.Context, sealed []byte) (wakeTarget, string) {
+	if len(sealed) == 0 {
+		return wakeTarget{}, "webhook not configured"
+	}
+	if h.BotWakeSecrets == nil {
+		return wakeTarget{}, "webhook encryption unavailable"
+	}
+	plain, err := h.BotWakeSecrets.Open(sealed)
+	if err != nil {
+		return wakeTarget{}, "webhook decryption failed"
+	}
+	var secret botWakeSecrets
+	if json.Unmarshal(plain, &secret) != nil {
+		return wakeTarget{}, "invalid stored webhook"
+	}
+	endpoint, err := validateWakeURL(ctx, secret.URL)
+	if err != nil {
+		return wakeTarget{}, "webhook endpoint unavailable"
+	}
+	return wakeTarget{Endpoint: endpoint, Key: secret.Key, Headers: secret.Headers}, ""
 }
 
 func NewBotWakeSecretBox(secret string) (*secretbox.Box, error) {
@@ -241,13 +323,14 @@ func (h *Handler) PutBotWake(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		InheritOwnerFollows *bool          `json:"inherit_owner_follows"`
-		WakeFrom            *BotWakeFrom   `json:"wake_from"`
-		Events              *[]string      `json:"events"`
-		HourlyLimit         *int32         `json:"hourly_limit"`
-		QuietHours          *BotQuietHours `json:"quiet_hours"`
-		URL                 *string        `json:"webhook_url"`
-		Key                 *string        `json:"webhook_key"`
+		InheritOwnerFollows *bool              `json:"inherit_owner_follows"`
+		WakeFrom            *BotWakeFrom       `json:"wake_from"`
+		Events              *[]string          `json:"events"`
+		HourlyLimit         *int32             `json:"hourly_limit"`
+		QuietHours          *BotQuietHours     `json:"quiet_hours"`
+		URL                 *string            `json:"webhook_url"`
+		Key                 *string            `json:"webhook_key"`
+		Headers             *map[string]string `json:"webhook_headers"`
 	}
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16384))
 	dec.DisallowUnknownFields()
@@ -296,6 +379,10 @@ func (h *Handler) PutBotWake(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var sealed []byte
+	if req.Headers != nil && req.URL == nil {
+		writeError(w, 400, "webhook_headers are written together with webhook_url and webhook_key")
+		return
+	}
 	if req.URL != nil || req.Key != nil {
 		if req.URL == nil || req.Key == nil {
 			writeError(w, 400, "write webhook_url and webhook_key together; empty strings disconnect")
@@ -304,22 +391,14 @@ func (h *Handler) PutBotWake(w http.ResponseWriter, r *http.Request) {
 		if *req.URL == "" && *req.Key == "" {
 			sealed = []byte{}
 		} else {
-			if h.BotWakeSecrets == nil {
-				writeError(w, 503, "webhook encryption unavailable")
-				return
+			var headers map[string]string
+			if req.Headers != nil {
+				headers = *req.Headers
 			}
-			if _, err := validateWakeURL(r.Context(), *req.URL); err != nil {
-				writeError(w, 400, err.Error())
-				return
-			}
-			if len(*req.Key) == 0 || len(*req.Key) > 4096 || strings.ContainsAny(*req.Key, "\r\n") {
-				writeError(w, 400, "invalid webhook key")
-				return
-			}
-			plain, _ := json.Marshal(botWakeSecrets{*req.URL, *req.Key})
-			sealed, err = h.BotWakeSecrets.Seal(plain)
+			var status int
+			sealed, status, err = h.sealWakeWebhook(r.Context(), *req.URL, *req.Key, headers)
 			if err != nil {
-				writeError(w, 500, "failed to store webhook")
+				writeError(w, status, err.Error())
 				return
 			}
 		}
