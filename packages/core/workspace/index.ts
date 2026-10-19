@@ -4,3 +4,4 @@ export * from "./hooks";
 export * from "./member-roles";
 export * from "./modules";
 export * from "./agent-spawn";
+export * from "./magpie";

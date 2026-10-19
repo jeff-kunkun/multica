@@ -537,6 +537,12 @@ import {
   EMPTY_BILLING_CHECKOUT_SESSION_STATUS,
   EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE,
   EMPTY_CANCEL_TASK_RESPONSE,
+  WorkspaceMagpieSchema,
+  EMPTY_WORKSPACE_MAGPIE,
+  type WorkspaceMagpie,
+  DeleteAgentResponseSchema,
+  EMPTY_DELETE_AGENT_RESPONSE,
+  type DeleteAgentResponse,
   EMPTY_CHAT_DRAFT_RESTORES,
   CreateFeedbackResponseSchema,
   EMPTY_CREATE_FEEDBACK_RESPONSE,
@@ -1870,6 +1876,13 @@ export class ApiClient {
     });
   }
 
+  async setIssueMetadataKey(id: string, key: string, value: string | number | boolean): Promise<void> {
+    await this.fetch(`/api/issues/${id}/metadata/${encodeURIComponent(key)}`, {
+      method: "PUT",
+      body: JSON.stringify({ value }),
+    });
+  }
+
   async deleteIssueMetadata(id: string, key: string): Promise<{ metadata: Record<string, unknown>; issue_revision: number }> {
     return this.fetch(`/api/issues/${id}/metadata/${encodeURIComponent(key)}`, { method: "DELETE" });
   }
@@ -2610,6 +2623,14 @@ export class ApiClient {
   async revokeAgentAccessPass(agentId: string, passId: string): Promise<AgentAccessPass> {
     return this.fetch(`/api/agents/${agentId}/access-passes/${passId}`, {
       method: "DELETE",
+    });
+  }
+
+  /** Magpie mode only; the server refuses with 409 when the switch is off. */
+  async deleteAgent(id: string): Promise<DeleteAgentResponse> {
+    const raw = await this.fetch<unknown>(`/api/agents/${id}`, { method: "DELETE" });
+    return parseWithFallback(raw, DeleteAgentResponseSchema, EMPTY_DELETE_AGENT_RESPONSE, {
+      endpoint: "DELETE /api/agents/{id}",
     });
   }
 
@@ -3921,6 +3942,23 @@ export class ApiClient {
     return this.fetch(`/api/workspaces/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),
+    });
+  }
+
+  async getWorkspaceMagpie(workspaceId: string): Promise<WorkspaceMagpie> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/magpie`);
+    return parseWithFallback(raw, WorkspaceMagpieSchema, EMPTY_WORKSPACE_MAGPIE, {
+      endpoint: "GET /api/workspaces/{id}/magpie",
+    });
+  }
+
+  async updateWorkspaceMagpie(workspaceId: string, enabled: boolean): Promise<WorkspaceMagpie> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/magpie`, {
+      method: "PUT",
+      body: JSON.stringify({ enabled }),
+    });
+    return parseWithFallback(raw, WorkspaceMagpieSchema, { enabled }, {
+      endpoint: "PUT /api/workspaces/{id}/magpie",
     });
   }
 
