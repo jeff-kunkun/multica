@@ -4,6 +4,8 @@
     "stop": "Arrêter",
     "stopping": "Arrêt...",
     "queued": "En attente d'un agent disponible.",
+    "runtime_offline": "Runtime hors ligne",
+    "runtime_offline_hint": "Runtime hors ligne · lancez Multica sur l'appareil de l'agent pour vous reconnecter.",
     "starting": "Préparation de la session de l'agent.",
     "waiting_directory": "En attente de la libération du répertoire de travail par une autre exécution.",
     "thinking": "Réflexion",

@@ -4,6 +4,8 @@
     "stop": "Stop",
     "stopping": "Stopping...",
     "queued": "Waiting for an available agent.",
+    "runtime_offline": "Runtime offline",
+    "runtime_offline_hint": "Runtime offline · start Multica on the agent's device to reconnect.",
     "starting": "Preparing the agent session.",
     "waiting_directory": "Waiting for another run to release the working directory.",
     "thinking": "Thinking",

@@ -790,6 +790,9 @@ type Daemon struct {
 	// claimGateWakeup nudges the batch poller when a held provider is
 	// released, so its queued tasks do not wait out a poll interval.
 	claimGateWakeup chan struct{}
+	// drainUntil (unix nanos) pauses claiming until that time; set by POST
+	// /drain. Independent of pauseClaims so the update barriers never see it.
+	drainUntil atomic.Int64
 
 	activeEnvRootsMu   sync.Mutex
 	activeEnvRootsCond *sync.Cond      // signalled when an in-flight env-root GC mutation finishes
@@ -5611,11 +5614,28 @@ func (d *Daemon) reportUpdateResultWithRetry(ctx context.Context, runtimeID, upd
 func (d *Daemon) tryEnterClaim() bool {
 	d.claimMu.Lock()
 	defer d.claimMu.Unlock()
-	if d.pauseClaims {
+	if d.pauseClaims || d.draining() {
 		return false
 	}
 	d.claimsInFlight++
 	return true
+}
+
+// drainLease is how long one POST /drain keeps the daemon from claiming. The
+// Desktop app renews it on every status poll while it waits to restart the
+// daemon into a new bundled CLI, so a busy daemon actually reaches idle
+// instead of picking up new work forever. A short lease means a caller that
+// goes away (app quit or crashed) can never leave claiming paused for long.
+var drainLease = 90 * time.Second
+
+// startDrain pauses new claims until the lease expires. Running tasks are
+// untouched; the caller restarts the daemon once active_task_count reaches 0.
+func (d *Daemon) startDrain() {
+	d.drainUntil.Store(time.Now().Add(drainLease).UnixNano())
+}
+
+func (d *Daemon) draining() bool {
+	return time.Now().UnixNano() < d.drainUntil.Load()
 }
 
 // exitClaim releases the in-flight claim recorded by tryEnterClaim.
@@ -8781,6 +8801,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Repos the local directory does not already hold are passed as metadata
 	// only — the agent checks those out on demand via `multica repo checkout`.
 	taskCtx := execenv.TaskContextForEnv{
+		MarkerSelfHeal:      d.cfg.TaskMarkerSelfHeal,
 		IssueID:             task.IssueID,
 		TriggerCommentID:    task.TriggerCommentID,
 		TriggerThreadID:     task.TriggerThreadID,
@@ -9558,6 +9579,19 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 					cleanupErr = cerr
 				}
 				d.logger.Warn("execenv: cleanup sidecars failed", "error", cerr)
+			}
+			// The task context marker must not outlive the task that owns
+			// it, even when the manifest-based pass above could not remove
+			// it (a corrupt or missing manifest aborts the rollback while
+			// the marker itself is fine to unlink — it is a daemon-reserved
+			// path we wrote). A leftover marker keeps every `multica`
+			// command in the user's tree failing closed (DENE-2142).
+			// Behind MULTICA_TASK_MARKER_SELF_HEAL: off keeps the old
+			// behaviour of leaving it to the manifest pass.
+			if d.cfg.TaskMarkerSelfHeal {
+				if rerr := os.Remove(filepath.Join(env.WorkDir, execenv.TaskContextMarkerRelPath)); rerr != nil && !os.IsNotExist(rerr) {
+					d.logger.Warn("execenv: remove task context marker failed", "work_dir", env.WorkDir, "error", rerr)
+				}
 			}
 			// In worktree mode a failed cleanup is NOT survivable: Finalize is
 			// about to `git add -A`, so whatever the cleanup could not remove

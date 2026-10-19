@@ -247,14 +247,18 @@ type TaskContextForEnv struct {
 	// which never had a prior session to lose.
 	PriorSessionResumeUnavailable bool
 	AgentID                       string // unique ID of the dispatched agent
-	AgentName                     string
-	AgentInstructions             string // agent identity/persona instructions, injected into CLAUDE.md
-	AgentSkills                   []SkillContextForEnv
-	DisabledRuntimeSkills         []RuntimeSkillRefForEnv
-	Repos                         []RepoContextForEnv // workspace repos available for checkout
-	ProjectRepos                  []RepoContextForEnv // project-only repos for the runtime brief
-	WorkspaceRepoCount            int                 // total workspace repos, for the project brief summary
-	OtherWorkspaceRepoCount       int                 // workspace repos outside the active project
+	// MarkerSelfHeal lets the task context marker writer reclaim an
+	// unparseable (torn) marker instead of failing closed. Off by default;
+	// set from the daemon's MULTICA_TASK_MARKER_SELF_HEAL.
+	MarkerSelfHeal          bool
+	AgentName               string
+	AgentInstructions       string // agent identity/persona instructions, injected into CLAUDE.md
+	AgentSkills             []SkillContextForEnv
+	DisabledRuntimeSkills   []RuntimeSkillRefForEnv
+	Repos                   []RepoContextForEnv // workspace repos available for checkout
+	ProjectRepos            []RepoContextForEnv // project-only repos for the runtime brief
+	WorkspaceRepoCount      int                 // total workspace repos, for the project brief summary
+	OtherWorkspaceRepoCount int                 // workspace repos outside the active project
 	// CodeSource is the resolved answer to "where does this task's code come
 	// from" (DENE-595). Zero value means the historical behavior: no directory
 	// pinned on this machine, every repo checked out on demand. When the
@@ -1357,6 +1361,51 @@ func ReadGCMeta(envRoot string) (*GCMeta, error) {
 		meta.Kind = GCKindIssue
 	}
 	return &meta, nil
+}
+
+// crashedSidecarRollbackGrace is how young a leftover sidecar manifest may be
+// before the GC treats it as crash debris. A task that completes normally has
+// its sidecars rolled back by its own run and its .gc_meta.json written right
+// after; the manifest file is gone by then. The grace only has to cover that
+// gap, so a value small against the GC interval is plenty.
+const crashedSidecarRollbackGrace = 10 * time.Minute
+
+// CleanupCrashedTaskSidecars rolls back the sidecar writes of a task whose
+// daemon died before the run's own cleanup pass could: a leftover sidecar
+// manifest with no recorded completion (DENE-2142). The manifest records the
+// task context marker by absolute path, so for a local_directory task this
+// also removes the marker from the user's tree — the file that otherwise keeps
+// every `multica` command there failing closed until someone deletes it by
+// hand.
+//
+// A task that DID complete is left alone: a managed env root deliberately
+// keeps its marker between runs so the next dispatch can prove reuse
+// eligibility (shouldReusePriorWorkdir), and a local_directory run already
+// rolled its manifest back on the way out, leaving nothing to find.
+//
+// Safe to call on every non-active env root in every GC cycle: no manifest
+// means one stat and out, a too-young manifest waits for a later cycle, and a
+// completed task's env root has no manifest to begin with.
+func CleanupCrashedTaskSidecars(envRoot string, logger *slog.Logger) {
+	if envRoot == "" {
+		return
+	}
+	info, err := os.Stat(filepath.Join(envRoot, sidecarManifestFile))
+	if err != nil || time.Since(info.ModTime()) < crashedSidecarRollbackGrace {
+		return
+	}
+	if meta, metaErr := ReadGCMeta(envRoot); metaErr == nil && !meta.CompletedAt.IsZero() {
+		return
+	}
+	if err := CleanupSidecars(envRoot); err != nil {
+		if logger != nil {
+			logger.Warn("execenv: rollback sidecars of crashed task failed", "dir", filepath.Base(envRoot), "error", err)
+		}
+		return
+	}
+	if logger != nil {
+		logger.Info("execenv: rolled back sidecars of a task that never completed", "dir", filepath.Base(envRoot))
+	}
 }
 
 const managedEnvProvenanceFile = ".managed_env.json"

@@ -237,6 +237,16 @@ export function applyTestFeed(
 // applied again once preferences resolve, before the first check.
 applyStableFeed(autoUpdater, "0.0.0");
 
+// Set when the user clicks "Restart now" on a downloaded update. The app is
+// back within seconds, so before-quit leaves the daemon (and its running
+// tasks) alone even with autoStop on; the relaunched app swaps the daemon to
+// the new CLI once it drains.
+let quittingToInstallUpdate = false;
+
+export function isQuittingToInstallUpdate(): boolean {
+  return quittingToInstallUpdate;
+}
+
 const STARTUP_CHECK_DELAY_MS = 5_000;
 const PERIODIC_CHECK_INTERVAL_MS = 60 * 60 * 1000; // 1 hour
 // A release is created when its tag is pushed; the manifests land minutes
@@ -736,6 +746,7 @@ export function setupAutoUpdater(
   });
 
   ipcMain.handle("updater:install", () => {
+    quittingToInstallUpdate = true;
     autoUpdater.quitAndInstall(false, true);
   });
 

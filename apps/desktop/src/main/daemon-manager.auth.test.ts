@@ -28,6 +28,7 @@ vi.mock("fs/promises", () => ({
   mkdir: vi.fn(), rm: vi.fn(), open: vi.fn(), stat: vi.fn(),
 }));
 vi.mock("./cli-bootstrap", () => ({ ensureManagedCli: vi.fn(), managedCliPath: () => "/test/multica" }));
+vi.mock("./updater", () => ({ isQuittingToInstallUpdate: () => false }));
 
 import { profileConfigPath, profileUserIdPath } from "./daemon-profile";
 const profile = "desktop-api.example.com";

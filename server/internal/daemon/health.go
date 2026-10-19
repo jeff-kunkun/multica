@@ -86,8 +86,11 @@ type HealthResponse struct {
 	// version change on disk but hasn't restarted into it yet — it was busy at
 	// the last barrier check and will retry when idle. Omitted when empty, so
 	// older consumers see no change. Diagnostic only: nothing keys off it.
-	ReloadPendingReason string            `json:"reload_pending_reason,omitempty"`
-	Workspaces          []healthWorkspace `json:"workspaces"`
+	ReloadPendingReason string `json:"reload_pending_reason,omitempty"`
+	// Draining is true while a POST /drain lease keeps the daemon from
+	// claiming new tasks ahead of a restart.
+	Draining   bool              `json:"draining,omitempty"`
+	Workspaces []healthWorkspace `json:"workspaces"`
 	// PlanLimits is a credential-free per-provider overlay for Desktop. Official
 	// cloud backends do not persist heartbeat snapshots, so the renderer merges
 	// this map onto local runtime rows. Omitted when empty so older clients
@@ -422,6 +425,7 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 			SkippedAgents:         d.skippedAgentsSnapshot(),
 
 			ReloadPendingReason: d.reloadPending(),
+			Draining:            d.draining(),
 			Workspaces:          wsList,
 			PlanLimits:          d.planLimitsByProvider(),
 			AgyLoggedInDirs:     currentAgyLoggedInDirs(),
@@ -460,6 +464,9 @@ func (d *Daemon) shutdownHandler() http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		if d.logger != nil {
+			d.logger.Info("daemon shutdown requested through local API", "user_agent", r.UserAgent())
+		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"status": "shutting down"})
 		if d.cancelFunc != nil {
@@ -470,12 +477,31 @@ func (d *Daemon) shutdownHandler() http.HandlerFunc {
 	}
 }
 
+// drainHandler stops the daemon from claiming new tasks for drainLease, so the
+// Desktop app can restart it into a new CLI as soon as running tasks finish.
+// Callers renew it while they wait. Localhost-only, like /shutdown.
+func (d *Daemon) drainHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		d.startDrain()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"draining":          true,
+			"active_task_count": d.activeTasks.Load(),
+		})
+	}
+}
+
 // serveHealth runs the health HTTP server on the given listener.
 // Blocks until ctx is cancelled.
 func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt time.Time) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", d.healthHandler(startedAt))
 	mux.HandleFunc("/shutdown", d.shutdownHandler())
+	mux.HandleFunc("/drain", d.drainHandler())
 	mux.HandleFunc("/repo/checkout", d.repoCheckoutHandler())
 	mux.HandleFunc("/worktrees/cleanup", d.worktreeCleanupHandler())
 	mux.HandleFunc("/sessions/scratch", d.sharedScratchHandler())
