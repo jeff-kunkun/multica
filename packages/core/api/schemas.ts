@@ -1088,6 +1088,11 @@ export const AttachmentResponseSchema = z.object({
   // mode. Optional: a server older than this field omits it, and callers fall
   // back to `download_url` / the stable endpoint. Never persisted (short-lived).
   attachment_download_url: z.string().optional(),
+  // Credential-free inline preview URL — Content-Disposition: inline under a
+  // CSP sandbox, so a phone browser renders the document instead of
+  // downloading it. Bearer link with a multi-day TTL; never persisted.
+  // Optional: a server older than this field omits it.
+  preview_url: z.string().optional(),
   markdown_url: z.string().optional().default(""),
   filename: z.string(),
   chat_session_id: z.string().nullable().optional(),

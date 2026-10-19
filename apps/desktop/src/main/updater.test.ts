@@ -84,6 +84,7 @@ import {
   pickNewestTestReleaseTag,
   testManifestFileName,
   resolveCapabilities,
+  isQuittingToInstallUpdate,
   setupAutoUpdater,
   testReleaseFeedOptions,
   type ChannelConfigurableUpdater,
@@ -376,6 +377,16 @@ describe("setupAutoUpdater", () => {
     vi.clearAllTimers();
     vi.useRealTimers();
     rmSync(ctx.userDataPath, { recursive: true, force: true });
+  });
+
+  it("marks the quit as an update install so the daemon keeps running", async () => {
+    setupAutoUpdater(() => null);
+    expect(isQuittingToInstallUpdate()).toBe(false);
+
+    await invokeIpc("updater:install");
+
+    expect(ctx.quitAndInstall).toHaveBeenCalledWith(false, true);
+    expect(isQuittingToInstallUpdate()).toBe(true);
   });
 
   it("enables automatic background updates by default", async () => {

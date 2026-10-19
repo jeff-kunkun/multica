@@ -4,6 +4,8 @@
     "stop": "停止",
     "stopping": "停止中...",
     "queued": "利用可能なエージェントを待っています。",
+    "runtime_offline": "ランタイムがオフライン",
+    "runtime_offline_hint": "ランタイムがオフライン · エージェントのデバイスで Multica を起動して再接続してください。",
     "starting": "エージェントのセッションを準備しています。",
     "waiting_directory": "別の実行が作業ディレクトリを解放するのを待っています。",
     "thinking": "思考中",

@@ -68,6 +68,13 @@ const (
 	// cannot be replayed as it. It rides the URL as dl=1; the empty (load) intent
 	// signs the historical three-field message, byte-identical.
 	attachmentCapabilityDownloadIntent = "attachment"
+
+	// attachmentCapabilityPreviewIntent is folded into a preview capability's
+	// signed message (DENE-2225). A preview link serves the body inline under
+	// the sandboxing preview CSP — a strictly less privileged rendering than
+	// the load link, but intent-bound all the same so a /preview signature can
+	// never be replayed against /signed-download or the download button.
+	attachmentCapabilityPreviewIntent = "preview"
 )
 
 var (
@@ -150,6 +157,33 @@ func attachmentDownloadCapabilityPath(attachmentID string, now time.Time) string
 		"?exp=" + strconv.FormatInt(exp, 10) +
 		"&sig=" + signAttachmentCapabilityIntent(attachmentID, exp, attachmentCapabilityDownloadIntent) +
 		"&dl=1"
+}
+
+// defaultAttachmentPreviewTTL is how long a minted preview capability stays
+// redeemable. Unlike the 60-second download capability — which a native
+// downloader redeems in the same tick — a preview link is tapped by a human
+// in a browser long after it was shared (chat comment, issue description), so
+// it is days by design. The trade is explicit: the link is a bearer secret
+// for exactly one attachment's sandboxed inline view, and a leaked link
+// stays usable until expiry. ATTACHMENT_PREVIEW_URL_TTL overrides it.
+const defaultAttachmentPreviewTTL = 30 * 24 * time.Hour
+
+func attachmentPreviewTTL(previewTTL time.Duration) time.Duration {
+	if previewTTL > 0 {
+		return previewTTL
+	}
+	return defaultAttachmentPreviewTTL
+}
+
+// attachmentPreviewCapabilityPath builds the site-relative capability URL for
+// the preview intent. Same single-id, signed shape as the download
+// capabilities; the route it feeds always proxy-streams (never redirects), so
+// the signature cannot leak to a CDN via a Referer.
+func attachmentPreviewCapabilityPath(attachmentID string, now time.Time, previewTTL time.Duration) string {
+	exp := now.Add(attachmentPreviewTTL(previewTTL)).Unix()
+	return "/api/attachments/" + attachmentID + "/preview" +
+		"?exp=" + strconv.FormatInt(exp, 10) +
+		"&sig=" + signAttachmentCapabilityIntent(attachmentID, exp, attachmentCapabilityPreviewIntent)
 }
 
 // verifyAttachmentCapability fails closed on every path: a missing field, an

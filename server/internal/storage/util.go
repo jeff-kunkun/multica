@@ -98,6 +98,20 @@ func AttachmentContentDisposition(filename string) string {
 	return `attachment; filename="` + asciiFallback + `"; filename*=UTF-8''` + rfc5987Encode(filename)
 }
 
+// InlineContentDisposition unconditionally forces the display-intent
+// disposition, keeping the original filename for "Save As". Used by the
+// inline preview route for HTML documents only — the whole point is to render
+// the body instead of downloading it; the sandboxing CSP on that route is what
+// makes an inline HTML document safe to serve. Non-HTML attachments are never
+// inlined there.
+func InlineContentDisposition(filename string) string {
+	if !needsRFC5987Encoding(filename) {
+		return `inline; filename="` + sanitizeFilename(filename) + `"`
+	}
+	asciiFallback := sanitizeFilename(asciiOnlyFilename(filename))
+	return `inline; filename="` + asciiFallback + `"; filename*=UTF-8''` + rfc5987Encode(filename)
+}
+
 // isInlineContentType returns true for media types that browsers should
 // display inline (images, video, audio, PDF). Everything else triggers a
 // download via Content-Disposition: attachment.

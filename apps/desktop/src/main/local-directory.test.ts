@@ -17,6 +17,7 @@ vi.mock("electron", () => ({
   BrowserWindow: { fromWebContents: mocks.fromWebContents },
 }));
 vi.mock("fs/promises", () => ({ stat: mocks.stat, access: mocks.access }));
+vi.mock("./updater", () => ({ isQuittingToInstallUpdate: () => false }));
 
 const event = { sender: {} } as IpcMainInvokeEvent;
 function invoke(channel: string, path?: string) {

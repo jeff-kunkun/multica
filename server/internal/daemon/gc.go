@@ -289,6 +289,14 @@ func (d *Daemon) gcWorkspace(ctx context.Context, wsDir string, stats *gcStats) 
 			stats.skipped++
 			continue
 		}
+		// A manifest left behind by a task whose daemon died mid-run gets its
+		// missed rollback here — most importantly the task context marker a
+		// crashed local_directory run stranded in the user's own tree
+		// (DENE-2142). A no-op for every directory whose task completed.
+		// Behind MULTICA_TASK_MARKER_SELF_HEAL (default off = leave them).
+		if d.cfg.TaskMarkerSelfHeal {
+			execenv.CleanupCrashedTaskSidecars(taskDir, d.logger)
+		}
 		meta, metaErr := execenv.ReadGCMeta(taskDir)
 		if metaErr == nil && meta.Kind == execenv.GCKindIssue && strings.TrimSpace(meta.IssueID) != "" {
 			if workspaceID := strings.TrimSpace(meta.WorkspaceID); workspaceID != "" {

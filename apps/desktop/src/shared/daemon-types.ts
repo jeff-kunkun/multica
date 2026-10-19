@@ -72,6 +72,15 @@ export interface DaemonStatus {
 export interface DaemonPrefs {
   autoStart: boolean;
   autoStop: boolean;
+  /**
+   * Opt-in upgrade behaviour (no Settings UI; set in desktop_prefs.json).
+   * When true, a deferred daemon version restart asks the daemon to stop
+   * claiming new tasks (POST /drain) so it reaches idle, and quitting to
+   * install an app update leaves the daemon running even with autoStop on.
+   * Default false keeps the old behaviour: the daemon keeps claiming until it
+   * happens to be idle, and autoStop also stops it on an update install.
+   */
+  drainForUpgrade?: boolean;
 }
 
 export type LocalRuntimeProbe =

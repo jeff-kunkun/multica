@@ -136,6 +136,7 @@ type Config struct {
 	Agents                         map[string]AgentEntry // keyed by provider: claude, codebuddy, codex, copilot, opencode, codearts, deveco, openclaw, hermes, pi, cursor, kimi, reasonix, dsh, kiro, antigravity, qoder, qoderclicn, traecli, grok, qwen, qwenpaw, mcode, dim, zeroclaw (plus built-in runtime identities from agent.BuiltinRuntimes, e.g. omp)
 	WorkspacesRoot                 string                // base path for execution envs (default: ~/multica_workspaces)
 	KeepEnvAfterTask               bool                  // preserve env after task for debugging
+	TaskMarkerSelfHeal             bool                  // reclaim torn task context markers, remove the marker at task end and roll back crashed tasks' sidecars in GC (default: false = old fail-closed behaviour)
 	HealthPort                     int                   // local HTTP port for health checks (default: 19514)
 	MaxConcurrentTasks             int                   // max tasks running in parallel (default: 20)
 	GCEnabled                      bool                  // enable periodic workspace garbage collection (default: true)
@@ -571,6 +572,10 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// Keep env after task: env > default (false)
 	keepEnv := os.Getenv("MULTICA_KEEP_ENV_AFTER_TASK") == "true" || os.Getenv("MULTICA_KEEP_ENV_AFTER_TASK") == "1"
 
+	// Task context marker self-heal: env > default (false). Off keeps the
+	// old fail-closed handling of a leftover or torn marker.
+	markerSelfHeal := os.Getenv("MULTICA_TASK_MARKER_SELF_HEAL") == "true" || os.Getenv("MULTICA_TASK_MARKER_SELF_HEAL") == "1"
+
 	// GC config: env > defaults
 	gcEnabled := true
 	if v := os.Getenv("MULTICA_GC_ENABLED"); v == "false" || v == "0" {
@@ -682,6 +687,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		Agents:                          agents,
 		WorkspacesRoot:                  workspacesRoot,
 		KeepEnvAfterTask:                keepEnv,
+		TaskMarkerSelfHeal:              markerSelfHeal,
 		GCEnabled:                       gcEnabled,
 		GCInterval:                      gcInterval,
 		GCTTL:                           gcTTL,

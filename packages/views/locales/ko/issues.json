@@ -4,6 +4,8 @@
     "stop": "중지",
     "stopping": "중지 중...",
     "queued": "사용 가능한 에이전트를 기다리고 있습니다.",
+    "runtime_offline": "런타임 오프라인",
+    "runtime_offline_hint": "런타임 오프라인 · 에이전트 기기에서 Multica를 실행해 다시 연결하세요.",
     "starting": "에이전트 세션을 준비하고 있습니다.",
     "waiting_directory": "다른 실행이 작업 디렉터리를 해제할 때까지 기다리고 있습니다.",
     "thinking": "생각 중",

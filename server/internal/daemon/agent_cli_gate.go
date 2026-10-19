@@ -50,7 +50,10 @@ func (d *Daemon) tryEnterClaimFor(runtimeIDs []string) (agentCLIClaim, bool) {
 	providerOf := d.runtimeProviders(runtimeIDs)
 	d.claimMu.Lock()
 	defer d.claimMu.Unlock()
-	if d.pauseClaims {
+	// A /drain lease pauses this gate too: it is the one the batch poller
+	// actually goes through, so checking only tryEnterClaim would never stop
+	// a claim.
+	if d.pauseClaims || d.draining() {
 		return agentCLIClaim{}, false
 	}
 	var claim agentCLIClaim

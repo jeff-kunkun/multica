@@ -169,3 +169,145 @@ func TestReuse_SelfHealsWorkspacesRootMarker(t *testing.T) {
 		t.Fatalf("Reuse did not restore the root marker: %v", err)
 	}
 }
+
+// TestWriteTaskContextMarkerPreExisting covers the decision table for a
+// pre-existing file at the reserved per-workdir marker path (DENE-2142): a
+// daemon-owned marker — whatever agent or issue it names, which subsumes
+// same-issue retry, reassignment, and stale takeover — is overwritten
+// atomically, torn bytes from a crashed write are reclaimed, and only a
+// parseable file NOT owned by the daemon is refused, with the occupant's
+// identity in the error instead of a bare refuse line.
+func TestWriteTaskContextMarkerPreExisting(t *testing.T) {
+	seed := func(t *testing.T, content string) (workDir, markerPath string) {
+		t.Helper()
+		workDir = t.TempDir()
+		markerPath = filepath.Join(workDir, TaskContextMarkerRelPath)
+		if err := os.MkdirAll(filepath.Dir(markerPath), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if content == "" {
+			return workDir, markerPath
+		}
+		if err := os.WriteFile(markerPath, []byte(content), 0o644); err != nil {
+			t.Fatalf("seed marker: %v", err)
+		}
+		return workDir, markerPath
+	}
+	next := TaskContextForEnv{AgentID: "agent-new", IssueID: "issue-new"}
+
+	t.Run("overwrites a daemon-owned marker from another agent and issue", func(t *testing.T) {
+		workDir, markerPath := seed(t, `{"managed_by":"multica-daemon-task","agent_id":"agent-old","issue_id":"issue-old"}`)
+		if err := writeTaskContextMarker(workDir, next, nil); err != nil {
+			t.Fatalf("writeTaskContextMarker: %v", err)
+		}
+		data, err := os.ReadFile(markerPath)
+		if err != nil {
+			t.Fatalf("read marker: %v", err)
+		}
+		var marker taskContextMarkerFile
+		if err := json.Unmarshal(data, &marker); err != nil {
+			t.Fatalf("marker not valid JSON after takeover: %v\n%s", err, string(data))
+		}
+		if marker.AgentID != next.AgentID || marker.IssueID != next.IssueID {
+			t.Fatalf("marker = %+v, want agent %q issue %q", marker, next.AgentID, next.IssueID)
+		}
+	})
+
+	t.Run("refuses torn bytes by default (old fail-closed behaviour)", func(t *testing.T) {
+		for _, torn := range []string{"{", "not-json", `{"managed_by":"multica-daemon-task","agent_id":`} {
+			workDir, markerPath := seed(t, torn)
+			if err := writeTaskContextMarker(workDir, next, nil); err == nil {
+				t.Fatalf("torn marker %q must be refused while MarkerSelfHeal is off", torn)
+			}
+			data, err := os.ReadFile(markerPath)
+			if err != nil {
+				t.Fatalf("read torn marker: %v", err)
+			}
+			if string(data) != torn {
+				t.Fatalf("torn marker %q was rewritten to %q with MarkerSelfHeal off", torn, string(data))
+			}
+		}
+	})
+
+	t.Run("reclaims torn bytes from a crashed write when self-heal is on", func(t *testing.T) {
+		heal := next
+		heal.MarkerSelfHeal = true
+		for _, torn := range []string{"", "{", "not-json", `{"managed_by":"multica-daemon-task","agent_id":`} {
+			workDir, markerPath := seed(t, torn)
+			if err := writeTaskContextMarker(workDir, heal, nil); err != nil {
+				t.Fatalf("reclaim torn marker %q: unexpected error %v", torn, err)
+			}
+			data, err := os.ReadFile(markerPath)
+			if err != nil {
+				t.Fatalf("read reclaimed marker: %v", err)
+			}
+			var marker taskContextMarkerFile
+			if err := json.Unmarshal(data, &marker); err != nil {
+				t.Fatalf("reclaimed marker not valid JSON for input %q: %v\n%s", torn, err, string(data))
+			}
+			if marker.ManagedBy != TaskContextMarkerManagedBy {
+				t.Fatalf("managed_by = %q, want %q (input %q)", marker.ManagedBy, TaskContextMarkerManagedBy, torn)
+			}
+		}
+	})
+
+	t.Run("refuses a parseable foreign file and names the occupant", func(t *testing.T) {
+		foreign := `{"managed_by":"someone-else","agent_id":"agent-foreign","issue_id":"issue-foreign"}`
+		workDir, markerPath := seed(t, foreign)
+		err := writeTaskContextMarker(workDir, next, nil)
+		if err == nil {
+			t.Fatal("expected error for foreign file at marker path, got nil")
+		}
+		for _, want := range []string{"someone-else", "agent-foreign", "issue-foreign", markerPath} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("error %q does not name occupant detail %q", err, want)
+			}
+		}
+		data, readErr := os.ReadFile(markerPath)
+		if readErr != nil {
+			t.Fatalf("re-read foreign file: %v", readErr)
+		}
+		if string(data) != foreign {
+			t.Fatalf("foreign file was clobbered: %s", string(data))
+		}
+	})
+
+	t.Run("records the takeover in the sidecar manifest for end-of-task cleanup", func(t *testing.T) {
+		workDir, markerPath := seed(t, `{"managed_by":"multica-daemon-task","agent_id":"agent-old","issue_id":"issue-old"}`)
+		manifest := &sidecarManifest{}
+		if err := writeTaskContextMarker(workDir, next, manifest); err != nil {
+			t.Fatalf("writeTaskContextMarker: %v", err)
+		}
+		found := false
+		for _, f := range manifest.Files {
+			if f == markerPath {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("refreshed marker not recorded in manifest: %+v", manifest.Files)
+		}
+	})
+
+	t.Run("write leaves no torn bytes for a concurrent reader", func(t *testing.T) {
+		// The atomic-write contract: after writeTaskContextMarker returns,
+		// every byte visible at the path parses. A truncate-then-write here
+		// (the pre-fix behavior) could be observed mid-flight by another
+		// task's prepare on a shared directory and refused the whole prepare.
+		workDir, markerPath := seed(t, "")
+		if err := writeTaskContextMarker(workDir, next, nil); err != nil {
+			t.Fatalf("writeTaskContextMarker: %v", err)
+		}
+		data, err := os.ReadFile(markerPath)
+		if err != nil {
+			t.Fatalf("read marker: %v", err)
+		}
+		var marker taskContextMarkerFile
+		if err := json.Unmarshal(data, &marker); err != nil {
+			t.Fatalf("marker not valid JSON: %v\n%s", err, string(data))
+		}
+		if marker.ManagedBy != TaskContextMarkerManagedBy {
+			t.Fatalf("managed_by = %q, want %q", marker.ManagedBy, TaskContextMarkerManagedBy)
+		}
+	})
+}

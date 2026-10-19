@@ -220,6 +220,12 @@ node scripts/desktop-release-assets.mjs clean --tag v0.4.57 --repo jeff-kunkun/m
 - Linux CLI 包（守护进程是同一个二进制）在借用仓库补上自动构建前，由发版人在 tag 上本机交叉编译 linux amd64/arm64，按 `.goreleaser.yml` 的两种命名各出一份（`multica-cli-<ver>-linux-<arch>.tar.gz` 和 `multica_linux_<arch>.tar.gz`）加 `checksums.txt`，等 Desktop 的上传开始后（即 `clean` 已清过僵尸资产）再追加到同一个 Release。
 - 测试版（`-test.N`）的 CLI 包 `multica update` 不会自动拿到（它只看正式版的 `releases/latest`），服务器要按版本号用 Release 直链下载替换。
 
+### 完全磁盘访问权限（Full Disk Access）
+
+Agent 读受保护的文件夹要用完全磁盘访问权限，macOS 不会弹窗申请。Desktop「守护进程」设置页在权限没开时显示一行，按钮直达系统设置，回到应用后自动复查。这项授权跟着 designated requirement 走：ad-hoc 包每版都变，升级后要重新授权；用 `CSC_LINK` 那张长期自签证书签的包，升级后授权还在。
+
+本机打包想保住授权、手上又没有那张证书时，设 `MULTICA_MAC_LOCAL_SIGN=1` 再跑 `pnpm package`：`scripts/mac-local-signing.sh` 在本机生成一张固定的自签身份（`Multica Local Signing`，放在 `~/.multica/desktop-signing/` 自己的钥匙串里，不进仓库），`scripts/mac-local-sign.mjs` 用它签名、不打时间戳。只对这台 Mac 自己打的包有效；有 `CSC_LINK` / `CSC_NAME` / `CSC_KEYCHAIN` / `APPLE_TEAM_ID` 时不生效，CI 发版不受影响。不设这个变量时行为不变（ad-hoc）。
+
 ## 本机兜底构建（只在 CI 跑不起来时用）
 
 用本条时，红线 6、7 与红线 2 的核对一条都不能省。

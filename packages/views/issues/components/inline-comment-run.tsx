@@ -5,6 +5,7 @@ import { AlertCircle, BookOpen, Brain, Check, ChevronRight, CirclePause, Clock3,
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { useTraceIssueLabels } from "../../common/task-transcript/use-trace-issue-labels";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useTaskMessages } from "@multica/core/chat/queries";
@@ -105,6 +106,14 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   replacesFailureNotice?: boolean;
 }) {
   const { task, hasReply } = run;
+  const wsId = useWorkspaceId();
+  const { data: runtimes } = useQuery({
+    ...runtimeListOptions(wsId),
+    enabled: task.status === "queued",
+    refetchInterval: task.status === "queued" ? 5_000 : false,
+  });
+  const runtime = runtimes?.find((candidate) => candidate.id === task.runtime_id);
+  const runtimeOffline = task.status === "queued" && runtime?.status === "offline";
   const { t } = useT("issues");
   const { t: tAgents } = useT("agents");
   const { getActorName } = useActorName();
@@ -116,7 +125,8 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
   const cancelled = isCancelledOutcome(task);
   // One label says how the run ended (MUL-7692). The raw error stays
   // reachable: on hover, or in view when someone has to fix a setting.
-  const statusText = (ended ? runOutcomeLabel(task, tAgents) : null) ?? status;
+  const statusText = runtimeOffline ? t(($) => $.inline_run.runtime_offline)
+    : (ended ? runOutcomeLabel(task, tAgents) : null) ?? status;
   const rawError = ended && task.error?.trim() ? redactSecrets(task.error.trim()) : "";
   const needsAction = failureNeedsAction(task);
   // Without a reply, how the run ended is the block's content, not metadata.
@@ -172,7 +182,8 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
     : current?.kind === "skill" ? t(($) => $.inline_run.skill_step, { name: current.item.tool ?? "" })
     : t(($) => $.inline_run.waiting_response);
   const machineQueueReason = task.status === "queued" ? task.queue_reason : undefined;
-  const summary = task.status === "queued" ? t(($) => $.inline_run.queued)
+  const summary = runtimeOffline ? t(($) => $.inline_run.runtime_offline_hint)
+    : task.status === "queued" ? t(($) => $.inline_run.queued)
     : task.status === "dispatched" ? t(($) => $.inline_run.starting)
     : task.status === "waiting_local_directory" ? t(($) => $.inline_run.waiting_directory)
     : task.status === "deferred" ? t(($) => $.inline_run.retrying)
@@ -245,7 +256,8 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
           aria-expanded={expanded} aria-controls={expanded ? regionId : undefined}
           onClick={(event) => { state.disclosure.onTrigger(event); setExpanded(!expanded); }}>
           {showProgress
-            ? <><RunActivityIndicator status={task.status} animate={animationVisibility.visible} />
+            ? <>{runtimeOffline ? <AlertCircle aria-hidden className="size-3.5 shrink-0 text-warning" />
+                : <RunActivityIndicator status={task.status} animate={animationVisibility.visible} />}
                 <RunActivitySummary summary={summary} /></>
             : <span className={cn(showIdentity && "@max-[32rem]/run:sr-only")}>{activityLabel}</span>}
           {!showProgress && stepLabel && <span className="text-faint-foreground @max-[32rem]/run:hidden">· {stepLabel}</span>}

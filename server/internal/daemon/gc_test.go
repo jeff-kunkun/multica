@@ -2739,3 +2739,63 @@ func TestShouldCleanTaskDir_LocalDirectoryFalsePreservesNormalClean(t *testing.T
 		t.Fatalf("expected gcActionClean for normal task, got %d", got)
 	}
 }
+
+// TestGCWorkspace_RollsBackCrashedTaskSidecars guards the GC wiring of the
+// crash recovery: a task whose daemon died mid-run leaves its sidecar
+// manifest behind, and the next cycle must roll it back — most importantly
+// the task context marker a local_directory run stranded in the user's own
+// tree, which keeps every `multica` command there failing closed (DENE-2142).
+func TestGCWorkspace_RollsBackCrashedTaskSidecars(t *testing.T) {
+	t.Parallel()
+	for _, selfHeal := range []bool{false, true} {
+		t.Run(fmt.Sprintf("self_heal=%v", selfHeal), func(t *testing.T) {
+			testGCWorkspaceRollsBackCrashedTaskSidecars(t, selfHeal)
+		})
+	}
+}
+
+func testGCWorkspaceRollsBackCrashedTaskSidecars(t *testing.T, selfHeal bool) {
+	d := newGCTestDaemon(t, http.NewServeMux())
+	d.cfg.TaskMarkerSelfHeal = selfHeal
+
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws-crash", "task-crashed", nil)
+	userDir := t.TempDir()
+	markerPath := filepath.Join(userDir, execenv.TaskContextMarkerRelPath)
+	if err := os.MkdirAll(filepath.Dir(markerPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(markerPath, []byte(`{"managed_by":"multica-daemon-task"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manifest := fmt.Sprintf(`{"files":[%q],"dirs":[%q]}`, markerPath, filepath.Dir(markerPath))
+	manifestPath := filepath.Join(taskDir, ".multica_sidecar_manifest.json")
+	if err := os.WriteFile(manifestPath, []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-time.Hour)
+	if err := os.Chtimes(manifestPath, old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	d.gcWorkspace(context.Background(), filepath.Join(d.cfg.WorkspacesRoot, "ws-crash"), &gcStats{byPattern: map[string]int{}})
+
+	if !selfHeal {
+		// Default: the old line leaves crash debris alone.
+		if _, err := os.Stat(markerPath); err != nil {
+			t.Fatalf("marker must survive GC while MULTICA_TASK_MARKER_SELF_HEAL is off: %v", err)
+		}
+		if _, err := os.Stat(manifestPath); err != nil {
+			t.Fatalf("manifest must survive GC while MULTICA_TASK_MARKER_SELF_HEAL is off: %v", err)
+		}
+		return
+	}
+	if _, err := os.Stat(markerPath); !os.IsNotExist(err) {
+		t.Fatalf("crashed task's marker survived in the user tree: %v", err)
+	}
+	if _, err := os.Stat(manifestPath); !os.IsNotExist(err) {
+		t.Fatalf("manifest survived the GC rollback: %v", err)
+	}
+	if _, err := os.Stat(taskDir); err != nil {
+		t.Fatalf("env root itself should survive a local-directory rollback: %v", err)
+	}
+}
