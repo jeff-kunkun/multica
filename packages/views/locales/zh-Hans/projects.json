@@ -126,7 +126,7 @@
     "local_validate_not_writable": "目录不可写。",
     "local_validate_unsupported": "本地目录仅能在桌面端选择。",
     "mode_dialog_title": "每次运行如何使用这个文件夹？",
-    "mode_dialog_description": "这决定了你如何拿到智能体的工作成果，以及这个文件夹上的运行能否并行。",
+    "mode_dialog_description": "在 Mac 的 APFS 磁盘上此选项不生效：每次运行都在自己的私有副本里同时进行，结束时合并回来；如果和别人改了同一行，会停下来等你处理。此选项在 Windows、Linux 和其他磁盘上生效。",
     "mode_in_place_title": "直接修改这个文件夹",
     "mode_in_place_description": "同一时间只处理一次运行。智能体的改动会直接出现在你的工作区里，你可以接着改。",
     "mode_worktree_title": "并行隔离运行",

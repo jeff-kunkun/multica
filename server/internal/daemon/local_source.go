@@ -199,10 +199,7 @@ func resolveTaskCodeSource(assignment *localDirectoryAssignment, readOnly []*loc
 	if assignment == nil {
 		return taskCodeSource{Kind: codeSourceKindRemoteCheckout, RemoteRepos: append([]string(nil), repoURLs...)}
 	}
-	mode := strings.TrimSpace(assignment.Ref.ExecutionMode)
-	if mode == "" {
-		mode = localDirectoryModeInPlace
-	}
+	mode := assignment.mode()
 	src := taskCodeSource{
 		Kind: codeSourceKindLocalDirectory,
 		// The directory the AGENT is in, which is the user's own path in
@@ -329,7 +326,7 @@ func decideLocalCheckout(assignment *localDirectoryAssignment, workDir, repoURL 
 	res := resolveLocalRepo(assignment, repoURL, remotesOf)
 	mode := ""
 	if assignment != nil {
-		mode = strings.TrimSpace(assignment.Ref.ExecutionMode)
+		mode = assignment.mode()
 	}
 	switch {
 	case res.Covered:

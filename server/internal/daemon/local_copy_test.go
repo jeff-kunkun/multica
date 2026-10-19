@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -109,19 +110,140 @@ func TestLocalRunCopyMergesBackAlongsideConcurrentChanges(t *testing.T) {
 	}
 }
 
-func TestLocalRunCopySameLinesRunWinsAndOriginalIsBackedUp(t *testing.T) {
+// (1) Both sides edit the same line: the folder keeps its version, the run's
+// is saved next to it, the copy is kept and the conflict is reported.
+func TestLocalRunCopySameLineConflictKeepsBothVersions(t *testing.T) {
+	orig, logger := newLocalCopyFixture(t, map[string]string{"note.md": "title\nbody\n"})
+	const taskID = "019a0000-0000-7000-8000-00000000abcd"
+	c := mustPrepareLocalRunCopy(t, Task{ID: taskID, AgentID: "agent-1", IssueID: "issue-1"}, orig, logger)
+
+	writeCopyTestFile(t, filepath.Join(c.Work, "note.md"), "title by run\nbody\n")
+	writeCopyTestFile(t, filepath.Join(orig, "note.md"), "title by other\nbody\n")
+	out := c.Finish(logger)
+
+	if got := readTestFile(t, filepath.Join(orig, "note.md")); got != "title by other\nbody\n" {
+		t.Errorf("note.md = %q, the folder's version must stay untouched", got)
+	}
+	saved := "note.md" + localCopyConflictSuffix + "0000abcd"
+	if got := readTestFile(t, filepath.Join(orig, saved)); got != "title by run\nbody\n" {
+		t.Errorf("%s = %q, want the run's version", saved, got)
+	}
+	if len(out.Conflicts) != 1 || out.Conflicts[0].Path != "note.md" || out.Conflicts[0].SavedAs != saved {
+		t.Fatalf("conflicts = %+v, want note.md saved as %s", out.Conflicts, saved)
+	}
+	if out.KeptCopy == "" || out.KeptCopy == c.Dir {
+		t.Fatalf("kept copy = %q, want it set aside under its own name", out.KeptCopy)
+	}
+	if got := readTestFile(t, filepath.Join(out.KeptCopy, "work", "note.md")); got != "title by run\nbody\n" {
+		t.Errorf("kept copy note.md = %q", got)
+	}
+	if _, err := os.Stat(c.Dir); !os.IsNotExist(err) {
+		t.Errorf("the key's directory must be free for the next run, stat err = %v", err)
+	}
+	note := out.Note()
+	for _, want := range []string{"note.md", saved, ".multica-runs/folder/"} {
+		if !strings.Contains(note, want) {
+			t.Errorf("note missing %q:\n%s", want, note)
+		}
+	}
+	if strings.Contains(note, orig) {
+		t.Errorf("note must not carry the absolute folder path:\n%s", note)
+	}
+}
+
+// (2) Both sides edit different lines: merged automatically, no conflict.
+func TestLocalRunCopyDifferentLinesMergeWithoutConflict(t *testing.T) {
+	orig, logger := newLocalCopyFixture(t, map[string]string{"doc.md": "one\ntwo\nthree\nfour\nfive\n"})
+	c := mustPrepareLocalRunCopy(t, Task{ID: "task-1", AgentID: "agent-1", IssueID: "issue-1"}, orig, logger)
+
+	writeCopyTestFile(t, filepath.Join(c.Work, "doc.md"), "ONE\ntwo\nthree\nfour\nfive\n")
+	writeCopyTestFile(t, filepath.Join(orig, "doc.md"), "one\ntwo\nthree\nfour\nFIVE\n")
+	out := c.Finish(logger)
+
+	if got := readTestFile(t, filepath.Join(orig, "doc.md")); got != "ONE\ntwo\nthree\nfour\nFIVE\n" {
+		t.Errorf("doc.md = %q, want both edits", got)
+	}
+	if len(out.Conflicts) != 0 || out.KeptCopy != "" || out.Note() != "" {
+		t.Errorf("outcome = %+v, want no conflict", out)
+	}
+	if matches, _ := filepath.Glob(filepath.Join(orig, "*"+localCopyConflictSuffix+"*")); len(matches) != 0 {
+		t.Errorf("unexpected conflict files: %v", matches)
+	}
+	if _, err := os.Stat(c.Dir); !os.IsNotExist(err) {
+		t.Errorf("copy should be removed after a clean merge-back, stat err = %v", err)
+	}
+}
+
+// (3) The folder was not touched: the run's version is written.
+func TestLocalRunCopyUntouchedOriginalTakesRunVersion(t *testing.T) {
 	orig, logger := newLocalCopyFixture(t, map[string]string{"note.md": "title\n"})
 	c := mustPrepareLocalRunCopy(t, Task{ID: "task-1", AgentID: "agent-1", IssueID: "issue-1"}, orig, logger)
 
 	writeCopyTestFile(t, filepath.Join(c.Work, "note.md"), "title by run\n")
-	writeCopyTestFile(t, filepath.Join(orig, "note.md"), "title by other\n")
-	c.Finish(logger)
+	out := c.Finish(logger)
 
 	if got := readTestFile(t, filepath.Join(orig, "note.md")); got != "title by run\n" {
 		t.Errorf("note.md = %q, want the run's version", got)
 	}
-	if got := findBackup(t, c, "note.md"); got != "title by other\n" {
-		t.Errorf("backup = %q, want the other task's version", got)
+	if len(out.Conflicts) != 0 || out.KeptCopy != "" {
+		t.Errorf("outcome = %+v, want no conflict", out)
+	}
+}
+
+func TestLocalRunCopyRunDeletingAChangedFileIsAConflict(t *testing.T) {
+	orig, logger := newLocalCopyFixture(t, map[string]string{"keep.md": "v1\n"})
+	c := mustPrepareLocalRunCopy(t, Task{ID: "task-1", AgentID: "agent-1", IssueID: "issue-1"}, orig, logger)
+
+	if err := os.Remove(filepath.Join(c.Work, "keep.md")); err != nil {
+		t.Fatal(err)
+	}
+	writeCopyTestFile(t, filepath.Join(orig, "keep.md"), "v2 by other\n")
+	out := c.Finish(logger)
+
+	if got := readTestFile(t, filepath.Join(orig, "keep.md")); got != "v2 by other\n" {
+		t.Errorf("keep.md = %q, the other side's change must survive", got)
+	}
+	if len(out.Conflicts) != 1 || out.Conflicts[0].SavedAs != "" {
+		t.Errorf("conflicts = %+v, want one deletion conflict", out.Conflicts)
+	}
+}
+
+func TestLocalRunCopyBothCreatingTheSameFileIsNotAConflict(t *testing.T) {
+	orig, logger := newLocalCopyFixture(t, map[string]string{"a.txt": "a\n"})
+	c := mustPrepareLocalRunCopy(t, Task{ID: "task-1", AgentID: "agent-1", IssueID: "issue-1"}, orig, logger)
+
+	writeCopyTestFile(t, filepath.Join(c.Work, "gen.txt"), "same\n")
+	writeCopyTestFile(t, filepath.Join(orig, "gen.txt"), "same\n")
+	if out := c.Finish(logger); len(out.Conflicts) != 0 {
+		t.Errorf("conflicts = %+v, identical results must not conflict", out.Conflicts)
+	}
+}
+
+func TestApplyLocalCopyOutcomeBlocksACompletedRun(t *testing.T) {
+	out := localCopyOutcome{Folder: "/u/folder", Conflicts: []localCopyConflict{{Path: "a.txt", SavedAs: "a.txt.multica-conflict-1234"}}}
+
+	result := TaskResult{Status: "completed", Comment: "done"}
+	var runErr error
+	applyLocalCopyOutcome(&result, &runErr, out)
+	if result.Status != "blocked" || result.FailureReason != "agent_blocked" || runErr != nil {
+		t.Fatalf("result = %+v, err = %v; want blocked / agent_blocked", result, runErr)
+	}
+	if !strings.Contains(result.Comment, "a.txt.multica-conflict-1234") || !strings.HasSuffix(result.Comment, "done") {
+		t.Errorf("comment = %q, want the note then the agent's output", result.Comment)
+	}
+
+	failed := TaskResult{}
+	runErr = errors.New("agent crashed")
+	applyLocalCopyOutcome(&failed, &runErr, out)
+	if !strings.Contains(runErr.Error(), "agent crashed") || !strings.Contains(runErr.Error(), "a.txt") {
+		t.Errorf("err = %v, want the run's error plus the note", runErr)
+	}
+
+	clean := TaskResult{Status: "completed"}
+	runErr = nil
+	applyLocalCopyOutcome(&clean, &runErr, localCopyOutcome{Folder: "/u/folder"})
+	if clean.Status != "completed" || runErr != nil {
+		t.Errorf("a clean merge-back must leave the result alone: %+v %v", clean, runErr)
 	}
 }
 
@@ -147,6 +269,46 @@ func TestLocalRunCopyDisabledBySwitchFile(t *testing.T) {
 	c, err := prepareLocalRunCopy(Task{ID: "task-1", AgentID: "agent-1", IssueID: "issue-1"}, orig, logger)
 	if err != nil || c != nil {
 		t.Fatalf("prepare with switch file = (%v, %v), want (nil, nil)", c, err)
+	}
+}
+
+func TestLocalRunCopyDisabledOnlyForListedFolders(t *testing.T) {
+	orig, logger := newLocalCopyFixture(t, map[string]string{"a.txt": "a\n"})
+	switchFile := filepath.Join(os.Getenv("HOME"), ".multica", localCopyDisableFileName)
+
+	writeCopyTestFile(t, switchFile, "# too large to clone\n/elsewhere/big-folder\n")
+	c := mustPrepareLocalRunCopy(t, Task{ID: "task-1", AgentID: "agent-1", IssueID: "issue-1"}, orig, logger)
+	c.Finish(logger)
+
+	writeCopyTestFile(t, switchFile, "/elsewhere/big-folder\n"+orig+"/\n")
+	c, err := prepareLocalRunCopy(Task{ID: "task-2", AgentID: "agent-1", IssueID: "issue-1"}, orig, logger)
+	if err != nil || c != nil {
+		t.Fatalf("prepare for listed folder = (%v, %v), want (nil, nil)", c, err)
+	}
+}
+
+func TestLocalRunCopyConflictedLeftoverIsSetAside(t *testing.T) {
+	orig, logger := newLocalCopyFixture(t, map[string]string{"a.txt": "a\n"})
+	const crashed = "019a0000-0000-7000-8000-0000crash001"
+	c := mustPrepareLocalRunCopy(t, Task{ID: crashed, AgentID: "agent-1", IssueID: "issue-1"}, orig, logger)
+	writeCopyTestFile(t, filepath.Join(c.Work, "a.txt"), "a by crashed run\n")
+	writeCopyTestFile(t, filepath.Join(orig, "a.txt"), "a by user\n")
+	// The daemon died before Finish ran.
+	localCopyActiveDirs.Delete(c.Dir)
+
+	next := mustPrepareLocalRunCopy(t, Task{ID: "task-2", AgentID: "agent-1", IssueID: "issue-1"}, orig, logger)
+	defer next.Finish(logger)
+	if got := readTestFile(t, filepath.Join(orig, "a.txt")); got != "a by user\n" {
+		t.Errorf("a.txt = %q, the user's version must stay", got)
+	}
+	if got := readTestFile(t, filepath.Join(orig, "a.txt"+localCopyConflictSuffix+idTail(crashed))); got != "a by crashed run\n" {
+		t.Errorf("saved conflict = %q, want the crashed run's version named after it", got)
+	}
+	if got := readTestFile(t, filepath.Join(next.Work, "a.txt")); got != "a by user\n" {
+		t.Errorf("next copy a.txt = %q, want a fresh snapshot of the folder", got)
+	}
+	if matches, _ := filepath.Glob(c.Dir + ".conflict-*"); len(matches) != 1 {
+		t.Errorf("conflicted leftover copies kept: %v, want one", matches)
 	}
 }
 
@@ -287,6 +449,35 @@ func TestBuildLocalRunCopyBlock(t *testing.T) {
 func TestLocalRunCopyNoticeOnlyWithACopy(t *testing.T) {
 	if got := buildLocalRunCopyBlock("", "/Users/u/project"); got != "" {
 		t.Errorf("no copy must render no notice, got:\n%s", got)
+	}
+}
+
+// Not parallel: it swaps the package-level probe. Stored worktree and shared
+// rows run on a private copy where one can be made, and keep their mode where
+// it cannot; the stored value itself is never rewritten.
+func TestStoredExecutionModeIgnoredWhereACopyCanBeMade(t *testing.T) {
+	prev := localCopySupported
+	defer func() { localCopySupported = prev }()
+
+	for _, stored := range []string{"", localDirectoryModeInPlace, localDirectoryModeWorktree, localDirectoryModeShared} {
+		a := &localDirectoryAssignment{AbsPath: "/u/folder", Ref: localDirectoryRef{ExecutionMode: stored}}
+
+		localCopySupported = func(string) bool { return true }
+		if a.UsesWorktree() || a.IsShared() || a.SkipsPathMutex() || !a.RunsInUserDirectory() || a.mode() != localDirectoryModeInPlace {
+			t.Errorf("stored %q with a copy: mode = %q, want in_place on a private copy", stored, a.mode())
+		}
+
+		localCopySupported = func(string) bool { return false }
+		want := stored
+		if want == "" {
+			want = localDirectoryModeInPlace
+		}
+		if a.mode() != want {
+			t.Errorf("stored %q without a copy: mode = %q, want the stored mode", stored, a.mode())
+		}
+		if a.Ref.ExecutionMode != stored {
+			t.Errorf("stored mode rewritten to %q", a.Ref.ExecutionMode)
+		}
 	}
 }
 

@@ -27,19 +27,32 @@ import (
 //	<parent>/.multica-runs/<folder>/<key>/base   snapshot taken at start
 //	<parent>/.multica-runs/<folder>/<key>/work   the agent's working directory
 //	<parent>/.multica-runs/<folder>/_backup/...  originals replaced on merge-back, kept 7 days
+//	<parent>/.multica-runs/<folder>/<key>.conflict-<task>  a copy whose merge-back conflicted, kept
 //
 // <key> is stable per (issue or chat, agent), so a resumed session finds the
 // same working directory path on its next run.
+//
+// Merge-back never picks a winner: a file changed both in the folder and by
+// the run that does not merge line by line keeps the folder's version, the
+// run's version is saved next to it as <file>.multica-conflict-<task>, and the
+// task stops for a person (see localCopyOutcome).
 
 var errCloneUnsupported = errors.New("copy-on-write clone not supported on this volume")
 
 const (
-	// localCopyDisableFileName under ~/.multica switches every local_directory
-	// task back to running directly in the user's folder. Checked per task, so
-	// creating or deleting it takes effect on the next run without a restart.
+	// localCopyDisableFileName under ~/.multica switches local_directory tasks
+	// back to running directly in the user's folder: every folder when the
+	// file is empty, otherwise only the folders it lists, one absolute path per
+	// line. Checked per task, so editing it takes effect on the next run
+	// without a restart.
 	localCopyDisableFileName = "local-directory-direct"
 	localCopyRunsDirName     = ".multica-runs"
 	localCopyBackupRetention = 7 * 24 * time.Hour
+	// localCopyConflictSuffix names the run's version of a file merge-back
+	// could not reconcile with the folder's: <file>.multica-conflict-<task>.
+	localCopyConflictSuffix = ".multica-conflict-"
+	// localCopyOwnerFileName in a copy directory records the task that made it.
+	localCopyOwnerFileName = "task-id"
 	// Files above this size, or with NUL bytes, are not line-merged.
 	localCopyMergeMaxBytes = 8 << 20
 )
@@ -63,14 +76,30 @@ type localRunCopy struct {
 // per-path mutex. A variable so the mutex tests can switch the copy off.
 var localCopySupported = probeLocalCopy
 
-// localCopyDisabled reports whether the user turned the private copy off.
-func localCopyDisabled() bool {
+// localCopyDisabled reports whether the user turned the private copy off for
+// orig. Listing a folder suits one too large to clone quickly: a folder of a
+// million files takes minutes to clone and merge back on every run.
+func localCopyDisabled(orig string) bool {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return false
 	}
-	_, err = os.Stat(filepath.Join(home, ".multica", localCopyDisableFileName))
-	return err == nil
+	data, err := os.ReadFile(filepath.Join(home, ".multica", localCopyDisableFileName))
+	if err != nil {
+		return false
+	}
+	listed := false
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		listed = true
+		if filepath.Clean(line) == filepath.Clean(orig) {
+			return true
+		}
+	}
+	return !listed
 }
 
 func localCopyFolderLock(orig string) *sync.Mutex {
@@ -94,7 +123,7 @@ func localCopyKey(task Task) string {
 // the copy is switched off or the volume cannot clone; the caller then runs
 // in orig directly, as before.
 func prepareLocalRunCopy(task Task, orig string, logger *slog.Logger) (*localRunCopy, error) {
-	if localCopyDisabled() {
+	if localCopyDisabled(orig) {
 		return nil, nil
 	}
 	runsRoot := filepath.Join(filepath.Dir(orig), localCopyRunsDirName, filepath.Base(orig))
@@ -127,19 +156,36 @@ func prepareLocalRunCopy(task Task, orig string, logger *slog.Logger) (*localRun
 		// A previous run on this key did not finish merging back (daemon
 		// killed mid-run, or a merge error). Merge it now, before snapshotting
 		// the folder again; if that fails, set it aside rather than lose it.
-		if err := c.landLocked(logger, "leftover"); err != nil {
+		leftover := &localRunCopy{Orig: orig, RunsRoot: runsRoot, Dir: dir, Base: c.Base, Work: c.Work, TaskID: readLocalCopyOwner(dir)}
+		label := leftover.TaskID
+		if label == "" {
+			label = "leftover"
+		}
+		report, err := leftover.landLocked(logger, label)
+		switch {
+		case err != nil:
 			stale := dir + ".stale-" + time.Now().Format("20060102-150405")
 			logger.Warn("local_directory: leftover copy could not be merged back; set aside", "copy", stale, "error", err)
 			if rerr := os.Rename(dir, stale); rerr != nil {
 				return nil, fmt.Errorf("set aside leftover copy: %w", rerr)
 			}
-		} else {
+		case len(report.conflicts) > 0:
+			kept, kerr := leftover.keepForConflicts(label)
+			logger.Warn("local_directory: leftover copy conflicted with the folder; both versions kept",
+				"copy", kept, "conflicts", truncateList(conflictPaths(report.conflicts)), "error", kerr)
+			if kerr != nil {
+				return nil, fmt.Errorf("set aside conflicted leftover copy: %w", kerr)
+			}
+		default:
 			c.trash()
 		}
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
+	// Remember whose copy this is, so a leftover merged by a later run names
+	// its conflict files after the task that made the changes.
+	_ = os.WriteFile(filepath.Join(dir, localCopyOwnerFileName), []byte(task.ID), 0o644)
 	if err := cloneTree(orig, c.Base); err != nil {
 		_ = os.RemoveAll(dir)
 		if errors.Is(err, errCloneUnsupported) {
@@ -158,19 +204,113 @@ func prepareLocalRunCopy(task Task, orig string, logger *slog.Logger) (*localRun
 	return c, nil
 }
 
+// localCopyConflict is one path merge-back did not write because the folder
+// changed it after the snapshot and the run changed it too, and the two
+// versions did not merge cleanly. The folder's version is left as it is.
+type localCopyConflict struct {
+	Path    string // relative to the folder
+	SavedAs string // relative path of the run's version; empty when the run deleted the file
+}
+
+// localCopyOutcome is what Finish reports back to the task.
+type localCopyOutcome struct {
+	Folder    string
+	Conflicts []localCopyConflict
+	// KeptCopy is the copy directory left on disk because of the conflicts
+	// (or because merge-back failed), so the run's full tree stays reachable.
+	KeptCopy string
+}
+
 // Finish merges the run's changes back into the user's folder and removes the
 // copy. A copy that could not be fully merged is kept; the next run on the
-// same key retries it.
-func (c *localRunCopy) Finish(logger *slog.Logger) {
+// same key retries it. A copy whose changes conflicted with the folder is
+// kept under its own name, out of the next run's way, and the conflicts are
+// returned so the task can stop for a person instead of reporting success.
+func (c *localRunCopy) Finish(logger *slog.Logger) localCopyOutcome {
 	defer localCopyActiveDirs.Delete(c.Dir)
 	mu := localCopyFolderLock(c.Orig)
 	mu.Lock()
 	defer mu.Unlock()
-	if err := c.landLocked(logger, c.TaskID); err != nil {
+	report, err := c.landLocked(logger, c.TaskID)
+	out := localCopyOutcome{Folder: c.Orig, Conflicts: report.conflicts}
+	if err != nil {
 		logger.Warn("local_directory: merge-back incomplete; copy kept for the next run", "copy", c.Dir, "error", err)
-		return
+		out.KeptCopy = c.Dir
+		return out
+	}
+	if len(report.conflicts) > 0 {
+		kept, kerr := c.keepForConflicts(c.TaskID)
+		if kerr != nil {
+			logger.Warn("local_directory: could not set the conflicted copy aside; left in place", "copy", c.Dir, "error", kerr)
+			kept = c.Dir
+		}
+		logger.Warn("local_directory: merge-back stopped on conflicts; folder versions kept, run versions saved next to them",
+			"folder", c.Orig, "conflicts", truncateList(conflictPaths(report.conflicts)), "copy", kept)
+		out.KeptCopy = kept
+		return out
 	}
 	c.trash()
+	return out
+}
+
+// keepForConflicts moves the copy to a name of its own so the next run on the
+// same key starts from a fresh snapshot instead of merging it again.
+func (c *localRunCopy) keepForConflicts(label string) (string, error) {
+	kept := c.Dir + ".conflict-" + idTail(label)
+	if _, err := os.Lstat(kept); err == nil {
+		kept += "-" + time.Now().Format("20060102-150405")
+	}
+	if err := os.Rename(c.Dir, kept); err != nil {
+		return "", err
+	}
+	return kept, nil
+}
+
+// readLocalCopyOwner returns the task id recorded in a copy directory.
+func readLocalCopyOwner(dir string) string {
+	data, err := os.ReadFile(filepath.Join(dir, localCopyOwnerFileName))
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+func conflictPaths(conflicts []localCopyConflict) []string {
+	out := make([]string, 0, len(conflicts))
+	for _, cf := range conflicts {
+		out = append(out, cf.Path)
+	}
+	return out
+}
+
+// Note is the text the task reports when merge-back stopped on conflicts.
+// Paths are relative to the folder and the copy is named relative to the
+// folder's parent: absolute paths carry the account name into the issue.
+func (o localCopyOutcome) Note() string {
+	if len(o.Conflicts) == 0 {
+		return ""
+	}
+	name := filepath.Base(o.Folder)
+	var b strings.Builder
+	fmt.Fprintf(&b, "本地目录合并冲突：%d 个文件在任务运行期间被别处改动，且与任务的改动无法自动合并。原文件未改动，任务版本已另存，请人工处理。\n\n", len(o.Conflicts))
+	fmt.Fprintf(&b, "Merge-back conflict in local directory %q: %d file(s) were changed in the folder while this task ran, and the task's changes to them did not merge cleanly. The folder's version was left unchanged; the task's version needs a person to reconcile.\n", name, len(o.Conflicts))
+	for i, cf := range o.Conflicts {
+		if i == 20 {
+			fmt.Fprintf(&b, "- ... %d more\n", len(o.Conflicts)-20)
+			break
+		}
+		if cf.SavedAs == "" {
+			fmt.Fprintf(&b, "- %s (the task deleted it; the folder's changed version was kept)\n", filepath.ToSlash(cf.Path))
+			continue
+		}
+		fmt.Fprintf(&b, "- %s -> task version saved as %s\n", filepath.ToSlash(cf.Path), filepath.ToSlash(cf.SavedAs))
+	}
+	if o.KeptCopy != "" {
+		if rel, err := filepath.Rel(filepath.Dir(o.Folder), o.KeptCopy); err == nil && !strings.HasPrefix(rel, "..") {
+			fmt.Fprintf(&b, "The task's full working copy is kept at %s (next to %q).\n", filepath.ToSlash(rel), name)
+		}
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 // trash moves the copy out of the way at once and deletes it in the
@@ -275,27 +415,30 @@ func scanTree(root string) (entries map[string]entrySig, nested map[string]bool,
 
 // landReport is what one merge-back did, for the log.
 type landReport struct {
-	written     int
-	deleted     int
-	merged      []string // both sides changed, lines merged cleanly
-	overwritten []string // both sides changed the same place; the run's version won
-	skipped     []string // new nested repositories / worktrees created inside the copy
-	backupDir   string
+	label     string
+	written   int
+	deleted   int
+	merged    []string            // both sides changed, lines merged cleanly
+	conflicts []localCopyConflict // both sides changed and did not merge; the folder's version kept
+	skipped   []string            // new nested repositories / worktrees created inside the copy
+	backupDir string
 }
 
-// landLocked merges Work back into Orig. Caller holds the folder lock.
-func (c *localRunCopy) landLocked(logger *slog.Logger, label string) error {
+// landLocked merges Work back into Orig. Caller holds the folder lock. The
+// report is never nil, so conflicts found before an error are still seen.
+func (c *localRunCopy) landLocked(logger *slog.Logger, label string) (*landReport, error) {
+	report := &landReport{
+		label:     label,
+		backupDir: filepath.Join(c.RunsRoot, "_backup", time.Now().Format("20060102-150405")+"-"+idTail(label)),
+	}
 	pruneLocalCopyBackups(filepath.Join(c.RunsRoot, "_backup"))
 	baseEntries, baseNested, err := scanTree(c.Base)
 	if err != nil {
-		return fmt.Errorf("scan snapshot: %w", err)
+		return report, fmt.Errorf("scan snapshot: %w", err)
 	}
 	workEntries, workNested, err := scanTree(c.Work)
 	if err != nil {
-		return fmt.Errorf("scan working copy: %w", err)
-	}
-	report := &landReport{
-		backupDir: filepath.Join(c.RunsRoot, "_backup", time.Now().Format("20060102-150405")+"-"+idTail(label)),
+		return report, fmt.Errorf("scan working copy: %w", err)
 	}
 
 	var newNested []string
@@ -358,19 +501,19 @@ func (c *localRunCopy) landLocked(logger *slog.Logger, label string) error {
 		_ = os.Remove(filepath.Join(c.Orig, rel))
 	}
 
-	if report.written+report.deleted > 0 || len(report.skipped) > 0 || len(errs) > 0 {
+	if report.written+report.deleted > 0 || len(report.conflicts) > 0 || len(report.skipped) > 0 || len(errs) > 0 {
 		logger.Info("local_directory: merged run copy back",
 			"folder", c.Orig,
 			"written", report.written,
 			"deleted", report.deleted,
 			"merged", truncateList(report.merged),
-			"overwritten", truncateList(report.overwritten),
+			"conflicts", truncateList(conflictPaths(report.conflicts)),
 			"skipped_nested_repos", truncateList(report.skipped),
 			"backup", report.backupDir,
 			"errors", len(errs),
 		)
 	}
-	return errors.Join(errs...)
+	return report, errors.Join(errs...)
 }
 
 func (c *localRunCopy) landPath(rel string, w entrySig, inWork bool, b entrySig, inBase bool, report *landReport) error {
@@ -387,11 +530,14 @@ func (c *localRunCopy) landPath(rel string, w entrySig, inWork bool, b entrySig,
 		if !inOrig {
 			return nil
 		}
+		if concurrent {
+			// The run deleted a file someone else changed meanwhile: their
+			// change is not the run's to throw away.
+			report.conflicts = append(report.conflicts, localCopyConflict{Path: rel})
+			return nil
+		}
 		if err := c.backup(origPath, rel, report); err != nil {
 			return err
-		}
-		if concurrent {
-			report.overwritten = append(report.overwritten, rel)
 		}
 		report.deleted++
 		return os.RemoveAll(origPath)
@@ -411,19 +557,29 @@ func (c *localRunCopy) landPath(rel string, w entrySig, inWork bool, b entrySig,
 		return os.MkdirAll(origPath, w.mode.Perm())
 	}
 
-	if concurrent && inOrig && inBase && w.isRegular() && o.isRegular() && b.isRegular() {
-		merged, clean, merr := mergeFileLines(workPath, filepath.Join(c.Base, rel), origPath)
-		if merr == nil && clean {
-			if err := c.backup(origPath, rel, report); err != nil {
-				return err
-			}
-			if err := writeFileAtomic(origPath, merged, w.mode.Perm()); err != nil {
-				return err
-			}
-			report.merged = append(report.merged, rel)
-			report.written++
+	if concurrent {
+		if inOrig && sameEntryContent(workPath, origPath, w, o) {
+			// Both sides arrived at the same result.
 			return nil
 		}
+		if inOrig && inBase && w.isRegular() && o.isRegular() && b.isRegular() {
+			merged, clean, merr := mergeFileLines(workPath, filepath.Join(c.Base, rel), origPath)
+			if merr == nil && clean {
+				if err := c.backup(origPath, rel, report); err != nil {
+					return err
+				}
+				if err := writeFileAtomic(origPath, merged, w.mode.Perm()); err != nil {
+					return err
+				}
+				report.merged = append(report.merged, rel)
+				report.written++
+				return nil
+			}
+		}
+		// Changed on both sides and not mergeable line by line: never pick a
+		// winner. The folder keeps its version and the run's is saved next to
+		// it for a person to reconcile.
+		return c.saveConflict(rel, workPath, report)
 	}
 	if inOrig {
 		if err := c.backup(origPath, rel, report); err != nil {
@@ -435,14 +591,43 @@ func (c *localRunCopy) landPath(rel string, w entrySig, inWork bool, b entrySig,
 			}
 		}
 	}
-	if concurrent && inOrig {
-		report.overwritten = append(report.overwritten, rel)
-	}
 	if err := replaceWithClone(workPath, origPath); err != nil {
 		return err
 	}
 	report.written++
 	return nil
+}
+
+// saveConflict puts the run's version of rel next to the folder's as
+// <rel>.multica-conflict-<task>, leaving the folder's version untouched.
+func (c *localRunCopy) saveConflict(rel, workPath string, report *landReport) error {
+	saved := rel + localCopyConflictSuffix + idTail(report.label)
+	dst := filepath.Join(c.Orig, saved)
+	if s, ok, err := lstatSig(dst); err != nil {
+		return err
+	} else if ok && s.isDir() {
+		// A leftover landed again: replace the earlier saved copy.
+		if err := os.RemoveAll(dst); err != nil {
+			return err
+		}
+	}
+	if err := replaceWithClone(workPath, dst); err != nil {
+		return fmt.Errorf("save conflicting version: %w", err)
+	}
+	report.conflicts = append(report.conflicts, localCopyConflict{Path: rel, SavedAs: saved})
+	return nil
+}
+
+// sameEntryContent reports whether two non-directory entries hold the same
+// thing: identical bytes for files, the same target for symlinks.
+func sameEntryContent(a, b string, sa, sb entrySig) bool {
+	if sa.mode.Type() != sb.mode.Type() {
+		return false
+	}
+	if sa.mode&fs.ModeSymlink != 0 {
+		return sa.link == sb.link
+	}
+	return sameRegularContent(a, b, sa, sb)
 }
 
 // backup keeps the user's current version of rel before merge-back replaces

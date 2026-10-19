@@ -154,7 +154,7 @@ func buildLocalRunCopyBlock(workDir, orig string) string {
 	var b strings.Builder
 	b.WriteString("## Private copy of the user's folder\n\n")
 	fmt.Fprintf(&b, "Your working directory `%s` is a private copy of the user's folder `%s`, made for this run. Edit files here directly; do not create git worktrees inside it. When the run ends, your changes are merged back into the original folder automatically and this copy is removed.\n\n", workDir, orig)
-	b.WriteString("Other tasks may change the original folder while you work. If you and another task changed the same lines of a file, your version is kept and theirs is backed up, so before finishing, if that matters, compare the files you changed with the original folder and merge in their changes yourself. Refer to files by their path in the original folder.\n\n")
+	b.WriteString("Other tasks, or the user, may change the original folder while you work. Changes to different lines are merged automatically. If the original's copy of a file you changed was also changed in a way that does not merge, the original keeps its version, yours is saved next to it as `<file>.multica-conflict-<task>`, and this task stops for a person to reconcile them. So before finishing, compare the files you changed with the original folder and merge in their changes yourself. Refer to files by their path in the original folder.\n\n")
 	b.WriteString("If it is a git repository: commits on a new branch are carried back to the original repository, and you can push them from here. Commits on the checked-out branch arrive in the original folder as uncommitted changes.\n\n")
 	return b.String()
 }
