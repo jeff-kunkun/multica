@@ -9,6 +9,15 @@ import type { ArchivedInboxPage, ArchivedInboxFacets } from "../types/inbox";
 import type { InboxBoardResponse, ParkingRecordsResponse, UnreadInboxIssue, WaitingSummon } from "../types/home";
 import type { WorkThreadSnapshot } from "../types/work_thread";
 import type { Ask, CreateAskRequest, AnswerAskRequest } from "../types/ask";
+import type { IssuePlans, Plan, PlanApprover } from "../types/plan";
+import {
+  IssuePlansSchema,
+  EMPTY_ISSUE_PLANS,
+  ApprovePlanResponseSchema,
+  PlanApproverListSchema,
+  PlanApproverSchema,
+  EMPTY_PLAN_APPROVER,
+} from "./schemas";
 import { configStore } from "../config";
 import type { CommentSendMode } from "../types";
 import type {
@@ -7273,4 +7282,45 @@ export class ApiClient {
     });
   }
 
+  /** Every plan version on an issue (newest first) and whether the caller may approve. */
+  async listIssuePlans(issueId: string): Promise<IssuePlans> {
+    const raw = await this.fetch<unknown>(`/api/issues/${encodeURIComponent(issueId)}/plans`);
+    return parseWithFallback(raw, IssuePlansSchema, EMPTY_ISSUE_PLANS, {
+      endpoint: "GET /api/issues/{id}/plans",
+    });
+  }
+
+  /** Approves one plan version; each step becomes a child issue and starts. */
+  async approvePlan(issueId: string, version: number): Promise<Plan | null> {
+    const raw = await this.fetch<unknown>(
+      `/api/issues/${encodeURIComponent(issueId)}/plans/${version}/approve`,
+      { method: "POST" },
+    );
+    return parseWithFallback(raw, ApprovePlanResponseSchema, { plan: null }, {
+      endpoint: "POST /api/issues/{id}/plans/{version}/approve",
+    }).plan;
+  }
+
+  async listPlanApprovers(): Promise<PlanApprover[]> {
+    const raw = await this.fetch<unknown>("/api/plan-approvers");
+    return parseWithFallback(raw, PlanApproverListSchema, { approvers: [] }, {
+      endpoint: "GET /api/plan-approvers",
+    }).approvers;
+  }
+
+  async addPlanApprover(userId: string): Promise<PlanApprover> {
+    const raw = await this.fetch<unknown>("/api/plan-approvers", {
+      method: "POST",
+      body: JSON.stringify({ user_id: userId }),
+    });
+    return parseWithFallback(raw, PlanApproverSchema, EMPTY_PLAN_APPROVER, {
+      endpoint: "POST /api/plan-approvers",
+    });
+  }
+
+  async removePlanApprover(userId: string): Promise<void> {
+    await this.fetch<unknown>(`/api/plan-approvers/${encodeURIComponent(userId)}`, {
+      method: "DELETE",
+    });
+  }
 }

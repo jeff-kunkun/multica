@@ -441,7 +441,8 @@
       "routing": "ルーティング",
       "project_sharing": "権限と共有",
       "agent_permissions": "エージェント権限",
-      "bots": "Group chat & Bots"
+      "bots": "Group chat & Bots",
+      "approvers": "承認権"
     },
     "groups": {
       "personal": "個人",

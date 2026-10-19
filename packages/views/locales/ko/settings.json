@@ -441,7 +441,8 @@
       "routing": "라우팅",
       "project_sharing": "권한 및 공유",
       "agent_permissions": "에이전트 권한",
-      "bots": "Group chat & Bots"
+      "bots": "Group chat & Bots",
+      "approvers": "승인 권한"
     },
     "groups": {
       "personal": "개인",

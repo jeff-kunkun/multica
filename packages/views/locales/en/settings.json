@@ -443,7 +443,8 @@
       "routing": "Routing",
       "project_sharing": "Permissions & sharing",
       "agent_permissions": "Agent permissions",
-      "bots": "Group chat & Bots"
+      "bots": "Group chat & Bots",
+      "approvers": "Approval rights"
     },
     "groups": {
       "personal": "Personal",
