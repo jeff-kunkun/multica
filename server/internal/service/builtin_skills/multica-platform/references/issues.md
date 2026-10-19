@@ -283,6 +283,10 @@ A status change is not cosmetic. The per-key contracts (Backlog parking, In
 Review completion and parent-scoped acceptance, Blocked failure fields, In
 Progress recovery) are in `references/status-effects.md`.
 
+Project workflows can limit which statuses an issue takes and turn a status
+change into a handoff to another agent. When the per-turn prompt carries a
+`[Project workflow]` block, read `references/projects.md`.
+
 ## Automatic routing (off unless the workspace turned it on)
 
 Routing fills the assignee and 验收席 slots on creation and on status changes,

@@ -310,6 +310,7 @@ type AgentTaskQueue struct {
 	WakeHumanQuote            pgtype.Text        `json:"wake_human_quote"`
 	PickupDeadlineAt          pgtype.Timestamptz `json:"pickup_deadline_at"`
 	OnBehalfOfUserID          pgtype.UUID        `json:"on_behalf_of_user_id"`
+	WorkflowStep              pgtype.Text        `json:"workflow_step"`
 }
 
 type AgentToLabel struct {
@@ -831,7 +832,6 @@ type ChatMessage struct {
 	ChannelOutboundChatID         pgtype.Text        `json:"channel_outbound_chat_id"`
 	ChannelOutboundMessageIds     []string           `json:"channel_outbound_message_ids"`
 	SenderUserID                  pgtype.UUID        `json:"sender_user_id"`
-	ChannelTypingSettled          bool               `json:"channel_typing_settled"`
 	LinkedSessionID               pgtype.UUID        `json:"linked_session_id"`
 	ViaBotID                      pgtype.UUID        `json:"via_bot_id"`
 	ViaBotName                    pgtype.Text        `json:"via_bot_name"`
@@ -840,6 +840,7 @@ type ChatMessage struct {
 	SupersededAt                  pgtype.Timestamptz `json:"superseded_at"`
 	SupersededByMessageID         pgtype.UUID        `json:"superseded_by_message_id"`
 	OnBehalfOfUserID              pgtype.UUID        `json:"on_behalf_of_user_id"`
+	ChannelTypingSettled          bool               `json:"channel_typing_settled"`
 }
 
 type ChatNamingEvent struct {
@@ -1840,6 +1841,18 @@ type IssueWakeupReceipt struct {
 	CoalesceKey pgtype.Text        `json:"coalesce_key"`
 }
 
+type IssueWorkflow struct {
+	ID               pgtype.UUID        `json:"id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	Name             string             `json:"name"`
+	Description      string             `json:"description"`
+	InitialStatusKey string             `json:"initial_status_key"`
+	Steps            []byte             `json:"steps"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	IsDefault        bool               `json:"is_default"`
+}
+
 type KnowledgeSediment struct {
 	ID            pgtype.UUID        `json:"id"`
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
@@ -2223,6 +2236,7 @@ type Project struct {
 	DomainIds        []pgtype.UUID      `json:"domain_ids"`
 	LinkedProjects   []byte             `json:"linked_projects"`
 	ExecutorAgentIds []pgtype.UUID      `json:"executor_agent_ids"`
+	WorkflowID       pgtype.UUID        `json:"workflow_id"`
 }
 
 type ProjectMember struct {

@@ -124,6 +124,7 @@ const mockViewState: {
   toggleSwimlaneCollapsed: (key: string) => void;
   hideStatus: (s: string) => void;
   showStatus: (s: string) => void;
+  hiddenStatuses: string[];
   priorityFilters?: string[];
   assigneeFilters?: any[];
   includeNoAssignee?: boolean;
@@ -148,6 +149,7 @@ const mockViewState: {
   toggleSwimlaneCollapsed: vi.fn(),
   hideStatus: vi.fn(),
   showStatus: vi.fn(),
+  hiddenStatuses: [],
   priorityFilters: [],
   assigneeFilters: [],
   includeNoAssignee: false,

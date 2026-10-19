@@ -578,7 +578,7 @@ INSERT INTO agent_task_queue (
     coalesced_comment_ids, trigger_summary, force_fresh_session, is_leader_task, handoff_note,
     squad_id, context, originator_user_id, accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
     via_bot_id, via_bot_name, originator_source, delegated_from_task_id, rule_version_id, rerun_of_task_id, trigger_evidence_kind, trigger_evidence_ref_id,
-    work_thread_id, id
+    work_thread_id, workflow_step, id
 )
 SELECT
     $1, $2, $3, 'queued', $4, sqlc.narg(trigger_comment_id),
@@ -608,6 +608,8 @@ SELECT
                 AND wt.model IS NOT DISTINCT FROM (SELECT a.model FROM agent a WHERE a.id = $1)
                 AND wt.permission_mode IS NOT DISTINCT FROM (SELECT a.permission_mode FROM agent a WHERE a.id = $1)
               ORDER BY wt.updated_at DESC, wt.id DESC LIMIT 1), gen_random_uuid()),
+    -- The issue's status as this task is queued: the workflow step it works on (MUL-7420).
+    (SELECT i.status FROM issue i WHERE i.id = $3),
     COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
 WHERE lock_task_owner_rows($1, $3, $2)
 RETURNING *;
@@ -626,7 +628,7 @@ INSERT INTO agent_task_queue (
     squad_id, context, originator_user_id, accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
     via_bot_id, via_bot_name, originator_source, delegated_from_task_id, rule_version_id, rerun_of_task_id,
     trigger_evidence_kind, trigger_evidence_ref_id, fire_at, work_thread_id,
-    id
+    workflow_step, id
 )
 SELECT
     $1, $2, $3, 'deferred', $4, sqlc.narg(trigger_comment_id),
@@ -656,6 +658,8 @@ SELECT
                 AND wt.model IS NOT DISTINCT FROM (SELECT a.model FROM agent a WHERE a.id = $1)
                 AND wt.permission_mode IS NOT DISTINCT FROM (SELECT a.permission_mode FROM agent a WHERE a.id = $1)
               ORDER BY wt.updated_at DESC, wt.id DESC LIMIT 1), gen_random_uuid()),
+    -- The issue's status as this task is queued: the workflow step it works on (MUL-7420).
+    (SELECT i.status FROM issue i WHERE i.id = $3),
     COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
 WHERE lock_task_owner_rows($1, $3, $2)
 RETURNING *;
@@ -753,7 +757,7 @@ INSERT INTO agent_task_queue (
     trigger_evidence_kind, trigger_evidence_ref_id, retry_of_task_id,
     chat_input_task_id, fire_at,
     channel_context_revision, failure_input_version,
-    work_thread_id, context_generation, continuity_break_reason, handoff_note, id
+    work_thread_id, context_generation, continuity_break_reason, handoff_note, workflow_step, id
 )
 SELECT
     p.agent_id, p.runtime_id, p.issue_id, p.chat_session_id, p.autopilot_run_id,
@@ -779,7 +783,11 @@ SELECT
          THEN p.context_generation + 1 ELSE p.context_generation END,
     CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity'
          THEN 'resume_unsafe_failure' ELSE p.continuity_break_reason END,
-    CASE WHEN p.context->>'wakeup_id' IS NOT NULL THEN p.handoff_note END,
+    -- Carried for a wakeup's prompt and a workflow handoff's brief (MUL-7420);
+    -- rows from before workflow_step existed may hold a retired assignment note.
+    CASE WHEN p.context->>'wakeup_id' IS NOT NULL OR p.workflow_step IS NOT NULL THEN p.handoff_note END,
+    -- A retry continues its parent's work, so it keeps the parent's step (MUL-7420).
+    p.workflow_step,
     -- Named new_task_id, not id: $1 above is the PARENT task's id.
     COALESCE(sqlc.narg('new_task_id')::uuid, gen_random_uuid())
 FROM agent_task_queue p
@@ -802,6 +810,11 @@ ON CONFLICT (issue_id, agent_id, (COALESCE(comment_thread_id, '00000000-0000-000
        OR (status = 'deferred' AND context->>'channel_issue_media_pending' = 'true')
 DO NOTHING
 RETURNING *;
+
+-- name: SetTaskWorkflowStep :exec
+-- Moves a run's workflow step along with a status change the run itself made
+-- (MUL-7420). See migration 557.
+UPDATE agent_task_queue SET workflow_step = @workflow_step WHERE id = @id;
 
 -- name: CreateManualQuickCreateRetryTask :one
 -- A human retry of an issue-less quick-create is a new direct_human run, not

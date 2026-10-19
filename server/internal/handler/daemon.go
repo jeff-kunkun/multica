@@ -3428,6 +3428,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			projectCtx.Projects[0].Resources = append(projectCtx.Projects[0].Resources, h.crossProjectReadonlyResources(r.Context(), issue)...)
 		}
 		projectCtx.applyTo(&resp)
+		// Project workflow (MUL-7420): best-effort, like the status catalog
+		// below — a failure degrades to the workspace-wide status rules.
+		resp.ProjectWorkflow = h.claimProjectWorkflow(r.Context(), issue, task)
 
 		// Load every planned input as one chronological, de-duplicated set.
 		// The trigger is included here so the delivery receipt can only contain

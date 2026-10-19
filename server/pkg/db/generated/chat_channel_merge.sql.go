@@ -23,7 +23,7 @@ FROM (
 ) pending
 WHERE task.id=pending.id AND pending.max_until IS NOT NULL
   AND (task.fire_at IS NULL OR task.fire_at < pending.max_until)
-RETURNING task.id, task.agent_id, task.issue_id, task.status, task.priority, task.dispatched_at, task.started_at, task.completed_at, task.result, task.error, task.created_at, task.context, task.runtime_id, task.session_id, task.work_dir, task.trigger_comment_id, task.chat_session_id, task.autopilot_run_id, task.attempt, task.max_attempts, task.parent_task_id, task.failure_reason, task.trigger_summary, task.force_fresh_session, task.is_leader_task, task.wait_reason, task.initiator_user_id, task.handoff_note, task.prepare_lease_expires_at, task.squad_id, task.runtime_mcp_overlay, task.escalation_for_task_id, task.fire_at, task.originator_user_id, task.runtime_connected_apps, task.coalesced_comment_ids, task.delivered_comment_ids, task.chat_input_task_id, task.chat_finalize_deferred_at, task.originator_source, task.delegated_from_task_id, task.retry_of_task_id, task.rerun_of_task_id, task.rule_version_id, task.trigger_evidence_kind, task.trigger_evidence_ref_id, task.accountable_user_id, task.session_rollout_missing, task.retired_session_id, task.quick_actions_disabled, task.regenerate_quick_actions_for, task.branch_name, task.durable_work_dir, task.channel_context_revision, task.comment_thread_id, task.cancelled_by_type, task.cancelled_by_id, task.cancelled_by_name, task.issue_snapshot, task.code_decision, task.failure_input_version, task.failure_fingerprint, task.work_thread_id, task.context_generation, task.context_message_limit, task.context_token_budget, task.continuity_break_reason, task.session_mode, task.resumed_from_task_id, task.session_break_reason, task.via_bot_id, task.via_bot_name, task.wake_root_id, task.wake_hop, task.wake_generation, task.wake_reserved, task.wake_human_quote, task.pickup_deadline_at, task.on_behalf_of_user_id
+RETURNING task.id, task.agent_id, task.issue_id, task.status, task.priority, task.dispatched_at, task.started_at, task.completed_at, task.result, task.error, task.created_at, task.context, task.runtime_id, task.session_id, task.work_dir, task.trigger_comment_id, task.chat_session_id, task.autopilot_run_id, task.attempt, task.max_attempts, task.parent_task_id, task.failure_reason, task.trigger_summary, task.force_fresh_session, task.is_leader_task, task.wait_reason, task.initiator_user_id, task.handoff_note, task.prepare_lease_expires_at, task.squad_id, task.runtime_mcp_overlay, task.escalation_for_task_id, task.fire_at, task.originator_user_id, task.runtime_connected_apps, task.coalesced_comment_ids, task.delivered_comment_ids, task.chat_input_task_id, task.chat_finalize_deferred_at, task.originator_source, task.delegated_from_task_id, task.retry_of_task_id, task.rerun_of_task_id, task.rule_version_id, task.trigger_evidence_kind, task.trigger_evidence_ref_id, task.accountable_user_id, task.session_rollout_missing, task.retired_session_id, task.quick_actions_disabled, task.regenerate_quick_actions_for, task.branch_name, task.durable_work_dir, task.channel_context_revision, task.comment_thread_id, task.cancelled_by_type, task.cancelled_by_id, task.cancelled_by_name, task.issue_snapshot, task.code_decision, task.failure_input_version, task.failure_fingerprint, task.work_thread_id, task.context_generation, task.context_message_limit, task.context_token_budget, task.continuity_break_reason, task.session_mode, task.resumed_from_task_id, task.session_break_reason, task.via_bot_id, task.via_bot_name, task.wake_root_id, task.wake_hop, task.wake_generation, task.wake_reserved, task.wake_human_quote, task.pickup_deadline_at, task.on_behalf_of_user_id, task.workflow_step
 `
 
 func (q *Queries) DeferMergedChannelChatTaskForPendingMedia(ctx context.Context, taskID pgtype.UUID) (AgentTaskQueue, error) {
@@ -109,12 +109,13 @@ func (q *Queries) DeferMergedChannelChatTaskForPendingMedia(ctx context.Context,
 		&i.WakeHumanQuote,
 		&i.PickupDeadlineAt,
 		&i.OnBehalfOfUserID,
+		&i.WorkflowStep,
 	)
 	return i, err
 }
 
 const getChannelChatMergeTarget = `-- name: GetChannelChatMergeTarget :one
-SELECT t.id, t.agent_id, t.issue_id, t.status, t.priority, t.dispatched_at, t.started_at, t.completed_at, t.result, t.error, t.created_at, t.context, t.runtime_id, t.session_id, t.work_dir, t.trigger_comment_id, t.chat_session_id, t.autopilot_run_id, t.attempt, t.max_attempts, t.parent_task_id, t.failure_reason, t.trigger_summary, t.force_fresh_session, t.is_leader_task, t.wait_reason, t.initiator_user_id, t.handoff_note, t.prepare_lease_expires_at, t.squad_id, t.runtime_mcp_overlay, t.escalation_for_task_id, t.fire_at, t.originator_user_id, t.runtime_connected_apps, t.coalesced_comment_ids, t.delivered_comment_ids, t.chat_input_task_id, t.chat_finalize_deferred_at, t.originator_source, t.delegated_from_task_id, t.retry_of_task_id, t.rerun_of_task_id, t.rule_version_id, t.trigger_evidence_kind, t.trigger_evidence_ref_id, t.accountable_user_id, t.session_rollout_missing, t.retired_session_id, t.quick_actions_disabled, t.regenerate_quick_actions_for, t.branch_name, t.durable_work_dir, t.channel_context_revision, t.comment_thread_id, t.cancelled_by_type, t.cancelled_by_id, t.cancelled_by_name, t.issue_snapshot, t.code_decision, t.failure_input_version, t.failure_fingerprint, t.work_thread_id, t.context_generation, t.context_message_limit, t.context_token_budget, t.continuity_break_reason, t.session_mode, t.resumed_from_task_id, t.session_break_reason, t.via_bot_id, t.via_bot_name, t.wake_root_id, t.wake_hop, t.wake_generation, t.wake_reserved, t.wake_human_quote, t.pickup_deadline_at, t.on_behalf_of_user_id FROM agent_task_queue t
+SELECT t.id, t.agent_id, t.issue_id, t.status, t.priority, t.dispatched_at, t.started_at, t.completed_at, t.result, t.error, t.created_at, t.context, t.runtime_id, t.session_id, t.work_dir, t.trigger_comment_id, t.chat_session_id, t.autopilot_run_id, t.attempt, t.max_attempts, t.parent_task_id, t.failure_reason, t.trigger_summary, t.force_fresh_session, t.is_leader_task, t.wait_reason, t.initiator_user_id, t.handoff_note, t.prepare_lease_expires_at, t.squad_id, t.runtime_mcp_overlay, t.escalation_for_task_id, t.fire_at, t.originator_user_id, t.runtime_connected_apps, t.coalesced_comment_ids, t.delivered_comment_ids, t.chat_input_task_id, t.chat_finalize_deferred_at, t.originator_source, t.delegated_from_task_id, t.retry_of_task_id, t.rerun_of_task_id, t.rule_version_id, t.trigger_evidence_kind, t.trigger_evidence_ref_id, t.accountable_user_id, t.session_rollout_missing, t.retired_session_id, t.quick_actions_disabled, t.regenerate_quick_actions_for, t.branch_name, t.durable_work_dir, t.channel_context_revision, t.comment_thread_id, t.cancelled_by_type, t.cancelled_by_id, t.cancelled_by_name, t.issue_snapshot, t.code_decision, t.failure_input_version, t.failure_fingerprint, t.work_thread_id, t.context_generation, t.context_message_limit, t.context_token_budget, t.continuity_break_reason, t.session_mode, t.resumed_from_task_id, t.session_break_reason, t.via_bot_id, t.via_bot_name, t.wake_root_id, t.wake_hop, t.wake_generation, t.wake_reserved, t.wake_human_quote, t.pickup_deadline_at, t.on_behalf_of_user_id, t.workflow_step FROM agent_task_queue t
 WHERE t.chat_session_id = $1
   AND t.channel_context_revision IS NOT DISTINCT FROM $2::bigint
   AND t.status IN ('queued','deferred','running','dispatched','waiting_local_directory')
@@ -212,12 +213,13 @@ func (q *Queries) GetChannelChatMergeTarget(ctx context.Context, arg GetChannelC
 		&i.WakeHumanQuote,
 		&i.PickupDeadlineAt,
 		&i.OnBehalfOfUserID,
+		&i.WorkflowStep,
 	)
 	return i, err
 }
 
 const getQueuedChannelChatMergeTarget = `-- name: GetQueuedChannelChatMergeTarget :one
-SELECT t.id, t.agent_id, t.issue_id, t.status, t.priority, t.dispatched_at, t.started_at, t.completed_at, t.result, t.error, t.created_at, t.context, t.runtime_id, t.session_id, t.work_dir, t.trigger_comment_id, t.chat_session_id, t.autopilot_run_id, t.attempt, t.max_attempts, t.parent_task_id, t.failure_reason, t.trigger_summary, t.force_fresh_session, t.is_leader_task, t.wait_reason, t.initiator_user_id, t.handoff_note, t.prepare_lease_expires_at, t.squad_id, t.runtime_mcp_overlay, t.escalation_for_task_id, t.fire_at, t.originator_user_id, t.runtime_connected_apps, t.coalesced_comment_ids, t.delivered_comment_ids, t.chat_input_task_id, t.chat_finalize_deferred_at, t.originator_source, t.delegated_from_task_id, t.retry_of_task_id, t.rerun_of_task_id, t.rule_version_id, t.trigger_evidence_kind, t.trigger_evidence_ref_id, t.accountable_user_id, t.session_rollout_missing, t.retired_session_id, t.quick_actions_disabled, t.regenerate_quick_actions_for, t.branch_name, t.durable_work_dir, t.channel_context_revision, t.comment_thread_id, t.cancelled_by_type, t.cancelled_by_id, t.cancelled_by_name, t.issue_snapshot, t.code_decision, t.failure_input_version, t.failure_fingerprint, t.work_thread_id, t.context_generation, t.context_message_limit, t.context_token_budget, t.continuity_break_reason, t.session_mode, t.resumed_from_task_id, t.session_break_reason, t.via_bot_id, t.via_bot_name, t.wake_root_id, t.wake_hop, t.wake_generation, t.wake_reserved, t.wake_human_quote, t.pickup_deadline_at, t.on_behalf_of_user_id FROM agent_task_queue t
+SELECT t.id, t.agent_id, t.issue_id, t.status, t.priority, t.dispatched_at, t.started_at, t.completed_at, t.result, t.error, t.created_at, t.context, t.runtime_id, t.session_id, t.work_dir, t.trigger_comment_id, t.chat_session_id, t.autopilot_run_id, t.attempt, t.max_attempts, t.parent_task_id, t.failure_reason, t.trigger_summary, t.force_fresh_session, t.is_leader_task, t.wait_reason, t.initiator_user_id, t.handoff_note, t.prepare_lease_expires_at, t.squad_id, t.runtime_mcp_overlay, t.escalation_for_task_id, t.fire_at, t.originator_user_id, t.runtime_connected_apps, t.coalesced_comment_ids, t.delivered_comment_ids, t.chat_input_task_id, t.chat_finalize_deferred_at, t.originator_source, t.delegated_from_task_id, t.retry_of_task_id, t.rerun_of_task_id, t.rule_version_id, t.trigger_evidence_kind, t.trigger_evidence_ref_id, t.accountable_user_id, t.session_rollout_missing, t.retired_session_id, t.quick_actions_disabled, t.regenerate_quick_actions_for, t.branch_name, t.durable_work_dir, t.channel_context_revision, t.comment_thread_id, t.cancelled_by_type, t.cancelled_by_id, t.cancelled_by_name, t.issue_snapshot, t.code_decision, t.failure_input_version, t.failure_fingerprint, t.work_thread_id, t.context_generation, t.context_message_limit, t.context_token_budget, t.continuity_break_reason, t.session_mode, t.resumed_from_task_id, t.session_break_reason, t.via_bot_id, t.via_bot_name, t.wake_root_id, t.wake_hop, t.wake_generation, t.wake_reserved, t.wake_human_quote, t.pickup_deadline_at, t.on_behalf_of_user_id, t.workflow_step FROM agent_task_queue t
 WHERE t.chat_session_id = $1
   AND t.channel_context_revision IS NOT DISTINCT FROM $2::bigint
   AND t.status IN ('queued','deferred')
@@ -317,12 +319,13 @@ func (q *Queries) GetQueuedChannelChatMergeTarget(ctx context.Context, arg GetQu
 		&i.WakeHumanQuote,
 		&i.PickupDeadlineAt,
 		&i.OnBehalfOfUserID,
+		&i.WorkflowStep,
 	)
 	return i, err
 }
 
 const listUnownedChannelChatMessagesForMerge = `-- name: ListUnownedChannelChatMessagesForMerge :many
-SELECT message.id, message.chat_session_id, message.role, message.content, message.task_id, message.created_at, message.failure_reason, message.elapsed_ms, message.message_kind, message.channel_media_pending_until, message.channel_ingested, message.quick_actions, message.channel_context_revision, message.channel_outbound_type, message.channel_outbound_installation_id, message.channel_outbound_chat_id, message.channel_outbound_message_ids, message.sender_user_id, message.channel_typing_settled, message.linked_session_id, message.via_bot_id, message.via_bot_name, message.wake_root_id, message.wake_hop, message.superseded_at, message.superseded_by_message_id, message.on_behalf_of_user_id FROM chat_message message
+SELECT message.id, message.chat_session_id, message.role, message.content, message.task_id, message.created_at, message.failure_reason, message.elapsed_ms, message.message_kind, message.channel_media_pending_until, message.channel_ingested, message.quick_actions, message.channel_context_revision, message.channel_outbound_type, message.channel_outbound_installation_id, message.channel_outbound_chat_id, message.channel_outbound_message_ids, message.sender_user_id, message.linked_session_id, message.via_bot_id, message.via_bot_name, message.wake_root_id, message.wake_hop, message.superseded_at, message.superseded_by_message_id, message.on_behalf_of_user_id, message.channel_typing_settled FROM chat_message message
 WHERE message.chat_session_id = $1
   AND message.role = 'user'
   AND message.task_id IS NULL
@@ -383,7 +386,6 @@ func (q *Queries) ListUnownedChannelChatMessagesForMerge(ctx context.Context, ar
 			&i.ChannelOutboundChatID,
 			&i.ChannelOutboundMessageIds,
 			&i.SenderUserID,
-			&i.ChannelTypingSettled,
 			&i.LinkedSessionID,
 			&i.ViaBotID,
 			&i.ViaBotName,
@@ -392,6 +394,7 @@ func (q *Queries) ListUnownedChannelChatMessagesForMerge(ctx context.Context, ar
 			&i.SupersededAt,
 			&i.SupersededByMessageID,
 			&i.OnBehalfOfUserID,
+			&i.ChannelTypingSettled,
 		); err != nil {
 			return nil, err
 		}

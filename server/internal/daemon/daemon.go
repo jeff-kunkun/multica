@@ -297,6 +297,26 @@ type terminalReportSendFunc func(context.Context, terminalTaskReport, []time.Dur
 
 type executionEnvironmentCommand func() ([]string, error)
 
+// cursorSupplementHookCommand returns the hook relay a steerable Cursor run
+// installs in .cursor/hooks.json. That file lands in the workdir, so steering
+// is offered only for daemon-managed workdirs, never inside a user's own
+// directory or worktree, and only when the workdir has no hooks.json of its
+// own. Windows is excluded because Cursor runs hooks there through PowerShell,
+// whose quoting the relay command is not verified against.
+func cursorSupplementHookCommand(env *execenv.Environment) ([]string, bool) {
+	if runtime.GOOS == "windows" || env == nil || env.LocalDirectory || env.LocalWorktree != nil {
+		return nil, false
+	}
+	if agent.CursorHooksInstallable(env.WorkDir) != nil {
+		return nil, false
+	}
+	executable, err := resolveSelfExecutable()
+	if err != nil {
+		return nil, false
+	}
+	return []string{executable, agent.CursorHookHelperArg}, true
+}
+
 func defaultExecutionEnvironmentCommand() ([]string, error) {
 	executable, err := resolveSelfExecutable()
 	if err != nil {
@@ -7055,6 +7075,7 @@ var runtimeDisplayNameOverrides = map[string]string{
 	"qwen":       "Qwen Code",
 	"qwenpaw":    "QwenPaw",
 	"mcode":      "MiniMax Code",
+	"muse":       "Muse Code",
 	"zeroclaw":   "ZeroClaw",
 }
 
@@ -7211,6 +7232,8 @@ var sharedModeRefusedProviders = map[string]string{
 	// mcode ignores ExecOptions.SystemPrompt and only reads cwd AGENTS.md
 	// (mcode.go, DENE-125).
 	"mcode": "reads the brief only from cwd AGENTS.md",
+	// muse (upstream) likewise ignores SystemPrompt for cwd AGENTS.md (muse.go).
+	"muse": "reads the brief only from cwd AGENTS.md",
 	// reasonix sends the bare prompt over ACP and has no verified route.
 	"reasonix": "no verified brief route",
 	// copilot and deveco carry the prompt on argv; a brief of tens of KB
@@ -9584,7 +9607,18 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// "start task failed: <…>" string and the same failure_reason
 	// taxonomy as before — see MUL-2946 for the classifier contract.
 	var taskCapabilities []string
-	if agent.SupportsTaskSupplement(provider, resolvedVersion) && (task.IssueID != "" || task.ChatSessionID != "") {
+	// DENE-2315 CHOICE pending (cursor live-run steering): the old office
+	// steers Cursor by restart (cursor is listed in SteersByRestart, DENE-1349);
+	// upstream dfa8bdaa53 steers it in-process through a postToolUse hook relay
+	// (cursor-agent >= 2026.10.14, Unix only, issue tasks only). Both are kept:
+	// the restart path stays active and the hook path is compiled but only
+	// reachable once cursor leaves SteersByRestart.
+	var cursorHookCommand []string
+	supplementSupported := agent.SupportsTaskSupplement(provider, resolvedVersion) && (task.IssueID != "" || task.ChatSessionID != "")
+	if supplementSupported && provider == "cursor" && !agent.SteersByRestart(provider) {
+		cursorHookCommand, supplementSupported = cursorSupplementHookCommand(env)
+	}
+	if supplementSupported {
 		taskCapabilities = append(taskCapabilities, protocol.DaemonCapabilityTaskSupplementV1)
 		if agent.SteersByRestart(provider) {
 			taskCapabilities = append(taskCapabilities, protocol.DaemonCapabilitySteerRestartV1)
@@ -9973,6 +10007,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 	execOpts := agent.ExecOptions{
 		EnableTaskSupplement:       taskSupplementNegotiated,
+		CursorHookCommand:          cursorHookCommand,
 		Cwd:                        env.WorkDir,
 		Model:                      model,
 		ThreadName:                 deriveTaskThreadName(task),
@@ -10398,11 +10433,19 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// had been observed yet (handleTask's cancelledByPoll branch
 		// discards that case before we get here). Reaching this report means
 		// the daemon itself is stopping the process — restart, self-reload,
-		// or shutdown — and the server will retry it (DENE-813). The comment
-		// string is the machine record; the issue notice is written server-side.
+		// or shutdown — and the server will retry it (DENE-813). The retry
+		// keys on failure_reason "cancelled"; the issue notice is written
+		// server-side.
+		//
+		// Comment stays empty on purpose. reportTaskResult forwards it as the
+		// task's `error`, which the UI shows verbatim under "Technical
+		// details", so a sentence written here would reach the reader
+		// untranslated. The status alone already yields failure_reason
+		// "cancelled", whose label is localized in every shipped locale, and
+		// it says the same thing — an English sentence beside it would only
+		// be a worse copy of it.
 		return TaskResult{
 			Status:    "cancelled",
-			Comment:   "task cancelled by server",
 			SessionID: result.SessionID,
 			WorkDir:   env.WorkDir,
 			EnvRoot:   env.RootDir,
@@ -11210,8 +11253,8 @@ func (d *Daemon) executeAndDrainDetectingSkills(ctx context.Context, backend age
 		waitForDrain()
 		// Idle watchdog cancels via agentCancel(), which propagates here as
 		// context.Canceled. Check this BEFORE the generic cancelled/timeout
-		// classifiers so a watchdog-induced stop isn't misreported as
-		// "task cancelled by server".
+		// classifiers so a watchdog-induced stop isn't misreported as a
+		// server cancellation.
 		if idleWatchdogFired.Load() {
 			// For a backend that publishes a terminal boundary, enter the
 			// hand-off without asking terminalObserved first. Reading a flag and

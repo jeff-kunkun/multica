@@ -6,6 +6,7 @@ import { configStore } from "@multica/core/config";
 import {
   BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG,
   PLUGINS_V1_FLAG,
+  PROJECT_WORKFLOWS_V1_FLAG,
 } from "@multica/core/feature-flags";
 import { renderWithI18n } from "../../test/i18n";
 
@@ -25,6 +26,7 @@ vi.mock("./channels-tab", stub("ChannelsTab"));
 vi.mock("./notifications-tab", stub("NotificationsTab"));
 vi.mock("./labels-tab", stub("LabelsTab"));
 vi.mock("./issue-statuses-tab", stub("IssueStatusesTab"));
+vi.mock("../../workflows/workflows-tab", stub("WorkflowsTab"));
 vi.mock("./properties-tab", stub("PropertiesTab"));
 vi.mock("./quick-actions-tab", stub("QuickActionsTab"));
 vi.mock("./keyboard-shortcuts-tab", stub("KeyboardShortcutsTab"));
@@ -176,6 +178,28 @@ describe("SettingsPage Plugin feature flag", () => {
 
     expect(screen.queryByRole("link", { name: "Plugins" })).not.toBeInTheDocument();
     expect(screen.getByText("PluginsTab")).toBeInTheDocument();
+  });
+});
+
+describe("SettingsPage workflow feature flag", () => {
+  it("mounts workflows in workspace settings without losing wakeups", () => {
+    navigationState.search = "tab=workflows";
+    configStore.getState().setFeatureFlags({ [PROJECT_WORKFLOWS_V1_FLAG]: true });
+
+    renderWithI18n(<SettingsPage />);
+
+    // DENE-2009: these pages open from links only; the nav does not list them.
+    expect(screen.getByText("WorkflowsTab")).toBeInTheDocument();
+    expect(screen.queryByText("IssueStatusesTab")).not.toBeInTheDocument();
+  });
+
+  it("keeps the status catalog when workflows are disabled", () => {
+    navigationState.search = "tab=issue-statuses";
+
+    renderWithI18n(<SettingsPage />);
+
+    expect(screen.getByText("IssueStatusesTab")).toBeInTheDocument();
+    expect(screen.queryByText("WorkflowsTab")).not.toBeInTheDocument();
   });
 });
 

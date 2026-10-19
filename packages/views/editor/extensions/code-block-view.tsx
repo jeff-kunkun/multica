@@ -3,16 +3,21 @@
 import { useState } from "react";
 import { NodeViewWrapper, NodeViewContent } from "@tiptap/react";
 import type { NodeViewProps } from "@tiptap/react";
-import { Code as CodeIcon, Copy, Check, Eye } from "lucide-react";
+import { Code as CodeIcon, Copy, Check, Eye, Maximize2 } from "lucide-react";
+import { Button } from "@multica/ui/components/ui/button";
+import { HtmlPreviewSurface } from "../html-preview-surface";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
-import { Dialog, DialogContent } from "@multica/ui/components/ui/dialog";
 import { useDebouncedValue } from "../../common/use-debounced-value";
 import { useT } from "../../i18n";
 import { MermaidDiagram } from "../mermaid-diagram";
 import { CodeBlockIframe } from "../code-block-iframe";
-import { PREVIEW_POSTER_HEIGHT, PreviewPoster } from "../preview-poster";
+import {
+  PREVIEW_POSTER_HEIGHT,
+  PREVIEW_POSTER_HEIGHT_PX,
+  PreviewPoster,
+} from "../preview-poster";
 import { useBackToDismiss } from "../../navigation";
 
 // Coalesces fast keystrokes before re-rendering live previews.
@@ -24,11 +29,12 @@ import { useBackToDismiss } from "../../navigation";
 // keystroke causes the iframe to re-load and flicker.
 const PREVIEW_DEBOUNCE_MS = 200;
 
-const HTML_PREVIEW_HEIGHT = "h-[480px]";
+const HTML_PREVIEW_HEIGHT_PX = 480;
 
 function CodeBlockView({ node }: NodeViewProps) {
   const { t } = useT("editor");
   const [copied, setCopied] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
   // HTML blocks default to "preview"; the user can flip to "source" to
   // edit the markup directly. Note: the source `<pre>` MUST stay mounted
   // (just hidden) so ProseMirror keeps its NodeView bindings — unmounting
@@ -37,11 +43,11 @@ function CodeBlockView({ node }: NodeViewProps) {
   // Phones get a short, non-scrollable thumbnail that opens the full-screen
   // preview on tap (see PreviewPoster); the back gesture closes it again.
   const isMobile = useIsMobile();
-  const [fullscreen, setFullscreen] = useState(false);
   useBackToDismiss(isMobile && fullscreen, () => setFullscreen(false));
   const language = node.attrs.language || "";
   const isMermaid = language === "mermaid";
   const isHtml = language === "html";
+  const showHtmlPreview = isHtml && view === "preview";
   const chart = node.textContent;
   const debouncedChart = useDebouncedValue(
     isMermaid ? chart : "",
@@ -50,6 +56,7 @@ function CodeBlockView({ node }: NodeViewProps) {
   const debouncedHtml = useDebouncedValue(
     isHtml ? chart : "",
     PREVIEW_DEBOUNCE_MS,
+    showHtmlPreview || fullscreen,
   );
 
   const handleCopy = async () => {
@@ -61,7 +68,6 @@ function CodeBlockView({ node }: NodeViewProps) {
     }
   };
 
-  const showHtmlPreview = isHtml && view === "preview";
   const toggleView = () =>
     setView((v) => (v === "preview" ? "source" : "preview"));
 
@@ -75,31 +81,45 @@ function CodeBlockView({ node }: NodeViewProps) {
           <MermaidDiagram chart={debouncedChart} />
         </div>
       )}
-      {isHtml && showHtmlPreview && (
+      {isHtml && (
         // CSS-hidden when toggled off so the `<pre>` below stays mounted —
         // unmounting either side would either lose ProseMirror bindings
         // (source) or thrash iframe.srcDoc (preview).
-        <div contentEditable={false} className="relative mb-1">
-          <CodeBlockIframe
-            html={debouncedHtml}
+        <div
+          contentEditable={false}
+          className={cn("relative", showHtmlPreview && "mb-1")}
+          hidden={!showHtmlPreview && !fullscreen}
+        >
+          <HtmlPreviewSurface
+            open={fullscreen}
+            inlineHeight={
+              showHtmlPreview
+                ? isMobile
+                  ? PREVIEW_POSTER_HEIGHT_PX
+                  : HTML_PREVIEW_HEIGHT_PX
+                : 0
+            }
+            onOpenChange={setFullscreen}
             title={t(($) => $.code_block.html_preview)}
-            heightClassName={isMobile ? PREVIEW_POSTER_HEIGHT : HTML_PREVIEW_HEIGHT}
-            className={isMobile ? "pointer-events-none" : undefined}
-          />
-          {isMobile && <PreviewPoster onOpen={() => setFullscreen(true)} />}
-          <Dialog open={fullscreen} onOpenChange={setFullscreen}>
-            <DialogContent
-              className="!max-w-6xl !h-[min(90dvh,calc(100dvh-2rem))] w-full p-0 gap-0 overflow-hidden"
-              aria-label={t(($) => $.code_block.fullscreen)}
-            >
-              <CodeBlockIframe
-                html={debouncedHtml}
-                title={t(($) => $.code_block.html_preview)}
-                heightClassName="h-full"
-                className="rounded-none border-0"
-              />
-            </DialogContent>
-          </Dialog>
+          >
+            <CodeBlockIframe
+              html={debouncedHtml}
+              title={t(($) => $.code_block.html_preview)}
+              heightClassName={
+                fullscreen ? "h-full" : isMobile ? PREVIEW_POSTER_HEIGHT : "h-[480px]"
+              }
+              className={
+                fullscreen
+                  ? "rounded-none border-0"
+                  : isMobile
+                    ? "pointer-events-none"
+                    : undefined
+              }
+            />
+          </HtmlPreviewSurface>
+          {isMobile && showHtmlPreview && !fullscreen && (
+            <PreviewPoster onOpen={() => setFullscreen(true)} />
+          )}
         </div>
       )}
       <div
@@ -133,6 +153,19 @@ function CodeBlockView({ node }: NodeViewProps) {
               <Eye className="h-3.5 w-3.5" />
             )}
           </button>
+        )}
+        {isHtml && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            className="text-muted-foreground"
+            title={t(($) => $.code_block.fullscreen)}
+            aria-label={t(($) => $.code_block.fullscreen)}
+            onClick={() => setFullscreen(true)}
+          >
+            <Maximize2 className="h-3.5 w-3.5" />
+          </Button>
         )}
         <button
           type="button"

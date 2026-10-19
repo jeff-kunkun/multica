@@ -1794,14 +1794,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Patch("/api/me/onboarding", h.PatchOnboarding)
 		r.Post("/api/me/onboarding/complete", h.CompleteOnboarding)
 		r.Post("/api/me/onboarding/cloud-waitlist", h.JoinCloudWaitlist)
-		// DEPRECATED — shim routes for desktop < v3 during the rollout
-		// window. v3 frontend creates the Helper agent + starter issue
-		// via generic CreateAgent / CreateIssue and only calls /complete
-		// here. Remove once X-Client-Version telemetry confirms zero
-		// pre-v3 desktops are still calling these. Handlers live in
-		// server/internal/handler/onboarding_shim.go.
-		r.Post("/api/me/onboarding/runtime-bootstrap", h.BootstrapOnboardingRuntime)
-		r.Post("/api/me/onboarding/no-runtime-bootstrap", h.BootstrapOnboardingNoRuntime)
 		// Credential exchange is human-only (DENE-896). A mat_ task token is
 		// bound to one workspace by its row; letting it mint a JWT here would
 		// hand a running agent an unbound human credential. Callers today are
@@ -2346,6 +2338,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/comments", h.CreateComment)
 					r.Get("/comments", h.ListComments)
 					r.Get("/timeline", h.ListTimeline)
+					r.Get("/workflow-handoff", h.PreviewWorkflowHandoff)
 					r.Get("/subscribers", h.ListIssueSubscribers)
 					r.Post("/subscribe", h.SubscribeToIssue)
 					r.Post("/unsubscribe", h.UnsubscribeFromIssue)
@@ -2504,6 +2497,21 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
+			// Project workflows (MUL-7420). Reads are open to any member; writes
+			// are gated inside the handlers to workspace owners/admins and, for
+			// switching a project's workflow, its lead.
+			r.Route("/api/issue-workflows", func(r chi.Router) {
+				r.Get("/", h.ListIssueWorkflows)
+				r.Post("/", h.CreateIssueWorkflow)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetIssueWorkflow)
+					r.Patch("/", h.UpdateIssueWorkflow)
+					r.Delete("/", h.DeleteIssueWorkflow)
+					r.Put("/handoffs/{status}", h.SetIssueWorkflowHandoff)
+					r.Post("/brief", h.PreviewIssueWorkflowBrief)
+				})
+			})
+
 			// Projects
 			// Repositories are JSONB entries in workspace.repos, not rows, so
 			// their scope is keyed by URL in the body rather than by path id.
@@ -2526,6 +2534,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/visibility/preview", h.PreviewProjectVisibility)
 					r.Put("/visibility", h.SetProjectVisibility)
 					r.Get("/access", h.GetProjectAccess)
+					r.Post("/workflow", h.SetProjectWorkflow)
 					r.Get("/resources", h.ListProjectResources)
 					// Compact repository-only surface used by the CLI and agents.
 					r.Get("/repos", h.ListProjectRepos)

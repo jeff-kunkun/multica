@@ -24,6 +24,7 @@ export type MoveIssueUpdates = Pick<
   | "assignee_type"
   | "assignee_id"
   | "position"
+  | "stop_previous_assignee_runs"
   | "parent_issue_id"
   | "project_id"
 > & {
@@ -137,8 +138,8 @@ export function useIssueSurfaceActions({
           ...options,
         }),
       batchUpdate: async (issueIds, updates) => {
-        if (denyGuestWrite()) return;
-        await batchUpdateMutation.mutateAsync({ ids: issueIds, updates });
+        if (denyGuestWrite()) return { updated: 0 };
+        return batchUpdateMutation.mutateAsync({ ids: issueIds, updates });
       },
       batchDelete: async (issueIds) => {
         if (denyGuestWrite()) return;

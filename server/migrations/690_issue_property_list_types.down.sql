@@ -14,7 +14,7 @@ BEGIN
     WHERE type IN ('multi_text', 'multi_url');
 
     IF list_defs > 0 THEN
-        RAISE EXCEPTION 'cannot roll back 564: % multi_text/multi_url property definition(s) still exist', list_defs
+        RAISE EXCEPTION 'cannot roll back 690: % multi_text/multi_url property definition(s) still exist', list_defs
             USING HINT = 'Convert those definitions and the issue values keyed to them to a pre-list type first; this migration will not delete user data.';
     END IF;
 END

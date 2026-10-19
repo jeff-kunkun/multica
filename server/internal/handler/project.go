@@ -57,6 +57,9 @@ type ProjectResponse struct {
 	// automatic dispatch picks only these agents for its work. Empty means
 	// every seat may be picked.
 	ExecutorAgentIDs []string `json:"executor_agent_ids"`
+	// WorkflowID is the workflow this project uses; null means the workspace
+	// Default workflow. (MUL-7420)
+	WorkflowID *string `json:"workflow_id"`
 }
 
 func projectToResponse(p db.Project) ProjectResponse {
@@ -78,6 +81,7 @@ func projectToResponse(p db.Project) ProjectResponse {
 		CreatedBy:        uuidToString(p.CreatedBy),
 		DomainIDs:        domainIDStrings(p.DomainIds),
 		ExecutorAgentIDs: executorAgentIDsOrEmpty(p),
+		WorkflowID:       uuidToPtr(p.WorkflowID),
 	}
 }
 
@@ -136,6 +140,10 @@ type CreateProjectRequest struct {
 	Resources   []CreateProjectResourceRequestPayload `json:"resources,omitempty"`
 	// DomainIDs takes domain ids or names; empty or 通用 means generic.
 	DomainIDs []string `json:"domain_ids,omitempty"`
+	// WorkflowID picks the project's workflow at creation; omitted or null
+	// uses the workspace Default workflow. A new project has no issues, so no
+	// status mapping is involved. (MUL-7420)
+	WorkflowID *string `json:"workflow_id,omitempty"`
 }
 
 // CreateProjectResourceRequestPayload mirrors CreateProjectResourceRequest but
@@ -352,6 +360,24 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	var workflowID pgtype.UUID
+	if req.WorkflowID != nil && *req.WorkflowID != "" {
+		if !h.requireProjectWorkflowsV1(w, r) {
+			return
+		}
+		id, ok := parseUUIDOrBadRequest(w, *req.WorkflowID, "workflow_id")
+		if !ok {
+			return
+		}
+		row, err := h.Queries.GetIssueWorkflow(r.Context(), db.GetIssueWorkflowParams{ID: id, WorkspaceID: wsUUID})
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "workflow not found in this workspace")
+			return
+		}
+		if !row.IsDefault {
+			workflowID = id
+		}
+	}
 
 	// start_date / due_date are optional calendar days; an absent or empty
 	// value leaves the column NULL. Mirrors CreateIssue's date handling.
@@ -461,6 +487,7 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		Priority:    priority,
 		StartDate:   startDate,
 		DueDate:     dueDate,
+		WorkflowID:  workflowID,
 		// Every project starts visible to its own people (DENE-2166): its
 		// members see it and the work in it, nobody else does until it is
 		// widened. An agent-created project is no exception — it records the

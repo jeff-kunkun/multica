@@ -18,14 +18,14 @@ import (
 // the production migration hooks; requires the isolated test database.
 func TestTypingCleanupRepairsInterruptedIndexes(t *testing.T) {
 	versions := []string{
-		"565_channel_typing_cleanup",
-		"566_channel_typing_reaction_id_idx",
-		"567_channel_typing_reaction_retry_idx",
-		"568_channel_typing_reaction_gc_idx",
-		"569_channel_typing_limits",
-		"570_channel_typing_quota_idx",
-		"571_channel_typing_expiry_idx",
-		"572_channel_typing_abandoned_idx",
+		"691_channel_typing_cleanup",
+		"692_channel_typing_reaction_id_idx",
+		"693_channel_typing_reaction_retry_idx",
+		"694_channel_typing_reaction_gc_idx",
+		"695_channel_typing_limits",
+		"696_channel_typing_quota_idx",
+		"697_channel_typing_expiry_idx",
+		"698_channel_typing_abandoned_idx",
 	}
 	files := make([]string, len(versions))
 	for i, version := range versions {

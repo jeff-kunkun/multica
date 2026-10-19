@@ -2,12 +2,10 @@ package lark
 
 import (
 	"context"
-	"os"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/jackc/pgx/v5/pgxpool"
 	dbfx "github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -22,15 +20,7 @@ type typingDBFixture struct {
 
 func newTypingDBFixture(t *testing.T) *typingDBFixture {
 	t.Helper()
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		t.Skip("DATABASE_URL required for durable typing lifecycle regression")
-	}
-	pool, err := pgxpool.New(context.Background(), dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(pool.Close)
+	pool := dbfx.OpenTestDatabase(context.Background(), t)
 	fx := dbfx.New(pool, "", "")
 	suffix := uuid.NewString()
 	fx.UserID = fx.User(t, "Typing tester", "typing-"+suffix+"@multica.test")

@@ -87,6 +87,10 @@
     },
     "pr_auto_complete_badge": "Set when PRs merge",
     "built_in_locked": "Built-in statuses drive system behavior, so they can't be edited or archived. You can still reorder them.",
+    "builtin_badge": "Built-in",
+    "workflow_usage_one": "{{count}} workflow uses it",
+    "workflow_usage_other": "{{count}} workflows use it",
+    "workflow_usage_none": "In no workflow",
     "description": "Each status behaves according to its category."
   },
   "wakeups": {
@@ -147,6 +151,8 @@
     "field_name": "Name",
     "field_name_placeholder": "Code Review",
     "field_target": "Runs as",
+    "no_target": "No target",
+    "no_target_hint": "Posts a message without mentioning anyone.",
     "field_prompt": "Prompt",
     "field_prompt_placeholder": "Review the code linked to this issue. Focus on correctness and edge cases.",
     "prompt_hint": "Sent as written. The agent already sees the issue.",
@@ -432,6 +438,7 @@
       "code": "Code",
       "channels": "Messaging",
       "apps": "Connected apps",
+      "workflows": "Workflows",
       "config_transfer": "Export & import",
       "routing": "Routing",
       "project_sharing": "Permissions & sharing",

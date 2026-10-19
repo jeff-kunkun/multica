@@ -43,7 +43,7 @@ See `references/overview.md` for filter semantics and examples.
 | `references/specialisations.md` | Base roles and specialisations: create by base role + domain, what a child inherits, the two-level cap, runtime following, solidify, the archive guard |
 | `references/squads.md` | Squads: leader routing, roster, recording leader activity, why a squad did or did not run |
 | `references/autopilots.md` | Autopilots: schedule / webhook / manual triggers, `create_issue` vs `run_only`, why one did not fire |
-| `references/projects.md` | Projects, their members (`project member list`), and their durable resources (`github_repo`, `local_directory`, worktree mode) |
+| `references/projects.md` | Projects, their members (`project member list`), and their durable resources (`github_repo`, `local_directory`, worktree mode); project workflows — status columns, handoffs, a `[Project workflow]` block in your prompt |
 | `references/external-bots.md` | An owner-authorized external Bot: key-less one-yes connect (`multica bot connect`) or a personal CLI login instead of a mailbox; office event receipts and catch-up (`multica events`) |
 | `references/runtimes.md` | Runtimes, daemons, `repo checkout`, and the task CLI boundary |
 | `references/inbox.md` | The user asks about their inbox or what is stuck: `multica inbox board` (optionally `--project`) and the fixed five-part answer |

@@ -117,6 +117,7 @@
   },
   "code_block": {
     "html_preview": "HTML プレビュー",
+    "close_preview": "閉じる",
     "copy_code": "コードをコピー",
     "show_preview": "プレビューを表示",
     "show_source": "ソースを表示",
@@ -174,5 +175,18 @@
     },
     "skill_group": "{{name}} の skill",
     "skill_hint": "エージェントを @ すると、その skill を選べます"
+  },
+  "table": {
+    "reset_widths": "列幅をリセット",
+    "expand": "表を展開",
+    "copy_markdown": "Markdown としてコピー",
+    "copy_csv": "CSV としてコピー",
+    "copied": "コピーしました",
+    "resize_column": "「{{name}}」列の幅を変更",
+    "expanded_title": "表",
+    "filter_placeholder": "行を絞り込む",
+    "clear_filter": "絞り込みを解除",
+    "no_matches": "一致する行がありません",
+    "close": "閉じる"
   }
 }

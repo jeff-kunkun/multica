@@ -121,7 +121,7 @@ export function createKoDict(
           {
             title: "처음 실행할 때 자동 등록",
             description:
-              "Multica는 Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, ZeroClaw 등 26개 지원 도구를 스캔해 이미 설치된 것을 런타임으로 자동 등록합니다.",
+              "Multica는 Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, ZeroClaw 등 27개 지원 도구를 스캔해 이미 설치된 것을 런타임으로 자동 등록합니다.",
           },
         ],
       },
@@ -197,7 +197,7 @@ export function createKoDict(
         {
           question: "Multica는 어떤 코딩 에이전트를 지원하나요?",
           answer:
-            "Multica는 Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, ZeroClaw 등 26개 코딩 도구를 기본 지원합니다. 데몬이 이미 설치된 CLI를 자동으로 찾아 각각 런타임으로 등록합니다. 소스 코드가 공개되어 있으므로 직접 백엔드를 추가할 수도 있습니다.",
+            "Multica는 Antigravity, Claude Code, CodeBuddy, CodeArts, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, MiniMax Code, Muse Code, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI, ZeroClaw 등 27개 코딩 도구를 기본 지원합니다. 데몬이 이미 설치된 CLI를 자동으로 찾아 각각 런타임으로 등록합니다. 소스 코드가 공개되어 있으므로 직접 백엔드를 추가할 수도 있습니다.",
         },
         {
           question: "셀프 호스팅만 가능한가요, 클라우드 버전도 있나요?",
@@ -278,6 +278,30 @@ export function createKoDict(
         fixes: "버그 수정",
       },
       entries: [
+        {
+          version: "0.6.3",
+          date: "2026-10-16",
+          title: "실행별 비용 상세, 더 짧아진 온보딩, 떠난 멤버의 접근 차단, 더 안정적인 실행",
+          changes: [],
+          features: [
+            "실행 로그에서 실행마다 비용 막대와 함께 토큰, 소요 시간, 모델을 볼 수 있습니다.",
+            "실행 상세에서 비용, 토큰, 소요 시간별로 실행을 비교하고 누적 보기로 바꿀 수 있습니다.",
+            "실행을 펼치면 토큰과 비용 내역을 볼 수 있습니다.",
+          ],
+          improvements: [
+            "온보딩에서 런타임 설정을 건너뛰면 설치 안내 Issue가 바로 열립니다.",
+          ],
+          fixes: [
+            "워크스페이스를 떠나거나 제외된 멤버는 알림과 실시간 업데이트를 더 이상 받지 않습니다.",
+            "에이전트 빌더의 초안 형식이 조금 어긋나도 설정에 채워집니다.",
+            "에이전트 빌더의 재시도 안내는 닫거나 직접 수정하면 다시 뜨지 않습니다.",
+            "받아 간 뒤 전달되지 못한 태스크가 대기열로 돌아가 멈춰 있지 않습니다.",
+            "로컬 폴더에서 이어갈 때 커밋된 변경을 초안으로 다시 적용하지 않고, 다른 초안도 남깁니다.",
+            "캐시 정리 시 저장소가 추적하는 .next 같은 폴더나 그 안의 Git 저장소를 지우지 않습니다.",
+            "Claude Sonnet 5.5와 Haiku 5.5 실행도 예상 비용이 표시됩니다.",
+            "아랍어, 히브리어처럼 오른쪽에서 왼쪽으로 쓰는 글에 영어가 섞여도 올바른 순서로 읽힙니다.",
+          ],
+        },
         {
           version: "0.6.2",
           date: "2026-10-13",

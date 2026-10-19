@@ -105,7 +105,7 @@ SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL,
 WHERE queued.chat_session_id = $4
   AND queued.status = 'queued'
   AND queued.regenerate_quick_actions_for IS NULL
-RETURNING queued.id, queued.agent_id, queued.issue_id, queued.status, queued.priority, queued.dispatched_at, queued.started_at, queued.completed_at, queued.result, queued.error, queued.created_at, queued.context, queued.runtime_id, queued.session_id, queued.work_dir, queued.trigger_comment_id, queued.chat_session_id, queued.autopilot_run_id, queued.attempt, queued.max_attempts, queued.parent_task_id, queued.failure_reason, queued.trigger_summary, queued.force_fresh_session, queued.is_leader_task, queued.wait_reason, queued.initiator_user_id, queued.handoff_note, queued.prepare_lease_expires_at, queued.squad_id, queued.runtime_mcp_overlay, queued.escalation_for_task_id, queued.fire_at, queued.originator_user_id, queued.runtime_connected_apps, queued.coalesced_comment_ids, queued.delivered_comment_ids, queued.chat_input_task_id, queued.chat_finalize_deferred_at, queued.originator_source, queued.delegated_from_task_id, queued.retry_of_task_id, queued.rerun_of_task_id, queued.rule_version_id, queued.trigger_evidence_kind, queued.trigger_evidence_ref_id, queued.accountable_user_id, queued.session_rollout_missing, queued.retired_session_id, queued.quick_actions_disabled, queued.regenerate_quick_actions_for, queued.branch_name, queued.durable_work_dir, queued.channel_context_revision, queued.comment_thread_id, queued.cancelled_by_type, queued.cancelled_by_id, queued.cancelled_by_name, queued.issue_snapshot, queued.code_decision, queued.failure_input_version, queued.failure_fingerprint, queued.work_thread_id, queued.context_generation, queued.context_message_limit, queued.context_token_budget, queued.continuity_break_reason, queued.session_mode, queued.resumed_from_task_id, queued.session_break_reason, queued.via_bot_id, queued.via_bot_name, queued.wake_root_id, queued.wake_hop, queued.wake_generation, queued.wake_reserved, queued.wake_human_quote, queued.pickup_deadline_at, queued.on_behalf_of_user_id
+RETURNING queued.id, queued.agent_id, queued.issue_id, queued.status, queued.priority, queued.dispatched_at, queued.started_at, queued.completed_at, queued.result, queued.error, queued.created_at, queued.context, queued.runtime_id, queued.session_id, queued.work_dir, queued.trigger_comment_id, queued.chat_session_id, queued.autopilot_run_id, queued.attempt, queued.max_attempts, queued.parent_task_id, queued.failure_reason, queued.trigger_summary, queued.force_fresh_session, queued.is_leader_task, queued.wait_reason, queued.initiator_user_id, queued.handoff_note, queued.prepare_lease_expires_at, queued.squad_id, queued.runtime_mcp_overlay, queued.escalation_for_task_id, queued.fire_at, queued.originator_user_id, queued.runtime_connected_apps, queued.coalesced_comment_ids, queued.delivered_comment_ids, queued.chat_input_task_id, queued.chat_finalize_deferred_at, queued.originator_source, queued.delegated_from_task_id, queued.retry_of_task_id, queued.rerun_of_task_id, queued.rule_version_id, queued.trigger_evidence_kind, queued.trigger_evidence_ref_id, queued.accountable_user_id, queued.session_rollout_missing, queued.retired_session_id, queued.quick_actions_disabled, queued.regenerate_quick_actions_for, queued.branch_name, queued.durable_work_dir, queued.channel_context_revision, queued.comment_thread_id, queued.cancelled_by_type, queued.cancelled_by_id, queued.cancelled_by_name, queued.issue_snapshot, queued.code_decision, queued.failure_input_version, queued.failure_fingerprint, queued.work_thread_id, queued.context_generation, queued.context_message_limit, queued.context_token_budget, queued.continuity_break_reason, queued.session_mode, queued.resumed_from_task_id, queued.session_break_reason, queued.via_bot_id, queued.via_bot_name, queued.wake_root_id, queued.wake_hop, queued.wake_generation, queued.wake_reserved, queued.wake_human_quote, queued.pickup_deadline_at, queued.on_behalf_of_user_id, queued.workflow_step
 `
 
 type CancelQueuedChatTasksForReplaceParams struct {
@@ -212,6 +212,7 @@ func (q *Queries) CancelQueuedChatTasksForReplace(ctx context.Context, arg Cance
 			&i.WakeHumanQuote,
 			&i.PickupDeadlineAt,
 			&i.OnBehalfOfUserID,
+			&i.WorkflowStep,
 		); err != nil {
 			return nil, err
 		}
@@ -449,7 +450,7 @@ VALUES (
     $11,
     COALESCE($12::uuid, gen_random_uuid()), $13, $14
 )
-RETURNING id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until, channel_ingested, quick_actions, channel_context_revision, channel_outbound_type, channel_outbound_installation_id, channel_outbound_chat_id, channel_outbound_message_ids, sender_user_id, channel_typing_settled, linked_session_id, via_bot_id, via_bot_name, wake_root_id, wake_hop, superseded_at, superseded_by_message_id, on_behalf_of_user_id
+RETURNING id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until, channel_ingested, quick_actions, channel_context_revision, channel_outbound_type, channel_outbound_installation_id, channel_outbound_chat_id, channel_outbound_message_ids, sender_user_id, linked_session_id, via_bot_id, via_bot_name, wake_root_id, wake_hop, superseded_at, superseded_by_message_id, on_behalf_of_user_id, channel_typing_settled
 `
 
 type CreateChatMessageParams struct {
@@ -509,7 +510,6 @@ func (q *Queries) CreateChatMessage(ctx context.Context, arg CreateChatMessagePa
 		&i.ChannelOutboundChatID,
 		&i.ChannelOutboundMessageIds,
 		&i.SenderUserID,
-		&i.ChannelTypingSettled,
 		&i.LinkedSessionID,
 		&i.ViaBotID,
 		&i.ViaBotName,
@@ -518,6 +518,7 @@ func (q *Queries) CreateChatMessage(ctx context.Context, arg CreateChatMessagePa
 		&i.SupersededAt,
 		&i.SupersededByMessageID,
 		&i.OnBehalfOfUserID,
+		&i.ChannelTypingSettled,
 	)
 	return i, err
 }
@@ -614,7 +615,7 @@ SELECT
     COALESCE($18::uuid, gen_random_uuid()), $19,
     $20::timestamptz
 WHERE lock_task_owner_rows($1, NULL, $2)
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, code_decision, failure_input_version, failure_fingerprint, work_thread_id, context_generation, context_message_limit, context_token_budget, continuity_break_reason, session_mode, resumed_from_task_id, session_break_reason, via_bot_id, via_bot_name, wake_root_id, wake_hop, wake_generation, wake_reserved, wake_human_quote, pickup_deadline_at, on_behalf_of_user_id
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, code_decision, failure_input_version, failure_fingerprint, work_thread_id, context_generation, context_message_limit, context_token_budget, continuity_break_reason, session_mode, resumed_from_task_id, session_break_reason, via_bot_id, via_bot_name, wake_root_id, wake_hop, wake_generation, wake_reserved, wake_human_quote, pickup_deadline_at, on_behalf_of_user_id, workflow_step
 `
 
 type CreateChatTaskParams struct {
@@ -751,6 +752,7 @@ func (q *Queries) CreateChatTask(ctx context.Context, arg CreateChatTaskParams) 
 		&i.WakeHumanQuote,
 		&i.PickupDeadlineAt,
 		&i.OnBehalfOfUserID,
+		&i.WorkflowStep,
 	)
 	return i, err
 }
@@ -765,7 +767,7 @@ VALUES (
     $3::timestamptz + interval '1 microsecond',
     COALESCE($4::uuid, gen_random_uuid())
 )
-RETURNING id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until, channel_ingested, quick_actions, channel_context_revision, channel_outbound_type, channel_outbound_installation_id, channel_outbound_chat_id, channel_outbound_message_ids, sender_user_id, channel_typing_settled, linked_session_id, via_bot_id, via_bot_name, wake_root_id, wake_hop, superseded_at, superseded_by_message_id, on_behalf_of_user_id
+RETURNING id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until, channel_ingested, quick_actions, channel_context_revision, channel_outbound_type, channel_outbound_installation_id, channel_outbound_chat_id, channel_outbound_message_ids, sender_user_id, linked_session_id, via_bot_id, via_bot_name, wake_root_id, wake_hop, superseded_at, superseded_by_message_id, on_behalf_of_user_id, channel_typing_settled
 `
 
 type CreateMikaOnboardingOpeningParams struct {
@@ -814,7 +816,6 @@ func (q *Queries) CreateMikaOnboardingOpening(ctx context.Context, arg CreateMik
 		&i.ChannelOutboundChatID,
 		&i.ChannelOutboundMessageIds,
 		&i.SenderUserID,
-		&i.ChannelTypingSettled,
 		&i.LinkedSessionID,
 		&i.ViaBotID,
 		&i.ViaBotName,
@@ -823,6 +824,7 @@ func (q *Queries) CreateMikaOnboardingOpening(ctx context.Context, arg CreateMik
 		&i.SupersededAt,
 		&i.SupersededByMessageID,
 		&i.OnBehalfOfUserID,
+		&i.ChannelTypingSettled,
 	)
 	return i, err
 }
@@ -840,7 +842,7 @@ FROM (
 WHERE task.id = $1
   AND pending.max_until IS NOT NULL
   AND (task.fire_at IS NULL OR task.fire_at < pending.max_until)
-RETURNING task.id, task.agent_id, task.issue_id, task.status, task.priority, task.dispatched_at, task.started_at, task.completed_at, task.result, task.error, task.created_at, task.context, task.runtime_id, task.session_id, task.work_dir, task.trigger_comment_id, task.chat_session_id, task.autopilot_run_id, task.attempt, task.max_attempts, task.parent_task_id, task.failure_reason, task.trigger_summary, task.force_fresh_session, task.is_leader_task, task.wait_reason, task.initiator_user_id, task.handoff_note, task.prepare_lease_expires_at, task.squad_id, task.runtime_mcp_overlay, task.escalation_for_task_id, task.fire_at, task.originator_user_id, task.runtime_connected_apps, task.coalesced_comment_ids, task.delivered_comment_ids, task.chat_input_task_id, task.chat_finalize_deferred_at, task.originator_source, task.delegated_from_task_id, task.retry_of_task_id, task.rerun_of_task_id, task.rule_version_id, task.trigger_evidence_kind, task.trigger_evidence_ref_id, task.accountable_user_id, task.session_rollout_missing, task.retired_session_id, task.quick_actions_disabled, task.regenerate_quick_actions_for, task.branch_name, task.durable_work_dir, task.channel_context_revision, task.comment_thread_id, task.cancelled_by_type, task.cancelled_by_id, task.cancelled_by_name, task.issue_snapshot, task.code_decision, task.failure_input_version, task.failure_fingerprint, task.work_thread_id, task.context_generation, task.context_message_limit, task.context_token_budget, task.continuity_break_reason, task.session_mode, task.resumed_from_task_id, task.session_break_reason, task.via_bot_id, task.via_bot_name, task.wake_root_id, task.wake_hop, task.wake_generation, task.wake_reserved, task.wake_human_quote, task.pickup_deadline_at, task.on_behalf_of_user_id
+RETURNING task.id, task.agent_id, task.issue_id, task.status, task.priority, task.dispatched_at, task.started_at, task.completed_at, task.result, task.error, task.created_at, task.context, task.runtime_id, task.session_id, task.work_dir, task.trigger_comment_id, task.chat_session_id, task.autopilot_run_id, task.attempt, task.max_attempts, task.parent_task_id, task.failure_reason, task.trigger_summary, task.force_fresh_session, task.is_leader_task, task.wait_reason, task.initiator_user_id, task.handoff_note, task.prepare_lease_expires_at, task.squad_id, task.runtime_mcp_overlay, task.escalation_for_task_id, task.fire_at, task.originator_user_id, task.runtime_connected_apps, task.coalesced_comment_ids, task.delivered_comment_ids, task.chat_input_task_id, task.chat_finalize_deferred_at, task.originator_source, task.delegated_from_task_id, task.retry_of_task_id, task.rerun_of_task_id, task.rule_version_id, task.trigger_evidence_kind, task.trigger_evidence_ref_id, task.accountable_user_id, task.session_rollout_missing, task.retired_session_id, task.quick_actions_disabled, task.regenerate_quick_actions_for, task.branch_name, task.durable_work_dir, task.channel_context_revision, task.comment_thread_id, task.cancelled_by_type, task.cancelled_by_id, task.cancelled_by_name, task.issue_snapshot, task.code_decision, task.failure_input_version, task.failure_fingerprint, task.work_thread_id, task.context_generation, task.context_message_limit, task.context_token_budget, task.continuity_break_reason, task.session_mode, task.resumed_from_task_id, task.session_break_reason, task.via_bot_id, task.via_bot_name, task.wake_root_id, task.wake_hop, task.wake_generation, task.wake_reserved, task.wake_human_quote, task.pickup_deadline_at, task.on_behalf_of_user_id, task.workflow_step
 `
 
 // Closes the enqueue-vs-append race: under READ COMMITTED a media message can
@@ -932,6 +934,7 @@ func (q *Queries) DeferChatTaskForSealedPendingMedia(ctx context.Context, taskID
 		&i.WakeHumanQuote,
 		&i.PickupDeadlineAt,
 		&i.OnBehalfOfUserID,
+		&i.WorkflowStep,
 	)
 	return i, err
 }
@@ -1051,7 +1054,7 @@ DELETE FROM chat_message
 WHERE task_id = $1
   AND role = 'user'
   AND message_kind <> 'onboarding_kickoff'
-RETURNING id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until, channel_ingested, quick_actions, channel_context_revision, channel_outbound_type, channel_outbound_installation_id, channel_outbound_chat_id, channel_outbound_message_ids, sender_user_id, channel_typing_settled, linked_session_id, via_bot_id, via_bot_name, wake_root_id, wake_hop, superseded_at, superseded_by_message_id, on_behalf_of_user_id
+RETURNING id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until, channel_ingested, quick_actions, channel_context_revision, channel_outbound_type, channel_outbound_installation_id, channel_outbound_chat_id, channel_outbound_message_ids, sender_user_id, linked_session_id, via_bot_id, via_bot_name, wake_root_id, wake_hop, superseded_at, superseded_by_message_id, on_behalf_of_user_id, channel_typing_settled
 `
 
 // Deletes the MEMBER-TYPED input of a cancelled/edited turn.
@@ -1087,7 +1090,6 @@ func (q *Queries) DeleteUserChatMessageByTask(ctx context.Context, taskID pgtype
 		&i.ChannelOutboundChatID,
 		&i.ChannelOutboundMessageIds,
 		&i.SenderUserID,
-		&i.ChannelTypingSettled,
 		&i.LinkedSessionID,
 		&i.ViaBotID,
 		&i.ViaBotName,
@@ -1096,6 +1098,7 @@ func (q *Queries) DeleteUserChatMessageByTask(ctx context.Context, taskID pgtype
 		&i.SupersededAt,
 		&i.SupersededByMessageID,
 		&i.OnBehalfOfUserID,
+		&i.ChannelTypingSettled,
 	)
 	return i, err
 }
@@ -1187,7 +1190,7 @@ func (q *Queries) GetChannelMediaPendingUntil(ctx context.Context, arg GetChanne
 }
 
 const getChatMessage = `-- name: GetChatMessage :one
-SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until, channel_ingested, quick_actions, channel_context_revision, channel_outbound_type, channel_outbound_installation_id, channel_outbound_chat_id, channel_outbound_message_ids, sender_user_id, channel_typing_settled, linked_session_id, via_bot_id, via_bot_name, wake_root_id, wake_hop, superseded_at, superseded_by_message_id, on_behalf_of_user_id FROM chat_message
+SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until, channel_ingested, quick_actions, channel_context_revision, channel_outbound_type, channel_outbound_installation_id, channel_outbound_chat_id, channel_outbound_message_ids, sender_user_id, linked_session_id, via_bot_id, via_bot_name, wake_root_id, wake_hop, superseded_at, superseded_by_message_id, on_behalf_of_user_id, channel_typing_settled FROM chat_message
 WHERE id = $1
 `
 
@@ -1213,7 +1216,6 @@ func (q *Queries) GetChatMessage(ctx context.Context, id pgtype.UUID) (ChatMessa
 		&i.ChannelOutboundChatID,
 		&i.ChannelOutboundMessageIds,
 		&i.SenderUserID,
-		&i.ChannelTypingSettled,
 		&i.LinkedSessionID,
 		&i.ViaBotID,
 		&i.ViaBotName,
@@ -1222,12 +1224,13 @@ func (q *Queries) GetChatMessage(ctx context.Context, id pgtype.UUID) (ChatMessa
 		&i.SupersededAt,
 		&i.SupersededByMessageID,
 		&i.OnBehalfOfUserID,
+		&i.ChannelTypingSettled,
 	)
 	return i, err
 }
 
 const getChatMessageByTaskAssistant = `-- name: GetChatMessageByTaskAssistant :one
-SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until, channel_ingested, quick_actions, channel_context_revision, channel_outbound_type, channel_outbound_installation_id, channel_outbound_chat_id, channel_outbound_message_ids, sender_user_id, channel_typing_settled, linked_session_id, via_bot_id, via_bot_name, wake_root_id, wake_hop, superseded_at, superseded_by_message_id, on_behalf_of_user_id FROM chat_message
+SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until, channel_ingested, quick_actions, channel_context_revision, channel_outbound_type, channel_outbound_installation_id, channel_outbound_chat_id, channel_outbound_message_ids, sender_user_id, linked_session_id, via_bot_id, via_bot_name, wake_root_id, wake_hop, superseded_at, superseded_by_message_id, on_behalf_of_user_id, channel_typing_settled FROM chat_message
 WHERE task_id = $1 AND role = 'assistant'
 ORDER BY created_at DESC
 LIMIT 1
@@ -1257,7 +1260,6 @@ func (q *Queries) GetChatMessageByTaskAssistant(ctx context.Context, taskID pgty
 		&i.ChannelOutboundChatID,
 		&i.ChannelOutboundMessageIds,
 		&i.SenderUserID,
-		&i.ChannelTypingSettled,
 		&i.LinkedSessionID,
 		&i.ViaBotID,
 		&i.ViaBotName,
@@ -1266,6 +1268,7 @@ func (q *Queries) GetChatMessageByTaskAssistant(ctx context.Context, taskID pgty
 		&i.SupersededAt,
 		&i.SupersededByMessageID,
 		&i.OnBehalfOfUserID,
+		&i.ChannelTypingSettled,
 	)
 	return i, err
 }
@@ -1529,7 +1532,7 @@ func (q *Queries) GetLastChatTaskSession(ctx context.Context, arg GetLastChatTas
 }
 
 const getLatestAssistantChatMessageForSession = `-- name: GetLatestAssistantChatMessageForSession :one
-SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until, channel_ingested, quick_actions, channel_context_revision, channel_outbound_type, channel_outbound_installation_id, channel_outbound_chat_id, channel_outbound_message_ids, sender_user_id, channel_typing_settled, linked_session_id, via_bot_id, via_bot_name, wake_root_id, wake_hop, superseded_at, superseded_by_message_id, on_behalf_of_user_id FROM chat_message
+SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until, channel_ingested, quick_actions, channel_context_revision, channel_outbound_type, channel_outbound_installation_id, channel_outbound_chat_id, channel_outbound_message_ids, sender_user_id, linked_session_id, via_bot_id, via_bot_name, wake_root_id, wake_hop, superseded_at, superseded_by_message_id, on_behalf_of_user_id, channel_typing_settled FROM chat_message
 WHERE chat_session_id = $1 AND role = 'assistant' AND task_id IS NOT NULL
 ORDER BY created_at DESC
 LIMIT 1
@@ -1561,7 +1564,6 @@ func (q *Queries) GetLatestAssistantChatMessageForSession(ctx context.Context, c
 		&i.ChannelOutboundChatID,
 		&i.ChannelOutboundMessageIds,
 		&i.SenderUserID,
-		&i.ChannelTypingSettled,
 		&i.LinkedSessionID,
 		&i.ViaBotID,
 		&i.ViaBotName,
@@ -1570,6 +1572,7 @@ func (q *Queries) GetLatestAssistantChatMessageForSession(ctx context.Context, c
 		&i.SupersededAt,
 		&i.SupersededByMessageID,
 		&i.OnBehalfOfUserID,
+		&i.ChannelTypingSettled,
 	)
 	return i, err
 }
@@ -2571,7 +2574,7 @@ func (q *Queries) ListChatDraftRestoresBySession(ctx context.Context, chatSessio
 }
 
 const listChatInputMessages = `-- name: ListChatInputMessages :many
-SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until, channel_ingested, quick_actions, channel_context_revision, channel_outbound_type, channel_outbound_installation_id, channel_outbound_chat_id, channel_outbound_message_ids, sender_user_id, channel_typing_settled, linked_session_id, via_bot_id, via_bot_name, wake_root_id, wake_hop, superseded_at, superseded_by_message_id, on_behalf_of_user_id FROM chat_message
+SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until, channel_ingested, quick_actions, channel_context_revision, channel_outbound_type, channel_outbound_installation_id, channel_outbound_chat_id, channel_outbound_message_ids, sender_user_id, linked_session_id, via_bot_id, via_bot_name, wake_root_id, wake_hop, superseded_at, superseded_by_message_id, on_behalf_of_user_id, channel_typing_settled FROM chat_message
 WHERE task_id = $1 AND role = 'user'
 ORDER BY created_at ASC, id ASC
 `
@@ -2611,7 +2614,6 @@ func (q *Queries) ListChatInputMessages(ctx context.Context, taskID pgtype.UUID)
 			&i.ChannelOutboundChatID,
 			&i.ChannelOutboundMessageIds,
 			&i.SenderUserID,
-			&i.ChannelTypingSettled,
 			&i.LinkedSessionID,
 			&i.ViaBotID,
 			&i.ViaBotName,
@@ -2620,6 +2622,7 @@ func (q *Queries) ListChatInputMessages(ctx context.Context, taskID pgtype.UUID)
 			&i.SupersededAt,
 			&i.SupersededByMessageID,
 			&i.OnBehalfOfUserID,
+			&i.ChannelTypingSettled,
 		); err != nil {
 			return nil, err
 		}
@@ -2632,7 +2635,7 @@ func (q *Queries) ListChatInputMessages(ctx context.Context, taskID pgtype.UUID)
 }
 
 const listChatMessages = `-- name: ListChatMessages :many
-SELECT message.id, message.chat_session_id, message.role, message.content, message.task_id, message.created_at, message.failure_reason, message.elapsed_ms, message.message_kind, message.channel_media_pending_until, message.channel_ingested, message.quick_actions, message.channel_context_revision, message.channel_outbound_type, message.channel_outbound_installation_id, message.channel_outbound_chat_id, message.channel_outbound_message_ids, message.sender_user_id, message.channel_typing_settled, message.linked_session_id, message.via_bot_id, message.via_bot_name, message.wake_root_id, message.wake_hop, message.superseded_at, message.superseded_by_message_id, message.on_behalf_of_user_id FROM chat_message AS message
+SELECT message.id, message.chat_session_id, message.role, message.content, message.task_id, message.created_at, message.failure_reason, message.elapsed_ms, message.message_kind, message.channel_media_pending_until, message.channel_ingested, message.quick_actions, message.channel_context_revision, message.channel_outbound_type, message.channel_outbound_installation_id, message.channel_outbound_chat_id, message.channel_outbound_message_ids, message.sender_user_id, message.linked_session_id, message.via_bot_id, message.via_bot_name, message.wake_root_id, message.wake_hop, message.superseded_at, message.superseded_by_message_id, message.on_behalf_of_user_id, message.channel_typing_settled FROM chat_message AS message
 WHERE message.chat_session_id = $1
   AND message.message_kind != 'channel_command'
   AND NOT (
@@ -2705,7 +2708,6 @@ func (q *Queries) ListChatMessages(ctx context.Context, chatSessionID pgtype.UUI
 			&i.ChannelOutboundChatID,
 			&i.ChannelOutboundMessageIds,
 			&i.SenderUserID,
-			&i.ChannelTypingSettled,
 			&i.LinkedSessionID,
 			&i.ViaBotID,
 			&i.ViaBotName,
@@ -2714,6 +2716,7 @@ func (q *Queries) ListChatMessages(ctx context.Context, chatSessionID pgtype.UUI
 			&i.SupersededAt,
 			&i.SupersededByMessageID,
 			&i.OnBehalfOfUserID,
+			&i.ChannelTypingSettled,
 		); err != nil {
 			return nil, err
 		}
@@ -2726,7 +2729,7 @@ func (q *Queries) ListChatMessages(ctx context.Context, chatSessionID pgtype.UUI
 }
 
 const listChatMessagesForLegacyTask = `-- name: ListChatMessagesForLegacyTask :many
-SELECT message.id, message.chat_session_id, message.role, message.content, message.task_id, message.created_at, message.failure_reason, message.elapsed_ms, message.message_kind, message.channel_media_pending_until, message.channel_ingested, message.quick_actions, message.channel_context_revision, message.channel_outbound_type, message.channel_outbound_installation_id, message.channel_outbound_chat_id, message.channel_outbound_message_ids, message.sender_user_id, message.channel_typing_settled, message.linked_session_id, message.via_bot_id, message.via_bot_name, message.wake_root_id, message.wake_hop, message.superseded_at, message.superseded_by_message_id, message.on_behalf_of_user_id FROM chat_message AS message
+SELECT message.id, message.chat_session_id, message.role, message.content, message.task_id, message.created_at, message.failure_reason, message.elapsed_ms, message.message_kind, message.channel_media_pending_until, message.channel_ingested, message.quick_actions, message.channel_context_revision, message.channel_outbound_type, message.channel_outbound_installation_id, message.channel_outbound_chat_id, message.channel_outbound_message_ids, message.sender_user_id, message.linked_session_id, message.via_bot_id, message.via_bot_name, message.wake_root_id, message.wake_hop, message.superseded_at, message.superseded_by_message_id, message.on_behalf_of_user_id, message.channel_typing_settled FROM chat_message AS message
 WHERE message.chat_session_id = $1
   AND NOT (
     message.role = 'user'
@@ -2788,7 +2791,6 @@ func (q *Queries) ListChatMessagesForLegacyTask(ctx context.Context, chatSession
 			&i.ChannelOutboundChatID,
 			&i.ChannelOutboundMessageIds,
 			&i.SenderUserID,
-			&i.ChannelTypingSettled,
 			&i.LinkedSessionID,
 			&i.ViaBotID,
 			&i.ViaBotName,
@@ -2797,6 +2799,7 @@ func (q *Queries) ListChatMessagesForLegacyTask(ctx context.Context, chatSession
 			&i.SupersededAt,
 			&i.SupersededByMessageID,
 			&i.OnBehalfOfUserID,
+			&i.ChannelTypingSettled,
 		); err != nil {
 			return nil, err
 		}
@@ -2809,7 +2812,7 @@ func (q *Queries) ListChatMessagesForLegacyTask(ctx context.Context, chatSession
 }
 
 const listChatMessagesPage = `-- name: ListChatMessagesPage :many
-SELECT message.id, message.chat_session_id, message.role, message.content, message.task_id, message.created_at, message.failure_reason, message.elapsed_ms, message.message_kind, message.channel_media_pending_until, message.channel_ingested, message.quick_actions, message.channel_context_revision, message.channel_outbound_type, message.channel_outbound_installation_id, message.channel_outbound_chat_id, message.channel_outbound_message_ids, message.sender_user_id, message.channel_typing_settled, message.linked_session_id, message.via_bot_id, message.via_bot_name, message.wake_root_id, message.wake_hop, message.superseded_at, message.superseded_by_message_id, message.on_behalf_of_user_id FROM chat_message AS message
+SELECT message.id, message.chat_session_id, message.role, message.content, message.task_id, message.created_at, message.failure_reason, message.elapsed_ms, message.message_kind, message.channel_media_pending_until, message.channel_ingested, message.quick_actions, message.channel_context_revision, message.channel_outbound_type, message.channel_outbound_installation_id, message.channel_outbound_chat_id, message.channel_outbound_message_ids, message.sender_user_id, message.linked_session_id, message.via_bot_id, message.via_bot_name, message.wake_root_id, message.wake_hop, message.superseded_at, message.superseded_by_message_id, message.on_behalf_of_user_id, message.channel_typing_settled FROM chat_message AS message
 WHERE message.chat_session_id = $1
   AND message.message_kind != 'channel_command'
   AND NOT (
@@ -2887,7 +2890,6 @@ func (q *Queries) ListChatMessagesPage(ctx context.Context, arg ListChatMessages
 			&i.ChannelOutboundChatID,
 			&i.ChannelOutboundMessageIds,
 			&i.SenderUserID,
-			&i.ChannelTypingSettled,
 			&i.LinkedSessionID,
 			&i.ViaBotID,
 			&i.ViaBotName,
@@ -2896,6 +2898,7 @@ func (q *Queries) ListChatMessagesPage(ctx context.Context, arg ListChatMessages
 			&i.SupersededAt,
 			&i.SupersededByMessageID,
 			&i.OnBehalfOfUserID,
+			&i.ChannelTypingSettled,
 		); err != nil {
 			return nil, err
 		}
@@ -2908,7 +2911,7 @@ func (q *Queries) ListChatMessagesPage(ctx context.Context, arg ListChatMessages
 }
 
 const listChatMessagesPageForChannelContext = `-- name: ListChatMessagesPageForChannelContext :many
-SELECT message.id, message.chat_session_id, message.role, message.content, message.task_id, message.created_at, message.failure_reason, message.elapsed_ms, message.message_kind, message.channel_media_pending_until, message.channel_ingested, message.quick_actions, message.channel_context_revision, message.channel_outbound_type, message.channel_outbound_installation_id, message.channel_outbound_chat_id, message.channel_outbound_message_ids, message.sender_user_id, message.channel_typing_settled, message.linked_session_id, message.via_bot_id, message.via_bot_name, message.wake_root_id, message.wake_hop, message.superseded_at, message.superseded_by_message_id, message.on_behalf_of_user_id
+SELECT message.id, message.chat_session_id, message.role, message.content, message.task_id, message.created_at, message.failure_reason, message.elapsed_ms, message.message_kind, message.channel_media_pending_until, message.channel_ingested, message.quick_actions, message.channel_context_revision, message.channel_outbound_type, message.channel_outbound_installation_id, message.channel_outbound_chat_id, message.channel_outbound_message_ids, message.sender_user_id, message.linked_session_id, message.via_bot_id, message.via_bot_name, message.wake_root_id, message.wake_hop, message.superseded_at, message.superseded_by_message_id, message.on_behalf_of_user_id, message.channel_typing_settled
 FROM chat_message AS message
 LEFT JOIN agent_task_queue AS owner ON owner.id = message.task_id
 WHERE message.chat_session_id = $1
@@ -2984,7 +2987,6 @@ func (q *Queries) ListChatMessagesPageForChannelContext(ctx context.Context, arg
 			&i.ChannelOutboundChatID,
 			&i.ChannelOutboundMessageIds,
 			&i.SenderUserID,
-			&i.ChannelTypingSettled,
 			&i.LinkedSessionID,
 			&i.ViaBotID,
 			&i.ViaBotName,
@@ -2993,6 +2995,7 @@ func (q *Queries) ListChatMessagesPageForChannelContext(ctx context.Context, arg
 			&i.SupersededAt,
 			&i.SupersededByMessageID,
 			&i.OnBehalfOfUserID,
+			&i.ChannelTypingSettled,
 		); err != nil {
 			return nil, err
 		}
@@ -3068,7 +3071,7 @@ func (q *Queries) ListChatSessionProjectIDsForSessions(ctx context.Context, chat
 }
 
 const listChatSessionProjectsInWorkspace = `-- name: ListChatSessionProjectsInWorkspace :many
-SELECT p.id, p.workspace_id, p.title, p.description, p.icon, p.status, p.lead_type, p.lead_id, p.created_at, p.updated_at, p.priority, p.start_date, p.due_date, p.visibility, p.created_by, p.domain_ids, p.linked_projects, p.executor_agent_ids FROM chat_session_project AS csp
+SELECT p.id, p.workspace_id, p.title, p.description, p.icon, p.status, p.lead_type, p.lead_id, p.created_at, p.updated_at, p.priority, p.start_date, p.due_date, p.visibility, p.created_by, p.domain_ids, p.linked_projects, p.executor_agent_ids, p.workflow_id FROM chat_session_project AS csp
 JOIN project AS p ON p.id = csp.project_id AND p.workspace_id = csp.workspace_id
 WHERE csp.chat_session_id = $1 AND csp.workspace_id = $2
 ORDER BY csp.position ASC, csp.created_at ASC, csp.id ASC
@@ -3112,6 +3115,7 @@ func (q *Queries) ListChatSessionProjectsInWorkspace(ctx context.Context, arg Li
 			&i.DomainIds,
 			&i.LinkedProjects,
 			&i.ExecutorAgentIds,
+			&i.WorkflowID,
 		); err != nil {
 			return nil, err
 		}
@@ -4073,7 +4077,7 @@ WHERE task.chat_session_id = $1
         AND message.role = 'user'
         AND message.channel_media_pending_until > now()
   )
-RETURNING task.id, task.agent_id, task.issue_id, task.status, task.priority, task.dispatched_at, task.started_at, task.completed_at, task.result, task.error, task.created_at, task.context, task.runtime_id, task.session_id, task.work_dir, task.trigger_comment_id, task.chat_session_id, task.autopilot_run_id, task.attempt, task.max_attempts, task.parent_task_id, task.failure_reason, task.trigger_summary, task.force_fresh_session, task.is_leader_task, task.wait_reason, task.initiator_user_id, task.handoff_note, task.prepare_lease_expires_at, task.squad_id, task.runtime_mcp_overlay, task.escalation_for_task_id, task.fire_at, task.originator_user_id, task.runtime_connected_apps, task.coalesced_comment_ids, task.delivered_comment_ids, task.chat_input_task_id, task.chat_finalize_deferred_at, task.originator_source, task.delegated_from_task_id, task.retry_of_task_id, task.rerun_of_task_id, task.rule_version_id, task.trigger_evidence_kind, task.trigger_evidence_ref_id, task.accountable_user_id, task.session_rollout_missing, task.retired_session_id, task.quick_actions_disabled, task.regenerate_quick_actions_for, task.branch_name, task.durable_work_dir, task.channel_context_revision, task.comment_thread_id, task.cancelled_by_type, task.cancelled_by_id, task.cancelled_by_name, task.issue_snapshot, task.code_decision, task.failure_input_version, task.failure_fingerprint, task.work_thread_id, task.context_generation, task.context_message_limit, task.context_token_budget, task.continuity_break_reason, task.session_mode, task.resumed_from_task_id, task.session_break_reason, task.via_bot_id, task.via_bot_name, task.wake_root_id, task.wake_hop, task.wake_generation, task.wake_reserved, task.wake_human_quote, task.pickup_deadline_at, task.on_behalf_of_user_id
+RETURNING task.id, task.agent_id, task.issue_id, task.status, task.priority, task.dispatched_at, task.started_at, task.completed_at, task.result, task.error, task.created_at, task.context, task.runtime_id, task.session_id, task.work_dir, task.trigger_comment_id, task.chat_session_id, task.autopilot_run_id, task.attempt, task.max_attempts, task.parent_task_id, task.failure_reason, task.trigger_summary, task.force_fresh_session, task.is_leader_task, task.wait_reason, task.initiator_user_id, task.handoff_note, task.prepare_lease_expires_at, task.squad_id, task.runtime_mcp_overlay, task.escalation_for_task_id, task.fire_at, task.originator_user_id, task.runtime_connected_apps, task.coalesced_comment_ids, task.delivered_comment_ids, task.chat_input_task_id, task.chat_finalize_deferred_at, task.originator_source, task.delegated_from_task_id, task.retry_of_task_id, task.rerun_of_task_id, task.rule_version_id, task.trigger_evidence_kind, task.trigger_evidence_ref_id, task.accountable_user_id, task.session_rollout_missing, task.retired_session_id, task.quick_actions_disabled, task.regenerate_quick_actions_for, task.branch_name, task.durable_work_dir, task.channel_context_revision, task.comment_thread_id, task.cancelled_by_type, task.cancelled_by_id, task.cancelled_by_name, task.issue_snapshot, task.code_decision, task.failure_input_version, task.failure_fingerprint, task.work_thread_id, task.context_generation, task.context_message_limit, task.context_token_budget, task.continuity_break_reason, task.session_mode, task.resumed_from_task_id, task.session_break_reason, task.via_bot_id, task.via_bot_name, task.wake_root_id, task.wake_hop, task.wake_generation, task.wake_reserved, task.wake_human_quote, task.pickup_deadline_at, task.on_behalf_of_user_id, task.workflow_step
 `
 
 // Media completion may race with the 3s run batcher. Promote every original
@@ -4171,6 +4175,7 @@ func (q *Queries) PromoteChannelChatTasksIfMediaReady(ctx context.Context, chatS
 			&i.WakeHumanQuote,
 			&i.PickupDeadlineAt,
 			&i.OnBehalfOfUserID,
+			&i.WorkflowStep,
 		); err != nil {
 			return nil, err
 		}
@@ -4577,7 +4582,7 @@ WHERE id = (
     ORDER BY inner_msg.created_at DESC
     LIMIT 1
 )
-RETURNING id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until, channel_ingested, quick_actions, channel_context_revision, channel_outbound_type, channel_outbound_installation_id, channel_outbound_chat_id, channel_outbound_message_ids, sender_user_id, channel_typing_settled, linked_session_id, via_bot_id, via_bot_name, wake_root_id, wake_hop, superseded_at, superseded_by_message_id, on_behalf_of_user_id
+RETURNING id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, channel_media_pending_until, channel_ingested, quick_actions, channel_context_revision, channel_outbound_type, channel_outbound_installation_id, channel_outbound_chat_id, channel_outbound_message_ids, sender_user_id, linked_session_id, via_bot_id, via_bot_name, wake_root_id, wake_hop, superseded_at, superseded_by_message_id, on_behalf_of_user_id, channel_typing_settled
 `
 
 type SetChatMessageQuickActionsByTaskParams struct {
@@ -4607,7 +4612,6 @@ func (q *Queries) SetChatMessageQuickActionsByTask(ctx context.Context, arg SetC
 		&i.ChannelOutboundChatID,
 		&i.ChannelOutboundMessageIds,
 		&i.SenderUserID,
-		&i.ChannelTypingSettled,
 		&i.LinkedSessionID,
 		&i.ViaBotID,
 		&i.ViaBotName,
@@ -4616,6 +4620,7 @@ func (q *Queries) SetChatMessageQuickActionsByTask(ctx context.Context, arg SetC
 		&i.SupersededAt,
 		&i.SupersededByMessageID,
 		&i.OnBehalfOfUserID,
+		&i.ChannelTypingSettled,
 	)
 	return i, err
 }
@@ -4680,7 +4685,7 @@ const setChatTaskInputOwnerSelf = `-- name: SetChatTaskInputOwnerSelf :one
 UPDATE agent_task_queue
 SET chat_input_task_id = id
 WHERE id = $1
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, code_decision, failure_input_version, failure_fingerprint, work_thread_id, context_generation, context_message_limit, context_token_budget, continuity_break_reason, session_mode, resumed_from_task_id, session_break_reason, via_bot_id, via_bot_name, wake_root_id, wake_hop, wake_generation, wake_reserved, wake_human_quote, pickup_deadline_at, on_behalf_of_user_id
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, code_decision, failure_input_version, failure_fingerprint, work_thread_id, context_generation, context_message_limit, context_token_budget, continuity_break_reason, session_mode, resumed_from_task_id, session_break_reason, via_bot_id, via_bot_name, wake_root_id, wake_hop, wake_generation, wake_reserved, wake_human_quote, pickup_deadline_at, on_behalf_of_user_id, workflow_step
 `
 
 // Stamps a freshly-created direct-chat task as the owner of its own input batch
@@ -4773,6 +4778,7 @@ func (q *Queries) SetChatTaskInputOwnerSelf(ctx context.Context, id pgtype.UUID)
 		&i.WakeHumanQuote,
 		&i.PickupDeadlineAt,
 		&i.OnBehalfOfUserID,
+		&i.WorkflowStep,
 	)
 	return i, err
 }

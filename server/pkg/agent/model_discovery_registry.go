@@ -34,10 +34,10 @@ type modelDiscoverer func(ctx context.Context, runtimeCmd Command) (Catalog, err
 // entry and walks it. Endpoint and ListCommand are optional steps; a nil
 // endpoint or an unregistered command is skipped, never invented.
 type modelDiscoveryDecl struct {
-	Kind        modelDiscoveryKind
-	Reason      string
-	Discover    modelDiscoverer
-	Endpoint    modelEndpointSource
+	Kind     modelDiscoveryKind
+	Reason   string
+	Discover modelDiscoverer
+	Endpoint modelEndpointSource
 	// AnnotateEndpoint adds what the runtime's own config declares about the
 	// models the endpoint listed (Qwen's per-model thinking levels). Optional.
 	AnnotateEndpoint modelEndpointAnnotator
@@ -83,6 +83,10 @@ var modelDiscoveryByProvider = map[string]modelDiscoveryDecl{
 	"traecli": {Kind: modelDiscoveryDedicated, Discover: modelsDiscoverer(discoverTraecliModels)},
 	"grok":    {Kind: modelDiscoveryDedicated, Discover: discoverGrokModels},
 	"dim":     {Kind: modelDiscoveryDedicated, Discover: discoverDimModels},
+	// Meta Muse Code advertises its catalog over MSP model/list, a
+	// session-free query, and applies the pick through session/start modelId
+	// (or session/setModel on a resumed session).
+	"muse": {Kind: modelDiscoveryDedicated, Discover: discoverMuseModels},
 	// omp and devin keep their discoverer on the builtin descriptor. ListModels
 	// copies it onto the declaration before the walk, so a descriptor without
 	// ModelDiscovery cannot fall through to another family's command.

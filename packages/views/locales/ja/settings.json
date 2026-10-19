@@ -87,6 +87,9 @@
     },
     "pr_auto_complete_badge": "PR のマージで自動設定",
     "built_in_locked": "組み込みステータスはシステムの動作に使われるため、編集やアーカイブはできません。並び順は変更できます。",
+    "builtin_badge": "組み込み",
+    "workflow_usage_other": "{{count}} 件のワークフローで使用中",
+    "workflow_usage_none": "ワークフローで未使用",
     "description": "各ステータスの挙動は所属するカテゴリで決まります。"
   },
   "wakeups": {
@@ -146,6 +149,8 @@
     "field_name": "名前",
     "field_name_placeholder": "コードレビュー",
     "field_target": "実行者",
+    "no_target": "対象なし",
+    "no_target_hint": "誰もメンションせずにメッセージを投稿します。",
     "field_prompt": "プロンプト",
     "field_prompt_placeholder": "このタスクに関連するコードをレビューし、正確性とエッジケースを重点的に確認してください。",
     "prompt_hint": "そのまま送られます。タスクの内容は既に読めます。",
@@ -431,6 +436,7 @@
       "code": "コード",
       "channels": "メッセージング",
       "apps": "接続済みアプリ",
+      "workflows": "ワークフロー",
       "config_transfer": "設定の書き出し/読み込み",
       "routing": "ルーティング",
       "project_sharing": "権限と共有",
