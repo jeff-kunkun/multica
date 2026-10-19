@@ -2243,7 +2243,10 @@
     "confirm_off": "Désactiver",
     "cancel": "Annuler",
     "saved": "Enregistré",
-    "save_failed": "Échec de l'enregistrement"
+    "save_failed": "Échec de l'enregistrement",
+    "magpie_title": "Magpie",
+    "magpie_label": "Mode magpie",
+    "magpie_description": "Désactivé : les groupes de routage choisissent le modèle, les agents se modifient ici et s'archivent. Activé : chaque ticket peut choisir un groupe magpie, la page des agents reflète magpie en lecture seule, et les agents peuvent être supprimés après sauvegarde."
   },
   "bots": {
     "title": "External bots",

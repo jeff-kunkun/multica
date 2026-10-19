@@ -273,6 +273,8 @@ export function rowMatchesFilters(
  */
 import { isAccessChangeReady } from "@multica/core/agents";
 import { AgentBatchToolbar } from "./agent-batch-toolbar";
+import { useWorkspaceMagpieEnabled } from "../../workspace/use-magpie-mode";
+import { MagpieAgentsPage } from "./magpie/magpie-agents-page";
 export { isAccessChangeReady };
 
 export interface AgentsPageProps {
@@ -1003,7 +1005,16 @@ function LoadingSkeleton() {
 // Batch toolbar — archive (with confirm; archiving cancels active tasks) and
 // Page
 
-export function AgentsPage(_props: AgentsPageProps = {}) {
+/**
+ * Magpie mode shows the read-only magpie mirror; off (the default) keeps the
+ * editable agents page.
+ */
+export function AgentsPage(props: AgentsPageProps = {}) {
+  const magpie = useWorkspaceMagpieEnabled();
+  return magpie ? <MagpieAgentsPage /> : <LegacyAgentsPage {...props} />;
+}
+
+function LegacyAgentsPage(_props: AgentsPageProps = {}) {
   const { t } = useT("agents");
   const locale = useLocale();
   const wsId = useWorkspaceId();

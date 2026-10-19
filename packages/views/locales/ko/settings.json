@@ -2226,7 +2226,10 @@
     "confirm_off": "끄기",
     "cancel": "취소",
     "saved": "저장됨",
-    "save_failed": "저장 실패"
+    "save_failed": "저장 실패",
+    "magpie_title": "magpie",
+    "magpie_label": "magpie 모드",
+    "magpie_description": "끄기: 라우팅 그룹이 모델을 고르고, 에이전트는 여기서 편집하고 보관합니다. 켜기: 이슈마다 magpie 그룹을 고를 수 있고, 에이전트 페이지는 magpie의 읽기 전용 미러가 되며, 백업 후 에이전트를 삭제할 수 있습니다."
   },
   "bots": {
     "title": "External bots",

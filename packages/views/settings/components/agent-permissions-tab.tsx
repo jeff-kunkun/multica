@@ -29,6 +29,7 @@ import type { Workspace } from "@multica/core/types";
 import { useT } from "../../i18n";
 import { SettingsCard, SettingsRow, SettingsSection, SettingsTab } from "./settings-layout";
 import { useAutoSave } from "./use-auto-save";
+import { MagpieModeSection } from "./magpie-mode-section";
 import {
   AUTOMATION_LIMIT_PRESETS,
   MAX_BOT_WAKE_CHAIN_LIMIT,
@@ -162,6 +163,8 @@ export function AgentPermissionsTab() {
       </SettingsSection>
 
       {workspace && <RunLimitsSection key={workspace.id} workspace={workspace} canManage={canManage} />}
+
+      {workspace && <MagpieModeSection workspace={workspace} canManage={canManage} />}
 
       <AlertDialog open={confirmOff} onOpenChange={setConfirmOff}>
         <AlertDialogContent>

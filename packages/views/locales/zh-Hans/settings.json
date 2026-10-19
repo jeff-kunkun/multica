@@ -2226,7 +2226,10 @@
     "confirm_off": "关闭",
     "cancel": "取消",
     "saved": "已保存",
-    "save_failed": "保存失败"
+    "save_failed": "保存失败",
+    "magpie_title": "magpie",
+    "magpie_label": "magpie 模式",
+    "magpie_description": "关闭：由路由组选模型，智能体在这里编辑、只能归档。开启：每个工单可选 magpie 组，智能体页变成 magpie 的只读镜像，智能体可在备份后删除。"
   },
   "bots": {
     "title": "外部 Bot",

@@ -525,7 +525,10 @@
     "title_suggestion_apply_failed": "Failed to apply title suggestion",
     "title_suggestion_dismiss_failed": "Failed to dismiss title suggestion",
     "from_chat": "Depuis la discussion",
-    "from_chat_hidden": "Depuis une discussion que vous ne voyez pas"
+    "from_chat_hidden": "Depuis une discussion que vous ne voyez pas",
+    "prop_magpie_group": "Groupe magpie",
+    "magpie_group_default": "{{group}} (par défaut)",
+    "magpie_group_save_failed": "Impossible de changer le groupe magpie"
   },
   "timeline": {
     "loading": "Chargement..."

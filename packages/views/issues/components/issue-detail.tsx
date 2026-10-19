@@ -104,6 +104,7 @@ import { DueDatePicker } from "./pickers/due-date-picker";
 import { useAgentScene } from "@multica/core/agents";
 import { AgentSceneProvider } from "../../agents/components/agent-scene-context";
 import { AssigneePicker } from "./pickers/assignee-picker";
+import { MagpieGroupPicker, useIssueMagpieGroups } from "./pickers/magpie-group-picker";
 import { AssigneeSourceNote } from "./assignee-source-note";
 import { ReviewerPicker } from "./pickers/reviewer-picker";
 import { LabelPicker } from "./pickers/label-picker";
@@ -2649,6 +2650,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // Shared issue actions (mutations, pin, copy-link, modal dispatch, etc.).
   // Called before the `if (!issue)` early return so hook order stays stable.
   const actions = useIssueActions(issue);
+  const magpieGroups = useIssueMagpieGroups({
+    assignee_type: issue?.assignee_type ?? null,
+    assignee_id: issue?.assignee_id ?? null,
+  });
   const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
   useEffect(() => { setCancelDialogOpen(false); }, [id]);
   const cancelIssue = useMutation({
@@ -2968,6 +2973,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           <PropRow label={t(($) => $.detail.prop_assignee)}>
             <AssigneePicker assigneeType={issue.assignee_type} assigneeId={issue.assignee_id} onUpdate={handleUpdateField} align="start" sceneProjectIds={[issue.project_id]} sceneDomainId={issue.domain_id} />
           </PropRow>
+          {magpieGroups && (
+            <PropRow label={t(($) => $.detail.prop_magpie_group)}>
+              <MagpieGroupPicker issue={issue} groups={magpieGroups} />
+            </PropRow>
+          )}
           {issue.assignee_source && issue.assignee_id && (
             <div className="col-span-2">
               <AssigneeSourceNote issue={issue} />

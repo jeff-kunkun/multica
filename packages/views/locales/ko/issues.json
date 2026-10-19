@@ -558,7 +558,10 @@
     "title_suggestion_apply_failed": "Failed to apply title suggestion",
     "title_suggestion_dismiss_failed": "Failed to dismiss title suggestion",
     "from_chat": "채팅에서",
-    "from_chat_hidden": "볼 수 없는 채팅에서"
+    "from_chat_hidden": "볼 수 없는 채팅에서",
+    "prop_magpie_group": "magpie 그룹",
+    "magpie_group_default": "{{group}} (기본)",
+    "magpie_group_save_failed": "magpie 그룹을 바꾸지 못했습니다"
   },
   "timeline": {
     "loading": "불러오는 중..."

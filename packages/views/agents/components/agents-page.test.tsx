@@ -152,6 +152,8 @@ vi.mock("@multica/core/hooks", () => ({
 }));
 
 vi.mock("@multica/core/paths", () => ({
+  // No workspace settings: magpie mode is off, the legacy page renders.
+  useCurrentWorkspace: () => null,
   useWorkspacePaths: () => ({
     newAgent: () => "/test-workspace/agents/new",
     newAgentManual: () => "/test-workspace/agents/new/manual",

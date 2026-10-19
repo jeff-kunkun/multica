@@ -2243,7 +2243,10 @@
     "confirm_off": "Turn off",
     "cancel": "Cancel",
     "saved": "Saved",
-    "save_failed": "Failed to save"
+    "save_failed": "Failed to save",
+    "magpie_title": "Magpie",
+    "magpie_label": "Magpie mode",
+    "magpie_description": "Off: routing groups pick the model, agents are edited here and archived. On: each issue can pick a magpie group, the agents page mirrors magpie read-only, and agents can be deleted after a backup."
   },
   "bots": {
     "title": "External bots",
