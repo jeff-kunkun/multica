@@ -67,6 +67,7 @@ gaps, no reordering) and decides who gets a push, in the same transaction.
 | `blocked` / `failed` | stopped and needs someone / a run failed or was cancelled |
 | `artifact` | a file was delivered |
 | `release_pending_approval` | see below |
+| `alert` | `issue.alert`: a heads-up for the manager — the ticket went silent (`changes` `alert: stalled`) or its agent said it is stuck (`alert: stuck`); `summary` is the sentence to show. Not must-relay |
 | `change` | anything else that moved |
 
 `must_relay: true` marks a result the person has to hear about: chat replies,

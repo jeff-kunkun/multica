@@ -177,23 +177,16 @@ func (w *HumanNeededWorker) push(ctx context.Context, ev db.HumanNeededEvent) {
 		}
 	}
 	wake, err := w.h.Queries.GetBotWake(ctx, ev.BotID)
-	if err != nil || len(wake.WebhookSecret) == 0 || w.h.BotWakeSecrets == nil {
+	if err != nil {
 		w.finish(ev, false, "webhook not configured")
 		return
 	}
-	plain, err := w.h.BotWakeSecrets.Open(wake.WebhookSecret)
-	if err != nil {
-		w.finish(ev, false, "webhook decryption failed")
-		return
+	target, why := w.h.openWakeTarget(ctx, wake.WebhookSecret)
+	if why == "webhook encryption unavailable" {
+		why = "webhook not configured"
 	}
-	var secret botWakeSecrets
-	if json.Unmarshal(plain, &secret) != nil {
-		w.finish(ev, false, "invalid stored webhook")
-		return
-	}
-	endpoint, err := validateWakeURL(ctx, secret.URL)
-	if err != nil {
-		w.finish(ev, false, "webhook endpoint unavailable")
+	if why != "" {
+		w.finish(ev, false, why)
 		return
 	}
 	fields, err := w.h.humanNeededPayloadFields(ctx, ev, channel)
@@ -212,7 +205,7 @@ func (w *HumanNeededWorker) push(ctx context.Context, ev db.HumanNeededEvent) {
 		w.finish(ev, false, "payload unavailable")
 		return
 	}
-	status, reason := w.wake.deliver(ctx, endpoint, secret.Key, payload)
+	status, reason := w.wake.deliver(ctx, target, payload)
 	w.finish(ev, status == "received", reason)
 }
 

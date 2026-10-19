@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -189,7 +190,7 @@ func (h *Handler) CreateBot(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, BotKeyResponse{
 		Bot:       botToResponse(row, now),
 		Token:     raw,
-		SetupText: h.botSetupText(r.Context(), wsUUID, name, raw),
+		SetupText: h.botSetupText(r.Context(), wsUUID, name, raw, &row.ExpiresAt),
 	})
 }
 
@@ -259,7 +260,7 @@ func (h *Handler) RotateBotKey(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, BotKeyResponse{
 		Bot:       botToResponse(row, now),
 		Token:     raw,
-		SetupText: h.botSetupText(r.Context(), wsUUID, row.Name, raw),
+		SetupText: h.botSetupText(r.Context(), wsUUID, row.Name, raw, &row.ExpiresAt),
 	})
 }
 
@@ -326,6 +327,10 @@ func (h *Handler) DeleteBot(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "bot not found")
 		return
 	}
+	// Named receivers hold sealed push keys; a deleted Bot keeps none.
+	if err := h.Queries.DeleteBotWebhookReceiversByBot(r.Context(), botUUID); err != nil {
+		slog.Warn("bot delete: receiver cleanup failed", "bot_id", uuidToString(botUUID), "error", err)
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -351,6 +356,9 @@ func (h *Handler) GetBotSetupText(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	botName := strings.TrimSpace(r.URL.Query().Get("name"))
+	// A named Bot's copy states its key's lifetime, so it matches the text
+	// handed out when the key was minted.
+	var expiry *pgtype.Timestamptz
 	if botID := strings.TrimSpace(r.URL.Query().Get("bot")); botID != "" {
 		botUUID, ok := parseUUIDOrBadRequest(w, botID, "bot id")
 		if !ok {
@@ -362,16 +370,19 @@ func (h *Handler) GetBotSetupText(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		botName = pat.Name
+		expiry = &pat.ExpiresAt
 	}
 	if botName == "" {
 		botName = "外部 Bot"
 	}
-	writeJSON(w, http.StatusOK, BotSetupTextResponse{SetupText: h.botSetupText(r.Context(), wsUUID, botName, BotSetupTextPlaceholder)})
+	writeJSON(w, http.StatusOK, BotSetupTextResponse{SetupText: h.botSetupText(r.Context(), wsUUID, botName, BotSetupTextPlaceholder, expiry)})
 }
 
 // botSetupText is the message the admin pastes to the bot. It is rendered
 // here so the settings page and `multica bot create` hand out the same text.
-func (h *Handler) botSetupText(ctx context.Context, wsUUID pgtype.UUID, botName, token string) string {
+// expiry is the key's lifetime; nil when no Bot is named yet, so the text
+// says nothing about it.
+func (h *Handler) botSetupText(ctx context.Context, wsUUID pgtype.UUID, botName, token string, expiry *pgtype.Timestamptz) string {
 	wsName := ""
 	if ws, err := h.Queries.GetWorkspace(ctx, wsUUID); err == nil {
 		wsName = ws.Name
@@ -400,6 +411,7 @@ func (h *Handler) botSetupText(ctx context.Context, wsUUID pgtype.UUID, botName,
 		ServerURL:     serverURL,
 		AppURL:        appURL,
 		Token:         token,
+		KeyExpiry:     expiry,
 		Domains:       domains,
 	})
 }
@@ -416,7 +428,9 @@ type botSetupInput struct {
 	ServerURL     string
 	AppURL        string
 	Token         string
-	Domains       []botSetupDomain
+	// KeyExpiry: nil = unknown (no key minted), invalid = never expires.
+	KeyExpiry *pgtype.Timestamptz
+	Domains   []botSetupDomain
 }
 
 func renderBotSetupText(in botSetupInput) string {
@@ -426,6 +440,16 @@ func renderBotSetupText(in botSetupInput) string {
 		ws = in.WorkspaceID
 	}
 	fmt.Fprintf(&b, "你是「%s」，从现在起接入 Multica 工作区「%s」，权限和添加你的管理员相同。\n\n", in.BotName, ws)
+
+	// Network first (kun-main #693): an office on the admin's own Mac is
+	// unreachable from a cloud Bot, and copying its address fails silently.
+	b.WriteString("零、先确认网络通\n")
+	if in.ServerURL != "" {
+		fmt.Fprintf(&b, "- 先从你自己运行的地方访问 %s/health，能打通再往下做。\n", strings.TrimRight(in.ServerURL, "/"))
+	} else {
+		b.WriteString("- 先从你自己运行的地方访问办公室地址的 /health，能打通再往下做。\n")
+	}
+	b.WriteString("- 地址如果是 localhost、127.0.0.1 或 192.168./10. 这类内网地址，说明办公室开在管理员的 Mac 上，你直接连不到：不要照抄，先和那台 Mac 进同一个私有组网（如 Tailscale），把地址换成它在组网里的地址；做不到就停下来问管理员要公网 HTTPS 地址。\n\n")
 
 	b.WriteString("一、安装 Multica 命令行（macOS / Linux）\n")
 	b.WriteString(botKeyInstallCommand + "\n\n")
@@ -439,7 +463,15 @@ func renderBotSetupText(in botSetupInput) string {
 	}
 	fmt.Fprintf(&b, "multica login --token %s\n", in.Token)
 	fmt.Fprintf(&b, "multica workspace switch %s\n", in.WorkspaceID)
-	b.WriteString("multica issue list --limit 5   # 能列出任务就接好了\n\n")
+	b.WriteString("multica issue list --limit 5   # 能列出任务就接好了\n")
+	if in.KeyExpiry != nil {
+		if in.KeyExpiry.Valid {
+			fmt.Fprintf(&b, "- 这把钥匙 %s 过期，到期前找管理员换新的。\n", in.KeyExpiry.Time.Format("2006-01-02"))
+		} else {
+			b.WriteString("- 这把钥匙永不过期，不用定期续；只有管理员停用或重新生成时才需要换。\n")
+		}
+	}
+	b.WriteString("- 推送地址：你有办公室能访问到的公网 HTTPS 接收地址，就带这把钥匙调用 PUT <server_url>/api/bot/webhook 登记（只做一次），body 为 {\"url\": \"<接收地址>\", \"key\": \"<接收端要的 Authorization 值>\", \"headers\": {<可选的其他请求头>}}；url 传空字符串就是断开。几位经理共用你时，各自调用 PUT <server_url>/api/bot/webhooks 并带上 \"name\"，每人一个接收地址，互不覆盖。\n\n")
 
 	b.WriteString("三、上手（这段说明由系统生成，命令清单看 multica capabilities，不用背）\n")
 	b.WriteString(botonboarding.Render())

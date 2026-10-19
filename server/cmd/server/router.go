@@ -2183,6 +2183,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Get("/api/bot-connect/{code}", h.GetBotConnect)
 		r.Post("/api/bot-connect/{code}/approve", h.ApproveBotConnect)
 		r.Post("/api/bot-connect/{code}/deny", h.DenyBotConnect)
+		// A Bot registering its own push addresses with its own key
+		// (no workspace header needed): the main one, and named receivers.
+		r.Put("/api/bot/webhook", h.SetBotSelfWebhook)
+		r.Get("/api/bot/webhooks", h.ListBotWebhookReceivers)
+		r.Put("/api/bot/webhooks", h.SetBotWebhookReceiver)
 
 		r.Route("/api/tokens", func(r chi.Router) {
 			// Same boundary as /api/cli-token: a mat_ task token must not

@@ -37,6 +37,8 @@ change is written in the same transaction as the change itself, numbered
                             NOT approved (this is not a deploy permission)
   blocked / failed          stopped, needs someone
   artifact                  a file was delivered
+  alert                     a ticket went silent or its agent says it is
+                            stuck; a heads-up for the manager
   change                    a setting, member or config moved (old → new,
                             credentials masked)
 

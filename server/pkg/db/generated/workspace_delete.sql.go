@@ -430,6 +430,8 @@ deleted_comment_reactions AS (
 ),
 deleted_issue_reactions AS (
     DELETE FROM issue_reaction WHERE workspace_id = $1
+), deleted_bot_webhook_receivers AS (
+    DELETE FROM bot_webhook_receiver WHERE workspace_id = $1
 ), deleted_bot_wake_blocks AS (
     DELETE FROM bot_wake_block WHERE workspace_id = $1
 ),

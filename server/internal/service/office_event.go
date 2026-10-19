@@ -27,6 +27,10 @@ const (
 	OfficeMeaningArtifact   = "artifact"   // a file was delivered
 	OfficeMeaningChange     = "change"     // a status, setting, member or config moved
 	OfficeMeaningPendingRel = "release_pending_approval"
+	// A heads-up for the manager: an issue went silent or an agent said it
+	// is stuck. Read-and-act, not must-relay: owners without a Bot get no
+	// inbox reminder for it.
+	OfficeMeaningAlert = "alert"
 )
 
 // OfficeFacts is what the sealer knows about one captured row.
@@ -143,6 +147,14 @@ func ClassifyOffice(f OfficeFacts) OfficeClass {
 			return OfficeClass{Meaning: OfficeMeaningBlocked, MustRelay: true, Summary: joinSummary("卡住了，需要人", label)}
 		}
 		return OfficeClass{Meaning: OfficeMeaningChange, Summary: joinSummary("状态 "+from+" → "+to, label)}
+	}
+	if f.EventType == "issue.alert" {
+		_, text, _ := f.change("text")
+		if text == "" {
+			_, kind, _ := f.change("alert")
+			text = joinSummary("提醒 "+kind, label)
+		}
+		return OfficeClass{Meaning: OfficeMeaningAlert, Summary: text}
 	}
 	if strings.HasPrefix(f.EventType, "config.") {
 		return OfficeClass{Meaning: OfficeMeaningChange, Summary: configSummary(f)}

@@ -593,6 +593,19 @@ type BotWakeWatch struct {
 	ChatSessionID pgtype.UUID `json:"chat_session_id"`
 }
 
+type BotWebhookReceiver struct {
+	ID              pgtype.UUID        `json:"id"`
+	BotID           pgtype.UUID        `json:"bot_id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	Name            string             `json:"name"`
+	WebhookSecret   []byte             `json:"webhook_secret"`
+	Failures        int32              `json:"failures"`
+	LastError       string             `json:"last_error"`
+	LastDeliveredAt pgtype.Timestamptz `json:"last_delivered_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
 type BotWriteAudit struct {
 	ID               pgtype.UUID        `json:"id"`
 	WorkspaceID      pgtype.UUID        `json:"workspace_id"`

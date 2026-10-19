@@ -12,6 +12,7 @@ import (
 	"net/http/httptrace"
 	"net/url"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -30,6 +31,8 @@ type BotWakeWorker struct {
 	// Only tests replace this factory; production always uses the DNS-pinned,
 	// no-proxy, no-redirect public HTTPS transport.
 	client func(*url.URL) *http.Client
+	// receivers tracks background pushes to named receivers.
+	receivers sync.WaitGroup
 }
 
 func NewBotWakeWorker(h *Handler) *BotWakeWorker {
@@ -175,23 +178,9 @@ func (w *BotWakeWorker) ProcessNext(ctx context.Context) (worked bool, resultErr
 	if !alert && rules.HourlyLimit == 0 {
 		return pending("hourly limit")
 	}
-	if len(c.WebhookSecret) == 0 {
-		return pending("webhook not configured")
-	}
-	if w.h.BotWakeSecrets == nil {
-		return pending("webhook encryption unavailable")
-	}
-	plain, err := w.h.BotWakeSecrets.Open(c.WebhookSecret)
-	if err != nil {
-		return pending("webhook decryption failed")
-	}
-	var secret botWakeSecrets
-	if json.Unmarshal(plain, &secret) != nil {
-		return pending("invalid stored webhook")
-	}
-	endpoint, err := validateWakeURL(ctx, secret.URL)
-	if err != nil {
-		return pending("webhook endpoint unavailable")
+	target, why := w.h.openWakeTarget(ctx, c.WebhookSecret)
+	if why != "" {
+		return pending(why)
 	}
 	workspace, err := q.GetWorkspace(ctx, e.WorkspaceID)
 	if err != nil {
@@ -283,7 +272,9 @@ func (w *BotWakeWorker) ProcessNext(ctx context.Context) (worked bool, resultErr
 		return true, err
 	}
 	committed = true
-	status, reason := w.deliver(ctx, endpoint, secret.Key, payload)
+	status, reason := w.deliver(ctx, target, payload)
+	// Named receivers get the same push; they never change its outcome.
+	w.fanOutReceivers(ctx, e.BotID, payload)
 	delay := int32(0)
 	if status == "retry" {
 		if e.Attempts+1 >= 3 {
@@ -315,7 +306,8 @@ func (w *BotWakeWorker) ProcessNext(ctx context.Context) (worked bool, resultErr
 	}
 	return true, resultTx.Commit(recordCtx)
 }
-func (w *BotWakeWorker) deliver(ctx context.Context, endpoint *url.URL, key string, payload []byte) (string, string) {
+func (w *BotWakeWorker) deliver(ctx context.Context, target wakeTarget, payload []byte) (string, string) {
+	endpoint := target.Endpoint
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	var started atomic.Bool
@@ -326,8 +318,14 @@ func (w *BotWakeWorker) deliver(ctx context.Context, endpoint *url.URL, key stri
 	if err != nil {
 		return "failed", "invalid webhook request"
 	}
+	// The Bot's own headers go first so the office's headers below win.
+	for name, value := range target.Headers {
+		req.Header.Set(name, value)
+	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", key) // exact receiver-provided Authorization value
+	if target.Key != "" {
+		req.Header.Set("Authorization", target.Key) // exact receiver-provided Authorization value
+	}
 	var identity struct {
 		EventID string `json:"event_id"`
 	}

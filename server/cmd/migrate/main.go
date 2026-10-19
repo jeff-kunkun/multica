@@ -178,6 +178,7 @@ var concurrentIndexCleanups = map[string]string{
 	"700_issue_workflow_pkey_index":                             "issue_workflow_pkey_uidx",
 	"702_issue_workflow_workspace_name_index":                   "idx_issue_workflow_workspace_name",
 	"707_issue_workflow_default_index":                          "idx_issue_workflow_workspace_default",
+	"721_bot_webhook_receiver_name_index":                       "bot_webhook_receiver_bot_name",
 	"692_channel_typing_reaction_id_idx":                        "channel_typing_reaction_id_idx",
 	"693_channel_typing_reaction_retry_idx":                     "channel_typing_reaction_retry_idx",
 	"694_channel_typing_reaction_gc_idx":                        "channel_typing_reaction_gc_idx",
