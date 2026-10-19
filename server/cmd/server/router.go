@@ -2655,6 +2655,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Delete("/reactions", h.RemoveReaction)
 			})
 
+			// Backups written by agent deletes (magpie mode); restoring one
+			// re-creates the agent.
+			r.Route("/api/agent-backups", func(r chi.Router) {
+				r.Get("/", h.ListAgentBackups)
+				r.With(handler.RequireHumanActor).Post("/{backupId}/restore", h.RestoreAgentBackup)
+			})
+
 			// Agents
 			r.Route("/api/agents", func(r chi.Router) {
 				r.Get("/", h.ListAgents)
@@ -2674,6 +2681,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/access-passes/{passId}", h.RevokeAgentAccessPass)
 					r.Get("/", h.GetAgent)
 					r.Put("/", h.UpdateAgent)
+					// Real delete with backup; refused unless magpie mode is on.
+					r.With(handler.RequireHumanActor).Delete("/", h.DeleteAgent)
 					r.Post("/archive", h.ArchiveAgent)
 					r.Post("/restore", h.RestoreAgent)
 					// Bakes the base role's prompt into this specialisation and
