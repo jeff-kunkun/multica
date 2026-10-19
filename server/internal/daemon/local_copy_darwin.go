@@ -29,7 +29,7 @@ var localCopyProbes sync.Map // parent dir -> bool
 // probeLocalCopy answers localCopySupported with a real clone of a scratch
 // file where the copies live (orig's parent directory).
 func probeLocalCopy(orig string) bool {
-	if localCopyDisabled() {
+	if localCopyDisabled(orig) {
 		return false
 	}
 	parent := filepath.Dir(orig)

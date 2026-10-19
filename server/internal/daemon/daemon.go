@@ -6527,6 +6527,34 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, lease *taskSlotLease
 	}
 }
 
+// applyLocalCopyOutcome turns a merge-back that stopped on conflicts into a
+// task that needs a person. A run that otherwise succeeded is reported as
+// "blocked" with failure_reason agent_blocked: the closest existing terminal
+// state meaning "stopped, waiting for a human" — it is not auto-retried, it
+// notifies the issue's delegated subscribers, and its error text (the note,
+// then the agent's own output) is what the issue shows for the run. A run
+// that already failed keeps its own status and reason; the note is put in
+// front of its comment or joined to its error so the conflicts are not lost
+// behind it.
+func applyLocalCopyOutcome(result *TaskResult, runErr *error, out localCopyOutcome) {
+	note := out.Note()
+	if note == "" {
+		return
+	}
+	if *runErr != nil {
+		*runErr = errors.Join(*runErr, errors.New(note))
+		return
+	}
+	if comment := strings.TrimSpace(result.Comment); comment != "" {
+		note += "\n\n---\n\n" + comment
+	}
+	result.Comment = note
+	if result.Status == "completed" {
+		result.Status = "blocked"
+		result.FailureReason = taskfailure.ReasonAgentBlocked.String()
+	}
+}
+
 // worktreePreservedError marks a task error that must survive the cancel path:
 // its message names the preserved worktree holding the agent's uncommitted
 // work. Every other error on a cancelled run is expected noise (context
@@ -9430,7 +9458,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 						taskLog.Warn("local_directory: private copy failed; running in the folder directly", "error", copyErr)
 					case rc != nil:
 						runCopy = rc
-						defer rc.Finish(taskLog)
+						defer func() {
+							applyLocalCopyOutcome(&taskResult, &returnErr, rc.Finish(taskLog))
+						}()
 						prepParams.LocalWorkDir = rc.Work
 					}
 				}

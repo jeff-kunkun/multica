@@ -38,6 +38,15 @@ const localDirectoryResourceType = "local_directory"
 // convention) while still serialising every task behind every other. The
 // mode hands isolation back to the workspace's own conventions and keeps only
 // what the daemon can guarantee: its own files never collide.
+//
+// With MULTICA_LOCAL_DIRECTORY_ALWAYS_CLONE=1 on the daemon, the stored mode
+// is ignored on a volume that can clone (macOS APFS): every task runs on a
+// private copy-on-write copy of the directory and merges back when it ends
+// (DENE-2159), which gives worktree's isolation and shared's concurrency at
+// once. The stored value is never rewritten and still applies where no copy
+// can be made (Windows, Linux, non-APFS volumes, folders listed in the
+// local-directory-direct switch file). The switch is off by default, so every
+// stored mode behaves as it always has. See localDirectoryAssignment.mode.
 const (
 	localDirectoryModeInPlace  = "in_place"
 	localDirectoryModeWorktree = "worktree"
@@ -86,7 +95,35 @@ type localDirectoryAssignment struct {
 // serialises, cleans up sidecars, or exempts the env root from GC must branch
 // on this rather than on "is there a local_directory assignment at all".
 func (a *localDirectoryAssignment) UsesWorktree() bool {
-	return a != nil && strings.TrimSpace(a.Ref.ExecutionMode) == localDirectoryModeWorktree
+	return a.mode() == localDirectoryModeWorktree
+}
+
+// localDirectoryAlwaysCloneEnv is the daemon switch that makes every local
+// directory that can be cloned run in_place on a private copy, whatever mode
+// the resource stores. Off unless set to "1" or "true".
+const localDirectoryAlwaysCloneEnv = "MULTICA_LOCAL_DIRECTORY_ALWAYS_CLONE"
+
+func localDirectoryAlwaysClone() bool {
+	v := strings.TrimSpace(os.Getenv(localDirectoryAlwaysCloneEnv))
+	return v == "1" || strings.EqualFold(v, "true")
+}
+
+// mode is the execution mode this assignment actually runs in. With the
+// always-clone switch on, a directory the daemon can clone runs in_place on a
+// private copy whatever the resource stores, so worktree and shared rows keep
+// working without a data rewrite. Otherwise the stored mode applies.
+func (a *localDirectoryAssignment) mode() string {
+	if a == nil {
+		return ""
+	}
+	stored := strings.TrimSpace(a.Ref.ExecutionMode)
+	if stored == "" || stored == localDirectoryModeInPlace {
+		return localDirectoryModeInPlace
+	}
+	if localDirectoryAlwaysClone() && a.AbsPath != "" && localCopySupported(a.AbsPath) {
+		return localDirectoryModeInPlace
+	}
+	return stored
 }
 
 // IsShared reports whether this assignment runs in shared mode: the task's cwd
@@ -94,7 +131,7 @@ func (a *localDirectoryAssignment) UsesWorktree() bool {
 // the daemon's sidecar files are isolated into the task's env root. See the
 // mode constants for why the mode exists.
 func (a *localDirectoryAssignment) IsShared() bool {
-	return a != nil && strings.TrimSpace(a.Ref.ExecutionMode) == localDirectoryModeShared
+	return a.mode() == localDirectoryModeShared
 }
 
 // SkipsPathMutex reports whether tasks on this assignment run without the
@@ -909,7 +946,7 @@ func lookupDecidedDirectory(task Task, daemonID string, decision coderesolve.Dec
 	if err := validateLocalPath(absPath); err != nil {
 		return nil, &codePlacementError{Code: classifyPathFailure(err), Err: err}
 	}
-	if gotMode == localDirectoryModeWorktree && !isGitWorkTree(context.Background(), absPath) {
+	if assignment.UsesWorktree() && !isGitWorkTree(context.Background(), absPath) {
 		return nil, &codePlacementError{
 			Code: "not_git_worktree",
 			Err:  fmt.Errorf("local_directory: %q is not a git work tree, so it cannot run in worktree mode", absPath),
