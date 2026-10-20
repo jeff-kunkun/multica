@@ -106,17 +106,20 @@ function account(
   };
 }
 
-const AGY_DEFAULT = account("agy", "default", `${RUNTIME_HOME}/.gemini`, {
-  lever: "custom_args:--gemini_dir",
-});
-const AGY_ACCOUNT2 = account("agy", "account2", `${RUNTIME_HOME}/.gemini-account2`, {
-  lever: "custom_args:--gemini_dir",
-});
+// agy has no slot registry: the daemon reports its one `~/.gemini` with no
+// lever, so it renders read-only.
+const AGY_DEFAULT = account("agy", "default", `${RUNTIME_HOME}/.gemini`);
 const DSH_DEFAULT = account("dsh", "default", `${RUNTIME_HOME}/.dsh`, {
   lever: "env:DSH_HOME",
 });
 const DSH_ACCOUNT2 = account("dsh", "account2", `${RUNTIME_HOME}/.dsh-account2`, {
   lever: "env:DSH_HOME",
+});
+const CLAUDE_DEFAULT = account("claude", "default", `${RUNTIME_HOME}/.claude`, {
+  lever: "env:CLAUDE_CONFIG_DIR",
+});
+const CLAUDE_ACCOUNT2 = account("claude", "account2", `${RUNTIME_HOME}/.claude-account2`, {
+  lever: "env:CLAUDE_CONFIG_DIR",
 });
 const CODEX_DEFAULT = account("codex", "default", `${RUNTIME_HOME}/.codex`, {
   lever: "",
@@ -247,34 +250,35 @@ beforeEach(() => {
   );
 });
 
+function envBinding(custom_env: Record<string, string>) {
+  getAgentEnv.mockResolvedValue({ agent_id: "agent-1", custom_env });
+}
+
 describe("AgentAccountsTab rest state", () => {
   it("shows the account in effect and lists the others as read-only chips", async () => {
+    envBinding({ CLAUDE_CONFIG_DIR: CLAUDE_ACCOUNT2.home });
     renderTab({
-      agent: {
-        ...baseAgent,
-        custom_args: ["--gemini_dir", AGY_ACCOUNT2.home],
-      },
-      device: runtimeWith("antigravity", [AGY_DEFAULT, AGY_ACCOUNT2, DSH_DEFAULT]),
+      device: runtimeWith("claude", [CLAUDE_DEFAULT, CLAUDE_ACCOUNT2, DSH_DEFAULT]),
     });
 
-    expect(await screen.findByText("Antigravity · account2")).toBeInTheDocument();
+    expect(await screen.findByText("Claude · account2")).toBeInTheDocument();
     expect(screen.getByText("In use")).toBeInTheDocument();
     expect(
-      screen.getByText(`--gemini_dir=${AGY_ACCOUNT2.home}`),
+      screen.getByText(`CLAUDE_CONFIG_DIR=${CLAUDE_ACCOUNT2.home}`),
     ).toBeInTheDocument();
 
     // Non-current accounts are chips, never controls: clicking one must not
     // switch the account.
     const chip = screen.getByText("DSH · default");
     expect(chip.closest("button")).toBeNull();
-    expect(screen.getByText("Antigravity · default")).toBeInTheDocument();
+    expect(screen.getByText("Claude · default")).toBeInTheDocument();
   });
 
   it("reads the env endpoint only when an account is bound through an env key", async () => {
-    // That endpoint is audited server-side, so a machine whose accounts all use
-    // the custom_args lever must not pay for it.
+    // That endpoint is audited server-side, so a machine whose accounts have
+    // no lever must not pay for it.
     renderTab({
-      device: runtimeWith("antigravity", [AGY_DEFAULT, AGY_ACCOUNT2]),
+      device: runtimeWith("antigravity", [AGY_DEFAULT]),
     });
 
     expect(
@@ -285,7 +289,7 @@ describe("AgentAccountsTab rest state", () => {
 
   it("opens the drawer from the one primary entry point", async () => {
     renderTab({
-      device: runtimeWith("antigravity", [AGY_DEFAULT, AGY_ACCOUNT2]),
+      device: runtimeWith("dsh", [DSH_DEFAULT, DSH_ACCOUNT2]),
     });
 
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -293,22 +297,16 @@ describe("AgentAccountsTab rest state", () => {
 
     const drawer = screen.getByRole("dialog", { name: /manage accounts/i });
     expect(drawer).toBeInTheDocument();
-    // This agent has no persisted slot list yet, so it seeds slots 1–3 while
-    // the daemon reported only two of those directories: slot 3 is part of the
-    // rotation list and shows up as a slot whose directory does not exist yet.
-    expect(screen.getByText("1 CLIs · 3 accounts")).toBeInTheDocument();
+    expect(screen.getByText("1 CLIs · 2 accounts")).toBeInTheDocument();
     // Group header carries the binding lever.
-    expect(screen.getByText("--gemini_dir")).toBeInTheDocument();
+    expect(within(drawer).getByText("DSH_HOME")).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /save and switch/i }),
     ).toBeInTheDocument();
   });
 
   it("describes the binding it read from the env endpoint", async () => {
-    getAgentEnv.mockResolvedValue({
-      agent_id: "agent-1",
-      custom_env: { DSH_HOME: DSH_ACCOUNT2.home, KEEP: "untouched" },
-    });
+    envBinding({ DSH_HOME: DSH_ACCOUNT2.home, KEEP: "untouched" });
     renderTab({
       device: runtimeWith("dsh", [DSH_DEFAULT, DSH_ACCOUNT2]),
     });
@@ -317,6 +315,23 @@ describe("AgentAccountsTab rest state", () => {
     expect(
       screen.getByText(`DSH_HOME=${DSH_ACCOUNT2.home}`),
     ).toBeInTheDocument();
+  });
+
+  it("keeps agy's one account read-only", async () => {
+    renderTab({
+      device: runtimeWith("antigravity", [AGY_DEFAULT]),
+    });
+
+    expect(await screen.findByText("Antigravity · default")).toBeInTheDocument();
+    await openDrawer();
+    expect(screen.queryAllByRole("radio")).toHaveLength(0);
+    expect(
+      screen.queryByRole("button", { name: /add antigravity account/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getAllByText(/cannot be switched from here/i).length,
+    ).toBeGreaterThan(0);
+    expect(screen.queryByText(/each task gets its own/i)).not.toBeInTheDocument();
   });
 });
 
@@ -330,43 +345,10 @@ describe("AgentAccountsTab one-click switch", () => {
   const FUTURE_RESET_AT = 4_102_444_800;
   const SPENT = { quota_reset_at: FUTURE_RESET_AT };
   const SIGNED_OUT = { signed_in: false };
-  const antigravityDefault = {
-    ...baseAgent,
-    custom_args: ["--gemini_dir", `${RUNTIME_HOME}/.gemini`],
-  };
 
   function quickSwitchButton() {
     return screen.queryByRole("button", { name: /^switch to /i });
   }
-
-  it("switches to the eligible sibling in one click and rewrites the binding", async () => {
-    const { onSave } = renderTab({
-      agent: antigravityDefault,
-      device: runtimeWith("antigravity", [
-        account("agy", "default", `${RUNTIME_HOME}/.gemini`, {
-          lever: "custom_args:--gemini_dir",
-          ...SPENT,
-        }),
-        AGY_ACCOUNT2,
-      ]),
-    });
-
-    expect(await screen.findByText("Quota used up", { exact: false })).toBeInTheDocument();
-    const button = screen.getByRole("button", { name: "Switch to account2" });
-    fireEvent.click(button);
-
-    // The write is the drawer's own path: one `custom_args` update, no env
-    // call, and the summary bar moves to the account that took over.
-    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
-    expect(onSave).toHaveBeenCalledWith({
-      custom_args: ["--gemini_dir", AGY_ACCOUNT2.home],
-    });
-    expect(updateAgentEnv).not.toHaveBeenCalled();
-    expect(
-      await screen.findByText(`--gemini_dir=${AGY_ACCOUNT2.home}`),
-    ).toBeInTheDocument();
-    expect(quickSwitchButton()).not.toBeInTheDocument();
-  });
 
   it("writes the env key when the sibling's lever is an environment variable", async () => {
     const { onSave } = renderTab({
@@ -383,23 +365,28 @@ describe("AgentAccountsTab one-click switch", () => {
       await screen.findByRole("button", { name: "Switch to account2" }),
     );
 
+    // The write is the drawer's own path: one env update, no agent write, and
+    // the summary bar moves to the account that took over.
     await waitFor(() => expect(updateAgentEnv).toHaveBeenCalledTimes(1));
     expect(updateAgentEnv).toHaveBeenCalledWith("agent-1", {
       custom_env: { DSH_HOME: DSH_ACCOUNT2.home },
     });
     expect(onSave).not.toHaveBeenCalled();
+    expect(
+      await screen.findByText(`DSH_HOME=${DSH_ACCOUNT2.home}`),
+    ).toBeInTheDocument();
+    expect(quickSwitchButton()).not.toBeInTheDocument();
   });
 
   it("offers nothing when the only sibling is spent or signed out too", async () => {
     renderTab({
-      agent: antigravityDefault,
-      device: runtimeWith("antigravity", [
-        account("agy", "default", `${RUNTIME_HOME}/.gemini`, {
-          lever: "custom_args:--gemini_dir",
+      device: runtimeWith("dsh", [
+        account("dsh", "default", `${RUNTIME_HOME}/.dsh`, {
+          lever: "env:DSH_HOME",
           ...SPENT,
         }),
-        account("agy", "account2", `${RUNTIME_HOME}/.gemini-account2`, {
-          lever: "custom_args:--gemini_dir",
+        account("dsh", "account2", `${RUNTIME_HOME}/.dsh-account2`, {
+          lever: "env:DSH_HOME",
           ...SIGNED_OUT,
         }),
       ]),
@@ -434,18 +421,18 @@ describe("AgentAccountsTab one-click switch", () => {
 
   it("keeps the binding untouched while the account in effect has quota left", async () => {
     const { onSave } = renderTab({
-      agent: antigravityDefault,
-      device: runtimeWith("antigravity", [AGY_DEFAULT, AGY_ACCOUNT2]),
+      device: runtimeWith("dsh", [DSH_DEFAULT, DSH_ACCOUNT2]),
     });
 
-    expect(await screen.findByText("Antigravity · default")).toBeInTheDocument();
+    expect(await screen.findByText("DSH · default")).toBeInTheDocument();
     expect(quickSwitchButton()).not.toBeInTheDocument();
     expect(onSave).not.toHaveBeenCalled();
+    expect(updateAgentEnv).not.toHaveBeenCalled();
   });
 });
 
 describe("AgentAccountsTab untrusted states keep the drawer shut", () => {
-  it("renders the empty state with its three entry points and no drawer entry", () => {
+  it("renders the empty state with its two entry points and no drawer entry", () => {
     renderTab({ device: runtimeWith("dsh", []) });
 
     expect(
@@ -453,9 +440,6 @@ describe("AgentAccountsTab untrusted states keep the drawer shut", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /create the first dsh account/i }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /use an agy account/i }),
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: /i already have a directory/i }),
@@ -599,33 +583,9 @@ describe("AgentAccountsTab drawer", () => {
     expect(toast.error).not.toHaveBeenCalled();
   });
 
-  it("writes the agy binding through the agent and updates the summary", async () => {
-    const { onSave } = renderTab({
-      device: runtimeWith("antigravity", [AGY_DEFAULT, AGY_ACCOUNT2]),
-    });
-
-    await openDrawer();
-    selectAccount(/account2/);
-    saveAndSwitch();
-
-    expect(onSave).toHaveBeenCalledTimes(1);
-    expect(onSave).toHaveBeenCalledWith({
-      custom_args: ["--gemini_dir", AGY_ACCOUNT2.home],
-    });
-    expect(updateAgentEnv).not.toHaveBeenCalled();
-    // The bar owns this line, so it proves the summary — not a chip — moved.
-    expect(
-      await screen.findByText(`--gemini_dir=${AGY_ACCOUNT2.home}`),
-    ).toBeInTheDocument();
-  });
-
   it("sends nothing when the target is already the account in effect", async () => {
-    renderTab({
-      device: runtimeWith("antigravity", [AGY_DEFAULT, AGY_ACCOUNT2]),
-      agent: {
-        ...baseAgent,
-        custom_args: ["--gemini_dir", AGY_DEFAULT.home],
-      },
+    const { onSave } = renderTab({
+      device: runtimeWith("dsh", [DSH_DEFAULT, DSH_ACCOUNT2]),
     });
 
     await openDrawer();
@@ -635,13 +595,13 @@ describe("AgentAccountsTab drawer", () => {
     ).toBeDisabled();
     saveAndSwitch();
 
-    expect(getAgentEnv).not.toHaveBeenCalled();
     expect(updateAgentEnv).not.toHaveBeenCalled();
+    expect(onSave).not.toHaveBeenCalled();
   });
 
   it("forgets a selection that was never saved", async () => {
     renderTab({
-      device: runtimeWith("antigravity", [AGY_DEFAULT, AGY_ACCOUNT2]),
+      device: runtimeWith("dsh", [DSH_DEFAULT, DSH_ACCOUNT2]),
     });
 
     await openDrawer();
@@ -662,76 +622,48 @@ describe("AgentAccountsTab drawer", () => {
   });
 });
 
-// The AGY slot list is an agent field (`runtime_config.agy_slots`) the backend
-// rotates over, so the drawer's add/drop controls have to reach it — and reach
-// it in the same request as the binding, never before "save and switch".
-describe("AgentAccountsTab agy slots", () => {
+// The slot list is an agent field (`runtime_config.<cli>_slots`), so the
+// drawer's add/drop controls have to reach it — and reach it in the same save
+// as the binding, never before "save and switch".
+describe("AgentAccountsTab numbered slots", () => {
   const twoSlots: Agent = {
     ...baseAgent,
-    custom_args: ["--gemini_dir", AGY_DEFAULT.home],
-    runtime_config: { agy_slots: { accounts: [1, 2] } },
+    runtime_config: { dsh_slots: { accounts: [1, 2] } },
   };
-
-  it("adds a numbered slot and submits it with the switch in one write", async () => {
-    const { onSave } = renderTab({
-      device: runtimeWith("antigravity", [AGY_DEFAULT, AGY_ACCOUNT2]),
-      agent: twoSlots,
-    });
-
-    await openDrawer();
-    // Slot 3 has no directory on disk, so the daemon never reported it: the
-    // row exists because the agent's own slot list says it may rotate there.
-    fireEvent.click(
-      screen.getByRole("button", { name: "Add Antigravity account 3" }),
-    );
-    expect(screen.getByRole("radio", { name: /account3/ })).toBeInTheDocument();
-
-    selectAccount(/account3/);
-    saveAndSwitch();
-
-    expect(onSave).toHaveBeenCalledTimes(1);
-    expect(onSave).toHaveBeenCalledWith({
-      custom_args: ["--gemini_dir", `${RUNTIME_HOME}/.gemini-account3`],
-      runtime_config: { agy_slots: { accounts: [1, 2, 3] } },
-    });
-    expect(updateAgentEnv).not.toHaveBeenCalled();
-  });
 
   it("saves a slot drop on its own, without touching the binding", async () => {
     const { onSave } = renderTab({
-      device: runtimeWith("antigravity", [AGY_DEFAULT, AGY_ACCOUNT2]),
+      device: runtimeWith("dsh", [DSH_DEFAULT, DSH_ACCOUNT2]),
       agent: {
         ...twoSlots,
-        runtime_config: { agy_slots: { accounts: [1, 2, 3] } },
+        runtime_config: { dsh_slots: { accounts: [1, 2, 3] } },
       },
     });
 
     await openDrawer();
     // Dropping a slot that is neither selected nor in effect only changes the
-    // rotation list, so the write carries no `custom_args`.
-    fireEvent.click(screen.getByRole("button", { name: "Remove Antigravity account 3 from this agent" }));
+    // slot list, so nothing is written to the env.
+    fireEvent.click(screen.getByRole("button", { name: "Remove DSH account 3 from this agent" }));
     saveAndSwitch();
 
-    expect(onSave).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
     expect(onSave).toHaveBeenCalledWith({
-      runtime_config: { agy_slots: { accounts: [1, 2] } },
+      runtime_config: { dsh_slots: { accounts: [1, 2] } },
     });
     expect(updateAgentEnv).not.toHaveBeenCalled();
   });
 
   it("falls back to slot 1 when the dropped slot was the one selected", async () => {
+    envBinding({ DSH_HOME: `${RUNTIME_HOME}/.dsh-account2` });
     const { onSave } = renderTab({
-      device: runtimeWith("antigravity", [AGY_DEFAULT, AGY_ACCOUNT2]),
-      agent: {
-        ...twoSlots,
-        custom_args: ["--gemini_dir", AGY_ACCOUNT2.home],
-      },
+      device: runtimeWith("dsh", [DSH_DEFAULT]),
+      agent: twoSlots,
     });
 
     await openDrawer();
     // Opening selects the account in effect, so dropping it must move the
     // selection back to slot 1 rather than leave a row that no longer exists.
-    fireEvent.click(screen.getByRole("button", { name: "Remove Antigravity account 2 from this agent" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove DSH account 2 from this agent" }));
 
     expect(
       screen.queryByRole("radio", { name: /account2/ }),
@@ -742,22 +674,24 @@ describe("AgentAccountsTab agy slots", () => {
     );
 
     saveAndSwitch();
-    expect(onSave).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
     expect(onSave).toHaveBeenCalledWith({
-      custom_args: ["--gemini_dir", AGY_DEFAULT.home],
-      runtime_config: { agy_slots: { accounts: [1] } },
+      runtime_config: { dsh_slots: { accounts: [1] } },
+    });
+    expect(updateAgentEnv).toHaveBeenCalledWith("agent-1", {
+      custom_env: { DSH_HOME: DSH_DEFAULT.home },
     });
   });
 
   it("sends nothing when the drawer closes with slot edits unsaved", async () => {
     const { onSave } = renderTab({
-      device: runtimeWith("antigravity", [AGY_DEFAULT, AGY_ACCOUNT2]),
+      device: runtimeWith("dsh", [DSH_DEFAULT, DSH_ACCOUNT2]),
       agent: twoSlots,
     });
 
     await openDrawer();
     fireEvent.click(
-      screen.getByRole("button", { name: "Add Antigravity account 3" }),
+      screen.getByRole("button", { name: "Add DSH account 3" }),
     );
     expect(
       screen.getByRole("button", { name: /save and switch/i }),
@@ -778,27 +712,18 @@ describe("AgentAccountsTab agy slots", () => {
   });
 
   // Regression: an agent bound to a numbered directory its stored slot list
-  // omits — a state the retired custom-path field could save, since it wrote
-  // `--gemini_dir` without touching the list. Dropping that row left the
-  // account in effect unselectable and made every slot edit fail with
-  // "this account cannot be switched from here", losing the edit.
+  // omits. Dropping that row left the account in effect unselectable and made
+  // every slot edit fail with "this account cannot be switched from here".
   it("keeps the numbered account in effect even when the stored list omits it", async () => {
-    const AGY_ACCOUNT5 = account(
-      "agy",
-      "account5",
-      `${RUNTIME_HOME}/.gemini-account5`,
-      { lever: "custom_args:--gemini_dir" },
-    );
+    const DSH_ACCOUNT5 = account("dsh", "account5", `${RUNTIME_HOME}/.dsh-account5`, {
+      lever: "env:DSH_HOME",
+    });
+    envBinding({ DSH_HOME: DSH_ACCOUNT5.home });
     const { onSave } = renderTab({
-      device: runtimeWith("antigravity", [
-        AGY_DEFAULT,
-        AGY_ACCOUNT2,
-        AGY_ACCOUNT5,
-      ]),
+      device: runtimeWith("dsh", [DSH_DEFAULT, DSH_ACCOUNT2, DSH_ACCOUNT5]),
       agent: {
         ...baseAgent,
-        custom_args: ["--gemini_dir", AGY_ACCOUNT5.home],
-        runtime_config: { agy_slots: { accounts: [1, 2, 3] } },
+        runtime_config: { dsh_slots: { accounts: [1, 2, 3] } },
       },
     });
 
@@ -808,35 +733,32 @@ describe("AgentAccountsTab agy slots", () => {
       "true",
     );
 
-    // A slot edit still commits, and the write repairs the pair: the account
-    // the agent launches with is now also one it may rotate to.
-    fireEvent.click(screen.getByRole("button", { name: "Remove Antigravity account 3 from this agent" }));
+    // A slot edit still commits, and the account in effect stays listed.
+    fireEvent.click(screen.getByRole("button", { name: "Remove DSH account 3 from this agent" }));
     saveAndSwitch();
 
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
     expect(onSave).toHaveBeenCalledWith({
-      runtime_config: { agy_slots: { accounts: [1, 2, 5] } },
+      runtime_config: { dsh_slots: { accounts: [1, 2, 5] } },
     });
+    expect(updateAgentEnv).not.toHaveBeenCalled();
     expect(toast.error).not.toHaveBeenCalled();
   });
 
-  // The case above has the daemon reporting the bound directory. A slot bound
-  // straight after `add numbered account` has no directory on disk yet, so the
-  // report cannot carry it and the row exists only as the synthesised
-  // "signed out" one. Resolving the account in effect against the raw report
-  // then claimed no local account matched while listing that exact account as
-  // an "other account" one line below, and left every radio unchecked.
+  // A slot bound straight after `add numbered account` has no directory on
+  // disk yet, so the report cannot carry it and the row exists only as the
+  // synthesised "signed out" one. It must still be the account in effect.
   it("keeps a numbered account in effect when its directory is not on disk yet", async () => {
+    envBinding({ DSH_HOME: `${RUNTIME_HOME}/.dsh-account4` });
     renderTab({
-      device: runtimeWith("antigravity", [AGY_DEFAULT]),
+      device: runtimeWith("dsh", [DSH_DEFAULT]),
       agent: {
         ...baseAgent,
-        custom_args: ["--gemini_dir", `${RUNTIME_HOME}/.gemini-account4`],
-        runtime_config: { agy_slots: { accounts: [1, 4] } },
+        runtime_config: { dsh_slots: { accounts: [1, 4] } },
       },
     });
 
-    expect(await screen.findByText("Antigravity · account4")).toBeInTheDocument();
+    expect(await screen.findByText("DSH · account4")).toBeInTheDocument();
     expect(screen.getByText("In use")).toBeInTheDocument();
     expect(screen.queryByText(/no account on this machine/i)).toBeNull();
 
@@ -849,21 +771,21 @@ describe("AgentAccountsTab agy slots", () => {
 
   // The summary bar answers "what is in effect", which only a save can change.
   it("does not let an unsaved slot edit move the account in effect", async () => {
+    envBinding({ DSH_HOME: `${RUNTIME_HOME}/.dsh-account4` });
     renderTab({
-      device: runtimeWith("antigravity", [AGY_DEFAULT]),
+      device: runtimeWith("dsh", [DSH_DEFAULT]),
       agent: {
         ...baseAgent,
-        custom_args: ["--gemini_dir", `${RUNTIME_HOME}/.gemini-account4`],
-        runtime_config: { agy_slots: { accounts: [1, 4] } },
+        runtime_config: { dsh_slots: { accounts: [1, 4] } },
       },
     });
 
     await openDrawer();
-    fireEvent.click(screen.getByRole("button", { name: "Remove Antigravity account 4 from this agent" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove DSH account 4 from this agent" }));
 
     // Slot 4 is gone from the pending list, but nothing is saved: the account
     // in effect is still the one the agent launches with.
-    expect(screen.getByText("Antigravity · account4")).toBeInTheDocument();
+    expect(screen.getByText("DSH · account4")).toBeInTheDocument();
   });
 });
 
@@ -873,12 +795,9 @@ describe("AgentAccountsTab agy slots", () => {
 // or one locale silently falls back to English.
 // DENE-678: the slot registry is per CLI family. The parse/write matrix lives in
 // `account-slots.test.ts` and the add/drop rules in
-// `agent-accounts-model.test.ts`; this block only checks that a non-agy family
-// is wired to the same controls and the same single write path.
-describe("AgentAccountsTab slots of a family that does not rotate", () => {
-  const CLAUDE_DEFAULT = account("claude", "default", `${RUNTIME_HOME}/.claude`, {
-    lever: "env:CLAUDE_CONFIG_DIR",
-  });
+// `agent-accounts-model.test.ts`; this block only checks that each family is
+// wired to the same controls and the same single write path.
+describe("AgentAccountsTab slots per CLI family", () => {
 
   it("registers a dsh account, binds DSH_HOME to it and stores dsh_slots", async () => {
     const { onSave } = renderTab({
@@ -904,7 +823,8 @@ describe("AgentAccountsTab slots of a family that does not rotate", () => {
     expect(updateAgentEnv).toHaveBeenCalledWith("agent-1", {
       custom_env: { DSH_HOME: `${RUNTIME_HOME}/.dsh-account2` },
     });
-    // Only the edited family is written; agy's stored key rides along untouched.
+    // Only the edited family is written; a retired agy_slots key rides along
+    // untouched.
     expect(onSave).toHaveBeenCalledWith({
       runtime_config: {
         agy_slots: { accounts: [1, 2] },
@@ -949,14 +869,15 @@ describe("AgentAccountsTab slots of a family that does not rotate", () => {
     expect(screen.getByRole("button", { name: "Add DSH account 4" })).toBeInTheDocument();
   });
 
-  it("tells a rotating group apart from a manual one", async () => {
+  it("says a manual group, a read-only agy group and a task-scoped one apart", async () => {
     renderTab({
-      device: runtimeWith("antigravity", [AGY_DEFAULT, DSH_DEFAULT, CODEX_DEFAULT]),
+      device: runtimeWith("dsh", [AGY_DEFAULT, DSH_DEFAULT, CODEX_DEFAULT]),
     });
 
     await openDrawer();
-    expect(screen.getByText(/switches to the next signed-in account/i)).toBeInTheDocument();
+    expect(screen.queryByText(/switches to the next signed-in account/i)).toBeNull();
     expect(screen.getByText(/no automatic switching/i)).toBeInTheDocument();
+    expect(screen.getByText(/cannot be switched from here/i)).toBeInTheDocument();
     expect(screen.getByText(/gets its own Codex directory/i)).toBeInTheDocument();
   });
 });

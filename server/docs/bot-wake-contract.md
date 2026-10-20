@@ -424,8 +424,10 @@ without a Bot. When a channel turns bad the person gets one in-app notice per
 outage and every open call returns to the app, including calls still waiting
 after the notice.
 
-### Activity stream (DENE-1935)
+### Activity stream (DENE-1935, retired)
 
-The same outbox also carries the full activity stream (`type: "activity"`) for
-people who switched `activity_scope` on. Contract, tags and receipts:
-[bot-activity-contract.md](bot-activity-contract.md).
+The full activity stream (`type: "activity"`) is retired. Rows it queued before
+the upgrade are cancelled, not sent, and `GET .../activity` and
+`POST .../wake/events/{id}/handled` answer 404. `activity_scope` now only says
+whether office events that need nobody are pushed too
+([office-event-contract.md](office-event-contract.md)).

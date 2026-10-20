@@ -163,10 +163,7 @@ func (h *Handler) canAccessPrivateAgent(ctx context.Context, agent db.Agent, act
 	if roleAllowed(member.Role, "owner", "admin") {
 		return true
 	}
-	// DENE-808: a pass holder can open the agent they were granted. A
-	// doorbell-enabled agent is only LISTED to members (see
-	// memberAllowedToViewAgent) — ringing needs the name in the picker, not
-	// the configuration behind the detail page.
+	// DENE-808: a pass holder can open the agent they were granted.
 	if h.hasActiveAccessPass(ctx, agent.ID, actorID) {
 		return true
 	}
@@ -221,13 +218,9 @@ func memberAllowedToViewAgent(agent db.Agent, targets []db.AgentInvocationTarget
 	if uuidToString(agent.OwnerID) == userID {
 		return true
 	}
-	// DENE-808: doorbell-enabled agents are listed so a member can @ them and
-	// ring the bell; pass holders see the agent they were granted. Passes are
+	// DENE-808: pass holders see the agent they were granted. Passes are
 	// checked by the caller via memberAllowedToViewAgentWithPasses so the list
 	// endpoint keeps its single batch load.
-	if agent.DoorbellEnabled {
-		return true
-	}
 	if agent.PermissionMode != "public_to" {
 		return false
 	}

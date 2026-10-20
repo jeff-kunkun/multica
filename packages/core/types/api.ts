@@ -738,10 +738,9 @@ export interface BotConnectInfo {
 // back in the app).
 export type BotBindingState = "none" | "unverified" | "ok" | "broken";
 export type BotBindingMode = "bot_first" | "mirror";
-// Full activity stream (DENE-1935): which tickets and chats feed the Bot.
-// Empty means the stream is off.
-// "owner_visible_all" (DENE-1936) is everything you can see in the workspace:
-// PRs, runs, projects, settings, members, agents and every other write.
+// Whether office events that need nobody are pushed to the Bot too:
+// "owner_visible_all" is on, empty is off. "owned" and "followed" are still
+// stored for older clients and count as off.
 export type BotActivityScope = "owned" | "followed" | "owner_visible_all";
 
 /** One write a Bot made in a person's name (DENE-1936): route and field names only. */
@@ -827,7 +826,7 @@ export interface BotBinding {
   bot_id?: string;
   bot_name?: string;
   mode?: BotBindingMode;
-  /** Always an array; [] = activity stream off. */
+  /** Always an array; [] = office events that need nobody are not pushed. */
   activity_scope?: BotActivityScope[];
   resend_after_seconds?: number;
   escalate_after_seconds?: number;

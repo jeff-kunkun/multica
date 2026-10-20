@@ -59,13 +59,16 @@ function runtimeWith(entries: unknown, error?: unknown): { metadata: Record<stri
   };
 }
 
+// agy is reported read-only: its own `~/.gemini`, no lever.
 const AGY_DEFAULT = account({
   cli: "agy",
   account: "default",
   home: `${RUNTIME_HOME}/.gemini`,
-  lever: "custom_args:--gemini_dir",
+  lever: "",
 });
-const AGY_ACCOUNT2 = account({
+// What a 0.6.x daemon still reports: a numbered directory with the retired
+// `--gemini_dir` lever, which this client no longer writes.
+const AGY_LEGACY_ACCOUNT2 = account({
   cli: "agy",
   account: "account2",
   home: `${RUNTIME_HOME}/.gemini-account2`,
@@ -99,6 +102,12 @@ const CLAUDE_DEFAULT = account({
   cli: "claude",
   account: "default",
   home: `${RUNTIME_HOME}/.claude`,
+  lever: "env:CLAUDE_CONFIG_DIR",
+});
+const CLAUDE_ACCOUNT2 = account({
+  cli: "claude",
+  account: "account2",
+  home: `${RUNTIME_HOME}/.claude-account2`,
   lever: "env:CLAUDE_CONFIG_DIR",
 });
 const CURSOR_DEFAULT = account({
@@ -284,10 +293,10 @@ describe("parseAgentAccounts", () => {
 describe("groupAccountsByCli", () => {
   const fiveClis = [
     CURSOR_DEFAULT,
-    account({ cli: "agy", account: "account10", home: `${RUNTIME_HOME}/.gemini-account10`, lever: "custom_args:--gemini_dir" }),
+    account({ cli: "dsh", account: "account10", home: `${RUNTIME_HOME}/.dsh-account10`, lever: "env:DSH_HOME" }),
     AGY_DEFAULT,
     DSH_DEFAULT,
-    account({ cli: "agy", account: "account2", home: `${RUNTIME_HOME}/.gemini-account2`, lever: "custom_args:--gemini_dir" }),
+    DSH_ACCOUNT2,
     CLAUDE_DEFAULT,
     CODEX_DEFAULT,
   ];
@@ -297,13 +306,13 @@ describe("groupAccountsByCli", () => {
 
     expect(groups.map((group) => group.cli)).toEqual(["dsh", "agy", "codex", "claude", "cursor"]);
     expect(groups.map((group) => group.cli)).toEqual([...AGENT_ACCOUNT_CLIS]);
-    expect(groups[1]?.accounts.map((entry) => entry.account)).toEqual([
+    expect(groups[0]?.accounts.map((entry) => entry.account)).toEqual([
       "default",
       "account2",
       "account10",
     ]);
-    expect(groups[1]?.lever).toBe("custom_args:--gemini_dir");
-    expect(groups.map((group) => group.switchable)).toEqual([true, true, false, true, false]);
+    expect(groups[0]?.lever).toBe("env:DSH_HOME");
+    expect(groups.map((group) => group.switchable)).toEqual([true, false, false, true, false]);
     expect(groups[4]?.lever).toBe("");
   });
 
@@ -314,7 +323,14 @@ describe("groupAccountsByCli", () => {
       );
 
     expect(ids([...fiveClis].reverse())).toEqual(ids(fiveClis));
-    expect(ids([AGY_ACCOUNT2, CURSOR_DEFAULT, DSH_DEFAULT])).toEqual(ids([DSH_DEFAULT, AGY_ACCOUNT2, CURSOR_DEFAULT]));
+    expect(ids([DSH_ACCOUNT2, CURSOR_DEFAULT, AGY_DEFAULT])).toEqual(ids([AGY_DEFAULT, DSH_ACCOUNT2, CURSOR_DEFAULT]));
+  });
+
+  it("keeps an older daemon's agy directories, read-only", () => {
+    const [group] = groupAccountsByCli([AGY_LEGACY_ACCOUNT2, AGY_DEFAULT]);
+
+    expect(group?.accounts.map((entry) => entry.account)).toEqual(["default", "account2"]);
+    expect(group?.switchable).toBe(false);
   });
 
   it("omits CLIs without accounts", () => {
@@ -324,11 +340,11 @@ describe("groupAccountsByCli", () => {
 });
 
 describe("withAccountSlots", () => {
-  const AGY_CUSTOM = account({
-    cli: "agy",
+  const DSH_CUSTOM = account({
+    cli: "dsh",
     account: "work",
-    home: `${RUNTIME_HOME}/.gemini-work`,
-    lever: "custom_args:--gemini_dir",
+    home: `${RUNTIME_HOME}/.dsh-work`,
+    lever: "env:DSH_HOME",
   });
   const CLAUDE_DEFAULT = account({
     cli: "claude",
@@ -342,22 +358,22 @@ describe("withAccountSlots", () => {
 
   it("keeps a reported slot row and synthesizes the ones without a directory", () => {
     const merged = withAccountSlots(
-      [AGY_DEFAULT, AGY_ACCOUNT2],
-      { agy: [1, 2, 3] },
+      [DSH_DEFAULT, DSH_ACCOUNT2],
+      { dsh: [1, 2, 3] },
       RUNTIME_HOME,
     );
 
-    expect(groupIds(merged, "agy")).toEqual(["default", "account2", "account3"]);
+    expect(groupIds(merged, "dsh")).toEqual(["default", "account2", "account3"]);
     // A reported row keeps the daemon's own directory and sign-in state.
-    expect(merged[1]).toBe(AGY_ACCOUNT2);
+    expect(merged[1]).toBe(DSH_ACCOUNT2);
     const synthesized = merged.find((entry) => entry.account === "account3");
     expect(synthesized).toEqual({
-      cli: "agy",
+      cli: "dsh",
       account: "account3",
-      home: `${RUNTIME_HOME}/.gemini-account3`,
+      home: `${RUNTIME_HOME}/.dsh-account3`,
       base_url: "",
       key_ref: "",
-      lever: "custom_args:--gemini_dir",
+      lever: "env:DSH_HOME",
       signed_in: false,
       quota_reset_at: 0,
     });
@@ -388,16 +404,16 @@ describe("withAccountSlots", () => {
     });
   });
 
-  it("drops a numbered agy directory the rotation list does not carry", () => {
-    const merged = withAccountSlots([AGY_DEFAULT, AGY_ACCOUNT2], { agy: [1] }, RUNTIME_HOME);
+  it("passes agy through as reported, whatever an old agy_slots list says", () => {
+    const merged = withAccountSlots([AGY_DEFAULT, AGY_LEGACY_ACCOUNT2], { agy: [1, 3] }, RUNTIME_HOME);
 
-    expect(ids(merged)).toEqual(["default"]);
+    expect(merged).toEqual([AGY_DEFAULT, AGY_LEGACY_ACCOUNT2]);
   });
 
   it("keeps a reported directory of a manual family whatever its list says", () => {
     // `~/.dsh-account2` was switchable before slots existed. An agent that
-    // never saved a dsh list must not lose it — the list of a family that does
-    // not rotate only ever ADDS rows.
+    // never saved a dsh list must not lose it — a family's list only ever ADDS
+    // rows.
     const merged = withAccountSlots([DSH_DEFAULT, DSH_ACCOUNT2], { dsh: [1] }, RUNTIME_HOME);
 
     expect(groupIds(merged, "dsh")).toEqual(["default", "account2"]);
@@ -409,18 +425,18 @@ describe("withAccountSlots", () => {
   });
 
   it("always carries slot 1, even from an empty list", () => {
-    const merged = withAccountSlots([AGY_CUSTOM], { agy: [] }, RUNTIME_HOME);
+    const merged = withAccountSlots([DSH_CUSTOM], { dsh: [] }, RUNTIME_HOME);
 
     expect(ids(merged)).toEqual(["work", "default"]);
-    expect(merged[1]?.home).toBe(`${RUNTIME_HOME}/.gemini`);
+    expect(merged[1]?.home).toBe(`${RUNTIME_HOME}/.dsh`);
   });
 
   it("never invents a group for a CLI the machine did not report", () => {
-    // A dsh-only host must not grow a synthesized AGY or Claude group: there
-    // is no surface to edit there.
+    // A dsh-only host must not grow a synthesized Claude group: there is no
+    // surface to edit there.
     const merged = withAccountSlots(
       [DSH_DEFAULT, CODEX_DEFAULT],
-      { agy: [1, 2, 3], claude: [1, 2] },
+      { claude: [1, 2] },
       RUNTIME_HOME,
     );
 
@@ -438,41 +454,40 @@ describe("withAccountSlots", () => {
 
   it("leaves accounts outside the numbered convention and every other CLI alone", () => {
     const merged = withAccountSlots(
-      [AGY_DEFAULT, AGY_CUSTOM, DSH_DEFAULT, CODEX_DEFAULT],
-      { agy: [1, 5] },
+      [DSH_DEFAULT, DSH_CUSTOM, AGY_DEFAULT, CODEX_DEFAULT],
+      { dsh: [1, 5] },
       RUNTIME_HOME,
     );
 
-    // The custom AGY directory and both non-agy rows pass through untouched —
-    // a custom `--gemini_dir` is a real directory an agent may be bound to, so
+    // The custom DSH directory and both non-dsh rows pass through untouched —
+    // a custom DSH_HOME is a real directory an agent may be bound to, so
     // hiding it would leave the account in effect without a row.
-    expect(merged).toContain(AGY_CUSTOM);
-    expect(merged).toContain(DSH_DEFAULT);
+    expect(merged).toContain(DSH_CUSTOM);
+    expect(merged).toContain(AGY_DEFAULT);
     expect(merged).toContain(CODEX_DEFAULT);
     expect(merged).toHaveLength(5);
     // Inside the group `default` leads and the numbered slot sorts before the
     // named custom directory, exactly as the group sort already did.
-    expect(groupIds(merged, "agy")).toEqual(["default", "account5", "work"]);
+    expect(groupIds(merged, "dsh")).toEqual(["default", "account5", "work"]);
   });
 
   it("keeps a synthesized directory relative when the host home is unknown", () => {
-    const merged = withAccountSlots([AGY_DEFAULT], { agy: [1, 2] }, null);
+    const merged = withAccountSlots([DSH_DEFAULT], { dsh: [1, 2] }, null);
 
     // `planAccountSwitch` refuses a relative home, so an unresolved host home
     // ends as "this account cannot be bound" rather than a guessed path.
     expect(merged.find((entry) => entry.account === "account2")?.home).toBe(
-      ".gemini-account2",
+      ".dsh-account2",
     );
   });
 
   it("names the slot directories the same way the daemon does", () => {
     expect(slotAccountId(1)).toBe("default");
     expect(slotAccountId(2)).toBe("account2");
-    expect(accountSlotNumberOf(AGY_DEFAULT)).toBe(1);
-    expect(accountSlotNumberOf(AGY_ACCOUNT2)).toBe(2);
-    expect(accountSlotNumberOf(AGY_CUSTOM)).toBeNull();
     expect(accountSlotNumberOf(DSH_DEFAULT)).toBe(1);
     expect(accountSlotNumberOf(DSH_ACCOUNT2)).toBe(2);
+    expect(accountSlotNumberOf(DSH_CUSTOM)).toBeNull();
+    expect(accountSlotNumberOf(AGY_LEGACY_ACCOUNT2)).toBeNull();
     // No family, no slot — whatever the directory happens to be called.
     expect(accountSlotNumberOf(CODEX_DEFAULT)).toBeNull();
     expect(accountSlotNumberOf({ cli: "codex", account: "account2" })).toBeNull();
@@ -483,7 +498,8 @@ describe("nextSlotForGroup", () => {
   const groupOf = (accounts: AgentAccount[]) => groupAccountsByCli(accounts)[0]!;
 
   it("offers the first free number to every family with a writable lever", () => {
-    expect(nextSlotForGroup(groupOf([AGY_DEFAULT]), { agy: [1, 2, 3] })).toBe(4);
+    expect(nextSlotForGroup(groupOf([DSH_DEFAULT]), { dsh: [1, 2, 3] })).toBe(4);
+    expect(nextSlotForGroup(groupOf([CLAUDE_DEFAULT]), { claude: [1] })).toBe(2);
     expect(nextSlotForGroup(groupOf([DSH_DEFAULT]), { dsh: [1] })).toBe(2);
     expect(nextSlotForGroup(groupOf([DSH_DEFAULT]), {})).toBe(2);
   });
@@ -494,6 +510,7 @@ describe("nextSlotForGroup", () => {
 
   it("offers nothing to a CLI without a family, whatever lever it reports", () => {
     expect(nextSlotForGroup(groupOf([CODEX_DEFAULT]), {})).toBeNull();
+    expect(nextSlotForGroup(groupOf([AGY_DEFAULT]), { agy: [1, 2] })).toBeNull();
     // Even a future daemon advertising a lever cannot conjure a registry: the
     // family table is what says a bound slot reaches the task.
     const levered = account({
@@ -522,11 +539,7 @@ describe("nextSlotForGroup", () => {
 });
 
 describe("removableSlots", () => {
-  it("lets every numbered agy slot go, because the list IS the rotation set", () => {
-    expect(removableSlots([AGY_DEFAULT, AGY_ACCOUNT2], { agy: [1, 2, 3] }).agy).toEqual([2, 3]);
-  });
-
-  it("only drops a manual family's slot that exists nowhere but in the list", () => {
+  it("only drops a slot that exists nowhere but in the list", () => {
     // account2 is on disk: the daemon keeps reporting it, so a drop would be a
     // control that does nothing.
     expect(removableSlots([DSH_DEFAULT, DSH_ACCOUNT2], { dsh: [1, 2, 3] }).dsh).toEqual([3]);
@@ -542,12 +555,9 @@ describe("removableSlots", () => {
 describe("boundDirectoryFor", () => {
   it("reads each family's binding from the place its lever writes", () => {
     const binding = {
-      custom_args: ["--gemini_dir", "/Users/you/.gemini-account2"],
       custom_env: { DSH_HOME: " /Users/you/.dsh-account3 " },
     };
-    expect(boundDirectoryFor(binding, accountSlotFamily("agy")!)).toBe(
-      "/Users/you/.gemini-account2",
-    );
+    expect(accountSlotFamily("agy")).toBeNull();
     expect(boundDirectoryFor(binding, accountSlotFamily("dsh")!)).toBe(
       "/Users/you/.dsh-account3",
     );
@@ -558,28 +568,23 @@ describe("boundDirectoryFor", () => {
 
 describe("lever vocabulary", () => {
   it("parses the contract levers and rejects unknown shapes", () => {
-    expect(parseAccountLever("custom_args:--gemini_dir")).toEqual({
-      kind: "custom_args",
-      flag: "--gemini_dir",
-    });
     expect(parseAccountLever("env:DSH_HOME")).toEqual({ kind: "env", key: "DSH_HOME" });
     expect(parseAccountLever("")).toEqual({ kind: "none" });
     expect(parseAccountLever(null)).toEqual({ kind: "none" });
     expect(parseAccountLever("env:not a key")).toEqual({ kind: "unknown" });
     expect(parseAccountLever("fs:/tmp/account")).toEqual({ kind: "unknown" });
+    // agy's retired lever, as a 0.6.x daemon still reports it.
+    expect(parseAccountLever("custom_args:--gemini_dir")).toEqual({ kind: "unknown" });
   });
 
   it("marks only writable levers as switchable", () => {
     expect(isSwitchableLever("env:DSH_HOME")).toBe(true);
-    expect(isSwitchableLever("custom_args:--gemini_dir")).toBe(true);
     expect(isSwitchableLever("")).toBe(false);
-    // A newer daemon's flag is not something this client can write.
-    expect(isSwitchableLever("custom_args:--gemini_profile")).toBe(false);
+    expect(isSwitchableLever("custom_args:--gemini_dir")).toBe(false);
   });
 
   it("labels group headers with the lever the user must understand", () => {
     expect(accountLeverLabel("env:DSH_HOME")).toBe("DSH_HOME");
-    expect(accountLeverLabel("custom_args:--gemini_dir")).toBe("--gemini_dir");
     expect(accountLeverLabel("")).toBe("");
     expect(accountLeverLabel("fs:/tmp/account")).toBe("fs:/tmp/account");
   });
@@ -594,79 +599,54 @@ describe("lever vocabulary", () => {
 });
 
 describe("resolveCurrentAccount", () => {
-  const agyAccounts = [AGY_DEFAULT, AGY_ACCOUNT2];
-
-  it("reads agy's binding out of --gemini_dir, in both argument forms", () => {
-    expect(
-      resolveCurrentAccount(
-        { custom_args: ["--gemini_dir", AGY_ACCOUNT2.home], provider: "antigravity" },
-        agyAccounts,
-      ),
-    ).toEqual(AGY_ACCOUNT2);
-    expect(
-      resolveCurrentAccount(
-        { custom_args: [`--gemini_dir=${AGY_ACCOUNT2.home}`], provider: "antigravity" },
-        agyAccounts,
-      ),
-    ).toEqual(AGY_ACCOUNT2);
-  });
+  const dshAccounts = [DSH_DEFAULT, DSH_ACCOUNT2];
 
   it("expands a ~ binding with the runtime host home", () => {
     expect(
       resolveCurrentAccount(
-        { custom_args: ["--gemini_dir", "~/.gemini-account2"], runtime_home: RUNTIME_HOME },
-        agyAccounts,
+        { custom_env: { DSH_HOME: "~/.dsh-account2" }, runtime_home: RUNTIME_HOME },
+        dshAccounts,
       ),
-    ).toEqual(AGY_ACCOUNT2);
+    ).toEqual(DSH_ACCOUNT2);
   });
 
   it("falls back to the CLI's default account while the lever is unbound", () => {
-    expect(resolveCurrentAccount({ custom_args: [], provider: "antigravity" }, agyAccounts)).toEqual(
-      AGY_DEFAULT,
-    );
-    expect(resolveCurrentAccount({ custom_env: {}, provider: "dsh" }, [DSH_DEFAULT, DSH_ACCOUNT2])).toEqual(
+    expect(resolveCurrentAccount({ custom_env: {}, provider: "dsh" }, dshAccounts)).toEqual(
       DSH_DEFAULT,
     );
   });
 
+  it("describes agy by its own directory, even next to an older daemon's numbered one", () => {
+    expect(
+      resolveCurrentAccount({ provider: "antigravity" }, [AGY_DEFAULT, AGY_LEGACY_ACCOUNT2]),
+    ).toEqual(AGY_DEFAULT);
+  });
+
   it("returns null when the bound directory belongs to no reported account", () => {
     expect(
-      resolveCurrentAccount(
-        { custom_args: ["--gemini_dir", "/opt/other/.gemini"], provider: "antigravity" },
-        agyAccounts,
-      ),
-    ).toBeNull();
-    expect(
-      resolveCurrentAccount({ custom_env: { DSH_HOME: "/opt/other/.dsh" }, provider: "dsh" }, [
-        DSH_DEFAULT,
-        DSH_ACCOUNT2,
-      ]),
+      resolveCurrentAccount({ custom_env: { DSH_HOME: "/opt/other/.dsh" }, provider: "dsh" }, dshAccounts),
     ).toBeNull();
   });
 
   it("reads env levers out of the agent's env map", () => {
     expect(
-      resolveCurrentAccount({ custom_env: { DSH_HOME: DSH_ACCOUNT2.home }, provider: "dsh" }, [
-        DSH_DEFAULT,
-        DSH_ACCOUNT2,
-      ]),
+      resolveCurrentAccount({ custom_env: { DSH_HOME: DSH_ACCOUNT2.home }, provider: "dsh" }, dshAccounts),
     ).toEqual(DSH_ACCOUNT2);
   });
 
   it("scopes to the runtime's CLI, so another CLI's binding cannot win", () => {
-    const accounts = [AGY_DEFAULT, AGY_ACCOUNT2, DSH_DEFAULT, DSH_ACCOUNT2];
+    const accounts = [DSH_DEFAULT, DSH_ACCOUNT2, CLAUDE_DEFAULT, CLAUDE_ACCOUNT2];
     const agent = {
-      provider: "antigravity",
-      custom_args: ["--gemini_dir", AGY_ACCOUNT2.home],
-      custom_env: { DSH_HOME: DSH_ACCOUNT2.home },
+      provider: "claude",
+      custom_env: { DSH_HOME: DSH_ACCOUNT2.home, CLAUDE_CONFIG_DIR: CLAUDE_ACCOUNT2.home },
     };
 
-    expect(resolveCurrentAccount(agent, accounts)).toEqual(AGY_ACCOUNT2);
+    expect(resolveCurrentAccount(agent, accounts)).toEqual(CLAUDE_ACCOUNT2);
     // Without a readable provider the explicit binding still decides, even
     // though dsh leads the canonical group order.
     expect(
-      resolveCurrentAccount({ custom_args: ["--gemini_dir", AGY_ACCOUNT2.home] }, accounts),
-    ).toEqual(AGY_ACCOUNT2);
+      resolveCurrentAccount({ custom_env: { CLAUDE_CONFIG_DIR: CLAUDE_ACCOUNT2.home } }, accounts),
+    ).toEqual(CLAUDE_ACCOUNT2);
   });
 
   it("returns null when there are no accounts at all", () => {
@@ -812,19 +792,6 @@ describe("accountsViewState", () => {
 });
 
 describe("planAccountSwitch", () => {
-  it("writes agy's binding back into custom_args, preserving other arguments", () => {
-    const plan = planAccountSwitch(
-      { custom_args: ["--verbose", "--gemini_dir", AGY_DEFAULT.home, "--model", "fast"] },
-      AGY_ACCOUNT2,
-      READY,
-    );
-
-    expect(plan).toEqual({
-      kind: "custom_args",
-      custom_args: ["--verbose", "--model", "fast", "--gemini_dir", AGY_ACCOUNT2.home],
-    });
-  });
-
   it("writes an env lever as a single key so the caller can leave other keys alone", () => {
     const plan = planAccountSwitch(
       { custom_env: { DSH_HOME: DSH_DEFAULT.home, OTHER_KEY: "keep-me" } },
@@ -844,14 +811,18 @@ describe("planAccountSwitch", () => {
       kind: "unsupported",
       reason: "no_lever",
     });
+    expect(planAccountSwitch({}, AGY_DEFAULT, READY)).toEqual({
+      kind: "unsupported",
+      reason: "no_lever",
+    });
   });
 
   it("reports a lever shape this client cannot write as unsupported", () => {
     const futureFlag = account({
-      cli: "agy",
+      cli: "dsh",
       account: "account2",
-      home: AGY_ACCOUNT2.home,
-      lever: "custom_args:--gemini_profile",
+      home: DSH_ACCOUNT2.home,
+      lever: "custom_args:--dsh_profile",
     });
     const futureScheme = account({
       cli: "dsh",
@@ -868,44 +839,51 @@ describe("planAccountSwitch", () => {
       kind: "unsupported",
       reason: "unsupported_lever",
     });
+    // A 0.6.x daemon still reports agy's retired `--gemini_dir` lever; this
+    // client no longer writes it.
+    expect(planAccountSwitch({}, AGY_LEGACY_ACCOUNT2, READY)).toEqual({
+      kind: "unsupported",
+      reason: "unsupported_lever",
+    });
   });
 
   it("does not write when the target is already the account in effect", () => {
     expect(
-      planAccountSwitch({ custom_args: ["--gemini_dir", AGY_ACCOUNT2.home] }, AGY_ACCOUNT2, READY),
+      planAccountSwitch({ custom_env: { DSH_HOME: DSH_ACCOUNT2.home } }, DSH_ACCOUNT2, READY),
     ).toEqual({ kind: "noop" });
     // Unbound lever: the CLI's own default directory is already in effect.
     expect(planAccountSwitch({ custom_env: {} }, DSH_DEFAULT, READY)).toEqual({ kind: "noop" });
   });
 
   it("never produces a write from loading, empty or error states", () => {
-    const target = AGY_ACCOUNT2;
+    const target = DSH_ACCOUNT2;
 
     for (const view of [
       { kind: "loading" },
       { kind: "empty" },
       { kind: "error", message: "EACCES: permission denied" },
     ] satisfies AccountsViewState[]) {
-      expect(planAccountSwitch({ custom_args: [] }, target, view)).toEqual({
+      expect(planAccountSwitch({ custom_env: {} }, target, view)).toEqual({
         kind: "unsupported",
         reason: "view_not_ready",
       });
     }
 
     // Control: the same target does write once the list is trustworthy.
-    expect(planAccountSwitch({ custom_args: [] }, target, READY).kind).toBe("custom_args");
-    expect(planAccountSwitch({ custom_args: [] }, target)).toEqual({
-      kind: "custom_args",
-      custom_args: ["--gemini_dir", target.home],
+    expect(planAccountSwitch({ custom_env: {} }, target, READY).kind).toBe("env");
+    expect(planAccountSwitch({ custom_env: {} }, target)).toEqual({
+      kind: "env",
+      key: "DSH_HOME",
+      value: target.home,
     });
   });
 
   it("requires a selected target", () => {
-    expect(planAccountSwitch({ custom_args: [] }, null, READY)).toEqual({
+    expect(planAccountSwitch({ custom_env: {} }, null, READY)).toEqual({
       kind: "unsupported",
       reason: "no_target",
     });
-    expect(planAccountSwitch({ custom_args: [] }, undefined, READY)).toEqual({
+    expect(planAccountSwitch({ custom_env: {} }, undefined, READY)).toEqual({
       kind: "unsupported",
       reason: "no_target",
     });
@@ -913,13 +891,13 @@ describe("planAccountSwitch", () => {
 
   it("refuses to write a home that is not an absolute path", () => {
     const relative = account({
-      cli: "agy",
+      cli: "dsh",
       account: "account2",
-      home: "relative/.gemini-account2",
-      lever: "custom_args:--gemini_dir",
+      home: "relative/.dsh-account2",
+      lever: "env:DSH_HOME",
     });
 
-    expect(planAccountSwitch({ custom_args: [] }, relative, READY)).toEqual({
+    expect(planAccountSwitch({ custom_env: {} }, relative, READY)).toEqual({
       kind: "unsupported",
       reason: "invalid_home",
     });
@@ -930,18 +908,18 @@ describe("planAccountSwitch", () => {
     const { accounts } = parseAgentAccounts(
       runtimeWith([
         {
-          cli: "agy",
+          cli: "dsh",
           account: "account2",
-          home: AGY_ACCOUNT2.home,
+          home: DSH_ACCOUNT2.home,
           key_ref: secret,
-          lever: "custom_args:--gemini_dir",
+          lever: "env:DSH_HOME",
         },
       ]),
     );
     const target = accounts[0];
     expect(target?.key_ref).toBe("");
 
-    const plan = planAccountSwitch({ custom_args: [] }, target, READY);
+    const plan = planAccountSwitch({ custom_env: {} }, target, READY);
     expect(JSON.stringify(plan)).not.toContain("PRIVATE KEY");
     expect(JSON.stringify(plan)).not.toContain("key_ref");
   });
@@ -968,7 +946,7 @@ describe("quotaSwitchCandidate", () => {
     view?: AccountsViewState;
   }) =>
     quotaSwitchCandidate({
-      binding: input.binding ?? { custom_args: [] },
+      binding: input.binding ?? { custom_env: {} },
       accounts: input.accounts,
       current: input.current,
       view: input.view ?? READY,
@@ -977,16 +955,17 @@ describe("quotaSwitchCandidate", () => {
 
   it("picks a signed-in sibling of the same CLI while the current one is spent", () => {
     const candidate = pick({
-      accounts: [spent(AGY_DEFAULT), AGY_ACCOUNT2, DSH_DEFAULT],
-      current: spent(AGY_DEFAULT),
+      accounts: [spent(CLAUDE_DEFAULT), CLAUDE_ACCOUNT2, DSH_DEFAULT],
+      current: spent(CLAUDE_DEFAULT),
     });
 
-    expect(candidate).toEqual(AGY_ACCOUNT2);
+    expect(candidate).toEqual(CLAUDE_ACCOUNT2);
     // The button is only worth rendering because this very plan writes: it is
     // the same gate "save and switch" goes through.
-    expect(planAccountSwitch({ custom_args: [] }, candidate, READY)).toEqual({
-      kind: "custom_args",
-      custom_args: ["--gemini_dir", AGY_ACCOUNT2.home],
+    expect(planAccountSwitch({ custom_env: {} }, candidate, READY)).toEqual({
+      kind: "env",
+      key: "CLAUDE_CONFIG_DIR",
+      value: CLAUDE_ACCOUNT2.home,
     });
   });
 
@@ -1006,9 +985,9 @@ describe("quotaSwitchCandidate", () => {
   });
 
   it("is deterministic and independent of the order the daemon reported", () => {
-    const accounts = [AGY_DEFAULT, AGY_ACCOUNT2, DSH_DEFAULT];
+    const accounts = [DSH_DEFAULT, DSH_ACCOUNT2, CLAUDE_DEFAULT];
     const reversed = [...accounts].reverse();
-    const current = spent(AGY_DEFAULT);
+    const current = spent(DSH_DEFAULT);
 
     // `default` leads the canonical group order, so account2 is the first
     // eligible sibling under the CLI's own directory.
@@ -1019,22 +998,22 @@ describe("quotaSwitchCandidate", () => {
   it("offers nothing while the account in effect has quota left", () => {
     // The action exists for one situation only; anything else stays a
     // deliberate choice made in the drawer.
-    expect(pick({ accounts: [AGY_DEFAULT, AGY_ACCOUNT2], current: AGY_DEFAULT })).toBeNull();
+    expect(pick({ accounts: [DSH_DEFAULT, DSH_ACCOUNT2], current: DSH_DEFAULT })).toBeNull();
     // Control: the same list does offer the switch while the quota is spent.
     expect(
-      pick({ accounts: [spent(AGY_DEFAULT), AGY_ACCOUNT2], current: spent(AGY_DEFAULT) }),
-    ).toEqual(AGY_ACCOUNT2);
+      pick({ accounts: [spent(DSH_DEFAULT), DSH_ACCOUNT2], current: spent(DSH_DEFAULT) }),
+    ).toEqual(DSH_ACCOUNT2);
   });
 
   it("stops offering it once the deadline has passed", () => {
-    const accounts = [spent(AGY_DEFAULT), AGY_ACCOUNT2];
+    const accounts = [spent(DSH_DEFAULT), DSH_ACCOUNT2];
 
-    expect(pick({ accounts, current: spent(AGY_DEFAULT) })).toEqual(AGY_ACCOUNT2);
+    expect(pick({ accounts, current: spent(DSH_DEFAULT) })).toEqual(DSH_ACCOUNT2);
     expect(
       quotaSwitchCandidate({
-        binding: { custom_args: [] },
+        binding: { custom_env: {} },
         accounts,
-        current: spent(AGY_DEFAULT),
+        current: spent(DSH_DEFAULT),
         view: READY,
         nowMs: resetAt * 1000,
       }),
@@ -1042,12 +1021,12 @@ describe("quotaSwitchCandidate", () => {
   });
 
   it("offers nothing without a sibling to move to", () => {
-    expect(pick({ accounts: [spent(AGY_DEFAULT)], current: spent(AGY_DEFAULT) })).toBeNull();
+    expect(pick({ accounts: [spent(DSH_DEFAULT)], current: spent(DSH_DEFAULT) })).toBeNull();
     // The other CLIs are not candidates: they are not accounts of this group.
     expect(
       pick({
-        accounts: [spent(AGY_DEFAULT), DSH_DEFAULT, DSH_ACCOUNT2],
-        current: spent(AGY_DEFAULT),
+        accounts: [spent(DSH_DEFAULT), CLAUDE_DEFAULT, CLAUDE_ACCOUNT2],
+        current: spent(DSH_DEFAULT),
       }),
     ).toBeNull();
   });
@@ -1057,21 +1036,21 @@ describe("quotaSwitchCandidate", () => {
     // account further along.
     expect(
       pick({
-        accounts: [spent(AGY_DEFAULT), signedOut(AGY_ACCOUNT2)],
-        current: spent(AGY_DEFAULT),
+        accounts: [spent(DSH_DEFAULT), signedOut(DSH_ACCOUNT2)],
+        current: spent(DSH_DEFAULT),
       }),
     ).toBeNull();
     expect(
       pick({
-        accounts: [spent(AGY_DEFAULT), spent(AGY_ACCOUNT2)],
-        current: spent(AGY_DEFAULT),
+        accounts: [spent(DSH_DEFAULT), spent(DSH_ACCOUNT2)],
+        current: spent(DSH_DEFAULT),
       }),
     ).toBeNull();
     // Control: a signed-in sibling with quota left is the one that qualifies.
     expect(
       pick({
-        accounts: [spent(AGY_DEFAULT), signedOut(AGY_ACCOUNT2), account({ ...AGY_ACCOUNT2, account: "account3", home: `${RUNTIME_HOME}/.gemini-account3` })],
-        current: spent(AGY_DEFAULT),
+        accounts: [spent(DSH_DEFAULT), signedOut(DSH_ACCOUNT2), account({ ...DSH_ACCOUNT2, account: "account3", home: `${RUNTIME_HOME}/.dsh-account3` })],
+        current: spent(DSH_DEFAULT),
       })?.account,
     ).toBe("account3");
   });
@@ -1091,21 +1070,28 @@ describe("quotaSwitchCandidate", () => {
         current: spent(CURSOR_DEFAULT),
       }),
     ).toBeNull();
+    // agy is read-only too, including the retired lever an older daemon reports.
+    expect(
+      pick({
+        accounts: [spent(AGY_DEFAULT), AGY_LEGACY_ACCOUNT2],
+        current: spent(AGY_DEFAULT),
+      }),
+    ).toBeNull();
   });
 
   it("refuses a sibling whose lever shape this client cannot write", () => {
     expect(
       pick({
         accounts: [
-          spent(AGY_DEFAULT),
+          spent(DSH_DEFAULT),
           account({
-            cli: "agy",
+            cli: "dsh",
             account: "account2",
-            home: `${RUNTIME_HOME}/.gemini-account2`,
-            lever: "custom_args:--gemini_profile",
+            home: `${RUNTIME_HOME}/.dsh-account2`,
+            lever: "custom_args:--dsh_profile",
           }),
         ],
-        current: spent(AGY_DEFAULT),
+        current: spent(DSH_DEFAULT),
       }),
     ).toBeNull();
   });
@@ -1116,22 +1102,22 @@ describe("quotaSwitchCandidate", () => {
     expect(
       pick({
         accounts: [
-          spent(AGY_DEFAULT),
+          spent(DSH_DEFAULT),
           account({
-            cli: "agy",
+            cli: "dsh",
             account: "account2",
-            home: ".gemini-account2",
-            lever: "custom_args:--gemini_dir",
+            home: ".dsh-account2",
+            lever: "env:DSH_HOME",
           }),
         ],
-        current: spent(AGY_DEFAULT),
+        current: spent(DSH_DEFAULT),
       }),
     ).toBeNull();
   });
 
   it("never offers a write from an untrusted list", () => {
-    const accounts = [spent(AGY_DEFAULT), AGY_ACCOUNT2];
-    const current = spent(AGY_DEFAULT);
+    const accounts = [spent(DSH_DEFAULT), DSH_ACCOUNT2];
+    const current = spent(DSH_DEFAULT);
 
     for (const view of [
       { kind: "loading" },
@@ -1142,17 +1128,17 @@ describe("quotaSwitchCandidate", () => {
     }
 
     // Control: the same list does offer it once the view is trustworthy.
-    expect(pick({ accounts, current, view: READY })).toEqual(AGY_ACCOUNT2);
+    expect(pick({ accounts, current, view: READY })).toEqual(DSH_ACCOUNT2);
   });
 
   it("offers nothing when no account is in effect", () => {
-    expect(pick({ accounts: [spent(AGY_DEFAULT), AGY_ACCOUNT2], current: null })).toBeNull();
+    expect(pick({ accounts: [spent(DSH_DEFAULT), DSH_ACCOUNT2], current: null })).toBeNull();
   });
 
   it("picks a candidate that is not the account in effect even when it is reported twice", () => {
     const candidate = pick({
-      accounts: [spent(AGY_DEFAULT), AGY_ACCOUNT2],
-      current: spent(AGY_DEFAULT),
+      accounts: [spent(DSH_DEFAULT), DSH_ACCOUNT2],
+      current: spent(DSH_DEFAULT),
     });
 
     expect(candidate?.account).not.toBe("default");

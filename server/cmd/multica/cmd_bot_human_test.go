@@ -83,54 +83,6 @@ func TestBotBindActivityChangesOnlyTheScope(t *testing.T) {
 	}
 }
 
-func TestBotWakeHandledAndActivityCommands(t *testing.T) {
-	const bot = "11111111-1111-4111-8111-111111111111"
-	const event = "22222222-2222-4222-8222-222222222222"
-	var seen []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		seen = append(seen, r.Method+" "+r.URL.RequestURI())
-		if strings.HasSuffix(r.URL.Path, "/handled") {
-			var body map[string]any
-			_ = json.NewDecoder(r.Body).Decode(&body)
-			if body["reason"] != "已告诉他" {
-				t.Errorf("reason: %v", body)
-			}
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"events": []any{}, "next_cursor": ""})
-	}))
-	defer srv.Close()
-	setCLITestServerEnv(t, srv.URL)
-
-	wake := &cobra.Command{Use: "wake"}
-	addHumanNeededReceipts(wake)
-	run := func(name string, flags map[string]string, args ...string) {
-		t.Helper()
-		sub, _, err := wake.Find([]string{name})
-		if err != nil || sub.Name() != name {
-			t.Fatalf("command %q missing: %v", name, err)
-		}
-		for k, v := range flags {
-			if err := sub.Flags().Set(k, v); err != nil {
-				t.Fatal(err)
-			}
-		}
-		var out bytes.Buffer
-		sub.SetOut(&out)
-		if err := sub.RunE(sub, args); err != nil {
-			t.Fatalf("%s: %v", name, err)
-		}
-	}
-	run("handled", map[string]string{"reason": "已告诉他"}, bot, event)
-	run("activity", map[string]string{"importance": "high", "limit": "5"}, bot)
-	want := []string{
-		"POST /api/workspaces/ws-1/bots/" + bot + "/wake/events/" + event + "/handled",
-		"GET /api/workspaces/ws-1/bots/" + bot + "/activity?importance=high&limit=5",
-	}
-	if !reflect.DeepEqual(seen, want) {
-		t.Fatalf("requests:\n%v\nwant\n%v", seen, want)
-	}
-}
-
 func TestBotWritesCommandListsAuditAndSendsConfirmation(t *testing.T) {
 	var gotURI, gotConfirm string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

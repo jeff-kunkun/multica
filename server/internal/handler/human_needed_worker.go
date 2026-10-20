@@ -154,27 +154,19 @@ func (w *HumanNeededWorker) push(ctx context.Context, ev db.HumanNeededEvent) {
 		w.cancel(ev, "channel unavailable")
 		return
 	}
-	if ev.EventType == service.HumanEventActivity && len(channel.ActivityScope) == 0 {
-		w.cancel(ev, "activity stream switched off")
+	// The activity stream is retired: rows it queued before the upgrade drain
+	// here instead of being sent.
+	if ev.EventType == service.HumanEventActivity {
+		w.cancel(ev, "activity stream retired")
 		return
 	}
-	if ev.EventType == service.HumanEventActivity {
-		// Re-decided at send time against the stream as it stands now: the
-		// person may have lost sight of the ticket, stopped following it,
-		// handed it on, or narrowed the scope since the row was queued.
-		if ok, reason := newActivityGate(w.h, ctx).allows(ev); !ok {
-			w.cancel(ev, reason)
-			return
-		}
-	} else {
-		if ev.IssueID.Valid && !w.targetCanSeeIssue(ctx, ev) {
-			w.cancel(ev, "access unavailable")
-			return
-		}
-		if ev.ChatSessionID.Valid && !w.targetOwnsChat(ctx, ev) {
-			w.cancel(ev, "access unavailable")
-			return
-		}
+	if ev.IssueID.Valid && !w.targetCanSeeIssue(ctx, ev) {
+		w.cancel(ev, "access unavailable")
+		return
+	}
+	if ev.ChatSessionID.Valid && !w.targetOwnsChat(ctx, ev) {
+		w.cancel(ev, "access unavailable")
+		return
 	}
 	wake, err := w.h.Queries.GetBotWake(ctx, ev.BotID)
 	if err != nil {
@@ -291,9 +283,6 @@ func (h *Handler) humanNeededPayloadFields(ctx context.Context, ev db.HumanNeede
 		fields["source_id"] = uuidToString(ev.SourceCommentID)
 	}
 	fields["author"] = h.humanNeededAsker(ctx, ev)
-	if ev.EventType == service.HumanEventActivity {
-		return h.activityPayloadFields(fields, ev, title, sourceURL)
-	}
 	targetName := ""
 	if u, getErr := h.Queries.GetUser(ctx, ev.TargetUserID); getErr == nil {
 		targetName = u.Name
@@ -374,7 +363,7 @@ func (w *HumanNeededWorker) Sweep(ctx context.Context) {
 		slog.Error("human needed: expire failed", "error", err)
 	}
 	if _, err := q.PurgeActivityEvents(ctx); err != nil {
-		slog.Error("activity stream: purge failed", "error", err)
+		slog.Error("human needed: purge retired activity rows failed", "error", err)
 	}
 	if _, err := q.ResendUnwokenHumanNeeded(ctx); err != nil {
 		slog.Error("human needed: resend failed", "error", err)

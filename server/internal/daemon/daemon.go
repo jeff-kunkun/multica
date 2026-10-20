@@ -639,18 +639,6 @@ type Daemon struct {
 	wsHBLastAck  map[string]time.Time // runtime_id -> last successful WS heartbeat ack timestamp
 	planLimitsMu sync.RWMutex
 	planLimits   map[string]protocol.PlanLimitsSnapshot // runtime_id -> latest credential-free provider snapshot
-	// jevStatus is the host-level JEV snapshot, refreshed once per heartbeat
-	// tick and shared by every runtime frame of that tick (the state directory
-	// is per-machine, not per-runtime).
-	jevStatusMu sync.RWMutex
-	jevStatus   *protocol.JevStatusSnapshot
-	// jevConfigPathOverride points the runtime.env reader at a fixture file in
-	// tests, so they never read the developer's own JEV credentials.
-	jevConfigPathOverride string
-	// jevStateDirOverride points the reader at a fixture directory in tests.
-	// Empty in production, where the path follows XDG_STATE_HOME, then
-	// os.UserHomeDir()/.local/state/jev.
-	jevStateDirOverride string
 	// accountQuota tracks per-directory CLI account quota exhaustion: which
 	// account directory is out of quota, and until when. AGY reads it to fail
 	// over to another isolation slot; every other CLI reads it through the
@@ -2992,20 +2980,11 @@ func cloneRuntimeEntries(in []map[string]string) []map[string]string {
 	return out
 }
 
-// withHostHomeDir stamps the daemon host's home onto a register payload so the
-// web UI can expand AGY account-slot paths. Browsers cannot read process.env.HOME.
-// Logged-in Gemini dirs ride along so the settings page can show a green check
-// without putting AGY-unknown flags in custom_args.
-//
-// The three AGY keys stay byte-for-byte as they were — custom-args-tab.tsx
-// still consumes home_dir / agy_logged_in_dirs / agy_quota_exhausted until the
-// account surface converges (DENE-305-D). The multi-CLI channel is additive and
-// lives in agentAccountsReport.
+// withRegistrationHostMeta stamps the daemon host's home and its multi-CLI
+// account report onto a register payload. Browsers cannot read
+// process.env.HOME, so the web UI expands account paths against home_dir.
 func (d *Daemon) withRegistrationHostMeta(req map[string]any) map[string]any {
 	req = withHostHomeDir(req)
-	if exhausted := d.agyQuotaOverlay(time.Now()); len(exhausted) > 0 {
-		req["agy_quota_exhausted"] = exhausted
-	}
 	// agent_accounts is always written, even when empty: its presence is how a
 	// consumer tells "this host has no accounts" from "this daemon predates the
 	// channel". agent_accounts_error only joins it when the probe failed.
@@ -3021,9 +3000,6 @@ func withHostHomeDir(req map[string]any) map[string]any {
 	if home, err := os.UserHomeDir(); err == nil {
 		if home = strings.TrimSpace(home); home != "" {
 			req["home_dir"] = home
-			if dirs := probeAgyLoggedInDirs(home); len(dirs) > 0 {
-				req["agy_logged_in_dirs"] = dirs
-			}
 		}
 	}
 	return req
@@ -4797,8 +4773,7 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) bool {
 	}
 	d.logger.Debug("heartbeat: HTTP tick", "runtime_id", rid)
 	d.maybeRefreshPlanQuota()
-	d.refreshJevStatus()
-	resp, err := d.client.SendHeartbeat(ctx, rid, d.planLimitsForRuntime(rid), d.agentPlanLimitsForRuntime(rid), d.jevStatusSnapshot())
+	resp, err := d.client.SendHeartbeat(ctx, rid, d.planLimitsForRuntime(rid), d.agentPlanLimitsForRuntime(rid))
 	if err != nil {
 		if ctx.Err() == nil {
 			if isRuntimeNotFoundError(err) {
@@ -4833,13 +4808,12 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 	if resp == nil {
 		return
 	}
-	if resp.PendingUpdate != nil || resp.PendingModelList != nil || resp.PendingRoutingAnalysis != nil || resp.PendingProviderConfig != nil || resp.PendingLocalSkills != nil || resp.PendingLocalSkillImport != nil {
+	if resp.PendingUpdate != nil || resp.PendingModelList != nil || resp.PendingRoutingAnalysis != nil || resp.PendingLocalSkills != nil || resp.PendingLocalSkillImport != nil {
 		d.logger.Debug("heartbeat: pending actions",
 			"runtime_id", runtimeID,
 			"update", resp.PendingUpdate != nil,
 			"model_list", resp.PendingModelList != nil,
 			"routing_analysis", resp.PendingRoutingAnalysis != nil,
-			"provider_config", resp.PendingProviderConfig != nil,
 			"local_skills", resp.PendingLocalSkills != nil,
 			"local_skill_import", resp.PendingLocalSkillImport != nil,
 		)
@@ -4861,11 +4835,6 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 	if resp.PendingRoutingAnalysis != nil {
 		if rt := d.findRuntime(runtimeID); rt != nil {
 			go d.handleRoutingAnalysis(ctx, *rt, *resp.PendingRoutingAnalysis)
-		}
-	}
-	if resp.PendingProviderConfig != nil {
-		if rt := d.findRuntime(runtimeID); rt != nil {
-			go d.handleProviderConfig(ctx, *rt, *resp.PendingProviderConfig)
 		}
 	}
 	if resp.PendingLocalSkills != nil {
@@ -4961,8 +4930,7 @@ func (d *Daemon) handlePendingWorkHint(runtimeID, kind string) {
 		return
 	}
 	hbCtx, cancel := context.WithTimeout(ctx, pendingWorkHeartbeatTimeout)
-	d.refreshJevStatus()
-	resp, err := d.client.SendHeartbeat(hbCtx, runtimeID, d.planLimitsForRuntime(runtimeID), d.agentPlanLimitsForRuntime(runtimeID), d.jevStatusSnapshot())
+	resp, err := d.client.SendHeartbeat(hbCtx, runtimeID, d.planLimitsForRuntime(runtimeID), d.agentPlanLimitsForRuntime(runtimeID))
 	cancel()
 	if err != nil {
 		if isRuntimeNotFoundError(err) {
@@ -5294,14 +5262,6 @@ func (d *Daemon) reportRoutingAnalysisResult(ctx context.Context, rt Runtime, re
 	})
 }
 
-// reportProviderConfigResult delivers a provider-preset report to the server
-// with the same retry semantics as the other runtime async reports.
-func (d *Daemon) reportProviderConfigResult(ctx context.Context, rt Runtime, requestID string, payload map[string]any) {
-	d.reportRuntimeResultWithRetry(ctx, "provider_config", rt.ID, requestID, func(ctx context.Context) error {
-		return d.client.ReportProviderConfigResult(ctx, rt.ID, requestID, payload)
-	})
-}
-
 // reportRuntimeResultWithRetry retries `fn` on 5xx / network errors and
 // stops on success, 4xx, or after exhausting runtimeReportBackoffs.
 //
@@ -5353,61 +5313,6 @@ func (d *Daemon) reportRuntimeResultWithRetry(ctx context.Context, kind, runtime
 	}
 	d.logger.Error("runtime async report exhausted retries",
 		"kind", kind, "runtime_id", runtimeID, "request_id", requestID, "error", lastErr)
-}
-
-// handleProviderConfig executes one provider-preset action against this host's
-// own agent configuration and reports the refreshed snapshot back.
-//
-// The request payload is never logged: an upsert for a provider carries the
-// API key the user just typed, and it is on its way into their credentials
-// file rather than into our logs. The log line names the request and the
-// action, which is what a failure report needs.
-func (d *Daemon) handleProviderConfig(ctx context.Context, rt Runtime, pending PendingProviderConfig) {
-	d.logger.Info("runtime provider config requested",
-		"runtime_id", rt.ID, "request_id", pending.ID,
-		"provider", pending.Provider, "action", pending.Action)
-
-	payload := map[string]any{}
-	snapshot, err := applyProviderConfig(ctx, pending.Provider, pending.Action, pending.Payload)
-	if err != nil {
-		d.logger.Warn("runtime provider config failed",
-			"runtime_id", rt.ID, "request_id", pending.ID,
-			"provider", pending.Provider, "action", pending.Action, "error", err)
-		payload["status"] = "failed"
-		// The message is returned to a browser, so it goes through the shared
-		// credential filter even though this action's own errors are built
-		// from file paths and field names: a decode or encode error is the one
-		// place a value from the body can end up inside a message.
-		payload["error"] = redact.Text(err.Error())
-		// The kind is what a localized surface renders, and the message above
-		// is only its fallback. Parameters are the daemon's own facts — a
-		// model id from the caller's body, a reset instant, a status code —
-		// and never a gateway's prose, which is why they need no redaction
-		// pass: the classify step keeps the raw body out of them and lets the
-		// filtered `error` above carry the one copy that goes out.
-		var failure *providerConfigFailure
-		if errors.As(err, &failure) && failure.Kind != "" {
-			payload["error_kind"] = failure.Kind
-			if len(failure.Params) > 0 {
-				payload["error_params"] = failure.Params
-			}
-		}
-	} else {
-		// Every action answers with the refreshed list, so the client can
-		// redraw from this reply alone.
-		payload["status"] = "completed"
-		payload["providers"] = snapshot.Providers
-		if snapshot.Active != nil {
-			payload["active"] = snapshot.Active
-		}
-		if snapshot.ClearedActive {
-			payload["cleared_active"] = true
-		}
-		if len(snapshot.Models) > 0 {
-			payload["models"] = snapshot.Models
-		}
-	}
-	d.reportProviderConfigResult(ctx, rt, pending.ID, payload)
 }
 
 // handleUpdate performs the CLI update when triggered by the server via heartbeat.
@@ -9911,15 +9816,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if rootsValue, ok := composeOpenclawIncludeRoots(env.OpenclawIncludeRoot, os.Getenv("OPENCLAW_INCLUDE_ROOTS")); ok {
 		agentEnv["OPENCLAW_INCLUDE_ROOTS"] = rootsValue
 	}
-	// Export this machine's JEV credentials under both the names that read
-	// them: JEV_* for the `jev` CLI, TYPESAFE_* for the documented curl and
-	// the TypeSafe SDKs. Without this the SDK path 403s on a machine where
-	// `jev status` reports healthy, because nothing ever sets TYPESAFE_API_KEY
-	// for a daemon that launchd or make started.
-	//
-	// Set before custom_env is layered on, so an agent pinned to a different
-	// TypeSafe account can still override any of these names.
-	maps.Copy(agentEnv, d.jevTaskEnv())
 	// Inject user-configured custom environment variables (e.g. ANTHROPIC_API_KEY,
 	// ANTHROPIC_BASE_URL for router/proxy mode, or CLAUDE_CODE_USE_BEDROCK for
 	// Bedrock). These are set per-agent via the agent settings UI.
@@ -10220,33 +10116,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// One detector for the whole task, so a resume retry does not report a
 	// skill the first attempt already used.
 	skillUsage := newTaskSkillUsageDetector(skills, provider, env)
-	var runtimeConfig json.RawMessage
-	if task.Agent != nil {
-		runtimeConfig = task.Agent.RuntimeConfig
-	}
-	d.applyAgyLaunchSlot(provider, &execOpts, runtimeConfig, time.Now())
 	result, tools, err := d.executeAndDrainDetectingSkills(ctx, backend, prompt, execOpts, taskLog, task.ID, env.CodexHome, skillUsage, &msgSeq)
 	if err != nil {
 		return TaskResult{}, err
-	}
-	for range maxAgyQuotaExhausted {
-		failover := d.agyQuotaFailover(provider, result, execOpts, runtimeConfig, time.Now())
-		if failover.PoolError != "" {
-			result.Error = failover.PoolError
-			break
-		}
-		if !failover.Retry {
-			break
-		}
-		taskLog.Warn("agy slot quota exhausted, retrying with the next isolation directory",
-			"from", agent.GeminiDirFromArgs(execOpts.CustomArgs),
-			"to", agent.GeminiDirFromArgs(failover.Opts.CustomArgs),
-		)
-		execOpts = failover.Opts
-		result, tools, err = d.executeAndDrainDetectingSkills(ctx, backend, prompt, execOpts, taskLog, task.ID, env.CodexHome, skillUsage, &msgSeq)
-		if err != nil {
-			return TaskResult{}, err
-		}
 	}
 
 	// retiredSessionID is the session this run was told to resume and then

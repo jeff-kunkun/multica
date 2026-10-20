@@ -78,31 +78,6 @@ export interface PlanLimitsSnapshot {
   observed_at: number;
 }
 
-export type JevStatusValue = "active" | "fallback" | "unknown";
-
-/**
- * Host-level JEV (fast judgement layer) status reported by the daemon. There is
- * one state directory per machine, so every runtime of a daemon carries the
- * same snapshot. `unknown` means "we cannot tell" (unreadable state files, or a
- * daemon that predates the field) and must never be rendered as active.
- *
- * Any field beyond `status` is optional detail. Cooldown remaining is computed
- * from `disabled_until`, never sent pre-computed, so the payload stays stable
- * across heartbeats.
- */
-export interface JevStatusSnapshot {
-  status: JevStatusValue;
-  model?: string;
-  manual?: boolean;
-  disabled_until?: number;
-  failures?: number;
-  reason?: string;
-  last_scene?: string;
-  last_outcome?: string;
-  last_decision_at?: number;
-  observed_at?: number;
-}
-
 export interface MachineCapacity {
   active_runs: number;
   max_concurrent_runs: number;
@@ -143,11 +118,6 @@ export interface RuntimeDevice {
    */
   profile_id?: string | null;
   plan_limits?: PlanLimitsSnapshot | null;
-  /**
-   * Host-level JEV status. Absent/null when the backend has no snapshot yet
-   * (older server or older daemon) — consumers must render that as unknown.
-   */
-  jev?: JevStatusSnapshot | null;
   last_seen_at: string | null;
   created_at: string;
   updated_at: string;
@@ -914,14 +884,6 @@ export interface Agent {
    * up, then re-enable).
    */
   work_pause?: AgentWorkPause;
-  /**
-   * Doorbell (kun fork, DENE-808). When on, a member who is not allowed to
-   * invoke this agent does not get a plain refusal: their @mention or
-   * assignment becomes a pending access request the owner approves or
-   * declines from the inbox. Default off; only the owner can flip it. Older
-   * backends omit the field; treat `undefined` as off.
-   */
-  doorbell_enabled?: boolean;
   owner_id: string | null;
   skills: AgentSkillSummary[];
   /** Runtime-local skills this agent must not inherit. Older servers omit it. */
@@ -1206,8 +1168,6 @@ export interface UpdateAgentRequest {
    * stops the seat taking new work without archiving it.
    */
   work_enabled?: boolean;
-  /** Owner-only doorbell switch (DENE-808). Omitted preserves the saved value. */
-  doorbell_enabled?: boolean;
   /**
    * Re-parents this agent (DENE-301). Tri-state semantics:
    *   - field omitted → no change
@@ -1736,178 +1696,8 @@ export interface RuntimeLocalSkillImportResult {
 }
 
 // ---------------------------------------------------------------------------
-// Provider presets (DENE-348)
+// Agent borrowing: timed access passes (kun fork, DENE-808)
 // ---------------------------------------------------------------------------
-//
-// A provider preset is one route in the agent CLI's own configuration: an
-// endpoint, the protocol it speaks and the key that authenticates it. The
-// daemon reads and writes those files on the user's machine, so every field
-// here is what the daemon decided to report — there is no request shape in
-// this file except the write-only upsert input below.
-//
-// The key itself is deliberately absent from every read interface. The daemon
-// generates `key_mask` on the machine holding the credentials file, and that
-// mask is all the server (and therefore this client) ever sees; `has_key` is
-// the existence bit. A type with no field for the value cannot leak it into
-// React state, the DOM or a console log by accident.
-
-export type RuntimeProviderPresetAction =
-  | "list"
-  | "models"
-  | "upsert"
-  | "delete"
-  | "activate"
-  | "replay";
-
-export type RuntimeProviderPresetStatus =
-  | "pending"
-  | "running"
-  | "completed"
-  | "failed"
-  | "timeout";
-
-export interface RuntimeProviderPresetModel {
-  id: string;
-  name?: string;
-  /**
-   * Context window the gateway advertised. The daemon normalises either
-   * spelling it may have read off the wire onto `context_window`; the older
-   * `context_length` is kept so a response that carries it still shows a size.
-   */
-  context_window?: number;
-  context_length?: number;
-}
-
-export interface RuntimeProviderPreset {
-  id: string;
-  api?: string;
-  base_url?: string;
-  api_key_env?: string;
-  /**
-   * Non-secret identifier of the stored key (`sk-ab…cdef`, or `••••` when the
-   * value is too short to mask partially). Empty when no key is stored.
-   */
-  key_mask?: string;
-  /** Whether `api_key_env` currently resolves to a stored value. */
-  has_key: boolean;
-  /** True for the preset `agent-default-model` currently points at. */
-  active?: boolean;
-  models: RuntimeProviderPresetModel[];
-}
-
-/** The pair written into the agent's default-model setting. */
-export interface RuntimeProviderPresetActive {
-  provider: string;
-  model: string;
-}
-
-/** The ticket a POST answers with. The refreshed list arrives through the poll. */
-export interface RuntimeProviderPresetTicket {
-  id: string;
-  status: string;
-}
-
-export interface RuntimeProviderPresetRequest {
-  id: string;
-  runtime_id: string;
-  provider: string;
-  action: string;
-  status: RuntimeProviderPresetStatus;
-  /**
-   * The refreshed preset list every successful action answers with, so the
-   * client redraws from this reply alone instead of following up with a list.
-   */
-  providers?: RuntimeProviderPreset[];
-  active?: RuntimeProviderPresetActive;
-  /**
-   * The endpoint's own catalog, filled only by the `models` action. Ids travel
-   * verbatim — escaping one for a seat's `provider/model` string is the
-   * surface's job, not the daemon's.
-   */
-  models?: RuntimeProviderPresetModel[];
-  /**
-   * A delete that also emptied the active-model setting. The user just lost
-   * their default model, which the UI has to say out loud.
-   */
-  cleared_active?: boolean;
-  error?: string;
-  /**
-   * Machine-readable classification of `error`. A surface renders localized
-   * copy from the kind and its parameters; `error` is the English fallback for
-   * a kind this build does not know.
-   */
-  error_kind?: string;
-  /**
-   * Parameters for `error_kind` — the daemon's own facts only (`status`,
-   * `model`, `reset_at_local`, `action`). Never the gateway's raw body.
-   */
-  error_params?: Record<string, string>;
-  created_at: string;
-  updated_at: string;
-}
-
-/**
- * The upsert body. `api_key` is write-only: it is accepted, written to the
- * daemon's credentials file and never echoed back.
- *
- * Omit it (or send `""`) to leave the stored key alone, which is what lets a
- * user rotate an endpoint without retyping the key. There is deliberately no
- * `key_mask` field here — pre-filling the mask into the form would make the
- * next submit write the mask itself as the new key.
- */
-export interface RuntimeProviderPresetUpsertInput {
-  id: string;
-  api: string;
-  base_url: string;
-  /** Credential reference name. Empty lets the daemon derive one from `id`. */
-  api_key_env?: string;
-  models: RuntimeProviderPresetModel[];
-  api_key?: string;
-}
-
-/** Normalised reply of any preset action, for the query cache. */
-export interface RuntimeProviderPresetsResult {
-  presets: RuntimeProviderPreset[];
-  active: RuntimeProviderPresetActive | null;
-  clearedActive: boolean;
-}
-
-// ---------------------------------------------------------------------------
-// Agent borrowing: doorbell requests + timed access passes (kun fork, DENE-808)
-// ---------------------------------------------------------------------------
-
-export type AgentAccessRequestStatus = "pending" | "approved" | "declined" | "expired";
-export type AgentAccessTriggerKind = "mention" | "assign";
-
-/** One member's ask to use an agent they cannot normally invoke. */
-export interface AgentAccessRequest {
-  id: string;
-  workspace_id: string;
-  agent_id: string;
-  agent_name: string;
-  requester_id: string;
-  requester_name: string;
-  requester_email: string;
-  requester_avatar_url: string | null;
-  issue_id: string | null;
-  issue_number: number | null;
-  issue_title: string | null;
-  comment_id: string | null;
-  trigger_kind: AgentAccessTriggerKind;
-  summary: string;
-  status: AgentAccessRequestStatus;
-  resolved_by: string | null;
-  resolved_at: string | null;
-  expires_at: string;
-  created_at: string;
-}
-
-export interface AgentAccessRequestList {
-  /** Requests waiting on agents the caller owns. */
-  incoming: AgentAccessRequest[];
-  /** Requests the caller raised. */
-  outgoing: AgentAccessRequest[];
-}
 
 /** A time-limited grant letting one member invoke one agent. */
 export interface AgentAccessPass {
@@ -1924,26 +1714,6 @@ export interface AgentAccessPass {
   request_id: string | null;
   created_at: string;
   active: boolean;
-}
-
-export interface ApproveAgentAccessRequestBody {
-  /** Absolute expiry for a pass issued alongside the approval. */
-  pass_expires_at?: string;
-  /** Relative alternative to `pass_expires_at`. */
-  pass_duration_minutes?: number;
-}
-
-/** Server-side admission result of replaying the approved trigger. */
-export interface AgentAccessReplayOutcome {
-  status: "queued" | "coalesced" | "deferred" | "blocked" | string;
-  reason_code: string;
-  task_id?: string | null;
-}
-
-export interface ApproveAgentAccessRequestResponse {
-  request: AgentAccessRequest;
-  pass: AgentAccessPass | null;
-  replay: AgentAccessReplayOutcome | null;
 }
 
 export interface CreateAgentAccessPassRequest {

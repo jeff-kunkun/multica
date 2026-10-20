@@ -12,146 +12,18 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/service"
-	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// The review fixes of DENE-1936: the workspace stream keeps the access of what a
-// write touched (S1), the owner's go-ahead is a server-held object only the
-// owner can grant (R1), a first connection defaults to the full stream (R2), and
-// a stopped dangerous call reaches the owner once (R3). Real Postgres and local
-// sockets; NOT an actual Grok endpoint.
+// The review fixes of DENE-1936: the owner's go-ahead is a server-held object
+// only the owner can grant (R1), a first connection defaults to the full office
+// event scope (R2), and a stopped dangerous call reaches the owner once (R3).
+// Real Postgres and local sockets; NOT an actual Grok endpoint.
 
-func peerWrite(t *testing.T, route string, ids ...string) service.WorkspaceWrite {
+func agentActor(t *testing.T) string {
 	t.Helper()
-	w := service.WorkspaceWrite{
-		WorkspaceID: parseUUID(testWorkspaceID),
-		Method:      http.MethodPatch,
-		Route:       route,
-		Fields:      []string{"title"},
-		ActorType:   "member",
-		ActorID:     parseUUID(summonSecondMember(t)),
-	}
-	for _, id := range ids {
-		w.TargetIDs = append(w.TargetIDs, parseUUID(id))
-	}
-	return w
-}
-
-func routeWrite(t *testing.T, w service.WorkspaceWrite) int {
-	t.Helper()
-	n, err := service.RouteWorkspaceWrite(context.Background(), testHandler.Queries, w, testHandler.TargetVisibility())
-	if err != nil {
-		t.Fatal(err)
-	}
-	return n
-}
-
-const (
-	routeIssueWrite   = "/api/issues/{id}"
-	routeProjectWrite = "/api/workspaces/{id}/projects/{projectId}"
-	routeChatWrite    = "/api/chat/sessions/{id}"
-)
-
-// S1: a write to a private ticket, a restricted project or somebody's chat is
-// not told to a Bot whose owner could not open it; the same write to something
-// they can open still is.
-func TestWorkspaceStreamKeepsTheAccessOfWhatAWriteTouched(t *testing.T) {
-	f := newHumanNeededFixture(t, true)
-	setActivityScope(t, f, "owner_visible_all")
-	peer := summonSecondMember(t)
-
-	t.Run("private ticket", func(t *testing.T) {
-		hidden := dbfx.Issue(t, "Private", testutil.Cols{"visibility": "private", "creator_type": "member", "creator_id": peer})
-		if n := routeWrite(t, peerWrite(t, routeIssueWrite, hidden)); n != 0 {
-			t.Fatalf("a write to a private ticket queued %d", n)
-		}
-		open := dbfx.Issue(t, "Open", testutil.Cols{"visibility": "workspace"})
-		if n := routeWrite(t, peerWrite(t, routeIssueWrite, open)); n != 1 {
-			t.Fatalf("a write to a ticket the owner can open queued %d", n)
-		}
-	})
-
-	t.Run("restricted project", func(t *testing.T) {
-		setMemberRole(t, "member")
-		hidden := dbfx.Project(t, "Restricted", testutil.Cols{"visibility": "private", "created_by": peer})
-		if n := routeWrite(t, peerWrite(t, routeProjectWrite, hidden)); n != 0 {
-			t.Fatalf("a write to a restricted project queued %d", n)
-		}
-		open := dbfx.Project(t, "Open project", testutil.Cols{"visibility": "workspace", "created_by": peer})
-		if n := routeWrite(t, peerWrite(t, routeProjectWrite, open)); n != 1 {
-			t.Fatalf("a write to a project the owner can open queued %d", n)
-		}
-	})
-
-	t.Run("somebody else's chat", func(t *testing.T) {
-		rt := dbfx.Runtime(t, "s1 chat runtime")
-		chatAgent := dbfx.Agent(t, "S1 chat agent", rt)
-		theirs := dbfx.ChatSession(t, chatAgent, testutil.Cols{"creator_id": peer})
-		if n := routeWrite(t, peerWrite(t, routeChatWrite, theirs)); n != 0 {
-			t.Fatalf("a write to somebody else's chat queued %d", n)
-		}
-		mine := dbfx.ChatSession(t, chatAgent)
-		if n := routeWrite(t, peerWrite(t, routeChatWrite, mine)); n != 1 {
-			t.Fatalf("a write to the owner's own chat queued %d", n)
-		}
-	})
-
-	t.Run("a target nobody can name is not told", func(t *testing.T) {
-		if n := routeWrite(t, peerWrite(t, routeIssueWrite, "99999999-9999-4999-8999-999999999999")); n != 0 {
-			t.Fatalf("a write to an unknown ticket queued %d", n)
-		}
-		if n := routeWrite(t, peerWrite(t, routeIssueWrite)); n != 0 {
-			t.Fatalf("a ticket write with no target at all queued %d", n)
-		}
-		a := dbfx.Issue(t, "A", testutil.Cols{"visibility": "workspace"})
-		b := dbfx.Issue(t, "B", testutil.Cols{"visibility": "workspace"})
-		if n := routeWrite(t, peerWrite(t, routeIssueWrite, a, b)); n != 0 {
-			t.Fatalf("a write naming two tickets queued %d", n)
-		}
-	})
-
-	t.Run("workspace-wide settings are unaffected", func(t *testing.T) {
-		if n := routeWrite(t, peerWrite(t, "/api/workspaces/{id}/settings")); n != 1 {
-			t.Fatalf("a settings change queued %d", n)
-		}
-	})
-}
-
-// S1: the permission is judged again where a row is sent and where it is
-// listed, so a ticket that goes private after queueing is neither pushed nor
-// served.
-func TestWorkspaceStreamRevokedAccessStopsPushAndPull(t *testing.T) {
-	f := newHumanNeededFixture(t, true)
-	setActivityScope(t, f, "owner_visible_all")
-	call := activityCaller(t, f)
-	issue := dbfx.Issue(t, "Goes private", testutil.Cols{"visibility": "workspace"})
-	if n := routeWrite(t, peerWrite(t, routeIssueWrite, issue)); n != 1 {
-		t.Fatalf("queued %d", n)
-	}
-	listed := func() int {
-		t.Helper()
-		code, data := call("GET", "/activity")
-		var out struct {
-			Events []map[string]any `json:"events"`
-		}
-		if code != 200 || json.Unmarshal(data, &out) != nil {
-			t.Fatalf("list: %d %s", code, data)
-		}
-		return len(out.Events)
-	}
-	if listed() != 1 {
-		t.Fatal("the row should be listed while the owner can open the ticket")
-	}
-	dbfx.Exec(t, `UPDATE issue SET visibility='private', creator_type='member', creator_id=$2 WHERE id=$1`, issue, summonSecondMember(t))
-	if listed() != 0 {
-		t.Fatal("the pull list served a row about a ticket the owner can no longer open")
-	}
-	before := f.calls.Load()
-	f.worker.ProcessNext(context.Background())
-	if f.calls.Load() != before {
-		t.Fatal("a row about a ticket the owner can no longer open was pushed")
-	}
+	rt := dbfx.Runtime(t, "owner review runtime")
+	return dbfx.Agent(t, "Owner Review Agent", rt)
 }
 
 // R1: the owner's go-ahead.
@@ -310,7 +182,7 @@ func TestOwnerConfirmationExpiresAndNoIsNo(t *testing.T) {
 }
 
 // R3: a stopped dangerous call reaches the owner's own Bot once, however often
-// the Bot retries; the activity echo for the owner's own Bot stays filtered.
+// the Bot retries.
 func TestBlockedDangerousCallReachesTheOwnersBotOnce(t *testing.T) {
 	f := newHumanNeededFixture(t, true)
 	setActivityScope(t, f, "owner_visible_all")
@@ -334,16 +206,6 @@ func TestBlockedDangerousCallReachesTheOwnersBotOnce(t *testing.T) {
 	}
 	if ok, err := f.worker.ProcessNext(context.Background()); err != nil || !ok || f.calls.Load() != 1 {
 		t.Fatalf("delivery: ok=%v err=%v calls=%d", ok, err, f.calls.Load())
-	}
-
-	// The activity echo of the owner's own Bot's writes stays filtered, blocked
-	// or not: the card above is the one notice.
-	for _, blocked := range []bool{true, false} {
-		w := peerWrite(t, "/api/workspaces/{id}/members")
-		w.BotID, w.BotName, w.OnBehalfOf, w.Blocked = f.bot.ID, "Fixture Bot", parseUUID(testUserID), blocked
-		if n := routeWrite(t, w); n != 0 {
-			t.Fatalf("blocked=%v: the owner's own Bot was echoed its own call (%d)", blocked, n)
-		}
 	}
 }
 

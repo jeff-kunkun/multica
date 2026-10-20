@@ -1921,30 +1921,6 @@ func (q *Queries) UpdateAgentRuntimeCustomNameByDaemon(ctx context.Context, arg 
 	return items, nil
 }
 
-const updateAgentRuntimeJevStatus = `-- name: UpdateAgentRuntimeJevStatus :execrows
-UPDATE agent_runtime
-SET jev_status = $1
-WHERE id = $2
-  AND jev_status IS DISTINCT FROM $1
-`
-
-type UpdateAgentRuntimeJevStatusParams struct {
-	JevStatus []byte      `json:"jev_status"`
-	ID        pgtype.UUID `json:"id"`
-}
-
-// Stores the normalized, credential-free JEV snapshot accepted by the heartbeat
-// handler. Same IS DISTINCT FROM guard as plan_limits: the snapshot is a pure
-// function of the local state files, so an unchanged observation costs zero
-// writes and zero broadcasts.
-func (q *Queries) UpdateAgentRuntimeJevStatus(ctx context.Context, arg UpdateAgentRuntimeJevStatusParams) (int64, error) {
-	result, err := q.db.Exec(ctx, updateAgentRuntimeJevStatus, arg.JevStatus, arg.ID)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
-}
-
 const updateAgentRuntimePlanLimits = `-- name: UpdateAgentRuntimePlanLimits :execrows
 UPDATE agent_runtime
 SET plan_limits = $1

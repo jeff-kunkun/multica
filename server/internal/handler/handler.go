@@ -248,7 +248,6 @@ type Handler struct {
 	AgentCLICommands      AgentCLICommandStore
 	ModelListStore        ModelListStore
 	RoutingAnalysisStore  *RoutingAnalysisStore
-	ProviderPresetStore   ProviderPresetStore
 	LocalSkillListStore   LocalSkillListStore
 	LocalSkillImportStore LocalSkillImportStore
 	FeatureFlags          *featureflag.Service
@@ -554,7 +553,6 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		AgentCLICommands:             NewInMemoryAgentCLICommandStore(),
 		ModelListStore:               NewInMemoryModelListStore(),
 		RoutingAnalysisStore:         NewRoutingAnalysisStore(),
-		ProviderPresetStore:          NewInMemoryProviderPresetStore(),
 		ModelCatalogCache:            NewInMemoryModelCatalogCache(),
 		LocalSkillListStore:          NewInMemoryLocalSkillListStore(),
 		LocalSkillImportStore:        NewInMemoryLocalSkillImportStore(),

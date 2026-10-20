@@ -1,12 +1,4 @@
 // @vitest-environment jsdom
-//
-// Component suite for the custom-args tab (DENE-22, narrowed by DENE-309).
-//
-// This tab edits one thing: the `custom_args` array. AGY's numbered account
-// slots and the `--gemini_dir` lever moved to the accounts tab, and their
-// component suite moved with them (`agent-accounts-tab.test.tsx`); what stays
-// here is the argument list plus the one rule that survived the move — the
-// lever is hidden from the list and therefore has to be written back intact.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
@@ -59,13 +51,12 @@ const runtimeDevice = {
 function renderTab(
   overrides: Partial<Agent> = {},
   onSave = vi.fn().mockResolvedValue(undefined),
-  device: RuntimeDevice = runtimeDevice,
 ) {
   const result = render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <CustomArgsTab
         agent={{ ...baseAgent, ...overrides }}
-        runtimeDevice={device}
+        runtimeDevice={runtimeDevice}
         onSave={onSave}
       />
     </I18nProvider>,
@@ -73,12 +64,6 @@ function renderTab(
 
   return { ...result, onSave };
 }
-
-const agyDevice = {
-  ...runtimeDevice,
-  provider: "antigravity",
-  launch_header: "agy",
-} as RuntimeDevice;
 
 describe("CustomArgsTab", () => {
   beforeEach(() => {
@@ -135,53 +120,5 @@ describe("CustomArgsTab", () => {
     await user.click(screen.getByRole("button", { name: /^save$/i }));
 
     expect(onSave).toHaveBeenCalledWith({ custom_args: ["value with spaces"] });
-  });
-
-  it("points at the accounts tab instead of listing the agy lever", () => {
-    renderTab(
-      {
-        custom_args: [
-          "--profile",
-          "research",
-          "--gemini_dir",
-          "/Users/you/.gemini",
-        ],
-      },
-      undefined,
-      agyDevice,
-    );
-
-    expect(
-      screen.getByText(/managed on the Accounts tab/i),
-    ).toBeInTheDocument();
-    expect(screen.getByText("--profile")).toBeInTheDocument();
-    // The lever and its value stay in `custom_args` but out of this list, so
-    // the binding keeps exactly one editing surface.
-    expect(screen.queryByText("--gemini_dir")).not.toBeInTheDocument();
-    expect(screen.queryByText("/Users/you/.gemini")).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: /add argument/i }),
-    ).toBeInTheDocument();
-  });
-
-  it("writes the agy lever back untouched when another argument is added", async () => {
-    const user = userEvent.setup();
-    const { onSave } = renderTab(
-      { custom_args: ["--gemini_dir", "/Users/you/.gemini"] },
-      undefined,
-      agyDevice,
-    );
-
-    await user.click(screen.getByRole("button", { name: /add argument/i }));
-    await user.type(
-      screen.getByRole("textbox", { name: /new argument/i }),
-      "--model",
-    );
-    await user.click(screen.getByRole("button", { name: /^add$/i }));
-    await user.click(screen.getByRole("button", { name: /^save$/i }));
-
-    expect(onSave).toHaveBeenCalledWith({
-      custom_args: ["--gemini_dir", "/Users/you/.gemini", "--model"],
-    });
   });
 });

@@ -152,7 +152,7 @@ function account(id: string, overrides: Record<string, unknown> = {}) {
     home: `/Users/you/.gemini-${id}`,
     base_url: "",
     key_ref: "",
-    lever: "custom_args:--gemini_dir",
+    lever: "",
     signed_in: true,
     quota_reset_at: 0,
     ...overrides,

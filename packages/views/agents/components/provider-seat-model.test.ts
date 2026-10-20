@@ -1,33 +1,17 @@
 // @vitest-environment node
 
 // Canonical suite for the seat model string's codec and its display form. Every
-// surface that shows a seat's model — the provider-presets panel and both
-// seat-side model pickers — renders through this module, so the "no `%2F` on
-// screen" rule is proven here once rather than re-run through each DOM mount.
+// surface that shows a seat's model — both seat-side model pickers — renders
+// through this module, so the "no `%2F` on screen" rule is proven here once
+// rather than re-run through each DOM mount.
 
 import { describe, expect, it } from "vitest";
-import type {
-  RuntimeProviderPreset,
-  RuntimeProviderPresetModel,
-} from "@multica/core/types";
 import {
   parseProviderSeatModelString,
-  providerPresetModelLabel,
   providerSeatModelDisplay,
   providerSeatModelString,
   seatModelIsExactly,
 } from "./provider-seat-model";
-
-function preset(overrides: Partial<RuntimeProviderPreset> = {}): RuntimeProviderPreset {
-  return {
-    id: "command-code",
-    api: "openai-completions",
-    base_url: "https://api.example.test/v1",
-    has_key: true,
-    models: [{ id: "claude-sonnet-5" }],
-    ...overrides,
-  };
-}
 
 describe("seat model strings", () => {
   const rawId = "deepseek/deepseek-v4.1-flash";
@@ -65,47 +49,15 @@ describe("seat model strings", () => {
     }
   });
 
-  it("shows provider and model name, never the escape", () => {
-    const display = providerSeatModelDisplay(encoded, [
-      preset({ id: presetId, models: [{ id: rawId, name: "DeepSeek V4.1 Flash" }] }),
-    ]);
-    expect(display).toBe("command-code2 · DeepSeek V4.1 Flash");
-    // The regression this rule exists for: rendering `%2F` invites a hand-edit
-    // that drops the prefix.
-    expect(display).not.toContain("%2F");
-  });
-
-  it("falls back to the parsed pieces when the preset is not in hand", () => {
-    expect(providerSeatModelDisplay(encoded, [])).toBe(
-      `command-code2 · ${rawId}`,
-    );
-    expect(providerSeatModelDisplay("plain-model", [])).toBe("plain-model");
-  });
-
-  // The seat-side model pickers render catalog rows straight from the runtime's
-  // model list and fetch no preset list, so they call this with the presets
-  // omitted. That path still has to decode: the option they show for a DSH
-  // gateway is `deepseek-official/deepseek-v4%2Fflash`, and a user searching
-  // for the model they picked types `deepseek/deepseek-v4.1-flash` (DENE-684).
-  it("decodes a catalog row with no preset list to hand", () => {
+  // The regression this rule exists for: rendering `%2F` invites a hand-edit
+  // that drops the prefix. A user searching for the model they picked types
+  // `deepseek/deepseek-v4.1-flash` (DENE-684).
+  it("shows provider and decoded model id, never the escape", () => {
     const catalogId = "command-code2/deepseek%2Fdeepseek-v4.1-flash";
     expect(providerSeatModelDisplay(catalogId)).toBe(`command-code2 · ${rawId}`);
     expect(providerSeatModelDisplay(catalogId)).not.toContain("%2F");
     // A runtime whose ids carry no provider prefix is untouched by the rule.
     expect(providerSeatModelDisplay("claude-fable-5")).toBe("claude-fable-5");
-  });
-});
-
-describe("providerPresetModelLabel", () => {
-  it("labels a row by name and falls back to the id", () => {
-    const catalog: RuntimeProviderPresetModel[] = [
-      { id: "deepseek/deepseek-v4.1-flash", name: "DeepSeek V4.1 Flash" },
-      { id: "claude-sonnet-5" },
-      { id: "gpt-5.6-sol", name: "  " },
-    ];
-    expect(providerPresetModelLabel(catalog[0]!)).toBe("DeepSeek V4.1 Flash");
-    expect(providerPresetModelLabel(catalog[1]!)).toBe("claude-sonnet-5");
-    expect(providerPresetModelLabel(catalog[2]!)).toBe("gpt-5.6-sol");
   });
 });
 

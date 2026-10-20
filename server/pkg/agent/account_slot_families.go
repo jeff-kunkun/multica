@@ -32,10 +32,6 @@ type AccountSlotFamily struct {
 	RuntimeConfigKey string `json:"runtime_config_key"`
 	// DefaultAccounts seeds the list for an agent that never saved one.
 	DefaultAccounts []int `json:"default_accounts"`
-	// RotatesOnQuota is true only where the daemon can detect an exhausted quota
-	// and move to the next slot (agy_quota.go). Every other family's slots are a
-	// manual registry: the bound directory takes effect, nothing rotates.
-	RotatesOnQuota bool `json:"rotates_on_quota"`
 }
 
 // AccountGlob is the family's additional-account directory pattern, relative

@@ -9,7 +9,6 @@ import type {
 import { runtimeDisplayLabel } from "@multica/core/runtimes";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useT } from "../../i18n";
-import { AgentJevIndicator } from "./agent-jev-indicator";
 import {
   AgentQuotaCapsule,
   AgentQuotaMeter,
@@ -95,14 +94,6 @@ export function AgentOverviewSummary({
                   : t(($) => $.pickers.model_default)}
               </span>
             </span>
-          </SummaryRow>
-          <SummaryRow label={t(($) => $.jev.label)}>
-            <AgentJevIndicator
-              agent={agent}
-              runtime={runtime}
-              now={now}
-              labeled={false}
-            />
           </SummaryRow>
           <SummaryRow label={t(($) => $.inspector.prop_concurrency)}>
             <span className="font-mono tabular-nums text-foreground">

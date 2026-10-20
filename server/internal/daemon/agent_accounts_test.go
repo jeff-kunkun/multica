@@ -68,18 +68,16 @@ func byCLIAccount(accounts []AgentAccount) map[string]AgentAccount {
 }
 
 // TestProbeAgentAccountsReportsEveryCLI is the channel's contract test: one
-// fake home exercising the agy multi-account convention, the single-account
+// fake home exercising the multi-account conventions, the single-account
 // CLIs, a logged-out account directory, and the two witnesses that are not a
 // plain file existence check.
 func TestProbeAgentAccountsReportsEveryCLI(t *testing.T) {
 	f := newAgentAccountFixture(t)
 
-	// agy: default + a second account, both signed in, and a third directory
-	// that exists with no credential at all.
-	f.file(filepath.Join(".gemini", "oauth_creds.json"), `{"access_token":"fixture"}`)
-	f.dir(".gemini-account2")
-	f.file(filepath.Join(".gemini-account2", "antigravity-cli", "antigravity-oauth-token"), "fixture")
-	f.dir(".gemini-account7")
+	// agy: the default Gemini directory only. Numbered .gemini-accountN
+	// directories are not a reported convention, so the one here is ignored.
+	f.file(filepath.Join(".gemini", "antigravity-cli", "antigravity-oauth-token"), "fixture")
+	f.file(filepath.Join(".gemini-account2", "oauth_creds.json"), `{"access_token":"fixture"}`)
 
 	// dsh: login store.
 	f.file(filepath.Join(".dsh", ".credentials.yaml"), "version: 1")
@@ -105,9 +103,7 @@ func TestProbeAgentAccountsReportsEveryCLI(t *testing.T) {
 		lever string
 		login bool
 	}{
-		{"agy/default", filepath.Join(f.home, ".gemini"), agentLeverAgyGeminiDir, true},
-		{"agy/account2", filepath.Join(f.home, ".gemini-account2"), agentLeverAgyGeminiDir, true},
-		{"agy/account7", filepath.Join(f.home, ".gemini-account7"), agentLeverAgyGeminiDir, false},
+		{"agy/default", filepath.Join(f.home, ".gemini"), agentLeverNone, true},
 		{"claude/default", filepath.Join(f.home, ".claude"), agentLeverClaudeHome, true},
 		{"codex/default", filepath.Join(f.home, ".codex"), agentLeverNone, true},
 		{"cursor/default", filepath.Join(f.home, ".cursor"), agentLeverNone, false},
@@ -312,19 +308,14 @@ func TestAgentJSONKeyNonEmpty(t *testing.T) {
 	}
 }
 
-// TestWithRegistrationHostMetaKeepsLegacyAgyKeys is the regression guard for
-// the three keys that predate this channel: custom-args-tab.tsx still consumes
-// them, so the new payload must be purely additive.
-func TestWithRegistrationHostMetaKeepsLegacyAgyKeys(t *testing.T) {
+// TestWithRegistrationHostMetaReportsHomeAndAccounts pins the register payload:
+// home_dir and the account report, and none of the retired AGY slot keys.
+func TestWithRegistrationHostMetaReportsHomeAndAccounts(t *testing.T) {
 	f := newAgentAccountFixture(t)
 	t.Setenv("HOME", f.home)
 	t.Setenv("USERPROFILE", f.home)
 
 	f.file(filepath.Join(".gemini", "oauth_creds.json"), `{"access_token":"fixture"}`)
-	f.file(filepath.Join(".gemini-account2", "oauth_creds.json"), `{"refresh_token":"fixture"}`)
-	// Present, unreadable-looking, and NOT logged in: probeAgyLoggedInDirs must
-	// keep dropping it.
-	f.dir(".gemini-account3")
 	f.file(filepath.Join(".dsh", ".credentials.yaml"), "version: 1")
 
 	d := &Daemon{cfg: Config{DaemonID: "daemon-agent-accounts"}, logger: slog.Default()}
@@ -336,13 +327,10 @@ func TestWithRegistrationHostMetaKeepsLegacyAgyKeys(t *testing.T) {
 	if got := req["home_dir"]; got != f.home {
 		t.Fatalf("home_dir = %#v, want %q", got, f.home)
 	}
-	dirs, ok := req["agy_logged_in_dirs"].([]string)
-	if !ok || len(dirs) != 2 {
-		t.Fatalf("agy_logged_in_dirs = %#v, want the two signed-in Gemini dirs", req["agy_logged_in_dirs"])
-	}
-	exhausted, ok := req["agy_quota_exhausted"].([]agyQuotaExhaustedEntry)
-	if !ok || len(exhausted) != 1 || exhausted[0].ResetAt != resetAt.Unix() {
-		t.Fatalf("agy_quota_exhausted = %#v, want one entry resetting at %d", req["agy_quota_exhausted"], resetAt.Unix())
+	for _, key := range []string{"agy_logged_in_dirs", "agy_quota_exhausted"} {
+		if _, present := req[key]; present {
+			t.Fatalf("%s = %#v, want the retired key absent", key, req[key])
+		}
 	}
 	if _, present := req["agent_accounts_error"]; present {
 		t.Fatalf("clean probe must not report agent_accounts_error: %#v", req["agent_accounts_error"])
@@ -354,12 +342,9 @@ func TestWithRegistrationHostMetaKeepsLegacyAgyKeys(t *testing.T) {
 	}
 	got := byCLIAccount(accounts)
 	// The quota overlay is the daemon's authoritative answer for the AGY row,
-	// and the dsh row proves the two channels coexist in one payload.
+	// and the dsh row proves every CLI shares one payload.
 	if got["agy/default"].QuotaResetAt != resetAt.Unix() {
 		t.Fatalf("agy/default quota_reset_at = %d, want %d", got["agy/default"].QuotaResetAt, resetAt.Unix())
-	}
-	if got["agy/account2"].QuotaResetAt != 0 {
-		t.Fatalf("agy/account2 quota_reset_at = %d, want 0", got["agy/account2"].QuotaResetAt)
 	}
 	if _, ok := got["dsh/default"]; !ok {
 		t.Fatalf("agent_accounts = %#v, want the dsh row", got)

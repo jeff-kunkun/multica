@@ -52,32 +52,6 @@ func TestMaskSecretsRemovesCredentialsAndKeepsOrdinaryText(t *testing.T) {
 	}
 }
 
-func TestClassifyActivityLeansHighOnRiskAndNeverCritical(t *testing.T) {
-	type c struct {
-		f    ActivityFacts
-		imp  string
-		cats string
-	}
-	for _, tc := range []c{
-		{ActivityFacts{Type: ActivityStatusChanged, ToStatus: "blocked"}, ImportanceHigh, "risk"},
-		{ActivityFacts{Type: ActivityStatusChanged, ToStatus: "done"}, ImportanceNormal, "completion,result"},
-		{ActivityFacts{Type: ActivityStatusChanged, ToStatus: "in_progress"}, ImportanceLow, "progress"},
-		{ActivityFacts{Type: ActivityAssigneeChanged}, ImportanceLow, "info"},
-		{ActivityFacts{Type: ActivityCommentCreated, ActorType: "agent", Text: "部署失败，需要回滚"}, ImportanceHigh, "decision,failure,risk"},
-		{ActivityFacts{Type: ActivityCommentCreated, ActorType: "agent", Text: "要你做：请确认是否发布到生产"}, ImportanceHigh, "decision,risk"},
-		{ActivityFacts{Type: ActivityChatMessage, ActorType: "agent", Text: "已完成，结论如下"}, ImportanceNormal, "completion,result"},
-		{ActivityFacts{Type: ActivityCommentCreated, ActorType: "agent", Text: "正在看第二个文件"}, ImportanceNormal, "progress"},
-	} {
-		imp, cats := ClassifyActivity(tc.f)
-		if imp != tc.imp || strings.Join(cats, ",") != tc.cats {
-			t.Errorf("%+v -> %s %v, want %s %s", tc.f, imp, cats, tc.imp, tc.cats)
-		}
-		if imp == ImportanceCritical {
-			t.Errorf("critical is reserved for human_needed: %+v", tc.f)
-		}
-	}
-}
-
 func TestNormalizeActivityScope(t *testing.T) {
 	got, err := NormalizeActivityScope([]string{" Followed", "owned", "OWNED", ""})
 	if err != nil || strings.Join(got, ",") != "owned,followed" {

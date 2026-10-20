@@ -46,9 +46,6 @@ for (const family of data.families) {
   ) {
     throw new Error(`${label}: family ${family.cli} "default_accounts" must be slot numbers starting with 1`);
   }
-  if (typeof family.rotates_on_quota !== "boolean") {
-    throw new Error(`${label}: family ${family.cli} needs a boolean "rotates_on_quota"`);
-  }
   if (seenCli.has(family.cli)) throw new Error(`${label}: duplicate cli ${family.cli}`);
   if (seenKey.has(family.runtime_config_key)) {
     throw new Error(`${label}: duplicate runtime_config_key ${family.runtime_config_key}`);
@@ -82,11 +79,6 @@ lines.push("  readonly lever: string;");
 lines.push("  readonly runtimeConfigKey: string;");
 lines.push("  /** Seeds the list for an agent that never saved one. Always starts with 1. */");
 lines.push("  readonly defaultAccounts: readonly number[];");
-lines.push("  /**");
-lines.push("   * True only where the daemon detects an exhausted quota and moves to the");
-lines.push("   * next slot. Every other family's slots are a manual registry.");
-lines.push("   */");
-lines.push("  readonly rotatesOnQuota: boolean;");
 lines.push("};");
 lines.push("");
 lines.push(`export const MAX_ACCOUNT_SLOT_NUMBER = ${data.max_account_number};`);
@@ -100,7 +92,6 @@ for (const family of data.families) {
   lines.push(`    lever: ${JSON.stringify(family.lever)},`);
   lines.push(`    runtimeConfigKey: ${JSON.stringify(family.runtime_config_key)},`);
   lines.push(`    defaultAccounts: [${family.default_accounts.join(", ")}],`);
-  lines.push(`    rotatesOnQuota: ${family.rotates_on_quota},`);
   lines.push("  },");
 }
 lines.push("];");

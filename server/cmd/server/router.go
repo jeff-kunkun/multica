@@ -522,7 +522,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		h.AgentCLICommands = handler.NewRedisAgentCLICommandStore(rdb)
 		h.ModelListStore = handler.NewRedisModelListStore(rdb)
 		h.ModelCatalogCache = handler.NewRedisModelCatalogCache(rdb)
-		h.ProviderPresetStore = handler.NewRedisProviderPresetStore(rdb)
 		h.LocalSkillListStore = handler.NewRedisLocalSkillListStore(rdb)
 		h.LocalSkillImportStore = handler.NewRedisLocalSkillImportStore(rdb)
 		h.LivenessStore = handler.NewRedisLivenessStore(rdb)
@@ -1713,7 +1712,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/runtimes/{runtimeId}/model-catalog/refresh", h.RefreshRuntimeModelCatalog)
 		r.Post("/runtimes/{runtimeId}/models/{requestId}/result", h.ReportModelListResult)
 		r.Post("/runtimes/{runtimeId}/routing-analysis/{requestId}/result", h.ReportRoutingAnalysisResult)
-		r.Post("/runtimes/{runtimeId}/provider-presets/{requestId}/result", h.ReportProviderPresetResult)
 		r.Post("/runtimes/{runtimeId}/local-skills/{requestId}/result", h.ReportLocalSkillListResult)
 		r.Post("/runtimes/{runtimeId}/local-skills/import/{requestId}/result", h.ReportLocalSkillImportResult)
 
@@ -1756,12 +1754,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	})
 
 	// One instance for both authenticated trees (DENE-1936): see the comment on
-	// the main authenticated group below.
-	botWriteAudit := middleware.BotWriteAudit(queries, func(ctx context.Context, w service.WorkspaceWrite) {
-		if _, err := service.RouteWorkspaceWrite(ctx, queries, w, h.TargetVisibility()); err != nil {
-			slog.Warn("workspace activity: route write failed", "error", err, "route", w.Route)
-		}
-	}, h)
+	// the main authenticated group below. No observer: the workspace activity
+	// stream it fed is retired; the audit and owner confirmation remain.
+	botWriteAudit := middleware.BotWriteAudit(queries, nil, h)
 
 	// Browser-session relay for sandboxed plugin surfaces. The iframe talks to
 	// the host over MessagePort; the host calls this internal route with the
@@ -2110,10 +2105,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/bots/{botId}/wake/events/{eventId}/relayed", h.RelayHumanNeeded)
 					r.Post("/bots/{botId}/wake/events/{eventId}/answered", h.AnswerHumanNeeded)
 					r.Get("/bots/{botId}/human-needed", h.ListHumanNeededForBot)
-					// The full activity stream (DENE-1935): the optional
-					// "looked, nobody needs telling" receipt and the catch-up list.
-					r.Post("/bots/{botId}/wake/events/{eventId}/handled", h.HandledActivity)
-					r.Get("/bots/{botId}/activity", h.ListActivityForBot)
 					// The office event stream (DENE-1963): per-event receipts
 					// and the Bot's own delivery ledger.
 					r.Post("/bots/{botId}/office-events/{eventId}/receipt", h.OfficeEventReceipt)
@@ -2839,8 +2830,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/update/{updateId}", h.GetUpdate)
 					r.Post("/models", h.InitiateListModels)
 					r.Get("/models/{requestId}", h.GetModelListRequest)
-					r.Post("/provider-presets", h.InitiateProviderPresetAction)
-					r.Get("/provider-presets/{requestId}", h.GetProviderPresetRequest)
 					r.Post("/local-skills", h.InitiateListLocalSkills)
 					r.Get("/local-skills/{requestId}", h.GetLocalSkillListRequest)
 					r.Post("/local-skills/import", h.InitiateImportLocalSkill)
@@ -2979,12 +2968,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Get("/api/chat/thread", h.GetChatThread)
 
 			// Inbox
-			// Agent doorbell rings (DENE-808): owner approves / declines.
-			r.Route("/api/agent-access-requests", func(r chi.Router) {
-				r.Get("/", h.ListAgentAccessRequests)
-				r.Post("/{id}/approve", h.ApproveAgentAccessRequest)
-				r.Post("/{id}/decline", h.DeclineAgentAccessRequest)
-			})
 			// Calls still waiting on the current user (DENE-880).
 			r.Get("/api/summons/waiting", h.ListWaitingSummons)
 			r.Route("/api/inbox", func(r chi.Router) {

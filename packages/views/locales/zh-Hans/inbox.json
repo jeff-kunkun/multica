@@ -57,21 +57,7 @@
     "autopilot_quota_exceeded_body": "当前周期的 {{limit}} 次自动化执行额度已用完。在 {{resetAt}} 重置前，后续自动化执行将不会启动。",
     "autopilot_quota_upgrade": "查看升级方案",
     "archive": "归档",
-    "unarchive": "取消归档",
-    "access_request_mention_title": "{{requester}} @ 了 {{agent}}，需要你批准",
-    "access_request_assign_title": "{{requester}} 把任务指派给 {{agent}}，需要你批准",
-    "access_request_local_env_note": "批准后，该任务可访问你电脑上的密钥、登录状态和文件。",
-    "access_pass_prompt": "顺便放行一段时间：",
-    "access_pass_2h": "2 小时",
-    "access_pass_today": "今天内",
-    "access_pass_custom": "自定义截止…",
-    "access_approve_once": "批准这一次",
-    "access_approve_with_pass": "批准并发通行证",
-    "access_decline": "拒绝",
-    "access_request_expires": "{{until}} 过期",
-    "access_status_approved": "已批准",
-    "access_status_declined": "已拒绝",
-    "access_status_expired": "已过期：没人及时处理"
+    "unarchive": "取消归档"
   },
   "types": {
     "needs_you": "需要你处理",
@@ -126,11 +112,7 @@
   "toasts": {
     "source_context_retry_started": "已使用原始上下文开始重试",
     "archived": "已归档通知",
-    "unarchived": "已恢复通知",
-    "access_approved": "已批准，任务已排队",
-    "access_approved_with_pass": "已批准，通行证有效至 {{until}}",
-    "access_approved_but_blocked": "已批准，但任务没能启动，请检查智能体的运行时",
-    "access_declined": "已拒绝，已通知发起人"
+    "unarchived": "已恢复通知"
   },
   "errors": {
     "archived_lookup_failed": "无法加载链接指向的通知",
@@ -146,10 +128,7 @@
     "archive_completed_failed": "归档已完成失败",
     "unarchive_failed": "取消归档失败",
     "archived_load_failed": "无法加载已归档通知",
-    "filters_load_failed": "无法加载筛选项",
-    "access_request_not_pending": "这条申请已被处理或已过期",
-    "access_request_failed": "处理申请失败",
-    "access_pass_expiry_invalid": "请选择一个未来的截止时间"
+    "filters_load_failed": "无法加载筛选项"
   },
   "board": {
     "title": "收件箱",

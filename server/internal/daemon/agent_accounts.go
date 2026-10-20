@@ -14,24 +14,30 @@ import (
 )
 
 // maxAgentAccounts bounds the read-only account report the daemon stamps onto
-// every registration and /health response. Same order of magnitude as
-// maxAgyLoggedInDirs: a pathological home directory must not turn a heartbeat
-// into an unbounded payload.
+// every registration and /health response: a pathological home directory must
+// not turn a heartbeat into an unbounded payload.
 const maxAgentAccounts = 32
 
 // agyCLIName is the CLI id of Antigravity/Gemini. Named because the quota
 // overlay is keyed by provider family, not by directory.
 const agyCLIName = "agy"
 
+// agyCredentialRelativePaths are the files, relative to a Gemini directory,
+// whose presence means that directory holds an AGY/Gemini login.
+var agyCredentialRelativePaths = []string{
+	"oauth_creds.json",
+	filepath.Join("antigravity-cli", "antigravity-oauth-token"),
+}
+
 // Binding levers. A lever is how a "use this account" write reaches the CLI,
 // and it is also the frontend's answer to "can this row be switched at all?" —
 // an empty lever renders read-only, so a lever must never be advertised for a
 // CLI this daemon cannot actually rebind.
 const (
-	agentLeverAgyGeminiDir = "custom_args:--gemini_dir"
-	agentLeverDshHome      = "env:DSH_HOME"
-	agentLeverClaudeHome   = "env:CLAUDE_CONFIG_DIR"
-	// agentLeverNone covers codex and cursor. Their account directories are
+	agentLeverDshHome    = "env:DSH_HOME"
+	agentLeverClaudeHome = "env:CLAUDE_CONFIG_DIR"
+	// agentLeverNone covers agy, codex and cursor. Agy's directory lives in
+	// the agent's custom args, which this channel does not rewrite. Their account directories are
 	// selected by CODEX_HOME / CURSOR_DATA_DIR, which isBlockedEnvKey refuses
 	// from an agent's custom_env AND which the task environment rewrites per
 	// task (execenv builds a per-task CODEX_HOME, CURSOR_DATA_DIR sidecar).
@@ -123,9 +129,10 @@ type agentCLIProbe struct {
 // CLIs themselves use — each witness is documented with why it is the right
 // signal, because a wrong witness shows a confident, wrong status pill.
 var agentCLIProbes = []agentCLIProbe{
-	// Same witnesses the slot failover already trusts (agyDirHasLogin), so the
-	// green check and the new channel cannot disagree about a Gemini directory.
-	slotFamilyProbe(agyCLIName, agentFileWitnesses(agyCredentialRelativePaths...)),
+	// Antigravity keeps its login in the Gemini directory. Read-only: the
+	// account directory is chosen by --gemini_dir in the agent's custom args,
+	// which this channel does not rewrite.
+	{CLI: agyCLIName, BaseDir: ".gemini", Lever: agentLeverNone, Witnesses: agentFileWitnesses(agyCredentialRelativePaths...)},
 	// DSH keeps its login record in <home>/.credentials.yaml — a versioned
 	// store (version/refs/records) that DSH writes on login. Verified against a
 	// real ~/.dsh; it is the only auth-looking file the CLI creates there, so it

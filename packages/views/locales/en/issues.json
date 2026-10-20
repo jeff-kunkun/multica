@@ -760,9 +760,7 @@
     "steer_attachment_notice": "Only text can join a running run, so a message with files is handled after it.",
     "restart_send": "Stop and send",
     "restart_failed": "Couldn't stop the current run. Your message wasn't sent.",
-    "align_action": "Align on this first",
-    "trigger_blocked_access_requested": "The agent's owner has been asked to approve this — it starts once they do",
-    "trigger_blocked_short_access_requested": "Waiting for owner approval"
+    "align_action": "Align on this first"
   },
   "reply": {
     "placeholder": "Leave a reply...",

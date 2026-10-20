@@ -16,24 +16,10 @@
 // always goes through `providerSeatModelDisplay`, which resolves the pair back
 // to `provider · modelName`.
 //
-// This module sits next to the components, not inside the provider-presets form
-// that first needed it, because both seat-side model pickers render the same
-// strings: it is the shared vocabulary for a seat's model, not a detail of the
-// presets panel.
+// Both seat-side model pickers render the same strings: this module is the
+// shared vocabulary for a seat's model.
 //
 // Canonical tests: `provider-seat-model.test.ts`.
-
-import type {
-  RuntimeProviderPreset,
-  RuntimeProviderPresetModel,
-} from "@multica/core/types";
-
-/** The display name for a preset model row: its name when it has one, else its id. */
-export function providerPresetModelLabel(
-  model: RuntimeProviderPresetModel,
-): string {
-  return model.name?.trim() || model.id;
-}
 
 export interface ParsedSeatModelString {
   providerId: string;
@@ -50,7 +36,7 @@ function decodeSeatModelSegment(segment: string): string {
   }
 }
 
-/** The encoded seat model string for one preset + the gateway's own model id. */
+/** The encoded seat model string for one provider + the gateway's own model id. */
 export function providerSeatModelString(
   providerId: string,
   modelId: string,
@@ -79,26 +65,15 @@ export function parseProviderSeatModelString(
 }
 
 /**
- * Render a seat model string for the screen as `provider · model name`.
- *
- * `presets` is what turns the encoded model id back into the name the user
- * picked; without the preset in hand the raw id is the honest fallback. It is
- * optional because a model picker renders rows straight from the runtime's
- * model catalog and fetching the preset list there would put a daemon round
- * trip in front of a dropdown just to name a row — the decoded id is already
- * the pair the user picked, and it is what a search is typed against. The
- * returned string never contains the escape — that is the whole point.
+ * Render a seat model string for the screen as `provider · model id`, with the
+ * model id decoded — the pair the user picked, and what a search is typed
+ * against. The returned string never contains the escape — that is the whole
+ * point.
  */
-export function providerSeatModelDisplay(
-  seatModel: string,
-  presets: readonly RuntimeProviderPreset[] = [],
-): string {
+export function providerSeatModelDisplay(seatModel: string): string {
   const parsed = parseProviderSeatModelString(seatModel);
   if (!parsed) return seatModel;
-  const preset = presets.find((candidate) => candidate.id === parsed.providerId);
-  const model = preset?.models.find((entry) => entry.id === parsed.modelId);
-  const name = model ? providerPresetModelLabel(model) : parsed.modelId;
-  return `${parsed.providerId} · ${name}`;
+  return `${parsed.providerId} · ${parsed.modelId}`;
 }
 
 /**

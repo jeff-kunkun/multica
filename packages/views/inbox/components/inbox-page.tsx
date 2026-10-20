@@ -109,7 +109,6 @@ import {
   resolveDetailItem,
 } from "./inbox-display";
 import { AutopilotQuotaNotice } from "./autopilot-quota-notice";
-import { AgentAccessRequestNotice, isAgentAccessRequestNotice } from "./agent-access-request-notice";
 import { useT } from "../../i18n";
 import { BoardProjectControls, InboxBoardLanes, LANE_TAG_CLASS } from "../../home/components/home-page";
 import type { InboxRowDecoration } from "./inbox-list-item";
@@ -868,13 +867,6 @@ function InboxActivityPageContent({ merged = false }: { merged?: boolean } = {})
     // newest one — keying on its id would remount IssueDetail on every event,
     // wiping the comment composer draft and resetting scroll position.
     <>
-    {/* A doorbell request is pinned to the issue it was raised on, so the
-        owner decides with the issue in view; the card sits above the detail
-        and is keyed by the request so approving one never bleeds into the
-        next request on the same issue. */}
-    {isAgentAccessRequestNotice(detailItem.type) ? (
-      <AgentAccessRequestNotice key={detailItem.id} item={detailItem} />
-    ) : null}
     <ErrorBoundary
       resetKeys={[detailItem.issue_id]}
       // The default fallback is a bare message card. On a phone it would be the

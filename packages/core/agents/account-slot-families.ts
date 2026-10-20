@@ -22,25 +22,11 @@ export type AccountSlotFamily = {
   readonly runtimeConfigKey: string;
   /** Seeds the list for an agent that never saved one. Always starts with 1. */
   readonly defaultAccounts: readonly number[];
-  /**
-   * True only where the daemon detects an exhausted quota and moves to the
-   * next slot. Every other family's slots are a manual registry.
-   */
-  readonly rotatesOnQuota: boolean;
 };
 
 export const MAX_ACCOUNT_SLOT_NUMBER = 32;
 
 export const ACCOUNT_SLOT_FAMILIES: readonly AccountSlotFamily[] = [
-  {
-    cli: "agy",
-    baseDir: ".gemini",
-    accountDirPrefix: ".gemini-account",
-    lever: "custom_args:--gemini_dir",
-    runtimeConfigKey: "agy_slots",
-    defaultAccounts: [1, 2, 3],
-    rotatesOnQuota: true,
-  },
   {
     cli: "dsh",
     baseDir: ".dsh",
@@ -48,7 +34,6 @@ export const ACCOUNT_SLOT_FAMILIES: readonly AccountSlotFamily[] = [
     lever: "env:DSH_HOME",
     runtimeConfigKey: "dsh_slots",
     defaultAccounts: [1],
-    rotatesOnQuota: false,
   },
   {
     cli: "claude",
@@ -57,7 +42,6 @@ export const ACCOUNT_SLOT_FAMILIES: readonly AccountSlotFamily[] = [
     lever: "env:CLAUDE_CONFIG_DIR",
     runtimeConfigKey: "claude_slots",
     defaultAccounts: [1],
-    rotatesOnQuota: false,
   },
 ];
 

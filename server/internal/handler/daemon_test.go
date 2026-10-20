@@ -835,20 +835,21 @@ func TestDaemonRegister_StoresHomeDirInMetadata(t *testing.T) {
 	}
 }
 
-func TestDaemonRegister_StoresAgyLoggedInDirsInMetadata(t *testing.T) {
+// A 0.6.x daemon still sends the retired AGY slot keys. Registration must
+// succeed and simply not record them.
+func TestDaemonRegister_IgnoresRetiredAgyKeys(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
 
 	req := newDaemonTokenRequest("POST", "/api/daemon/register", map[string]any{
-		"workspace_id": testWorkspaceID,
-		"daemon_id":    "test-daemon-agy-logins",
-		"device_name":  "test-device",
-		"home_dir":     "/Users/agy-host",
-		"agy_logged_in_dirs": []string{
-			"/Users/agy-host/.gemini",
-			"relative",
-			"/Users/agy-host/.gemini-account4",
+		"workspace_id":       testWorkspaceID,
+		"daemon_id":          "test-daemon-agy-logins",
+		"device_name":        "test-device",
+		"home_dir":           "/Users/agy-host",
+		"agy_logged_in_dirs": []string{"/Users/agy-host/.gemini"},
+		"agy_quota_exhausted": []map[string]any{
+			{"dir": "/Users/agy-host/.gemini", "reset_at": time.Now().Add(time.Hour).Unix()},
 		},
 		"runtimes": []map[string]any{
 			{"name": "agy", "type": "antigravity", "version": "1.0.0", "status": "online"},
@@ -871,62 +872,14 @@ func TestDaemonRegister_StoresAgyLoggedInDirsInMetadata(t *testing.T) {
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, resp.Runtimes[0].ID)
 	})
-	got, ok := resp.Runtimes[0].Metadata["agy_logged_in_dirs"].([]any)
-	if !ok {
-		t.Fatalf("metadata.agy_logged_in_dirs = %#v", resp.Runtimes[0].Metadata["agy_logged_in_dirs"])
+	meta := resp.Runtimes[0].Metadata
+	if meta["home_dir"] != "/Users/agy-host" {
+		t.Fatalf("metadata.home_dir = %#v", meta["home_dir"])
 	}
-	if len(got) != 2 || got[0] != "/Users/agy-host/.gemini" || got[1] != "/Users/agy-host/.gemini-account4" {
-		t.Fatalf("agy_logged_in_dirs = %#v", got)
-	}
-}
-
-func TestDaemonRegister_StoresAgyQuotaExhaustedInMetadata(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-
-	resetAt := time.Now().Add(time.Hour).Unix()
-	req := newDaemonTokenRequest("POST", "/api/daemon/register", map[string]any{
-		"workspace_id": testWorkspaceID,
-		"daemon_id":    "test-daemon-agy-quota",
-		"device_name":  "test-device",
-		"home_dir":     "/Users/agy-host",
-		"agy_quota_exhausted": []map[string]any{
-			{"dir": "/Users/agy-host/.gemini", "reset_at": resetAt},
-			{"dir": "relative", "reset_at": resetAt},
-			{"dir": "/Users/agy-host/.gemini-account2", "reset_at": time.Now().Add(-time.Minute).Unix()},
-		},
-		"runtimes": []map[string]any{
-			{"name": "agy", "type": "antigravity", "version": "1.0.0", "status": "online"},
-		},
-	}, testWorkspaceID, "test-daemon-agy-quota")
-	w := testutil.Call(t, testHandler.DaemonRegister, req).Want(http.StatusOK)
-
-	var resp struct {
-		Runtimes []struct {
-			ID       string         `json:"id"`
-			Metadata map[string]any `json:"metadata"`
-		} `json:"runtimes"`
-	}
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
-	if len(resp.Runtimes) != 1 {
-		t.Fatalf("runtimes = %d, want 1", len(resp.Runtimes))
-	}
-	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, resp.Runtimes[0].ID)
-	})
-	got, ok := resp.Runtimes[0].Metadata["agy_quota_exhausted"].([]any)
-	if !ok {
-		t.Fatalf("metadata.agy_quota_exhausted = %#v", resp.Runtimes[0].Metadata["agy_quota_exhausted"])
-	}
-	if len(got) != 1 {
-		t.Fatalf("agy_quota_exhausted = %#v", got)
-	}
-	entry, _ := got[0].(map[string]any)
-	if entry["dir"] != "/Users/agy-host/.gemini" {
-		t.Fatalf("dir = %#v", entry)
+	for _, key := range []string{"agy_logged_in_dirs", "agy_quota_exhausted"} {
+		if _, ok := meta[key]; ok {
+			t.Errorf("metadata.%s = %#v, want it dropped", key, meta[key])
+		}
 	}
 }
 
@@ -1332,7 +1285,7 @@ func TestHandleDaemonWSHeartbeat_RuntimeGoneReturnsAckNotError(t *testing.T) {
 				missingRuntime: daemonws.NewRuntimeLease(testWorkspaceID, "", "online", time.Now().Add(-2*runtimeHeartbeatDBFlushInterval), true),
 			},
 		},
-		missingRuntime, false, nil, nil, nil)
+		missingRuntime, false, nil, nil)
 	if err != nil {
 		t.Fatalf("HandleDaemonWSHeartbeat: unexpected error %v", err)
 	}
@@ -1376,7 +1329,7 @@ func TestHandleDaemonWSHeartbeat_AllowsAnyAuthorizedWorkspace(t *testing.T) {
 				runtimeID: daemonws.NewRuntimeLease(workspaceID, "", "online", time.Now(), true),
 			},
 		},
-		runtimeID, false, nil, nil, nil)
+		runtimeID, false, nil, nil)
 	if err != nil {
 		t.Fatalf("HandleDaemonWSHeartbeat: unexpected error %v", err)
 	}

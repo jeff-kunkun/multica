@@ -4,11 +4,8 @@
 // parse/write pair for `runtime_config[family.runtimeConfigKey]` and the slot
 // ↔ directory mapping, for every CLI family in the generated table.
 //
-// The agy rows double as the compatibility contract: `agy_slots` is the key the
-// backend rotation reads and the key existing workspaces already store, so its
-// name, defaults and shape are pinned here exactly as they were before the
-// registry became per-CLI. The Go side pins the same facts against
-// `agy_quota.go` in `server/pkg/agent/account_slot_families_test.go`.
+// agy has no registry: its single `~/.gemini` account is read-only, and an
+// `agy_slots` key a workspace stored earlier is left exactly as it is.
 
 import { describe, expect, it } from "vitest";
 import {
@@ -29,36 +26,28 @@ import {
   writeSlotsConfig,
 } from "./account-slots";
 
-const AGY = accountSlotFamily("agy")!;
 const DSH = accountSlotFamily("dsh")!;
 const CLAUDE = accountSlotFamily("claude")!;
 
 describe("account slot family table", () => {
-  it("gives agy, dsh and claude a registry and leaves codex / cursor without one", () => {
+  it("gives dsh and claude a registry and leaves agy / codex / cursor without one", () => {
     expect(ACCOUNT_SLOT_FAMILIES.map((family) => family.cli)).toEqual([
-      "agy",
       "dsh",
       "claude",
     ]);
+    expect(accountSlotFamily("agy")).toBeNull();
     // CODEX_HOME / CURSOR_DATA_DIR are rewritten per task by the daemon, so a
     // slot registered for them could never take effect.
     expect(accountSlotFamily("codex")).toBeNull();
     expect(accountSlotFamily("cursor")).toBeNull();
   });
 
-  it("keeps agy's stored key and marks it as the only rotating family", () => {
-    expect(AGY.runtimeConfigKey).toBe("agy_slots");
+  it("stores each family under its own key", () => {
     expect(DSH.runtimeConfigKey).toBe("dsh_slots");
     expect(CLAUDE.runtimeConfigKey).toBe("claude_slots");
-    expect(
-      ACCOUNT_SLOT_FAMILIES.filter((family) => family.rotatesOnQuota).map(
-        (family) => family.cli,
-      ),
-    ).toEqual(["agy"]);
   });
 
   it("binds each family through the lever the daemon reports", () => {
-    expect(AGY.lever).toBe("custom_args:--gemini_dir");
     expect(DSH.lever).toBe("env:DSH_HOME");
     expect(CLAUDE.lever).toBe("env:CLAUDE_CONFIG_DIR");
   });
@@ -95,7 +84,6 @@ describe("slot numbers", () => {
 
 describe("slot directories", () => {
   it.each([
-    [AGY, ".gemini", ".gemini-account2", ".gemini-account4"],
     [DSH, ".dsh", ".dsh-account2", ".dsh-account4"],
     [CLAUDE, ".claude", ".claude-account2", ".claude-account4"],
   ])("maps %o slots onto the directories the daemon globs", (family, one, two, four) => {
@@ -105,17 +93,17 @@ describe("slot directories", () => {
   });
 
   it("reads the slot back from a bound directory, in any spelling", () => {
-    expect(slotNumberFromDirectory(AGY, "")).toBe(1);
-    expect(slotNumberFromDirectory(AGY, "/Users/you/.gemini")).toBe(1);
-    expect(slotNumberFromDirectory(AGY, "~/.gemini")).toBe(1);
-    expect(slotNumberFromDirectory(AGY, "/Users/you/.gemini-account2")).toBe(2);
-    expect(slotNumberFromDirectory(AGY, "~/.gemini-account4/")).toBe(4);
+    expect(slotNumberFromDirectory(DSH, "")).toBe(1);
+    expect(slotNumberFromDirectory(DSH, "/Users/you/.dsh")).toBe(1);
+    expect(slotNumberFromDirectory(DSH, "~/.dsh")).toBe(1);
+    expect(slotNumberFromDirectory(DSH, "/Users/you/.dsh-account2")).toBe(2);
+    expect(slotNumberFromDirectory(DSH, "~/.dsh-account4/")).toBe(4);
     expect(slotNumberFromDirectory(DSH, "C:\\Users\\you\\.dsh-account3")).toBe(3);
     expect(slotNumberFromDirectory(CLAUDE, "/Users/you/.claude-account2")).toBe(2);
   });
 
   it("calls a directory outside the numbered convention custom, not slot 1", () => {
-    expect(slotNumberFromDirectory(AGY, "/Users/you/.gemini-work")).toBeNull();
+    expect(slotNumberFromDirectory(DSH, "/Users/you/.dsh-work")).toBeNull();
     expect(slotNumberFromDirectory(DSH, "/Users/you/.dsh-accountX")).toBeNull();
     expect(slotNumberFromDirectory(DSH, "/Users/you/.dsh-account")).toBeNull();
     expect(slotNumberFromDirectory(DSH, "/Users/you/.dsh-account99")).toBeNull();
@@ -125,29 +113,19 @@ describe("slot directories", () => {
 });
 
 describe("runtime_config slot lists", () => {
-  it("reads agy exactly as before the registry became per-CLI", () => {
-    expect(parseSlotsConfig(AGY, {})).toEqual([1, 2, 3]);
-    expect(parseSlotsConfig(AGY, null)).toEqual([1, 2, 3]);
-    expect(parseSlotsConfig(AGY, { agy_slots: { accounts: [1, 4, 5] } })).toEqual([
-      1, 4, 5,
-    ]);
-    expect(parseSlotsConfig(AGY, {}, "/Users/you/.gemini-account4")).toEqual([
-      1, 2, 3, 4,
-    ]);
-    // A saved list wins over the binding: folding the bound slot back in is
-    // the tab's repair step, not the parser's.
-    expect(
-      parseSlotsConfig(AGY, { agy_slots: { accounts: [1] } }, "/Users/you/.gemini-account4"),
-    ).toEqual([1]);
-  });
-
-  it("seeds a manual family with its own directory plus the bound slot", () => {
+  it("seeds a family with its own directory plus the bound slot", () => {
     expect(parseSlotsConfig(DSH, {})).toEqual([1]);
+    expect(parseSlotsConfig(DSH, null)).toEqual([1]);
     expect(parseSlotsConfig(DSH, {}, "/Users/you/.dsh-account3")).toEqual([1, 3]);
     expect(parseSlotsConfig(CLAUDE, {}, "/Users/you/.claude-work")).toEqual([1]);
     expect(parseSlotsConfig(CLAUDE, { claude_slots: { accounts: [2, 1] } })).toEqual([
       1, 2,
     ]);
+    // A saved list wins over the binding: folding the bound slot back in is
+    // the tab's repair step, not the parser's.
+    expect(
+      parseSlotsConfig(DSH, { dsh_slots: { accounts: [1] } }, "/Users/you/.dsh-account4"),
+    ).toEqual([1]);
   });
 
   it("reads each family from its own key only", () => {
@@ -155,7 +133,6 @@ describe("runtime_config slot lists", () => {
       agy_slots: { accounts: [1, 5] },
       dsh_slots: { accounts: [1, 2] },
     };
-    expect(parseSlotsConfig(AGY, config)).toEqual([1, 5]);
     expect(parseSlotsConfig(DSH, config)).toEqual([1, 2]);
     expect(parseSlotsConfig(CLAUDE, config)).toEqual([1]);
   });
@@ -168,7 +145,6 @@ describe("runtime_config slot lists", () => {
     ["non-array accounts", { accounts: "1,2" }],
   ])("falls back to the defaults when the stored value is %s", (_label, stored) => {
     expect(parseSlotsConfig(DSH, { dsh_slots: stored })).toEqual([1]);
-    expect(parseSlotsConfig(AGY, { agy_slots: stored })).toEqual([1, 2, 3]);
   });
 
   it("drops non-numeric entries from a stored list instead of rejecting it", () => {
@@ -178,10 +154,11 @@ describe("runtime_config slot lists", () => {
   });
 
   it("writes one family's key and leaves every other key untouched", () => {
-    expect(writeSlotsConfig(AGY, { mode: "local" }, [1, 4])).toEqual({
+    expect(writeSlotsConfig(DSH, { mode: "local" }, [1, 4])).toEqual({
       mode: "local",
-      agy_slots: { accounts: [1, 4] },
+      dsh_slots: { accounts: [1, 4] },
     });
+    // A retired agy registry stays exactly as the workspace stored it.
     expect(
       writeSlotsConfig(DSH, { agy_slots: { accounts: [1, 2, 3] } }, [1, 2]),
     ).toEqual({
@@ -194,8 +171,8 @@ describe("runtime_config slot lists", () => {
   });
 
   it("stores a normalised list so the backend's normalisation cannot disagree", () => {
-    expect(writeSlotsConfig(AGY, {}, [4, 4, 0, 40])).toEqual({
-      agy_slots: { accounts: [1, 4] },
+    expect(writeSlotsConfig(DSH, {}, [4, 4, 0, 40])).toEqual({
+      dsh_slots: { accounts: [1, 4] },
     });
   });
 });

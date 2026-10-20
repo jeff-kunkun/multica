@@ -19,7 +19,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@multica/ui/components/ui/select";
-import { Switch } from "@multica/ui/components/ui/switch";
 import { toast } from "sonner";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useT } from "../../i18n";
@@ -30,8 +29,8 @@ import {
 import { SettingsCard, SettingsRow, SettingsSection } from "../../settings/components/settings-layout";
 
 /**
- * Owner-only borrowing controls for one agent (DENE-808): the doorbell switch
- * and the timed passes currently letting other members invoke it.
+ * Owner-only borrowing controls for one agent (DENE-808): the timed passes
+ * currently letting other members invoke it.
  *
  * Passes are server data (the server clock decides when one lapses), so this
  * reads them through TanStack Query and never caches them client-side.
@@ -40,19 +39,16 @@ export function AgentAccessPasses({
   agent,
   members,
   canEdit,
-  onUpdate,
 }: {
   agent: Agent;
   members: MemberWithUser[];
   canEdit: boolean;
-  onUpdate: (id: string, data: Record<string, unknown>) => Promise<void>;
 }) {
   const { t } = useT("agents");
   const passes = useAgentAccessPasses(agent.id, canEdit);
   const create = useCreateAgentAccessPass(agent.id);
   const revoke = useRevokeAgentAccessPass(agent.id);
 
-  const [doorbellSaving, setDoorbellSaving] = useState(false);
   const [userId, setUserId] = useState<string>("");
   const [preset, setPreset] = useState<AgentAccessPassPreset>("2h");
   const [custom, setCustom] = useState<string>(() => localDateTimeInputValue(2 * 60 * 60 * 1000));
@@ -64,17 +60,6 @@ export function AgentAccessPasses({
   const active = useMemo(() => (passes.data ?? []).filter((p) => p.active), [passes.data]);
 
   if (!canEdit) return null;
-
-  const toggleDoorbell = async (checked: boolean) => {
-    setDoorbellSaving(true);
-    try {
-      await onUpdate(agent.id, { doorbell_enabled: checked });
-    } catch {
-      toast.error(t(($) => $.access.doorbell_save_failed));
-    } finally {
-      setDoorbellSaving(false);
-    }
-  };
 
   const issue = async () => {
     if (!userId) {
@@ -110,18 +95,6 @@ export function AgentAccessPasses({
   return (
     <SettingsSection title={t(($) => $.access.borrow_section_title)}>
       <SettingsCard>
-        <SettingsRow
-          label={t(($) => $.access.doorbell_title)}
-          description={t(($) => $.access.doorbell_desc)}
-        >
-          <Switch
-            checked={agent.doorbell_enabled === true}
-            disabled={doorbellSaving}
-            onCheckedChange={(checked) => void toggleDoorbell(checked)}
-            aria-label={t(($) => $.access.doorbell_title)}
-            data-testid="doorbell-switch"
-          />
-        </SettingsRow>
         <SettingsRow
           label={t(($) => $.access.pass_issue_title)}
           description={t(($) => $.access.pass_issue_desc)}

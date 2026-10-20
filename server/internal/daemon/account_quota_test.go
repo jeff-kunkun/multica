@@ -293,20 +293,14 @@ func TestRecordRunAccountQuotaStampsNonAgyAccounts(t *testing.T) {
 			got["dsh/default"].QuotaResetAt)
 	}
 
-	// The AGY-named wire key must not start carrying dsh directories just
-	// because the store behind it went multi-CLI.
-	if legacy := d.agyQuotaOverlay(now); len(legacy) != 0 {
-		t.Fatalf("agy_quota_exhausted = %#v, want no entries for a dsh-only hit", legacy)
-	}
 	if overlay := d.accountQuotaOverlay(now); len(overlay) != 1 {
 		t.Fatalf("accountQuotaOverlay = %#v, want the one dsh entry", overlay)
 	}
 }
 
-// TestRecordRunAccountQuotaLeavesAntigravityToItsOwnPath guards the single
-// responder: agyQuotaFailover already accounts for antigravity while it fails
-// over, so this path must not move the same deadline a second time.
-func TestRecordRunAccountQuotaLeavesAntigravityToItsOwnPath(t *testing.T) {
+// Antigravity's account directory lives in --gemini_dir, which this path does
+// not see, so it must not guess ~/.gemini and mark the wrong account.
+func TestRecordRunAccountQuotaSkipsAntigravity(t *testing.T) {
 	home := t.TempDir()
 	pinAccountQuotaHost(t, home)
 
@@ -319,24 +313,5 @@ func TestRecordRunAccountQuotaLeavesAntigravityToItsOwnPath(t *testing.T) {
 
 	if overlay := d.accountQuotaOverlay(now); len(overlay) != 0 {
 		t.Fatalf("accountQuotaOverlay = %#v, want nothing recorded for antigravity here", overlay)
-	}
-}
-
-func TestIsAgyAccountDir(t *testing.T) {
-	cases := []struct {
-		dir  string
-		want bool
-	}{
-		{"/hosts/kk/.gemini", true},
-		{"/hosts/kk/.gemini-account2", true},
-		{"/hosts/kk/.gemini-account99", false},
-		{"/hosts/kk/.dsh", false},
-		{"/hosts/kk/.claude-account2", false},
-		{"", false},
-	}
-	for _, tc := range cases {
-		if got := agent.IsAgyAccountDir(tc.dir); got != tc.want {
-			t.Errorf("IsAgyAccountDir(%q) = %v, want %v", tc.dir, got, tc.want)
-		}
 	}
 }

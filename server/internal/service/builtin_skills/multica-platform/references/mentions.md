@@ -187,15 +187,9 @@ underway.
   *see* gate: a workspace admin who can open a private agent in the UI still may
   not trigger it, so being able to view the target says nothing about being able
   to mention it. (The squad assignment/promote path has its own gate; the
-  child-done wake is ungated.) When that agent's doorbell is on and the author
-  is a human member, the outcome stays `status: "blocked"` but `reason_code` is
-  `access_requested`: the owner has a pending request, and no task exists until
-  they approve. Approval replays the original trigger; a decline sends the
-  requester a receipt. Do not post the mention again, and do not change
-  visibility or the allow-list to get past it. Agent and system authors never
-  ring — there is no person to ask — so they keep the plain refusal. An
-  unexpired, unrevoked access pass admits like an allow-list hit, so a pass
-  holder is not this case.
+  child-done wake is ungated.) Do not change visibility or the allow-list to
+  get past it. An unexpired, unrevoked access pass from the agent's owner
+  admits like an allow-list hit, so a pass holder is not this case.
 
 ## Who the invoke gate judges
 
@@ -217,8 +211,7 @@ falls back to the **autopilot creator** as the effective invoking user — the s
 principal that admitted the first dispatch. So a mid-run `@agent` / `@squad`
 delegation fires exactly when the autopilot creator could invoke that target
 (owner / `public_to` match / unexpired access pass), and stays skipped otherwise.
-The doorbell does not apply on this path: the author is an agent, and only a
-human member rings. It is authorization only — the enqueued run's
+It is authorization only — the enqueued run's
 originator/attribution is unchanged.
 
 This fallback is bound to verified task lineage: it applies only when the

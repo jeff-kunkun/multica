@@ -300,7 +300,7 @@ func (h *Hub) forgetRuntimeGoneSeen(eventID string) {
 //
 // agentPlanLimits is the optional per-agent counterpart of planLimits (DENE-715),
 // keyed by agent id; an older daemon leaves it nil.
-type HeartbeatHandler func(ctx context.Context, identity ClientIdentity, runtimeID string, supportsBatchImport bool, planLimits *protocol.PlanLimitsSnapshot, agentPlanLimits map[string]protocol.PlanLimitsSnapshot, jev *protocol.JevStatusSnapshot) (*protocol.DaemonHeartbeatAckPayload, error)
+type HeartbeatHandler func(ctx context.Context, identity ClientIdentity, runtimeID string, supportsBatchImport bool, planLimits *protocol.PlanLimitsSnapshot, agentPlanLimits map[string]protocol.PlanLimitsSnapshot) (*protocol.DaemonHeartbeatAckPayload, error)
 
 // RPCHandler processes a generic daemon:rpc_request (MUL-4257). It dispatches
 // on method (e.g. "tasks.claim"), scoping work to identity (DaemonID +
@@ -1161,7 +1161,7 @@ func (c *client) handleHeartbeatFrame(raw json.RawMessage) {
 	// that keeps the HTTP heartbeat from putting a per-call timeout on
 	// PopPending. The natural bound is the read pump's lifetime (the conn
 	// closes if the daemon goes away) plus Redis's own server-side limits.
-	ack, err := handler(context.Background(), c.identity, payload.RuntimeID, payload.SupportsBatchImport, payload.PlanLimits, payload.AgentPlanLimits, payload.Jev)
+	ack, err := handler(context.Background(), c.identity, payload.RuntimeID, payload.SupportsBatchImport, payload.PlanLimits, payload.AgentPlanLimits)
 	if err != nil {
 		slog.Warn("daemon websocket heartbeat handler failed",
 			"error", err,

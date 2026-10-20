@@ -2203,7 +2203,6 @@ func (h *Handler) triggerTasksForCommentReport(ctx context.Context, issue db.Iss
 	}
 	h.noteBlockedRuntimeTargets(ctx, issue, targets)
 	h.noteMissedMentionRelays(ctx, issue, comment.ID, targets)
-	h.ringDoorbellTargets(ctx, issue, comment, actorType, actorID, targets)
 	resolved := triggers
 	attachments, attachmentErr := h.Queries.ListAttachmentsByComment(ctx, db.ListAttachmentsByCommentParams{CommentID: comment.ID, WorkspaceID: issue.WorkspaceID})
 	if !service.SeparateIssueRun(ctx) && len(steerTaskIDs) == 0 && attachmentErr == nil && len(attachments) == 0 {
@@ -3402,10 +3401,6 @@ type commentMentionTarget struct {
 	// only records the flag.
 	RelayMissed     bool
 	RelayedFromName string
-	// doorbell carries the agent whose doorbell this refused member mention
-	// should ring (DENE-808). Same preview/trigger split as unusable: the
-	// resolver only records it; ringDoorbellTargets does the write.
-	doorbell *db.Agent
 }
 
 // blockedRuntimeNotice is a refusal worth leaving on the issue: which agent, and
@@ -3596,13 +3591,6 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 		}
 		// Private-agent gate first, before any archived/runtime state is read.
 		if !h.canInvokeAgent(ctx, agent, authorType, authorID, opts.OriginatorUserID, wsID) {
-			if doorbellApplies(agent, authorType) {
-				// DENE-808: the refusal becomes a ring for the owner. Still a
-				// blocked target — no run exists until the owner approves.
-				rung := agent
-				addTarget(commentMentionTarget{TargetType: "agent", TargetID: m.ID, Status: DispatchBlocked, ReasonCode: ReasonAccessRequested, doorbell: &rung})
-				continue
-			}
 			blockTarget("agent", m.ID, ReasonInvocationNotAllowed)
 			continue
 		}

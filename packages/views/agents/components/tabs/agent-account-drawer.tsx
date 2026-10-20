@@ -49,7 +49,6 @@ import {
   formatQuotaResetAt,
   parseAccountLever,
 } from "./agent-accounts-model";
-import { formatAgyLoginCommand } from "./agy-account-slots";
 
 /**
  * CLI display names. These are product nouns — the same word in every locale —
@@ -128,8 +127,7 @@ export function AgentCliBadge({
  * The login / self-check command for one account, meant to be run on the
  * machine that hosts the daemon.
  *
- * agy goes through the shared `formatAgyLoginCommand` (its `--gemini_dir` flag
- * is the account selector). An env-lever CLI is selected by the env var the
+ * An env-lever CLI is selected by the env var the
  * daemon reported as its lever, so the command is that assignment in front of
  * the CLI binary — the same lever the switch writes, just applied by hand. A
  * CLI with no lever has no way to point itself at another directory, so it
@@ -137,9 +135,6 @@ export function AgentCliBadge({
  */
 export function accountLoginCommand(account: AgentAccount): string {
   const lever = parseAccountLever(account.lever);
-  if (lever.kind === "custom_args" && lever.flag === "--gemini_dir") {
-    return formatAgyLoginCommand(account.home);
-  }
   if (lever.kind === "env") {
     return `${lever.key}=${account.home} ${CLI_BINARY[account.cli]}`;
   }
@@ -384,20 +379,18 @@ export function AgentAccountDrawer({
                   ) : null}
                 </div>
 
-                {/* Three different situations, said apart: a group that rotates
-                    on its own, one that is switched by hand, and one that cannot
-                    be switched at all — with the reason, because "no add button"
+                {/* Two different situations, said apart: a group that is
+                    switched by hand, and one that cannot be switched at all — with the reason, because "no add button"
                     alone reads as an oversight. */}
                 <p className="px-0.5 text-caption text-muted-foreground">
                   {!group.switchable
-                    ? family
+                    ? // agy reads its one ~/.gemini; it is not rewritten per task.
+                      family || group.cli === "agy"
                       ? t(($) => $.tab_body.accounts.group_readonly_hint)
                       : t(($) => $.tab_body.accounts.group_task_scoped_hint, {
                           cli: agentCliLabel(group.cli),
                         })
-                    : family?.rotatesOnQuota === true
-                      ? t(($) => $.tab_body.accounts.group_rotation_hint)
-                      : t(($) => $.tab_body.accounts.group_manual_hint)}
+                    : t(($) => $.tab_body.accounts.group_manual_hint)}
                 </p>
 
                 <div

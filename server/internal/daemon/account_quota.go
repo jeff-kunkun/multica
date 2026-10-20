@@ -13,9 +13,9 @@ import (
 // accountQuotaProviderCLI maps a runtime provider onto the CLI family whose
 // account directory one of its runs burns.
 //
-// Antigravity is deliberately absent: its quota accounting runs inside
-// agyQuotaFailover, which also picks the next slot and retries. Recording the
-// same hit twice would move one deadline through two code paths.
+// Antigravity is absent: its account directory comes from --gemini_dir in the
+// agent's custom args, which this path does not see, so stamping ~/.gemini
+// would mark the wrong account.
 //
 // Codex and cursor ARE here even though they cannot be rebound today (their
 // account directory is chosen by CODEX_HOME / CURSOR_DATA_DIR, which the task

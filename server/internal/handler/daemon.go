@@ -242,15 +242,10 @@ type DaemonRegisterRequest struct {
 	CLIVersion      string   `json:"cli_version"` // multica CLI version
 	LaunchedBy      string   `json:"launched_by"` // "desktop" when spawned by the Electron app
 	// HomeDir is the daemon host's user home. The web UI cannot read
-	// process.env.HOME, so AGY account-slot presets use this absolute path.
+	// process.env.HOME, so account-slot presets use this absolute path.
+	// Daemons up to 0.6.x also send agy_logged_in_dirs / agy_quota_exhausted;
+	// they are ignored.
 	HomeDir string `json:"home_dir"`
-	// AgyLoggedInDirs are absolute Gemini directories on the daemon host that
-	// already contain an AGY/Gemini credential file. Used for the settings
-	// green check; never includes token contents.
-	AgyLoggedInDirs []string `json:"agy_logged_in_dirs"`
-	// AgyQuotaExhausted is the host-level overlay of Gemini directories whose
-	// individual quota is exhausted until reset_at (unix seconds).
-	AgyQuotaExhausted []AgyQuotaExhaustedEntry `json:"agy_quota_exhausted"`
 	// AgentAccounts is the host's read-only multi-CLI account report. Nil
 	// (field absent) means the daemon predates the channel; a non-nil empty
 	// slice means it reports accounts and found none. The two are NOT
@@ -277,11 +272,6 @@ type DaemonRegisterRequest struct {
 		CommandName string `json:"command_name"`
 		Reason      string `json:"reason"`
 	} `json:"failed_profiles"`
-}
-
-type AgyQuotaExhaustedEntry struct {
-	Dir     string `json:"dir"`
-	ResetAt int64  `json:"reset_at"`
 }
 
 // AgentAccountEntry mirrors daemon.AgentAccount — one read-only CLI account row
@@ -325,12 +315,6 @@ func runtimeRegistrationMetadata(req DaemonRegisterRequest, version string, capa
 	if home := absoluteHostHomeDir(req.HomeDir); home != "" {
 		meta["home_dir"] = home
 	}
-	if dirs := absoluteAgyLoggedInDirs(req.AgyLoggedInDirs); len(dirs) > 0 {
-		meta["agy_logged_in_dirs"] = dirs
-	}
-	if exhausted := absoluteAgyQuotaExhausted(req.AgyQuotaExhausted); len(exhausted) > 0 {
-		meta["agy_quota_exhausted"] = exhausted
-	}
 	// Presence, not length, decides whether the channel is recorded: an empty
 	// report is a real answer the account surface renders as its empty state,
 	// and dropping the key would make it indistinguishable from an old daemon.
@@ -353,7 +337,7 @@ func truncateMetadataString(value string, limit int) string {
 }
 
 // sanitizeAgentAccounts keeps only the rows a consumer can render, reusing the
-// same host-path rule as the AGY keys so a stored `home` is always something
+// same host-path rule as home_dir so a stored `home` is always something
 // the UI can show. Rows without a usable CLI family or home are dropped rather
 // than repaired: inventing an identity would show an account the daemon never
 // reported.
@@ -396,47 +380,6 @@ func sanitizeAgentAccounts(entries []AgentAccountEntry) []map[string]any {
 			"quota_reset_at": resetAt,
 		})
 		if len(out) >= maxAgentAccounts {
-			break
-		}
-	}
-	return out
-}
-
-func absoluteAgyQuotaExhausted(entries []AgyQuotaExhaustedEntry) []map[string]any {
-	out := make([]map[string]any, 0, len(entries))
-	seen := make(map[string]struct{}, len(entries))
-	now := time.Now().Unix()
-	for _, entry := range entries {
-		dir := absoluteHostHomeDir(entry.Dir)
-		if dir == "" || entry.ResetAt <= now {
-			continue
-		}
-		if _, ok := seen[dir]; ok {
-			continue
-		}
-		seen[dir] = struct{}{}
-		out = append(out, map[string]any{"dir": dir, "reset_at": entry.ResetAt})
-		if len(out) >= 32 {
-			break
-		}
-	}
-	return out
-}
-
-func absoluteAgyLoggedInDirs(dirs []string) []string {
-	out := make([]string, 0, len(dirs))
-	seen := make(map[string]struct{}, len(dirs))
-	for _, dir := range dirs {
-		abs := absoluteHostHomeDir(dir)
-		if abs == "" {
-			continue
-		}
-		if _, ok := seen[abs]; ok {
-			continue
-		}
-		seen[abs] = struct{}{}
-		out = append(out, abs)
-		if len(out) >= 32 {
 			break
 		}
 	}
@@ -1266,7 +1209,6 @@ type DaemonHeartbeatRequest struct {
 	// keyed by agent id. Optional: a daemon that predates it, or one that has
 	// never run an account-bound agent, simply omits it.
 	AgentPlanLimits map[string]protocol.PlanLimitsSnapshot `json:"agent_plan_limits,omitempty"`
-	Jev             *protocol.JevStatusSnapshot            `json:"jev,omitempty"`
 }
 
 // heartbeatHasPendingTimeout bounds the cheap HasPending probe on the
@@ -1405,12 +1347,6 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid plan_limits")
 		return
 	}
-	jevStatusJSON, jevValidationErr := validateJevStatusSnapshot(req.Jev)
-	if jevValidationErr != nil {
-		outcome = "invalid_jev_status"
-		writeError(w, http.StatusBadRequest, "invalid jev")
-		return
-	}
 	// Per-agent snapshots are best-effort: a malformed entry is dropped rather
 	// than failing the heartbeat, because the same request is also how this
 	// machine's runtimes stay online (DENE-715).
@@ -1434,12 +1370,6 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := h.applyStoredAgentPlanLimits(r.Context(), uuidToString(rt.WorkspaceID), agentPlanLimitsJSON); err != nil {
-		updateMs = time.Since(updateStart).Milliseconds()
-		outcome = "error_update"
-		writeError(w, http.StatusInternalServerError, "heartbeat failed")
-		return
-	}
-	if err := h.applyStoredJevStatus(r.Context(), rt.ID, uuidToString(rt.WorkspaceID), jevStatusJSON); err != nil {
 		updateMs = time.Since(updateStart).Milliseconds()
 		outcome = "error_update"
 		writeError(w, http.StatusInternalServerError, "heartbeat failed")
@@ -1480,9 +1410,6 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	if ack.PendingRoutingAnalysis != nil {
 		resp["pending_routing_analysis"] = ack.PendingRoutingAnalysis
 	}
-	if ack.PendingProviderConfig != nil {
-		resp["pending_provider_config"] = ack.PendingProviderConfig
-	}
 	if ack.PendingLocalSkills != nil {
 		resp["pending_local_skills"] = ack.PendingLocalSkills
 	}
@@ -1500,7 +1427,7 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 // captured each runtime's liveness state in a connection lease, so the hot
 // path never reads agent_runtime. HTTP heartbeat remains the stateless lookup
 // fallback for a daemon that stops receiving WebSocket acknowledgements.
-func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws.ClientIdentity, runtimeID string, supportsBatchImport bool, planLimits *protocol.PlanLimitsSnapshot, agentPlanLimits map[string]protocol.PlanLimitsSnapshot, jev *protocol.JevStatusSnapshot) (*protocol.DaemonHeartbeatAckPayload, error) {
+func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws.ClientIdentity, runtimeID string, supportsBatchImport bool, planLimits *protocol.PlanLimitsSnapshot, agentPlanLimits map[string]protocol.PlanLimitsSnapshot) (*protocol.DaemonHeartbeatAckPayload, error) {
 	lease := identity.RuntimeLeases[runtimeID]
 	if lease == nil {
 		return nil, fmt.Errorf("runtime not in connection lease")
@@ -1514,10 +1441,6 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 	planLimitsJSON, err := validatePlanLimitsSnapshot(planLimits, state.Provider)
 	if err != nil {
 		return nil, fmt.Errorf("invalid plan_limits: %w", err)
-	}
-	jevStatusJSON, err := validateJevStatusSnapshot(jev)
-	if err != nil {
-		return nil, fmt.Errorf("invalid jev: %w", err)
 	}
 	// Same best-effort rule as the HTTP path: a per-agent entry that fails
 	// validation is dropped, never a reason to tear down the connection.
@@ -1544,9 +1467,6 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 		return nil, err
 	}
 	if err := h.applyStoredAgentPlanLimits(ctx, state.WorkspaceID, agentPlanLimitsJSON); err != nil {
-		return nil, err
-	}
-	if err := h.applyStoredJevStatus(ctx, runtimeUUID, state.WorkspaceID, jevStatusJSON); err != nil {
 		return nil, err
 	}
 	ack, _, err := h.processHeartbeat(ctx, runtimeID, supportsBatchImport)
@@ -1626,31 +1546,6 @@ func (h *Handler) applyStoredAgentPlanLimits(ctx context.Context, workspaceID st
 				"plan_limits_updated": true,
 			})
 		}
-	}
-	return nil
-}
-
-// applyStoredJevStatus persists the host-level JEV snapshot onto this runtime
-// row and, only when the row actually changed, asks clients to refetch runtime
-// state. Empty bytes mean the daemon did not send the field at all (an older
-// daemon) — the stored column stays untouched so a NULL keeps reading as
-// unknown instead of being overwritten with a stale value.
-func (h *Handler) applyStoredJevStatus(ctx context.Context, runtimeUUID pgtype.UUID, workspaceID string, jevStatusJSON []byte) error {
-	if len(jevStatusJSON) == 0 {
-		return nil
-	}
-	updated, err := h.Queries.UpdateAgentRuntimeJevStatus(ctx, db.UpdateAgentRuntimeJevStatusParams{
-		ID:        runtimeUUID,
-		JevStatus: jevStatusJSON,
-	})
-	if err != nil {
-		return fmt.Errorf("update runtime jev status: %w", err)
-	}
-	if updated > 0 && workspaceID != "" {
-		h.publishWithSource(ctx, protocol.EventDaemonHeartbeat, workspaceID, "system", "", map[string]any{
-			"runtime_id":  uuidToString(runtimeUUID),
-			"jev_updated": true,
-		})
 	}
 	return nil
 }
@@ -1763,9 +1658,7 @@ func (h *Handler) recordHeartbeatState(
 // HTTP slow-log can stay structured. The WS path discards them.
 type heartbeatMetrics struct {
 	ProbeModelMs, PopModelMs, ProbeSkillsMs, PopSkillsMs, ProbeImportMs, PopImportMs int64
-	ProbeProviderMs, PopProviderMs                                                   int64
 	ProbeModelTimedOut, ProbeSkillsTimedOut, ProbeImportTimedOut                     bool
-	ProbeProviderTimedOut                                                            bool
 }
 
 // processHeartbeat pulls pending actions for both HTTP and WebSocket
@@ -1845,38 +1738,6 @@ func (h *Handler) processHeartbeat(ctx context.Context, runtimeID string, suppor
 	if h.RoutingAnalysisStore != nil {
 		if pending := h.RoutingAnalysisStore.PopPending(ctx, runtimeID); pending != nil {
 			ack.PendingRoutingAnalysis = pending
-		}
-	}
-
-	// Probe then claim the provider-preset queue. The claimed record is the
-	// one carrier allowed to hold an api_key: it goes straight into the ack
-	// below, and the store has already persisted the same request without it.
-	probeProviderStart := time.Now()
-	probeProviderCtx, cancelProbeProvider := context.WithTimeout(ctx, heartbeatHasPendingTimeout)
-	hasProviderConfig, probeProviderErr := h.ProviderPresetStore.HasPending(probeProviderCtx, runtimeID)
-	cancelProbeProvider()
-	m.ProbeProviderMs = time.Since(probeProviderStart).Milliseconds()
-	switch {
-	case probeProviderErr == nil && hasProviderConfig:
-		popStart := time.Now()
-		pendingProvider, popErr := h.ProviderPresetStore.PopPending(ctx, runtimeID)
-		m.PopProviderMs = time.Since(popStart).Milliseconds()
-		if popErr != nil {
-			slog.Warn("provider preset PopPending failed", "error", popErr, "runtime_id", runtimeID)
-		} else if pendingProvider != nil {
-			ack.PendingProviderConfig = &protocol.DaemonHeartbeatPendingProviderConfig{
-				ID:       pendingProvider.ID,
-				Provider: pendingProvider.Provider,
-				Action:   pendingProvider.Action,
-				Payload:  pendingProvider.Payload,
-			}
-		}
-	case probeProviderErr != nil:
-		if errors.Is(probeProviderErr, context.DeadlineExceeded) || errors.Is(probeProviderErr, context.Canceled) {
-			m.ProbeProviderTimedOut = true
-			slog.Warn("provider preset HasPending timed out", "runtime_id", runtimeID, "elapsed_ms", m.ProbeProviderMs)
-		} else {
-			slog.Warn("provider preset HasPending failed", "error", probeProviderErr, "runtime_id", runtimeID)
 		}
 	}
 

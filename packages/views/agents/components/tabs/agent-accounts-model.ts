@@ -11,7 +11,7 @@
 //   NAME plus a `signed_in` existence flag; no function here reads or composes
 //   credential material, and a `key_ref` no name could have (whitespace,
 //   control characters, absurd length) is dropped instead of passed through.
-// - Switching only rewrites the agent's binding (`custom_args` / one env key).
+// - Switching only rewrites the agent's binding (one env key).
 //   No function here produces a filesystem action against an account directory.
 // - Empty and error states never produce a write action.
 
@@ -33,12 +33,10 @@ import {
 } from "./account-slots";
 import {
   expandHomePrefix,
-  getGeminiDir,
   isAbsoluteFsPath,
   joinHomeDir,
   resolveHomeDir,
-  setGeminiDir,
-} from "./agy-account-slots";
+} from "./account-home";
 
 /** Runtime metadata key holding the daemon-reported account list. */
 export const AGENT_ACCOUNTS_METADATA_KEY = "agent_accounts";
@@ -57,11 +55,7 @@ export type AgentAccountCli = (typeof AGENT_ACCOUNT_CLIS)[number];
 /** Account id the daemon derives from a CLI's own default directory (`~/.dsh`, `~/.gemini`, …). */
 export const DEFAULT_ACCOUNT_ID = "default";
 
-/** The only `custom_args` flag this model knows how to write (see `setGeminiDir`). */
-const GEMINI_DIR_FLAG = "--gemini_dir";
-
 const ENV_LEVER_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
-const CUSTOM_ARGS_LEVER_RE = /^custom_args:(--[A-Za-z0-9_-]+)$/;
 const MAX_KEY_REF_LENGTH = 128;
 const MAX_ERROR_LENGTH = 500;
 const MAX_BASE_URL_LENGTH = 512;
@@ -102,8 +96,6 @@ export type ParsedAgentAccounts = {
  * env endpoint and the runtime device.
  */
 export type AgentAccountBinding = {
-  /** `agent.custom_args` — where the agy `--gemini_dir` lever lives. */
-  custom_args?: readonly string[] | null;
   /**
    * `agent.custom_env` — where env levers live. The agent payload redacts this
    * map (MUL-2600); callers pass the map read from `GET /api/agents/{id}/env`.
@@ -118,7 +110,6 @@ export type AgentAccountBinding = {
 };
 
 export type AgentAccountLever =
-  | { kind: "custom_args"; flag: string }
   | { kind: "env"; key: string }
   | { kind: "none" }
   | { kind: "unknown" };
@@ -158,7 +149,6 @@ export type AccountSwitchUnsupportedReason =
   | "invalid_home";
 
 export type AccountSwitchPlan =
-  | { kind: "custom_args"; custom_args: string[] }
   | { kind: "env"; key: string; value: string }
   | { kind: "unsupported"; reason: AccountSwitchUnsupportedReason }
   /** The target is already the account in effect — "save and switch" must not write. */
@@ -310,26 +300,20 @@ export function parseAccountLever(lever: string | null | undefined): AgentAccoun
     const key = trimmed.slice("env:".length).trim();
     return ENV_LEVER_KEY_RE.test(key) ? { kind: "env", key } : { kind: "unknown" };
   }
-  const customArgs = trimmed.match(CUSTOM_ARGS_LEVER_RE);
-  if (customArgs?.[1]) return { kind: "custom_args", flag: customArgs[1] };
   return { kind: "unknown" };
 }
 
 /** Whether "save and switch" can produce a write for this lever at all. */
 export function isSwitchableLever(lever: string | null | undefined): boolean {
-  const parsed = parseAccountLever(lever);
-  if (parsed.kind === "env") return true;
-  return parsed.kind === "custom_args" && parsed.flag === GEMINI_DIR_FLAG;
+  return parseAccountLever(lever).kind === "env";
 }
 
-/** Lever text for the drawer's group header: `DSH_HOME`, `--gemini_dir`, `""`. */
+/** Lever text for the drawer's group header: `DSH_HOME`, `""`. */
 export function accountLeverLabel(lever: string | null | undefined): string {
   const parsed = parseAccountLever(lever);
   switch (parsed.kind) {
     case "env":
       return parsed.key;
-    case "custom_args":
-      return parsed.flag;
     case "none":
       return "";
     default:
@@ -410,19 +394,15 @@ export function slotAccountId(slot: number): string {
 }
 
 /**
- * The raw value an agent's binding holds for a family's lever — the
- * `--gemini_dir` argument or the env key's value — or `""` when unbound.
+ * The raw value an agent's binding holds for a family's lever — the env
+ * key's value — or `""` when unbound.
  */
 export function boundDirectoryFor(
   agent: AgentAccountBinding | null | undefined,
   family: AccountSlotFamily,
 ): string {
   const lever = parseAccountLever(family.lever);
-  if (lever.kind === "env") return envBinding(agent, lever.key);
-  if (lever.kind === "custom_args" && lever.flag === GEMINI_DIR_FLAG) {
-    return getGeminiDir([...(agent?.custom_args ?? [])]).trim();
-  }
-  return "";
+  return lever.kind === "env" ? envBinding(agent, lever.key) : "";
 }
 
 /** Reported accounts of one family, split into numbered slots and the rest. */
@@ -453,13 +433,9 @@ function splitFamilyAccounts(
  * a slot added a moment ago is visible — and bindable — before its directory
  * exists; it reads as "not signed in" because nothing reported it.
  *
- * The two kinds of family differ in what the list may hide:
- * - a rotating family (agy) shows exactly its list — that list is the rotation
- *   allow-list the backend reads, so the drawer has to edit it rather than the
- *   machine's directory listing;
- * - a manual family (dsh, claude) shows its list PLUS every numbered directory
- *   the daemon reported. Those directories were switchable before slots
- *   existed, and an agent that never saved a list must not lose them.
+ * A family shows its list PLUS every numbered directory the daemon reported.
+ * Those directories were switchable before slots existed, and an agent that
+ * never saved a list must not lose them.
  *
  * Accounts outside the numbered convention (a custom directory) and CLIs with
  * no family are left exactly as reported.
@@ -480,9 +456,7 @@ export function withAccountSlots(
 
     const { reported, others } = splitFamilyAccounts(accounts, family);
     const registered = lists[family.cli] ?? [];
-    const slots = family.rotatesOnQuota
-      ? normalizeAccountNumbers(registered)
-      : normalizeAccountNumbers([...registered, ...reported.keys()]);
+    const slots = normalizeAccountNumbers([...registered, ...reported.keys()]);
 
     out.push(...others);
     for (const slot of slots) {
@@ -514,8 +488,8 @@ export function withAccountSlots(
 
 /**
  * Slots whose row a drop really removes, per CLI. Slot 1 is the CLI's own
- * directory and is never droppable. In a manual family a directory the daemon
- * reported stays listed whatever the registry says, so offering to drop it
+ * directory and is never droppable. A directory the daemon reported stays
+ * listed whatever the registry says, so offering to drop it
  * would be a control that does nothing; only a registered slot that exists
  * nowhere but in this agent's list can go.
  */
@@ -527,7 +501,7 @@ export function removableSlots(
   for (const family of ACCOUNT_SLOT_FAMILIES) {
     const { reported } = splitFamilyAccounts(reportedAccounts, family);
     out[family.cli] = normalizeAccountNumbers(lists[family.cli] ?? []).filter(
-      (slot) => slot > 1 && (family.rotatesOnQuota || !reported.has(slot)),
+      (slot) => slot > 1 && !reported.has(slot),
     );
   }
   return out;
@@ -538,8 +512,8 @@ export function removableSlots(
  * group cannot take one. The rule is about the family, never about one CLI id:
  * it owns a slot registry (which exists only for a lever the daemon can really
  * rebind), the daemon reported that lever as writable, and the cap is not
- * reached. Numbers already shown in the group are skipped, so a manual family
- * never offers a slot whose directory is already listed.
+ * reached. Numbers already shown in the group are skipped, so a family never
+ * offers a slot whose directory is already listed.
  */
 export function nextSlotForGroup(
   group: AgentAccountGroup,
@@ -576,7 +550,7 @@ export function cliForProvider(provider: string | null | undefined): AgentAccoun
 }
 
 /**
- * Resolve a lever value (`~/.dsh-account2`, `/Users/you/.gemini`) to an
+ * Resolve a lever value (`~/.dsh-account2`, `/Users/you/.dsh`) to an
  * absolute directory. Relative values return null: they can never equal the
  * absolute `home` the daemon reported, so claiming a match would be a guess.
  */
@@ -588,7 +562,7 @@ function resolveBoundDirectory(
   if (!trimmed) return null;
   if (isAbsoluteFsPath(trimmed)) return normalizeDirectory(trimmed);
   if (trimmed === "~" || trimmed.startsWith("~/") || trimmed.startsWith("~\\")) {
-    const hostHome = resolveHomeDir(trimmed, agent?.runtime_home ?? null);
+    const hostHome = resolveHomeDir(agent?.runtime_home ?? null);
     return hostHome ? normalizeDirectory(expandHomePrefix(trimmed, hostHome)) : null;
   }
   return null;
@@ -618,17 +592,10 @@ function accountIsExplicitlyBound(
   account: AgentAccount,
 ): boolean {
   const lever = parseAccountLever(account.lever);
-  if (lever.kind === "env") {
-    const value = envBinding(agent, lever.key);
-    if (!value) return false;
-    return sameDirectory(resolveBoundDirectory(value, agent), account.home);
-  }
-  if (lever.kind === "custom_args" && lever.flag === GEMINI_DIR_FLAG) {
-    const value = getGeminiDir([...(agent?.custom_args ?? [])]);
-    if (!value.trim()) return false;
-    return sameDirectory(resolveBoundDirectory(value, agent), account.home);
-  }
-  return false;
+  if (lever.kind !== "env") return false;
+  const value = envBinding(agent, lever.key);
+  if (!value) return false;
+  return sameDirectory(resolveBoundDirectory(value, agent), account.home);
 }
 
 /** True when nothing binds this CLI, so its own default directory is in effect. */
@@ -640,13 +607,8 @@ function accountFallsBackToCliDefault(
   const lever = parseAccountLever(account.lever);
   switch (lever.kind) {
     case "none":
-      // No binding lever exists for this CLI at all (codex / cursor).
+      // No binding lever exists for this CLI at all (agy / codex / cursor).
       return true;
-    case "custom_args":
-      return (
-        lever.flag === GEMINI_DIR_FLAG &&
-        getGeminiDir([...(agent?.custom_args ?? [])]).trim() === ""
-      );
     case "env":
       // `undefined` custom_env means "not loaded": assume no override, exactly
       // like an agent that never set the key.
@@ -769,8 +731,8 @@ export function canManageAccounts(state: AccountsViewState): boolean {
 /**
  * Turn "save and switch" into the write the caller performs.
  *
- * The plan only ever describes an agent-field write — agy's `--gemini_dir`
- * inside `custom_args`, or one env key — never a filesystem action. Callers
+ * The plan only ever describes an agent-field write — one env key — never a
+ * filesystem action. Callers
  * must apply the `env` plan through the env endpoint (a `custom_env` field on
  * the agent update is rejected with 400) and must touch only the returned key.
  *
@@ -797,16 +759,7 @@ export function planAccountSwitch(
   const home = normalizeDirectory(target.home);
   if (!isAbsoluteFsPath(home)) return { kind: "unsupported", reason: "invalid_home" };
 
-  if (lever.kind === "env") return { kind: "env", key: lever.key, value: home };
-  if (lever.flag === GEMINI_DIR_FLAG) {
-    // The default account is written explicitly too: the flag value is that
-    // account's own directory, which is what the CLI would have used anyway.
-    return {
-      kind: "custom_args",
-      custom_args: setGeminiDir([...(agent?.custom_args ?? [])], home),
-    };
-  }
-  return { kind: "unsupported", reason: "unsupported_lever" };
+  return { kind: "env", key: lever.key, value: home };
 }
 
 /**

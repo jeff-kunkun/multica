@@ -6,13 +6,9 @@
 // `runtime_config[family.runtimeConfigKey] = { accounts: [1, 2, …] }`.
 // Slot 1 is the CLI's own directory and is always part of the list.
 //
-// What a registered slot MEANS differs by family, and only by the family's
-// `rotatesOnQuota` flag:
-// - agy: the list is the rotation allow-list the backend reads
-//   (`server/pkg/agent/agy_quota.go`), so both sides must agree on its shape.
-// - dsh / claude: the list only registers a directory for this agent so it can
-//   be bound before it exists on disk. Nothing rotates; the bound directory
-//   reaches the task through the family's env lever.
+// A registered slot only registers a directory for this agent so it can be
+// bound before it exists on disk. Nothing rotates; the bound directory reaches
+// the task through the family's env lever.
 //
 // Slots are host-only paths. This module never reads a credential; sign-in and
 // quota state come from the daemon's `agent_accounts` report.
@@ -96,7 +92,7 @@ export function slotNumberFromDirectory(
 /**
  * Read a family's registered slots. A saved list wins as-is; an agent that
  * never saved one gets the family's defaults plus the numbered slot its
- * binding already points at, matching what the backend seeds for agy.
+ * binding already points at.
  */
 export function parseSlotsConfig(
   family: AccountSlotFamily,

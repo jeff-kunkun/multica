@@ -13,16 +13,14 @@
 // Two data sources feed the summary:
 // - the account list the daemon reports on the runtime's metadata (read-only,
 //   no request of our own);
-// - `agent.custom_args` for the agy lever, and the audited
-//   `GET /api/agents/{id}/env` for env levers (the agent payload redacts
+// - the audited `GET /api/agents/{id}/env` for env levers (the agent payload redacts
 //   `custom_env`, MUL-2600), which is the only way to tell a bound DSH_HOME
 //   from an unbound one.
 //
 // The drawer edits one more agent field: the numbered slot lists under
 // `runtime_config`, one key per CLI family that owns a slot registry
-// (`@multica/core/agents/account-slot-families`). For agy that list is what
-// the backend rotates over when a quota runs out; for dsh and claude it only
-// registers a directory for this agent — nothing rotates there.
+// (`@multica/core/agents/account-slot-families`). The list only registers a
+// directory for this agent so it can be bound before it exists on disk.
 //
 // Invariants from the design doc: no credential value is ever read, rendered
 // or logged (only `key_ref` names and `signed_in`); every control with a side
@@ -77,8 +75,7 @@ import {
   slotNumberFromDirectory,
   writeSlotsConfig,
 } from "./account-slots";
-import { runtimeHomeDir } from "./agy-account-slots";
-import { AgentProviderPresetsSection } from "./agent-provider-presets-section";
+import { runtimeHomeDir } from "./account-home";
 import {
   AccountActivePill,
   AccountStatusPill,
@@ -116,7 +113,7 @@ function cliNewAccountHome(cli: AgentAccountCli): string {
   return family ? `~/${family.accountDirPrefix}2` : `~/.${cli}`;
 }
 
-type EmptyChoice = "dsh" | "agy" | "manual";
+type EmptyChoice = "dsh" | "manual";
 
 function emptyEntryAccount(cli: AgentAccountCli): AgentAccount {
   return {
@@ -177,12 +174,11 @@ export function AgentAccountsTab({
 
   const binding = useMemo<AgentAccountBinding>(
     () => ({
-      custom_args: agent.custom_args,
       custom_env: envQuery.data?.custom_env,
       runtime_home: runtimeHomeDir(runtimeDevice),
       provider: runtimeDevice?.provider,
     }),
-    [agent.custom_args, envQuery.data, runtimeDevice],
+    [envQuery.data, runtimeDevice],
   );
 
   // A family's group is the agent's own numbered-slot list rather than only the
@@ -195,13 +191,10 @@ export function AgentAccountsTab({
       const boundDir = boundDirectoryFor(binding, family);
       const persisted = parseSlotsConfig(family, agent.runtime_config, boundDir);
       // The directory this agent actually launches with belongs to its own list
-      // whatever the stored list says. A stored list that omits it is a state
-      // older surfaces could save (the retired custom-path field wrote
-      // `--gemini_dir` without touching the list), and dropping the row would
-      // leave the account in effect with no row to select, no row to see, and
-      // every slot edit refused as "no target". Folding it in also repairs the
-      // pair on the next write, instead of leaving the agent bound to a
-      // directory the backend may not rotate to.
+      // whatever the stored list says. A stored list that omits it (an env
+      // value set by hand) would otherwise leave the account in effect with no
+      // row to select, no row to see, and every slot edit refused as "no
+      // target". Folding it in also repairs the list on the next write.
       const bound = slotNumberFromDirectory(family, boundDir);
       lists[family.cli] =
         bound === null
@@ -406,14 +399,9 @@ export function AgentAccountsTab({
         queryClient.setQueryData(agentEnvQueryKey(wsId, agent.id), saved);
       }
 
-      // The agy binding and the slot lists are both agent fields, so they
-      // leave in ONE request: the backend rotates over `runtime_config.agy_slots`
-      // and launches with `custom_args`, and committing only half of that pair
-      // would leave the agent bound to a directory it may not rotate to. Only
-      // the families that were edited are written, so an agent that never
-      // touched a family keeps no key for it.
+      // Only the families that were edited are written, so an agent that
+      // never touched a family keeps no key for it.
       const updates: Partial<Agent> = {};
-      if (plan.kind === "custom_args") updates.custom_args = plan.custom_args;
       if (commitSlots) {
         updates.runtime_config = dirtyFamilies.reduce(
           (config, family) =>
@@ -621,12 +609,6 @@ export function AgentAccountsTab({
           />
         </>
       ) : null}
-
-      {/* Sibling block, not a nested one: the account half answers "which CLI
-          config directory is in effect", this one answers "which endpoint and
-          key does that CLI call". It has its own data source and its own view
-          states, so it renders regardless of the account half's state. */}
-      <AgentProviderPresetsSection runtimeDevice={runtimeDevice} />
     </div>
   );
 }
@@ -668,7 +650,7 @@ function AccountsEmpty({ provider }: { provider: string }) {
 
   const cli = cliForProvider(provider);
   const defaultChoice: EmptyChoice =
-    cli === "agy" ? "agy" : cli === "dsh" ? "dsh" : "manual";
+    cli === "dsh" ? "dsh" : "manual";
   const choice = picked ?? defaultChoice;
 
   const lever = cli ? cliLever(cli) : "";
@@ -678,10 +660,6 @@ function AccountsEmpty({ provider }: { provider: string }) {
     {
       id: "dsh",
       label: t(($) => $.tab_body.accounts.empty_action_dsh),
-    },
-    {
-      id: "agy",
-      label: t(($) => $.tab_body.accounts.empty_action_agy),
     },
     {
       id: "manual",
@@ -724,9 +702,7 @@ function AccountsEmpty({ provider }: { provider: string }) {
         ) : (
           <>
             <p className="text-caption leading-5 text-muted-foreground">
-              {choice === "dsh"
-                ? t(($) => $.tab_body.accounts.empty_hint_dsh)
-                : t(($) => $.tab_body.accounts.empty_hint_agy)}
+              {t(($) => $.tab_body.accounts.empty_hint_dsh)}
             </p>
             <CommandBlock command={accountLoginCommand(emptyEntryAccount(choice))} />
           </>

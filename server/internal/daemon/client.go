@@ -832,21 +832,19 @@ type (
 	PendingAgentCLI         = protocol.DaemonHeartbeatPendingAgentCLI
 	PendingModelList        = protocol.DaemonHeartbeatPendingModelList
 	PendingRoutingAnalysis  = protocol.DaemonHeartbeatPendingRoutingAnalysis
-	PendingProviderConfig   = protocol.DaemonHeartbeatPendingProviderConfig
 	PendingLocalSkills      = protocol.DaemonHeartbeatPendingLocalSkills
 	PendingLocalSkillImport = protocol.DaemonHeartbeatPendingLocalSkillImport
 )
 
 // agentPlanLimits carries the per-seat snapshots of this runtime's
 // account-bound agents, keyed by agent id; nil when there are none (DENE-715).
-func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string, planLimits *protocol.PlanLimitsSnapshot, agentPlanLimits map[string]protocol.PlanLimitsSnapshot, jev *protocol.JevStatusSnapshot) (*HeartbeatResponse, error) {
+func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string, planLimits *protocol.PlanLimitsSnapshot, agentPlanLimits map[string]protocol.PlanLimitsSnapshot) (*HeartbeatResponse, error) {
 	var resp HeartbeatResponse
 	if err := c.postJSON(ctx, "/api/daemon/heartbeat", map[string]any{
 		"runtime_id":            runtimeID,
 		"supports_batch_import": true,
 		"plan_limits":           planLimits,
 		"agent_plan_limits":     agentPlanLimits,
-		"jev":                   jev,
 	}, &resp); err != nil {
 		return nil, err
 	}
@@ -923,12 +921,6 @@ func (c *Client) ReportModelListResult(ctx context.Context, runtimeID, requestID
 // cannot contend for the same request lifecycle.
 func (c *Client) ReportRoutingAnalysisResult(ctx context.Context, runtimeID, requestID string, result map[string]any) error {
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/routing-analysis/%s/result", runtimeID, requestID), result, nil)
-}
-
-// ReportProviderConfigResult sends the provider-preset result back to the
-// server. The result carries the refreshed preset list, never a key value.
-func (c *Client) ReportProviderConfigResult(ctx context.Context, runtimeID, requestID string, result map[string]any) error {
-	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/provider-presets/%s/result", runtimeID, requestID), result, nil)
 }
 
 // ReportLocalSkillListResult sends the runtime-local-skill inventory back to the server.

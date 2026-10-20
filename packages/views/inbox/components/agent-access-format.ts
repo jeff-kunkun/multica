@@ -1,4 +1,4 @@
-/** Date helpers shared by the doorbell card and the pass settings (DENE-808). */
+/** Date helpers for the pass settings (DENE-808). */
 
 export function formatAccessExpiry(value: string | null | undefined, locale?: string): string {
   if (!value) return "";

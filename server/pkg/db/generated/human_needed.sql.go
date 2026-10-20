@@ -164,18 +164,6 @@ func (q *Queries) CountOpenHumanNeededForBot(ctx context.Context, botID pgtype.U
 	return count, err
 }
 
-const countQueuedActivityForBot = `-- name: CountQueuedActivityForBot :one
-SELECT count(*) FROM human_needed_event
-WHERE bot_id = $1 AND event_type = 'activity' AND status IN ('queued', 'sending')
-`
-
-func (q *Queries) CountQueuedActivityForBot(ctx context.Context, botID pgtype.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countQueuedActivityForBot, botID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
-}
-
 const createHumanNeededEvent = `-- name: CreateHumanNeededEvent :one
 INSERT INTO human_needed_event (
     workspace_id, bot_id, binding_id, target_user_id, event_type, parent_event_id,
@@ -614,225 +602,6 @@ func (q *Queries) GetMemberBotBindingByID(ctx context.Context, id pgtype.UUID) (
 	return i, err
 }
 
-const hasHumanNeededForComment = `-- name: HasHumanNeededForComment :one
-SELECT EXISTS (
-    SELECT 1 FROM human_needed_event
-    WHERE bot_id = $1 AND source_comment_id = $2 AND event_type IN ('human_needed', 'human_needed.escalation')
-)::boolean
-`
-
-type HasHumanNeededForCommentParams struct {
-	BotID           pgtype.UUID `json:"bot_id"`
-	SourceCommentID pgtype.UUID `json:"source_comment_id"`
-}
-
-// A comment already pushed to this Bot as "you are needed" (an @, a summon, an
-// ask) is not pushed a second time as plain activity.
-func (q *Queries) HasHumanNeededForComment(ctx context.Context, arg HasHumanNeededForCommentParams) (bool, error) {
-	row := q.db.QueryRow(ctx, hasHumanNeededForComment, arg.BotID, arg.SourceCommentID)
-	var column_1 bool
-	err := row.Scan(&column_1)
-	return column_1, err
-}
-
-const listActivityBindingsForChat = `-- name: ListActivityBindingsForChat :many
-SELECT b.id, b.workspace_id, b.user_id, b.bot_id, b.mode, b.resend_after_seconds, b.escalate_after_seconds, b.created_at, b.updated_at, b.verified_at, b.revoked_at, b.broken_notified_at, b.activity_scope FROM member_bot_binding b
-JOIN chat_session cs ON cs.id = $2 AND cs.workspace_id = b.workspace_id AND cs.creator_id = b.user_id
-WHERE b.workspace_id = $1 AND b.revoked_at IS NULL AND b.verified_at IS NOT NULL
-  AND ('owned' = ANY(b.activity_scope) OR 'owner_visible_all' = ANY(b.activity_scope))
-`
-
-type ListActivityBindingsForChatParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	ID          pgtype.UUID `json:"id"`
-}
-
-// A chat is the opener's own: only 'owned' (or the all-scope) reaches it.
-func (q *Queries) ListActivityBindingsForChat(ctx context.Context, arg ListActivityBindingsForChatParams) ([]MemberBotBinding, error) {
-	rows, err := q.db.Query(ctx, listActivityBindingsForChat, arg.WorkspaceID, arg.ID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []MemberBotBinding{}
-	for rows.Next() {
-		var i MemberBotBinding
-		if err := rows.Scan(
-			&i.ID,
-			&i.WorkspaceID,
-			&i.UserID,
-			&i.BotID,
-			&i.Mode,
-			&i.ResendAfterSeconds,
-			&i.EscalateAfterSeconds,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.VerifiedAt,
-			&i.RevokedAt,
-			&i.BrokenNotifiedAt,
-			&i.ActivityScope,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listActivityBindingsForIssue = `-- name: ListActivityBindingsForIssue :many
-SELECT b.id, b.workspace_id, b.user_id, b.bot_id, b.mode, b.resend_after_seconds, b.escalate_after_seconds, b.created_at, b.updated_at, b.verified_at, b.revoked_at, b.broken_notified_at, b.activity_scope FROM member_bot_binding b
-JOIN issue i ON i.id = $2 AND i.workspace_id = b.workspace_id
-WHERE b.workspace_id = $1 AND b.revoked_at IS NULL AND b.verified_at IS NOT NULL
-  AND cardinality(b.activity_scope) > 0
-  AND (
-    'owner_visible_all' = ANY(b.activity_scope)
-    OR ('owned' = ANY(b.activity_scope) AND (
-        (i.creator_type = 'member' AND i.creator_id = b.user_id)
-        OR (i.assignee_type = 'member' AND i.assignee_id = b.user_id)
-        OR (i.assignee_type = 'squad' AND EXISTS (
-              SELECT 1 FROM squad sq WHERE sq.id = i.assignee_id AND sq.creator_id = b.user_id))
-        OR (i.origin_chat_session_id IS NOT NULL AND EXISTS (
-              SELECT 1 FROM chat_session cs WHERE cs.id = i.origin_chat_session_id AND cs.creator_id = b.user_id))
-    ))
-    OR ('followed' = ANY(b.activity_scope) AND EXISTS (
-        SELECT 1 FROM issue_subscriber sub
-        WHERE sub.issue_id = i.id AND sub.user_type = 'member' AND sub.user_id = b.user_id
-          AND sub.unsubscribed_at IS NULL))
-  )
-`
-
-type ListActivityBindingsForIssueParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	ID          pgtype.UUID `json:"id"`
-}
-
-// Bindings whose stream covers this ticket: verified, scope on, and the person
-// either owns it (created it, is assigned, leads the squad it is assigned to,
-// or opened the chat that made it) or follows it (an active subscription,
-// which includes everyone @-ed or delegated for), or asked for everything they
-// can see (owner_visible_all: the send-time gate then checks the ticket is
-// really visible to them).
-func (q *Queries) ListActivityBindingsForIssue(ctx context.Context, arg ListActivityBindingsForIssueParams) ([]MemberBotBinding, error) {
-	rows, err := q.db.Query(ctx, listActivityBindingsForIssue, arg.WorkspaceID, arg.ID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []MemberBotBinding{}
-	for rows.Next() {
-		var i MemberBotBinding
-		if err := rows.Scan(
-			&i.ID,
-			&i.WorkspaceID,
-			&i.UserID,
-			&i.BotID,
-			&i.Mode,
-			&i.ResendAfterSeconds,
-			&i.EscalateAfterSeconds,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.VerifiedAt,
-			&i.RevokedAt,
-			&i.BrokenNotifiedAt,
-			&i.ActivityScope,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listActivityForBot = `-- name: ListActivityForBot :many
-SELECT sequence, event_id, workspace_id, bot_id, binding_id, target_user_id, event_type, parent_event_id, kind, dedupe_key, issue_id, chat_session_id, summon_id, inbox_item_id, source_comment_id, ask_id, caller_type, caller_id, question, options, urgency, deadline, status, reason, attempts, next_attempt_at, created_at, sent_at, woken_at, relayed_at, relay_channel, relay_ref, answered_at, answer, answer_comment_id, escalated_at, last_nudge_at, expires_at, activity FROM human_needed_event
-WHERE bot_id = $1 AND workspace_id = $2 AND event_type = 'activity'
-  AND status = ANY($3::text[])
-  AND ($5::bigint IS NULL OR sequence < $5::bigint)
-ORDER BY sequence DESC
-LIMIT $4
-`
-
-type ListActivityForBotParams struct {
-	BotID       pgtype.UUID `json:"bot_id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	Column3     []string    `json:"column_3"`
-	Limit       int32       `json:"limit"`
-	Before      pgtype.Int8 `json:"before"`
-}
-
-// What the stream still holds for a Bot that missed pushes (restart, outage).
-func (q *Queries) ListActivityForBot(ctx context.Context, arg ListActivityForBotParams) ([]HumanNeededEvent, error) {
-	rows, err := q.db.Query(ctx, listActivityForBot,
-		arg.BotID,
-		arg.WorkspaceID,
-		arg.Column3,
-		arg.Limit,
-		arg.Before,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []HumanNeededEvent{}
-	for rows.Next() {
-		var i HumanNeededEvent
-		if err := rows.Scan(
-			&i.Sequence,
-			&i.EventID,
-			&i.WorkspaceID,
-			&i.BotID,
-			&i.BindingID,
-			&i.TargetUserID,
-			&i.EventType,
-			&i.ParentEventID,
-			&i.Kind,
-			&i.DedupeKey,
-			&i.IssueID,
-			&i.ChatSessionID,
-			&i.SummonID,
-			&i.InboxItemID,
-			&i.SourceCommentID,
-			&i.AskID,
-			&i.CallerType,
-			&i.CallerID,
-			&i.Question,
-			&i.Options,
-			&i.Urgency,
-			&i.Deadline,
-			&i.Status,
-			&i.Reason,
-			&i.Attempts,
-			&i.NextAttemptAt,
-			&i.CreatedAt,
-			&i.SentAt,
-			&i.WokenAt,
-			&i.RelayedAt,
-			&i.RelayChannel,
-			&i.RelayRef,
-			&i.AnsweredAt,
-			&i.Answer,
-			&i.AnswerCommentID,
-			&i.EscalatedAt,
-			&i.LastNudgeAt,
-			&i.ExpiresAt,
-			&i.Activity,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listHumanChannelHealth = `-- name: ListHumanChannelHealth :many
 SELECT b.id, b.workspace_id, b.user_id, b.bot_id, b.verified_at, b.broken_notified_at,
        (p.id IS NOT NULL AND NOT p.revoked AND p.deleted_at IS NULL
@@ -1184,48 +953,6 @@ func (q *Queries) ListOpenHumanNeededForBinding(ctx context.Context, bindingID p
 	return items, nil
 }
 
-const listWorkspaceActivityBindings = `-- name: ListWorkspaceActivityBindings :many
-SELECT id, workspace_id, user_id, bot_id, mode, resend_after_seconds, escalate_after_seconds, created_at, updated_at, verified_at, revoked_at, broken_notified_at, activity_scope FROM member_bot_binding
-WHERE workspace_id = $1 AND revoked_at IS NULL AND verified_at IS NOT NULL
-  AND 'owner_visible_all' = ANY(activity_scope)
-`
-
-// Bindings that asked for the whole workspace (DENE-1936). Who may see what is
-// decided per event, by role, when it is queued and again when it is sent.
-func (q *Queries) ListWorkspaceActivityBindings(ctx context.Context, workspaceID pgtype.UUID) ([]MemberBotBinding, error) {
-	rows, err := q.db.Query(ctx, listWorkspaceActivityBindings, workspaceID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []MemberBotBinding{}
-	for rows.Next() {
-		var i MemberBotBinding
-		if err := rows.Scan(
-			&i.ID,
-			&i.WorkspaceID,
-			&i.UserID,
-			&i.BotID,
-			&i.Mode,
-			&i.ResendAfterSeconds,
-			&i.EscalateAfterSeconds,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.VerifiedAt,
-			&i.RevokedAt,
-			&i.BrokenNotifiedAt,
-			&i.ActivityScope,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listWorkspaceOwnerIDs = `-- name: ListWorkspaceOwnerIDs :many
 SELECT user_id FROM member WHERE workspace_id = $1 AND role = 'owner' ORDER BY created_at
 `
@@ -1267,33 +994,14 @@ WHERE event_type = 'activity'
   AND status NOT IN ('queued', 'sending', 'sent', 'woken', 'relayed')
 `
 
-// Finished stream rows are history nobody reads; keep two weeks.
+// Rows of the retired activity stream (DENE-1935) are history nobody reads;
+// the worker cancels any still queued, and this clears them after two weeks.
 func (q *Queries) PurgeActivityEvents(ctx context.Context) (int64, error) {
 	result, err := q.db.Exec(ctx, purgeActivityEvents)
 	if err != nil {
 		return 0, err
 	}
 	return result.RowsAffected(), nil
-}
-
-const recordActivityHandled = `-- name: RecordActivityHandled :exec
-UPDATE human_needed_event
-SET status = CASE WHEN status IN ('queued', 'sending', 'sent', 'woken', 'relayed') THEN 'handled' ELSE status END,
-    woken_at = COALESCE(woken_at, now()),
-    reason = CASE WHEN status IN ('queued', 'sending', 'sent', 'woken', 'relayed') THEN $2::text ELSE reason END
-WHERE event_id = $1 AND event_type = 'activity'
-`
-
-type RecordActivityHandledParams struct {
-	EventID pgtype.UUID `json:"event_id"`
-	Reason  string      `json:"reason"`
-}
-
-// The Bot looked and decided nobody needs telling. A handled receipt also
-// proves the Bot woke.
-func (q *Queries) RecordActivityHandled(ctx context.Context, arg RecordActivityHandledParams) error {
-	_, err := q.db.Exec(ctx, recordActivityHandled, arg.EventID, arg.Reason)
-	return err
 }
 
 const recordHumanNeededAnswered = `-- name: RecordHumanNeededAnswered :exec
@@ -1439,7 +1147,7 @@ type SetMemberBotBindingActivityScopeParams struct {
 	ActivityScope []string    `json:"activity_scope"`
 }
 
-// ---- activity stream (DENE-1935) ----
+// ---- per-person activity scope (read by office events) ----
 func (q *Queries) SetMemberBotBindingActivityScope(ctx context.Context, arg SetMemberBotBindingActivityScopeParams) (MemberBotBinding, error) {
 	row := q.db.QueryRow(ctx, setMemberBotBindingActivityScope, arg.ID, arg.ActivityScope)
 	var i MemberBotBinding

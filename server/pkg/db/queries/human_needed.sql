@@ -257,7 +257,7 @@ WHERE binding_id = $1 AND status = 'queued' AND attempts >= 3;
 -- name: ListWorkspaceOwnerIDs :many
 SELECT user_id FROM member WHERE workspace_id = $1 AND role = 'owner' ORDER BY created_at;
 
--- ---- activity stream (DENE-1935) ----
+-- ---- per-person activity scope (read by office events) ----
 
 -- name: SetMemberBotBindingActivityScope :one
 UPDATE member_bot_binding
@@ -265,79 +265,9 @@ SET activity_scope = $2, updated_at = now()
 WHERE id = $1 AND revoked_at IS NULL
 RETURNING *;
 
--- name: ListActivityBindingsForIssue :many
--- Bindings whose stream covers this ticket: verified, scope on, and the person
--- either owns it (created it, is assigned, leads the squad it is assigned to,
--- or opened the chat that made it) or follows it (an active subscription,
--- which includes everyone @-ed or delegated for), or asked for everything they
--- can see (owner_visible_all: the send-time gate then checks the ticket is
--- really visible to them).
-SELECT b.* FROM member_bot_binding b
-JOIN issue i ON i.id = $2 AND i.workspace_id = b.workspace_id
-WHERE b.workspace_id = $1 AND b.revoked_at IS NULL AND b.verified_at IS NOT NULL
-  AND cardinality(b.activity_scope) > 0
-  AND (
-    'owner_visible_all' = ANY(b.activity_scope)
-    OR ('owned' = ANY(b.activity_scope) AND (
-        (i.creator_type = 'member' AND i.creator_id = b.user_id)
-        OR (i.assignee_type = 'member' AND i.assignee_id = b.user_id)
-        OR (i.assignee_type = 'squad' AND EXISTS (
-              SELECT 1 FROM squad sq WHERE sq.id = i.assignee_id AND sq.creator_id = b.user_id))
-        OR (i.origin_chat_session_id IS NOT NULL AND EXISTS (
-              SELECT 1 FROM chat_session cs WHERE cs.id = i.origin_chat_session_id AND cs.creator_id = b.user_id))
-    ))
-    OR ('followed' = ANY(b.activity_scope) AND EXISTS (
-        SELECT 1 FROM issue_subscriber sub
-        WHERE sub.issue_id = i.id AND sub.user_type = 'member' AND sub.user_id = b.user_id
-          AND sub.unsubscribed_at IS NULL))
-  );
-
--- name: ListActivityBindingsForChat :many
--- A chat is the opener's own: only 'owned' (or the all-scope) reaches it.
-SELECT b.* FROM member_bot_binding b
-JOIN chat_session cs ON cs.id = $2 AND cs.workspace_id = b.workspace_id AND cs.creator_id = b.user_id
-WHERE b.workspace_id = $1 AND b.revoked_at IS NULL AND b.verified_at IS NOT NULL
-  AND ('owned' = ANY(b.activity_scope) OR 'owner_visible_all' = ANY(b.activity_scope));
-
--- name: ListWorkspaceActivityBindings :many
--- Bindings that asked for the whole workspace (DENE-1936). Who may see what is
--- decided per event, by role, when it is queued and again when it is sent.
-SELECT * FROM member_bot_binding
-WHERE workspace_id = $1 AND revoked_at IS NULL AND verified_at IS NOT NULL
-  AND 'owner_visible_all' = ANY(activity_scope);
-
--- name: CountQueuedActivityForBot :one
-SELECT count(*) FROM human_needed_event
-WHERE bot_id = $1 AND event_type = 'activity' AND status IN ('queued', 'sending');
-
--- name: HasHumanNeededForComment :one
--- A comment already pushed to this Bot as "you are needed" (an @, a summon, an
--- ask) is not pushed a second time as plain activity.
-SELECT EXISTS (
-    SELECT 1 FROM human_needed_event
-    WHERE bot_id = $1 AND source_comment_id = $2 AND event_type IN ('human_needed', 'human_needed.escalation')
-)::boolean;
-
--- name: RecordActivityHandled :exec
--- The Bot looked and decided nobody needs telling. A handled receipt also
--- proves the Bot woke.
-UPDATE human_needed_event
-SET status = CASE WHEN status IN ('queued', 'sending', 'sent', 'woken', 'relayed') THEN 'handled' ELSE status END,
-    woken_at = COALESCE(woken_at, now()),
-    reason = CASE WHEN status IN ('queued', 'sending', 'sent', 'woken', 'relayed') THEN sqlc.arg('reason')::text ELSE reason END
-WHERE event_id = $1 AND event_type = 'activity';
-
--- name: ListActivityForBot :many
--- What the stream still holds for a Bot that missed pushes (restart, outage).
-SELECT * FROM human_needed_event
-WHERE bot_id = $1 AND workspace_id = $2 AND event_type = 'activity'
-  AND status = ANY($3::text[])
-  AND (sqlc.narg('before')::bigint IS NULL OR sequence < sqlc.narg('before')::bigint)
-ORDER BY sequence DESC
-LIMIT $4;
-
 -- name: PurgeActivityEvents :execrows
--- Finished stream rows are history nobody reads; keep two weeks.
+-- Rows of the retired activity stream (DENE-1935) are history nobody reads;
+-- the worker cancels any still queued, and this clears them after two weeks.
 DELETE FROM human_needed_event
 WHERE event_type = 'activity'
   AND created_at < now() - interval '14 days'

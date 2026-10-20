@@ -7,9 +7,6 @@ import type { useT } from "../i18n";
 //
 // Keep remedies distinct for an unbound agent, an offline runtime, an unusable CLI,
 // denied runtime access, and a missing runtime profile.
-// `access_requested` is not a refusal: the doorbell took the trigger and the
-// agent's owner has a pending approval, so the copy says "waiting on the owner",
-// never "no permission", or the user re-mentions and rings the bell again.
 type IssuesT = ReturnType<typeof useT<"issues">>["t"];
 
 // Full sentence — for tooltips and other surfaces with room to explain.
@@ -29,8 +26,6 @@ export function blockedReasonLabel(reasonCode: string, t: IssuesT): string {
       return t(($) => $.comment.trigger_blocked_agent_runtime_required);
     case "runtime_access_denied":
       return t(($) => $.comment.trigger_blocked_runtime_access_denied);
-    case "access_requested":
-      return t(($) => $.comment.trigger_blocked_access_requested);
     default:
       return t(($) => $.comment.trigger_blocked_generic);
   }
@@ -54,8 +49,6 @@ export function blockedShortReasonLabel(reasonCode: string, t: IssuesT): string 
       return t(($) => $.comment.trigger_blocked_short_agent_runtime_required);
     case "runtime_access_denied":
       return t(($) => $.comment.trigger_blocked_short_runtime_access_denied);
-    case "access_requested":
-      return t(($) => $.comment.trigger_blocked_short_access_requested);
     default:
       return t(($) => $.comment.trigger_blocked_short_generic);
   }

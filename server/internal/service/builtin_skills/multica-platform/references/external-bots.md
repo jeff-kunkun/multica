@@ -284,44 +284,20 @@ event is sent again. Woken but not `relayed` in 5 minutes: you get a
 owners are reminded, and the nudge repeats every 30 minutes. Receipts for the
 same call are shared by the original and its escalations.
 
-## Activity stream (DENE-1935)
+## Office events that need nobody
 
-A person who bound their Bot can also switch on the full stream:
-`multica bot bind --activity owned,followed` (`owned`, `followed`, both, or
-`off`; account settings row「把所有动态推给我的 Bot」; a first connection starts on
-`everything`, `--activity off` keeps it off). Then every
-comment (and each edit of one), chat message, status change and assignee change
-on tickets and chats they own or follow is pushed to the Bot as `type: "activity"` with an `activity`
-block: `activity_type`, `importance` (`high|normal|low`; `critical` stays with
-`human_needed`), `categories[]` (`needs_human, risk, decision, result,
-progress, completion, failure, info`), `excerpt`, `source_url`, `from_status` /
-`to_status`. **You filter**: decide what is worth telling the person. The whole
-body is masked server-side (not just the excerpt); attachments are not pushed.
-A row is re-checked when it is sent and when you list it: if the person lost
-sight of the ticket or the scope no longer covers it, it is not delivered. HTTP 200 is delivered —
-nothing is resent or escalated, dedupe on `event_id`.
+`multica bot bind --activity everything` (`owner_visible_all`; a first
+connection starts on it, `--activity off` keeps it off) also pushes office
+events the person can see that need nobody — for their information. Events
+they must hear about arrive either way (see the office event stream below).
+The older full activity stream (`type: "activity"`, `bot wake activity`,
+`bot wake handled`) is retired: nothing new is queued, rows left from before
+the upgrade are cancelled, and its endpoints answer 404.
 
-```sh
-multica bot wake activity <bot-id> --importance high     # catch up after downtime
-multica bot wake handled <bot-id> <event-id> --reason "…" # optional: looked, nobody needs telling
-```
-
-### Whole workspace (DENE-1936)
-
-`multica bot bind --activity everything` (`owner_visible_all`) widens it to
-everything the person can see: PRs, runs, projects, settings, members, agents,
-autopilots, skills, runtimes, integrations, squads, routing, billing, keys — every
-successful write, plus run endings and PR updates. The `activity.workspace`
-block carries `family`, `action`, `route`, `fields` (names only, never values),
-`entity_id`, `actor_*`, `via_bot_*`, `on_behalf_of_*`. Management families go
-only to owners and admins.
+## Acting with the owner's permission (DENE-1936)
 
 You act with the owner's permission, and every write you make is recorded as
-「Bot〈名〉代表〈主人〉」: read it with `multica bot writes [--mine]`. A write
-aimed at a ticket, project or chat the owner cannot open is never pushed. A PR
-update is pushed only when the owner can open every ticket the PR is linked to
-(`issue_ids`) and its repository (`attrs.repo`); a PR linked to no ticket is not
-pushed at all.
+「Bot〈名〉代表〈主人〉」: read it with `multica bot writes [--mine]`.
 
 Four things need the owner's own yes: delete the workspace, change members or
 roles, reset keys, change quota or billing. You cannot give it yourself. The
@@ -347,8 +323,7 @@ as `type: "office_event"` with an `event_id`, a gap-free `stream_seq`, a
 `change`), the real `actor` (and `via_bot_id` + `on_behalf_of_user_id` when a
 Bot acted for someone) and an `artifacts` catalog (filename, size, sha256,
 authorized download). An HTTP 200 is not a receipt: the same `event_id` comes
-back, forever, until you post one. Dedupe on `event_id`; the same fact on the
-older activity lane carries the same `business_key`.
+back, forever, until you post one. Dedupe on `event_id`.
 
 ```bash
 multica events receipt <event-id> --bot <bot-id> --stage received

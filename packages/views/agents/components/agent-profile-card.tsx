@@ -18,7 +18,6 @@ import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { AppLink } from "../../navigation";
 import { HealthIcon } from "../../runtimes/components/shared";
 import { availabilityConfig } from "../presence";
-import { AgentJevIndicator } from "./agent-jev-indicator";
 import { AgentQuotaCapsule } from "./agent-quota-meter";
 import { providerSeatModelDisplay } from "./provider-seat-model";
 import { VisibilityBadge } from "./visibility-badge";
@@ -130,7 +129,6 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
           runtime={runtime}
           planLimits={agent.plan_limits}
         />
-        <AgentJevIndicator agent={agent} runtime={runtime} />
         <ModelRow model={agent.model} thinkingLevel={agent.thinking_level} />
         {agent.skills.length > 0 && (
           <SkillsRow skills={agent.skills.map((s) => s.name)} />

@@ -11768,10 +11768,6 @@ UPDATE agent SET
     -- TRUE makes it follow its base role again. Setting it back to "not
     -- applicable" belongs to SetAgentParentAgent, which owns the detach.
     runtime_inherited = COALESCE($30::boolean, runtime_inherited),
-    -- Doorbell switch (DENE-808): same omitted-preserves / present-sets
-    -- contract as work_enabled. FALSE keeps the plain refusal for members
-    -- outside the allow-list; TRUE turns that refusal into an approval request.
-    doorbell_enabled = COALESCE($31::boolean, doorbell_enabled),
     updated_at = now()
 WHERE id = $1
 RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier, conversation_starters, switchable_models, auto_retry_enabled, parent_agent_id, runtime_inherited, routing_tier, work_enabled, plan_limits, doorbell_enabled, routing_usage, domain_id, dispatch_mode, dispatch_projects, series_override, fallback_runtime_id
@@ -11808,7 +11804,6 @@ type UpdateAgentParams struct {
 	AutoRetryEnabled         pgtype.Bool   `json:"auto_retry_enabled"`
 	WorkEnabled              pgtype.Bool   `json:"work_enabled"`
 	RuntimeInherited         pgtype.Bool   `json:"runtime_inherited"`
-	DoorbellEnabled          pgtype.Bool   `json:"doorbell_enabled"`
 }
 
 // composio_toolkit_allowlist is set wholesale: the API layer is responsible
@@ -11849,7 +11844,6 @@ func (q *Queries) UpdateAgent(ctx context.Context, arg UpdateAgentParams) (Agent
 		arg.AutoRetryEnabled,
 		arg.WorkEnabled,
 		arg.RuntimeInherited,
-		arg.DoorbellEnabled,
 	)
 	var i Agent
 	err := row.Scan(

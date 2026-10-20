@@ -1,13 +1,5 @@
 "use client";
 
-// Custom CLI arguments for one agent.
-//
-// This tab owned AGY's numbered account slots until DENE-309 moved them to the
-// accounts tab, where the rest of the account surface lives. `--gemini_dir` is
-// still AGY's binding lever and still rides in `custom_args` — it is only
-// edited from the accounts tab now, and stays hidden from this list so the
-// binding has exactly one control point.
-
 import { useEffect, useRef, useState } from "react";
 import {
   Loader2,
@@ -27,7 +19,6 @@ import {
   SettingsCard,
   SettingsSection,
 } from "../../../settings/components/settings-layout";
-import { isGeminiDirToken } from "./agy-account-slots";
 
 interface ArgEntry {
   id: string;
@@ -49,21 +40,6 @@ function entriesToArgs(entries: ArgEntry[]): string[] {
 
 function formatArgForPreview(value: string): string {
   return /\s/.test(value) ? JSON.stringify(value) : value;
-}
-
-function visibleArgEntries(entries: ArgEntry[]): ArgEntry[] {
-  const visible: ArgEntry[] = [];
-  for (let index = 0; index < entries.length; index += 1) {
-    const entry = entries[index];
-    if (!entry) continue;
-    if (entry.value === "--gemini_dir") {
-      index += 1;
-      continue;
-    }
-    if (isGeminiDirToken(entry.value)) continue;
-    visible.push(entry);
-  }
-  return visible;
 }
 
 export function CustomArgsTab({
@@ -89,7 +65,6 @@ export function CustomArgsTab({
   const currentArgs = entriesToArgs(entries);
   const originalArgs = agent.custom_args ?? [];
   const dirty = JSON.stringify(currentArgs) !== JSON.stringify(originalArgs);
-  const visibleEntries = visibleArgEntries(entries);
 
   useEffect(() => {
     onDirtyChange?.(dirty);
@@ -201,10 +176,6 @@ export function CustomArgsTab({
         {t(($) => $.tab_body.custom_args.intro)}
       </p>
 
-      <p className="max-w-2xl text-pretty rounded-lg border border-border bg-muted/40 p-3 text-caption leading-5 text-muted-foreground">
-        {t(($) => $.tab_body.custom_args.accounts_moved_hint)}
-      </p>
-
       <SettingsSection
         title={t(($) => $.tab_body.custom_args.arguments_label)}
         description={t(($) => $.tab_body.custom_args.arguments_description)}
@@ -223,7 +194,7 @@ export function CustomArgsTab({
       >
         <SettingsCard>
           <div className="space-y-2 p-3">
-            {visibleEntries.length === 0 && editor?.kind !== "add" ? (
+            {entries.length === 0 && editor?.kind !== "add" ? (
               <div className="flex min-h-28 flex-col items-center justify-center px-4 py-6 text-center">
                 <span className="flex size-9 items-center justify-center rounded-lg bg-muted text-muted-foreground">
                   <Terminal className="size-4" aria-hidden="true" />
@@ -235,7 +206,7 @@ export function CustomArgsTab({
             ) : null}
 
             <div role="list" className="space-y-2">
-              {visibleEntries.map((entry, index) => (
+              {entries.map((entry, index) => (
                 <div key={entry.id} role="listitem">
                   {editor?.kind === "edit" && editor.entryId === entry.id ? (
                     renderEditor(index + 1)

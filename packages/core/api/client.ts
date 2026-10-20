@@ -128,9 +128,6 @@ import type {
   DashboardFailureByAgent,
   RuntimeUpdate,
   RuntimeModelListRequest,
-  RuntimeProviderPresetAction,
-  RuntimeProviderPresetRequest,
-  RuntimeProviderPresetTicket,
   RuntimeLocalSkillListRequest,
   CreateRuntimeLocalSkillImportRequest,
   RuntimeLocalSkillImportRequest,
@@ -309,11 +306,7 @@ import type {
   TaskLogExportBundle,
   TaskLogExportPush,
   TaskLogExportScope,
-  AgentAccessRequest,
-  AgentAccessRequestList,
   AgentAccessPass,
-  ApproveAgentAccessRequestBody,
-  ApproveAgentAccessRequestResponse,
   CreateAgentAccessPassRequest,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
@@ -615,10 +608,6 @@ import {
   EMPTY_LIST_GITHUB_REPOSITORIES_RESPONSE,
   RuntimeModelListRequestSchema,
   MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
-  RuntimeProviderPresetRequestSchema,
-  MALFORMED_RUNTIME_PROVIDER_PRESET_REQUEST,
-  RuntimeProviderPresetTicketSchema,
-  MALFORMED_RUNTIME_PROVIDER_PRESET_TICKET,
   SkillSchema,
   EMPTY_SKILL,
   SkillSummaryListSchema,
@@ -2574,27 +2563,7 @@ export class ApiClient {
     });
   }
 
-  // --- Agent borrowing: doorbell requests + timed passes (DENE-808) ---
-
-  async listAgentAccessRequests(): Promise<AgentAccessRequestList> {
-    return this.fetch("/api/agent-access-requests");
-  }
-
-  async approveAgentAccessRequest(
-    id: string,
-    body: ApproveAgentAccessRequestBody = {},
-  ): Promise<ApproveAgentAccessRequestResponse> {
-    return this.fetch(`/api/agent-access-requests/${id}/approve`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
-  }
-
-  async declineAgentAccessRequest(id: string): Promise<AgentAccessRequest> {
-    return this.fetch(`/api/agent-access-requests/${id}/decline`, {
-      method: "POST",
-    });
-  }
+  // --- Agent borrowing: timed passes (DENE-808) ---
 
   async listAgentAccessPasses(agentId: string): Promise<AgentAccessPass[]> {
     return this.fetch(`/api/agents/${agentId}/access-passes`);
@@ -3402,56 +3371,6 @@ export class ApiClient {
     requestId: string,
   ): Promise<RuntimeLocalSkillImportRequest> {
     return this.fetch(`/api/runtimes/${runtimeId}/local-skills/import/${requestId}`);
-  }
-
-  // Provider presets are the machine's own agent-CLI configuration, so this is
-  // the same park-then-poll contract as every other runtime action the server
-  // cannot perform itself: the POST enqueues one action for the runtime's
-  // daemon and answers with a ticket, the GET carries the outcome.
-  //
-  // `payload` is opaque to the server (it forwards it to the daemon unchanged)
-  // and is validated here only insofar as both ends are parsed. On an upsert it
-  // carries the API key, which is why the server's POST reply is a ticket
-  // rather than the record: echoing the body back would put the secret on a
-  // second path for nothing.
-  async initiateProviderPresetAction(
-    runtimeId: string,
-    provider: string,
-    action: RuntimeProviderPresetAction,
-    payload?: unknown,
-  ): Promise<RuntimeProviderPresetTicket> {
-    const raw = await this.fetch<unknown>(
-      `/api/runtimes/${runtimeId}/provider-presets`,
-      {
-        method: "POST",
-        body: JSON.stringify({ provider, action, payload }),
-      },
-    );
-    return parseWithFallback<RuntimeProviderPresetTicket>(
-      raw,
-      RuntimeProviderPresetTicketSchema,
-      MALFORMED_RUNTIME_PROVIDER_PRESET_TICKET,
-      { endpoint: "POST /api/runtimes/{id}/provider-presets" },
-    );
-  }
-
-  async getProviderPresetResult(
-    runtimeId: string,
-    requestId: string,
-  ): Promise<RuntimeProviderPresetRequest> {
-    const raw = await this.fetch<unknown>(
-      `/api/runtimes/${runtimeId}/provider-presets/${requestId}`,
-    );
-    return parseWithFallback<RuntimeProviderPresetRequest>(
-      raw,
-      RuntimeProviderPresetRequestSchema,
-      {
-        ...MALFORMED_RUNTIME_PROVIDER_PRESET_REQUEST,
-        id: requestId,
-        runtime_id: runtimeId,
-      },
-      { endpoint: "GET /api/runtimes/{id}/provider-presets/{requestId}" },
-    );
   }
 
   async listAgentTasksPage(

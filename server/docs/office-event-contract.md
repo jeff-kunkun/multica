@@ -7,10 +7,9 @@ and, when a Bot acted for a person, both of them. A Bot can pull it with a
 cursor, and gets the events meant for its owner pushed one by one until it
 posts a receipt.
 
-It sits next to the older lanes ([bot-wake-contract.md](bot-wake-contract.md),
-[bot-activity-contract.md](bot-activity-contract.md)); those keep working. The
-same business fact carries the same `business_key` on every lane, so a Bot that
-gets it twice shows it once.
+It sits next to the older wake lane ([bot-wake-contract.md](bot-wake-contract.md)),
+which keeps working. The same business fact carries the same `business_key` on
+both, so a Bot that gets it twice shows it once.
 
 ## Capture
 

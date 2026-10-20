@@ -60,21 +60,7 @@
     "autopilot_quota_exceeded_body": "Cet espace de travail a atteint sa limite de {{limit}} exécutions d'automatisation pour la période actuelle. Les prochaines exécutions d'automatisation ne démarreront qu'après la réinitialisation du quota {{resetAt}}.",
     "autopilot_quota_upgrade": "Voir les options de mise à niveau",
     "archive": "Archiver",
-    "unarchive": "Désarchiver",
-    "access_request_mention_title": "{{requester}} a mentionné {{agent}} et attend votre approbation",
-    "access_request_assign_title": "{{requester}} a assigné {{agent}} et attend votre approbation",
-    "access_request_local_env_note": "Une fois approuvée, la tâche peut accéder aux clés, connexions et fichiers de votre machine.",
-    "access_pass_prompt": "Autoriser aussi pour un moment :",
-    "access_pass_2h": "2 heures",
-    "access_pass_today": "Jusqu'à ce soir",
-    "access_pass_custom": "Jusqu'à…",
-    "access_approve_once": "Approuver une fois",
-    "access_approve_with_pass": "Approuver et délivrer un laissez-passer",
-    "access_decline": "Refuser",
-    "access_request_expires": "Expire {{until}}",
-    "access_status_approved": "Approuvée",
-    "access_status_declined": "Refusée",
-    "access_status_expired": "Expirée : personne n'a répondu à temps"
+    "unarchive": "Désarchiver"
   },
   "types": {
     "needs_you": "Nécessite votre attention",
@@ -129,11 +115,7 @@
   "toasts": {
     "source_context_retry_started": "Nouvelle tentative démarrée avec le contexte d'origine",
     "archived": "Notification archivée",
-    "unarchived": "Notification restaurée",
-    "access_approved": "Approuvée : l'exécution est en file d'attente",
-    "access_approved_with_pass": "Approuvée : laissez-passer valable jusqu'au {{until}}",
-    "access_approved_but_blocked": "Approuvée, mais l'exécution n'a pas pu démarrer : vérifiez le runtime de l'agent",
-    "access_declined": "Refusée : le demandeur a été prévenu"
+    "unarchived": "Notification restaurée"
   },
   "errors": {
     "archived_lookup_failed": "Échec du chargement de la notification liée",
@@ -149,10 +131,7 @@
     "archive_completed_failed": "Échec de l'archivage des éléments terminés",
     "unarchive_failed": "Échec du désarchivage",
     "archived_load_failed": "Échec du chargement des notifications archivées",
-    "filters_load_failed": "Impossible de charger les filtres",
-    "access_request_not_pending": "Cette demande a déjà été traitée ou a expiré",
-    "access_request_failed": "Impossible de traiter la demande",
-    "access_pass_expiry_invalid": "Choisissez une échéance dans le futur"
+    "filters_load_failed": "Impossible de charger les filtres"
   },
   "board": {
     "title": "Inbox",

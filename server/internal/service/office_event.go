@@ -205,10 +205,8 @@ func joinSummary(head, label string) string {
 	return head + "：" + label
 }
 
-// OfficeIssueStatusKey is the key the same business fact carries on both lanes
-// (the office stream and the older activity stream), so a Bot that gets both
-// shows it once. Triggers already set it for status, chat and run rows; this
-// is the Go side for the activity lane.
+// OfficeIssueStatusKey is the business_key an issue status change carries.
+// Triggers set it in SQL; this is the same key computed in Go.
 func OfficeIssueStatusKey(issueID, from, to string, updatedAt time.Time) string {
 	return "issue-status:" + issueID + ":" + from + ">" + to + ":" + strconv.FormatInt(updatedAt.UnixMicro(), 10)
 }

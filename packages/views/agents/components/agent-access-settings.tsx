@@ -50,7 +50,6 @@ export function AgentAccessSettings({
       agent={agent}
       members={members}
       canEdit={canEdit}
-      onUpdate={onUpdate}
     />
     </>
   );

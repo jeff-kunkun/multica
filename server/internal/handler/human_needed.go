@@ -45,9 +45,9 @@ type BotBindingResponse struct {
 	EscalateAfterSeconds int32   `json:"escalate_after_seconds,omitempty"`
 	VerifiedAt           *string `json:"verified_at,omitempty"`
 	OpenCount            int64   `json:"open_count"`
-	// ActivityScope is what the full activity stream covers: "owned",
-	// "followed", "owner_visible_all" (everything the person can see in the
-	// workspace), a mix, or empty (off).
+	// ActivityScope says whether office events that need nobody are pushed:
+	// "owner_visible_all" is on, empty is off. "owned" and "followed" are
+	// still stored for older clients and count as off.
 	ActivityScope []string `json:"activity_scope"`
 }
 
@@ -126,8 +126,8 @@ type putBotBindingRequest struct {
 	Mode                 string `json:"mode"`
 	ResendAfterSeconds   *int32 `json:"resend_after_seconds"`
 	EscalateAfterSeconds *int32 `json:"escalate_after_seconds"`
-	// ActivityScope switches the full activity stream: absent leaves it as
-	// is, [] turns it off.
+	// ActivityScope switches office events that need nobody: absent leaves
+	// it as is, [] turns it off.
 	ActivityScope *[]string `json:"activity_scope"`
 }
 

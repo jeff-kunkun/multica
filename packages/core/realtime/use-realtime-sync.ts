@@ -981,7 +981,7 @@ export interface RealtimeSyncStores {
  * both here (invalidation fallback) and by per-page useWSEvent hooks (granular
  * updates). Daemon register events invalidate runtimes globally. Routine
  * heartbeats stay off the prefix path to avoid a 15s refetch storm; a
- * plan_limits or JEV snapshot change is handled by a dedicated listener.
+ * plan_limits snapshot change is handled by a dedicated listener.
  *
  * @param ws - WebSocket client instance (null when not yet connected)
  * @param stores - Platform-created Zustand store instances for auth and workspace
@@ -1344,14 +1344,8 @@ export function useRealtimeSync(
     const unsubDaemonHeartbeat = ws.on("daemon:heartbeat", (p) => {
       const payload = p as DaemonHeartbeatPayload;
       // The server sets a flag only when the stored row actually changed, so a
-      // routine beat still short-circuits. JEV reuses this event rather than
-      // opening a second one.
-      if (
-        payload?.plan_limits_updated !== true &&
-        payload?.jev_updated !== true
-      ) {
-        return;
-      }
+      // routine beat still short-circuits.
+      if (payload?.plan_limits_updated !== true) return;
       const wsId = getCurrentWsId();
       if (!wsId) return;
       // An agent-scoped snapshot lives on the agent row, so refetching runtimes

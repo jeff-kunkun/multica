@@ -101,8 +101,6 @@ import type {
   PluginSurfaceLaunch,
   ResourceLabelsResponse,
   RuntimeModelListRequest,
-  RuntimeProviderPresetRequest,
-  RuntimeProviderPresetTicket,
   SearchIssuesResponse,
   SearchProjectsResponse,
   ProjectMember,
@@ -2064,26 +2062,6 @@ export const PlanLimitsSnapshotSchema = z.object({
   observed_at: z.number().positive(),
 }).loose();
 
-/**
- * Progressive daemon capability like plan_limits: a malformed or missing JEV
- * snapshot is discarded (the resolver then reads it as unknown) rather than
- * failing the whole runtime row. `status` itself falls back to "unknown" — a
- * value we cannot interpret must never be presented as a working judgement
- * layer.
- */
-export const JevStatusSnapshotSchema = z.object({
-  status: z.enum(["active", "fallback", "unknown"]).catch("unknown"),
-  model: z.string().optional(),
-  manual: z.boolean().optional(),
-  disabled_until: z.number().optional(),
-  failures: z.number().optional(),
-  reason: z.string().optional(),
-  last_scene: z.string().optional(),
-  last_outcome: z.string().optional(),
-  last_decision_at: z.number().optional(),
-  observed_at: z.number().optional(),
-}).loose();
-
 export const AgentRuntimeSchema = z.object({
   machine_capacity: MachineCapacitySchema.optional().catch(undefined),
   id: z.string(),
@@ -2101,7 +2079,6 @@ export const AgentRuntimeSchema = z.object({
   visibility: z.enum(["private", "public"]).default("private"),
   profile_id: z.string().nullable().optional(),
   plan_limits: PlanLimitsSnapshotSchema.nullable().optional().catch(undefined),
-  jev: JevStatusSnapshotSchema.nullable().optional().catch(undefined),
   last_seen_at: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
@@ -2225,7 +2202,6 @@ export const AgentSchema: z.ZodType<Agent> = z.object({
     })
     .optional()
     .catch(undefined),
-  doorbell_enabled: z.boolean().optional().catch(undefined),
 }).loose() as z.ZodType<Agent>;
 
 // Malformed ROWS are dropped individually, the same way a blocked mention is
@@ -4199,122 +4175,6 @@ export const MALFORMED_RUNTIME_MODEL_LIST_REQUEST: RuntimeModelListRequest = {
   created_at: "",
   updated_at: "",
 };
-
-// A model entry with no `id` cannot be keyed or activated, so `id` is required
-// and an entry without one drops the whole response to the fallback rather than
-// rendering a row that would write an empty model id.
-//
-// `context_length` is the spelling some gateways use on the wire; the daemon
-// normalises it onto `context_window` before reporting, and both are accepted
-// so a catalog stays usable when only the older spelling arrives.
-const RuntimeProviderPresetModelSchema = z
-  .object({
-    id: z.string(),
-    name: z.string().optional(),
-    context_window: z.number().optional(),
-    context_length: z.number().optional(),
-  })
-  .loose();
-
-// `has_key` carries a default because the field only exists on daemons new
-// enough to know about it, and "no key recorded" is the safe reading of its
-// absence. `key_mask` is a string the daemon chose; nothing here reconstructs
-// or validates a key value, and there is no field for one.
-const RuntimeProviderPresetSchema = z
-  .object({
-    id: z.string(),
-    api: z.string().optional(),
-    base_url: z.string().optional(),
-    api_key_env: z.string().optional(),
-    key_mask: z.string().optional(),
-    has_key: z.boolean().default(false),
-    active: z.boolean().optional(),
-    models: z.array(RuntimeProviderPresetModelSchema).default([]),
-  })
-  .loose();
-
-const RuntimeProviderPresetActiveSchema = z
-  .object({
-    provider: z.string().default(""),
-    model: z.string().default(""),
-  })
-  .loose();
-
-// Failure parameters are the daemon's own facts and are typed as a string map,
-// but a newer daemon could add a numeric one (a status code, a retry delay).
-// Non-string values are dropped rather than failing the whole record: losing a
-// parameter degrades one localized sentence, while rejecting the response would
-// hide the failure the user needs to see.
-const RuntimeProviderPresetErrorParamsSchema = z
-  .record(z.string(), z.unknown())
-  .transform((params) => {
-    const out: Record<string, string> = {};
-    for (const [key, value] of Object.entries(params)) {
-      if (typeof value === "string") out[key] = value;
-    }
-    return out;
-  });
-
-export const RuntimeProviderPresetRequestSchema = z
-  .object({
-    id: z.string().default(""),
-    runtime_id: z.string().default(""),
-    provider: z.string().default(""),
-    action: z.string().default(""),
-    // Kept as a plain string, not an enum: a status this client does not know
-    // must still parse and be handled by the poll loop's default branch —
-    // rejecting it here would turn "newer server" into "malformed response".
-    status: z.string(),
-    providers: z.array(RuntimeProviderPresetSchema).optional(),
-    active: RuntimeProviderPresetActiveSchema.optional(),
-    cleared_active: z.boolean().optional(),
-    // The endpoint's own catalog, filled only by the `models` action. Absent on
-    // a response to any other action, and on a daemon older than the field.
-    models: z.array(RuntimeProviderPresetModelSchema).optional(),
-    error: z.string().optional(),
-    error_kind: z.string().optional(),
-    error_params: RuntimeProviderPresetErrorParamsSchema.optional(),
-    created_at: z.string().default(""),
-    updated_at: z.string().default(""),
-  })
-  .loose();
-
-// Fallback for an unparseable preset response. `failed` is the only honest
-// choice: `completed` would fabricate an empty preset list and silently erase
-// the caller's view of the machine's real configuration, while `pending` would
-// spin until the client-side poll timeout. `failed` surfaces the error
-// immediately and keeps the section's retry affordance live.
-export const MALFORMED_RUNTIME_PROVIDER_PRESET_REQUEST: RuntimeProviderPresetRequest =
-  {
-    id: "",
-    runtime_id: "",
-    provider: "",
-    action: "",
-    status: "failed",
-    error: "invalid provider preset response",
-    created_at: "",
-    updated_at: "",
-  };
-
-// The POST answers with the ticket only. An upsert body carries the API key,
-// and echoing the request back would put the secret on a second path for
-// nothing, so the server returns `{id, status}` and the refreshed list arrives
-// through the poll.
-export const RuntimeProviderPresetTicketSchema = z
-  .object({
-    id: z.string(),
-    status: z.string(),
-  })
-  .loose();
-
-// `failed` (not `pending`) on a malformed ticket: the poll loop treats a
-// terminal non-completed status as a failure, so this surfaces the contract
-// drift instead of polling on an empty id until the timeout.
-export const MALFORMED_RUNTIME_PROVIDER_PRESET_TICKET: RuntimeProviderPresetTicket =
-  {
-    id: "",
-    status: "failed",
-  };
 
 export const DingTalkInstallationSchema = z.object({
   id: z.string(),

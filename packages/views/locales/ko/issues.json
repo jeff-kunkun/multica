@@ -740,9 +740,7 @@
     "steer_attachment_notice": "실행 중에는 텍스트만 추가할 수 있어, 파일이 있는 메시지는 이번 실행 후에 처리됩니다.",
     "restart_send": "중지하고 보내기",
     "restart_failed": "현재 실행을 중지하지 못했습니다. 메시지는 보내지 않았습니다.",
-    "align_action": "이 댓글로 정렬 시작",
-    "trigger_blocked_access_requested": "에이전트 소유자에게 승인을 요청했습니다. 승인 후 시작됩니다",
-    "trigger_blocked_short_access_requested": "소유자 승인 대기 중"
+    "align_action": "이 댓글로 정렬 시작"
   },
   "reply": {
     "placeholder": "답글 남기기...",
