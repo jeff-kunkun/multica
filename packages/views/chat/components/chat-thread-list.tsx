@@ -44,7 +44,6 @@ import { toast } from "sonner";
 import { StopWorkDialog } from "../../common/stop-work-dialog";
 import { useLocale, useT } from "../../i18n";
 import { HighlightText } from "../../search/highlight-text";
-import { ProgressLine } from "../../common/progress-line";
 
 
 // History view shows every pinned chat plus this many recent unpinned ones;
@@ -261,8 +260,6 @@ export function ChatThreadList({
       previewNode = <span className="flex min-w-0 items-center gap-1.5 text-blue-500"><Loader2 className="size-3 shrink-0 animate-spin" /><span className="truncate">{t(($) => $.list.typing)}</span></span>;
     } else if (last?.failure_reason) {
       previewNode = <span className="block truncate text-destructive">{t(($) => $.list.failed)}</span>;
-    } else if (session.progress) {
-      previewNode = <ProgressLine progress={session.progress} />;
     } else if (last?.message_kind === "no_response") {
       // A no_response turn stores a non-empty English fallback as its content,
       // so the preview is never blank even on older clients; new clients show a

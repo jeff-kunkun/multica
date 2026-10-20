@@ -25,7 +25,6 @@ const INBOX_GROUPS: {
   labelKey: string;
   descriptionKey?: string;
 }[] = [
-  { key: "runtime_alerts", labelKey: "groups.runtime_alerts", descriptionKey: "groups.runtime_alerts_description" },
   {
     key: "assignments",
     labelKey: "groups.assignments",

@@ -1388,9 +1388,6 @@ export function useRealtimeSync(
         if (payload.status_changed) {
           qc.invalidateQueries({ queryKey: homeKeys.all(wsId) });
         }
-        if (payload.progress_changed) {
-          qc.invalidateQueries({ queryKey: issueKeys.progress(wsId, issue.id) });
-        }
         // A chat's ticket card shows its issues' status and executor (DENE-1665).
         qc.invalidateQueries({ queryKey: chatKeys.ticketsAll(wsId) });
       }

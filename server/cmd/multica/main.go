@@ -50,7 +50,6 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&debugFlag, "debug", false, "Print full error details on failure (env: MULTICA_DEBUG)")
 
 	// Core commands
-	overviewCmd.GroupID = groupCore
 	capabilitiesCmd.GroupID = groupCore
 	issueCmd.GroupID = groupCore
 	projectCmd.GroupID = groupCore
@@ -86,7 +85,6 @@ func init() {
 	updateCmd.GroupID = groupAdditional
 	versionCmd.GroupID = groupAdditional
 
-	rootCmd.AddCommand(overviewCmd)
 	mcpCommand := newMCPCommand()
 	mcpCommand.GroupID = groupCore
 	rootCmd.AddCommand(mcpCommand)

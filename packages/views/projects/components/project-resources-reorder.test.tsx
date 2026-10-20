@@ -56,15 +56,6 @@ vi.mock("@tanstack/react-query", () => ({
   useQuery: (options: { queryKey?: unknown[] }) => {
     const key = options?.queryKey ?? [];
     if (key[0] === "project-resources") return { data: existing };
-    if (key.includes("code-decision")) {
-      return {
-        data: {
-          kind: "local_in_place",
-          display_name: "app",
-          path: "/Users/me/code/app",
-        },
-      };
-    }
     return { data: [] };
   },
   queryOptions: (options: unknown) => options,
@@ -214,11 +205,9 @@ describe("ProjectResourcesSection — choosing which directory tasks write in", 
 
   // Where tasks run is the server's sentence, shown as it arrived. The list
   // still reorders with arrows; the sentence must not invent a gesture.
-  it("shows the server's decision and does not invent a drag gesture", () => {
+  it("does not invent a drag gesture", () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
-    const banner = screen.getByRole("status");
-    expect(banner.textContent ?? "").toMatch(/app/);
-    expect(banner.textContent ?? "").not.toMatch(/drag/i);
+    expect(screen.queryByText(/drag/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/first directory/i)).not.toBeInTheDocument();
   });
 });

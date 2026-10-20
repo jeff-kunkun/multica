@@ -110,9 +110,9 @@ func TestBotKeys_AdminAddsUsesStopsBot(t *testing.T) {
 		t.Fatalf("setup text misses workspace or directions: %q", created.SetupText)
 	}
 
-	// The setup text points the bot at overview, then the capability map
-	// (DENE-1804); the key-less copy is the same text with a placeholder.
-	for _, want := range []string{"1. multica overview", "2. multica capabilities"} {
+	// The setup text points the bot at the capability map (DENE-1804); the
+	// key-less copy is the same text with a placeholder.
+	for _, want := range []string{"1. multica capabilities"} {
 		if !strings.Contains(created.SetupText, want) {
 			t.Fatalf("setup text misses %q: %q", want, created.SetupText)
 		}
@@ -241,7 +241,7 @@ func TestRenderBotSetupTextUsesSharedOnboarding(t *testing.T) {
 	if strings.Contains(out, "常用命令") {
 		t.Fatalf("hand-maintained command list is back:\n%s", out)
 	}
-	if strings.Index(out, "multica login --token mul_x") > strings.Index(out, "1. multica overview") {
+	if strings.Index(out, "multica login --token mul_x") > strings.Index(out, "1. multica capabilities") {
 		t.Fatalf("login must come before the onboarding steps:\n%s", out)
 	}
 }

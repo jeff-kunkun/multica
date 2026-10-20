@@ -16,8 +16,7 @@ import (
 // ---------------------------------------------------------------------------
 // Plan approval commands (DENE-2315 F8, ported from kun-main) — propose a
 // plan card on an issue, read it, approve it. Approval is the only thing that
-// creates the step issues and starts work. They share the `plan` namespace
-// with `plan apply`, which builds a staged tree from a file and is unrelated.
+// creates the step issues and starts work.
 // ---------------------------------------------------------------------------
 
 var planProposeCmd = &cobra.Command{

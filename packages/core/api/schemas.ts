@@ -1593,10 +1593,6 @@ export const ProgressSchema = z.object({
   updated_at: z.string().default(""),
 });
 
-export const ProgressHistorySchema = z.object({
-  progress: z.array(ProgressSchema).default([]),
-});
-
 export const IssueSchema = z.object({
   id: z.string(),
   workspace_id: z.string(),
@@ -2315,25 +2311,6 @@ const DashboardUsageByAgentSchema = z.object({
 
 export const DashboardUsageByAgentListSchema = z.array(DashboardUsageByAgentSchema);
 
-// Per-(issue, model) rows for the dashboard's per-issue cost list. `identifier`
-// / `title` default to "" so a backend that predates the issue fields degrades
-// to an unnamed row rather than dropping the whole list to the `[]` fallback —
-// the row's link is derived from `issue_id`, which every version sends.
-const DashboardUsageByIssueSchema = z.object({
-  issue_id: z.string().default(""),
-  identifier: z.string().default(""),
-  title: z.string().default(""),
-  provider: z.string().default(""),
-  model: z.string().default(""),
-  input_tokens: z.number().default(0),
-  output_tokens: z.number().default(0),
-  cache_read_tokens: z.number().default(0),
-  cache_write_tokens: z.number().default(0),
-  ...CostSplitShape,
-}).loose();
-
-export const DashboardUsageByIssueListSchema = z.array(DashboardUsageByIssueSchema);
-
 // `cancelled_count` defaults to 0 so an installed client pointed at a
 // backend that predates it still renders: those rows simply carry no
 // cancelled segment, which is exactly what that backend measured.
@@ -2749,20 +2726,6 @@ export const ChatSessionListSchema = z
   .default([]);
 export const EMPTY_CHAT_SESSION_LIST: ChatSession[] = [];
 
-/** One chat whose messages contain the chat page's search text. */
-export const ChatMessageSearchHitSchema = z.object({
-  session_id: z.string(),
-  message_id: z.string(),
-  role: z.string().catch(""),
-  snippet: z.string().catch(""),
-  created_at: z.string().catch(""),
-});
-export type ChatMessageSearchHit = z.infer<typeof ChatMessageSearchHitSchema>;
-export const ChatMessageSearchHitListSchema = z
-  .array(ChatMessageSearchHitSchema.nullable().catch(null))
-  .transform((hits) => hits.filter((hit): hit is ChatMessageSearchHit => hit !== null))
-  .default([]);
-export const EMPTY_CHAT_MESSAGE_SEARCH_HITS: ChatMessageSearchHit[] = [];
 
 export const ChatDirectoryItemSchema: z.ZodType<ChatDirectoryItem> = z.object({
   id: z.string(),

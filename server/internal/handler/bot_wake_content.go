@@ -31,45 +31,32 @@ func (w *BotWakeWorker) eventHoldReason(ctx context.Context, q *db.Queries, e db
 	if e.EventType == "wake_blocked" {
 		return "", nil
 	}
-	runtimeEvent := e.RuntimeOutageID.Valid && (e.EventType == "runtime.offline" || e.EventType == "runtime.online")
-	if runtimeEvent {
-		// Owner-scoped machine events bypass sender/follow rules; the owner's
-		// alert switch, event list, quiet hours and hourly limit still apply.
-		enabled, err := runtimeAlertsEnabled(ctx, q, e.WorkspaceID, bot.UserID)
+	if e.AuthorType == "bot" && e.AuthorID == e.BotID {
+		return "self wake suppressed", nil
+	}
+	if e.InheritedOwner {
+		if !rules.InheritOwnerFollows {
+			return "owner inheritance disabled", nil
+		}
+		follows, err := q.BotOwnerFollowsIssue(ctx, db.BotOwnerFollowsIssueParams{ID: e.IssueID, AssigneeID: bot.UserID})
 		if err != nil {
 			return "", err
 		}
-		if !enabled {
-			return "runtime alerts muted", nil
+		if !follows.Bool {
+			return "owner no longer follows source", nil
 		}
-	} else {
-		if e.AuthorType == "bot" && e.AuthorID == e.BotID {
-			return "self wake suppressed", nil
-		}
-		if e.InheritedOwner {
-			if !rules.InheritOwnerFollows {
-				return "owner inheritance disabled", nil
-			}
-			follows, err := q.BotOwnerFollowsIssue(ctx, db.BotOwnerFollowsIssueParams{ID: e.IssueID, AssigneeID: bot.UserID})
-			if err != nil {
-				return "", err
-			}
-			if !follows.Bool {
-				return "owner no longer follows source", nil
+	}
+	rule, known := rules.WakeFrom[e.AuthorType]
+	allowed := rule.Mode == "all"
+	if rule.Mode == "list" {
+		for _, id := range rule.IDs {
+			if id == uuidToString(e.AuthorID) {
+				allowed = true
 			}
 		}
-		rule, known := rules.WakeFrom[e.AuthorType]
-		allowed := rule.Mode == "all"
-		if rule.Mode == "list" {
-			for _, id := range rule.IDs {
-				if id == uuidToString(e.AuthorID) {
-					allowed = true
-				}
-			}
-		}
-		if e.AuthorType != "system" && e.AuthorID.Valid && (!known || !allowed) {
-			return "sender not allowed", nil
-		}
+	}
+	if e.AuthorType != "system" && e.AuthorID.Valid && (!known || !allowed) {
+		return "sender not allowed", nil
 	}
 	enabled := false
 	for _, event := range rules.Events {

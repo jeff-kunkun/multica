@@ -6,17 +6,6 @@ import {
 } from "./patch";
 
 describe("notification preference patches", () => {
-  it("persists runtime alerts and rolls back a failed toggle without changing other groups", () => {
-    const previous = { comments: "muted" } as const;
-    const patch = deriveNotificationPreferencePatch(previous, { ...previous, runtime_alerts: "muted" });
-    expect(patch).toEqual({ runtime_alerts: "muted" });
-    const muted = applyNotificationPreferencePatch(previous, patch);
-    expect(muted).toEqual({ comments: "muted", runtime_alerts: "muted" });
-    expect(rollbackNotificationPreferencePatch(muted, patch, previous)).toEqual(previous);
-    const enable = deriveNotificationPreferencePatch(muted, previous);
-    expect(enable).toEqual({ runtime_alerts: "all" });
-    expect(applyNotificationPreferencePatch(muted, enable)).toEqual(previous);
-  });
   it("sends only the changed key when another muted preference is present", () => {
     expect(
       deriveNotificationPreferencePatch(

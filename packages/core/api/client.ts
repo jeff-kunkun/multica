@@ -122,7 +122,6 @@ import type {
   RuntimeUsageByHour,
   DashboardUsageDaily,
   DashboardUsageByAgent,
-  DashboardUsageByIssue,
   DashboardAgentRunTime,
   DashboardRunTimeDaily,
   DashboardFailureDaily,
@@ -136,7 +135,6 @@ import type {
   CreateRuntimeLocalSkillImportRequest,
   RuntimeLocalSkillImportRequest,
   TimelineEntry,
-  Progress,
   AssigneeFrequencyEntry,
   TaskMessagePayload,
   Attachment,
@@ -311,7 +309,6 @@ import type {
   TaskLogExportBundle,
   TaskLogExportPush,
   TaskLogExportScope,
-  CodeDecision,
   AgentAccessRequest,
   AgentAccessRequestList,
   AgentAccessPass,
@@ -384,9 +381,6 @@ import {
   ChatSessionListSchema,
   ChatDirectoryListSchema,
   EMPTY_CHAT_DIRECTORY,
-  ChatMessageSearchHitListSchema,
-  EMPTY_CHAT_MESSAGE_SEARCH_HITS,
-  type ChatMessageSearchHit,
   ChatSessionSchema,
   PrioritizeQueuedChatTaskResponseSchema,
   SendChatMessageResponseSchema,
@@ -415,7 +409,6 @@ import {
   issueDraftRuntimeSwitchFallback,
   AgentSchema,
   AgentListSchema,
-  CodeDecisionSchema,
   EMPTY_AGENT_LIST,
   AgentBuilderSessionListSchema,
   EMPTY_AGENT_BUILDER_SESSION_LIST,
@@ -425,7 +418,6 @@ import {
   DashboardFailureDailyListSchema,
   DashboardFailureByAgentListSchema,
   DashboardUsageByAgentListSchema,
-  DashboardUsageByIssueListSchema,
   DashboardUsageDailyListSchema,
   EMPTY_APP_CONFIG,
   EMPTY_ATTACHMENT,
@@ -498,7 +490,6 @@ import {
   SubscribersListSchema,
   TaskMessageListSchema,
   TimelineEntriesSchema,
-  ProgressHistorySchema,
   UserSchema,
   WebhookDeliveryResponseSchema,
   BillingBalanceSchema,
@@ -2056,16 +2047,6 @@ export class ApiClient {
     });
   }
 
-  /** Progress line history, newest first (DENE-1037). */
-  async listIssueProgress(issueId: string): Promise<Progress[]> {
-    const raw = await this.fetch<unknown>(
-      `/api/issues/${encodeURIComponent(issueId)}/progress`,
-    );
-    return parseWithFallback(raw, ProgressHistorySchema, { progress: [] }, {
-      endpoint: "GET /api/issues/:id/progress",
-    }).progress as Progress[];
-  }
-
   async listTimeline(issueId: string): Promise<TimelineEntry[]> {
     const raw = await this.fetch<unknown>(
       `/api/issues/${issueId}/timeline`,
@@ -3240,22 +3221,6 @@ export class ApiClient {
       DashboardUsageByAgentListSchema,
       [],
       { endpoint: "GET /api/dashboard/usage/by-agent" },
-    );
-  }
-
-  async getDashboardUsageByIssue(
-    params: { days?: number; project_id?: string | null; tz?: string },
-  ): Promise<DashboardUsageByIssue[]> {
-    const search = new URLSearchParams();
-    if (params.days) search.set("days", String(params.days));
-    if (params.project_id) search.set("project_id", params.project_id);
-    if (params.tz) search.set("tz", params.tz);
-    const raw = await this.fetch<unknown>(`/api/dashboard/usage/by-issue?${search}`);
-    return parseWithFallback<DashboardUsageByIssue[]>(
-      raw,
-      DashboardUsageByIssueListSchema,
-      [],
-      { endpoint: "GET /api/dashboard/usage/by-issue" },
     );
   }
 
@@ -5217,17 +5182,6 @@ export class ApiClient {
     });
   }
 
-  /** Chats (active and archived) whose message content contains every word of `q`. */
-  async searchChatMessages(q: string, signal?: AbortSignal): Promise<ChatMessageSearchHit[]> {
-    const raw: unknown = await this.fetch(
-      `/api/chat/sessions/search?${new URLSearchParams({ q })}`,
-      signal ? { signal } : undefined,
-    );
-    return parseWithFallback(raw, ChatMessageSearchHitListSchema, EMPTY_CHAT_MESSAGE_SEARCH_HITS, {
-      endpoint: "GET /api/chat/sessions/search",
-    });
-  }
-
   async listChatDirectory(params?: {
     project?: string;
     allProjects?: boolean;
@@ -5748,25 +5702,6 @@ export class ApiClient {
     projectId: string,
   ): Promise<ListProjectResourcesResponse> {
     return this.fetch(`/api/projects/${projectId}/resources`);
-  }
-
-  /** Where a new task on this project would run if `daemonId`'s machine claimed
-   *  it. The server computes it; callers render the result. */
-  async previewProjectCodeDecision(
-    projectId: string,
-    daemonId: string,
-  ): Promise<CodeDecision> {
-    const params = new URLSearchParams({ daemon_id: daemonId });
-    const raw = await this.fetch<unknown>(
-      `/api/projects/${projectId}/code-decision?${params}`,
-    );
-    const parsed = CodeDecisionSchema.safeParse(raw);
-    if (!parsed.success) {
-      throw new Error(
-        "GET /api/projects/:id/code-decision failed schema validation",
-      );
-    }
-    return parsed.data;
   }
 
   async createProjectResource(

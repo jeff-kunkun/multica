@@ -78,8 +78,7 @@ comment or chat message the Bot writes with a line naming the Bot (for example
 `🤖 <Bot name> (Grok Bot)`), and mark relayed owner words as quotes. Treat a
 signed Bot message as a request, not as the owner's direct decision.
 
-A new bot starts with the two commands its setup text names (DENE-1804):
-`multica overview --output json` for the workspace map, then
+A new bot starts with the command its setup text names (DENE-1804):
 `multica capabilities` for the command map. The map is generated from the
 installed CLI's own command tree on every run, grouped by domain (issues,
 chats, agents, projects, automations, overview, workspace, local); each row
@@ -98,12 +97,12 @@ instead of help text, exit code 1.
 
 Use the relevant references in this skill and each command's `--help`:
 
-- `overview --output json` for the permission-filtered workspace map.
+- `capabilities --output json` for the command map.
 - `issue list/search/get/context`, `issue comment list --full` for complete reads.
 - `chat list/search/history` for discovery; personal `chat new --agent ... --wait` on supported versions.
 - `chat send --session ... --attachment ./file` uploads local files and binds them to the user message through the ordinary chat API. Sends include runtime status/last_seen_at and an offline warning on stderr and in JSON; the message is already accepted, so the warning is not a retry instruction.
 - `chat send --session <id> "Hello" --wait --wait-timeout 20s --output json` exits nonzero on timeout with task_status, reason, queue_ahead and runtime. `chat progress --session <id> --history --output json` reads the latest turn's same diagnostics. See `references/run-control.md` for reason meanings.
-- `overview --output json` includes runtime status and last_seen_at for the workspace panorama; use chat progress to explain a particular unanswered turn.
+- `runtime list --output json` includes runtime status and last_seen_at; use chat progress to explain a particular unanswered turn.
 - `issue update/status/assign/label/close/rerun` for issue work.
 - `issue comment add/update/delete` and its attachment flags for comment work.
 - Agent/settings commands supported by the installed CLI for administration.
@@ -132,20 +131,6 @@ Report who, the issue/chat, the action, its result/evidence and the next step.
 For execution delivery distinguish delivered, wake acknowledged, and result received;
 an unverified stage is unknown, never a reason to automatically resend.
 
-## Machine health in the capability map
-
-- `runtime outages --output json`: own machines, runtime ids, disconnect start,
-  recovery end and alert time; also `overview --output json` → `runtime_outages`.
-- `runtime alerts [on|off] --output json`: read/change the owner's inbox and
-  Bot disconnect alerts. This does not change runtime bindings.
-- Bot wake `events` accepts `runtime.offline` and `runtime.online`. These are
-  owner-scoped system events; they bypass sender/follow rules, while quiet hours
-  and hourly limits still apply. The ordinary webhook contains `runtime_outage`
-  (machine_name, machine_key, runtime_ids, started_at, ended_at, alerted_at).
-  Handle both event types as Telegram notices to the owner, deduplicate on
-  `event_id`, then use the ordinary receipt endpoint. Do not start an agent or
-  invent an issue/chat id: those fields are empty for machine events.
-
 ## Bot wake-chain guard
 
 The workspace's `bot_wake_chain_limit` defaults to 4 (valid values 1–100).
@@ -172,12 +157,11 @@ multica settings set bot_wake_chain_limit --value-json '6'
 
 Agent task tokens cannot change the guard. Every blocked attempt is recorded
 and emits `wake_blocked` to the originating Bot's webhook. For patrol and
-dispatch daily reports, consume `multica overview --output json`:
+dispatch daily reports, read the routing-health inspection response:
 `bot_wake_chain.blocked_last_24h` and `recent_blocks` report counts and details.
 Authenticated Bots can inspect their own blocks only; human workspace owners
 and admins can inspect viewer-visible records. Task tokens do not read the audit. Other members see the limit and recovery contract.
 `audit_read_failed: true` means the audit is unavailable, not zero blocks.
-The same report is included in the routing-health inspection response.
 
 ## Mention delivery and replying in place
 

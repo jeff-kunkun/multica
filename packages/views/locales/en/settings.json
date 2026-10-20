@@ -2364,14 +2364,6 @@
         "chat": {
           "label": "New chat message",
           "description": "A chat it's in has a new message"
-        },
-        "runtime.offline": {
-          "label": "Machine offline",
-          "description": "My machine has been disconnected for over 3 minutes."
-        },
-        "runtime.online": {
-          "label": "Machine online",
-          "description": "My machine reconnects after a disconnect alert."
         }
       },
       "limits_title": "Rate and quiet hours",

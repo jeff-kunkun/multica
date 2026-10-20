@@ -19,7 +19,6 @@ import {
   useDeleteProjectResource,
   useUpdateProjectResource,
 } from "@multica/core/projects";
-import { projectCodeDecisionOptions } from "@multica/core/projects/code-decision";
 import { useWorkspaceId } from "@multica/core/hooks";
 import type {
   GithubRepoResourceRef,
@@ -50,8 +49,7 @@ import {
 // queries as it does in production, and a mocked barrel would strip it.
 import { findDuplicateSources } from "@multica/core/projects/source-rule";
 import { DuplicateSourceBanner } from "./duplicate-source-banner";
-import { CodeDecisionBanner } from "./code-decision-banner";
-import { isCodeDecision, isPlainFolder } from "./code-decision-view";
+import { isPlainFolder } from "./code-decision-view";
 import { LocalDirectoryModeDialog } from "./local-directory-mode-dialog";
 import { localDirectoryLabel } from "./local-directory-label";
 import {
@@ -151,27 +149,6 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
   // browser.
   const desktopMode = isDesktopShell();
   const localDaemonId = daemonStatus.daemonId;
-  // Cache identity only. The decision itself comes back from the server;
-  // this string just says "the list the answer was about has changed".
-  const decisionInputKey = resources
-    .map(
-      (resource) =>
-        `${resource.position}:${resource.id}:${resource.resource_type}:${JSON.stringify(resource.resource_ref)}`,
-    )
-    .join("|");
-  const decisionQuery = useQuery({
-    ...projectCodeDecisionOptions(
-      wsId,
-      projectId,
-      localDaemonId ?? "",
-      decisionInputKey,
-    ),
-    enabled: desktopMode && !!wsId && !!localDaemonId,
-  });
-  const codeDecision = isCodeDecision(decisionQuery.data)
-    ? decisionQuery.data
-    : undefined;
-
   // The one thing the client must still check up front: whether this server
   // performs that gate at all. One declared boolean, no inference — servers
   // that predate it drop execution_mode and answer 201.
@@ -716,12 +693,6 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
       </button>
       {open && (
         <div className="pl-2 space-y-1.5">
-          {codeDecision && <CodeDecisionBanner decision={codeDecision} />}
-          {decisionQuery.isError && !codeDecision && (
-            <p className="px-2 py-1 text-micro text-muted-foreground">
-              {t(($) => $.resources.code_decision_unavailable)}
-            </p>
-          )}
           {listedResources.length === 0 && (
             <p className="text-caption text-muted-foreground">
               {t(($) => $.resources.empty)}

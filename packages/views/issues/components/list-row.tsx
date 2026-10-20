@@ -38,7 +38,6 @@ import {
 } from "../surface/peek-context";
 import { useLocale } from "../../i18n";
 import { useT } from "../../i18n";
-import { IssueProgressLine } from "./issue-progress-line";
 
 export interface ChildProgress {
   done: number;
@@ -153,7 +152,7 @@ function ListRowContent({
               density="row"
               className="hidden sm:inline-flex"
             />
-            <span className="flex min-w-0 flex-col"><span className="flex min-w-0 items-center gap-1.5"><span className="truncate">{issue.title}</span></span><IssueProgressLine issue={issue} /></span>
+            <span className="truncate">{issue.title}</span>
             {/* Keep custom names visible when this row appears outside a status section. */}
             <CustomStatusChip status={issue.status} className="shrink-0" />
             <BlockWaitProbeBadge issue={issue} />

@@ -37,7 +37,6 @@ import {
   useRegenerateChatQuickActions,
 } from "@multica/core/chat/mutations";
 import {
-  chatMessageSearchOptions,
   chatMessagesOptions,
   chatQuickActionsPendingOptions,
 } from "@multica/core/chat/queries";
@@ -77,7 +76,6 @@ import { RuntimeRequiredBanner } from "./components/runtime-required-banner";
 import { WorkThreadPanel } from "../common/work-thread-panel";
 import { PageSearchInput } from "../common/page-search-input";
 import { matchesPinyin } from "../editor/extensions/pinyin-match";
-import { useDebouncedValue } from "../common/use-debounced-value";
 import { useRestoredScrollRef } from "../platform";
 import { openAlignIssue } from "@multica/core/issues/stores/create-mode-store";
 
@@ -267,23 +265,12 @@ export function ChatPage() {
   const [switcherOpen, setSwitcherOpen] = useState(false);
   const startDirectRef = useRef<() => void>(() => {});
   const dismissProjectNudge = useDismissChatProjectNudge();
-  // In-page search: titles match locally on the keystroke; what was said in a
-  // chat comes from the server once typing settles. Archived chats match too.
+  // In-page search matches titles locally on the keystroke. Archived chats
+  // match too.
   const search = useChatListViewStore((s) => s.search);
   const setSearch = useChatListViewStore((s) => s.setSearch);
   const query = search.trim().toLowerCase();
-  const debouncedQuery = useDebouncedValue(query, 250);
-  const { data: contentHits } = useQuery(chatMessageSearchOptions(c.wsId, debouncedQuery));
-  const searchSnippets = useMemo(() => {
-    if (!query) return null;
-    const snippets = new Map<string, string>();
-    // Hits for a stale query would attach the wrong snippet; wait for the
-    // settled query instead.
-    if (debouncedQuery === query) {
-      for (const hit of contentHits ?? []) snippets.set(hit.session_id, hit.snippet);
-    }
-    return snippets;
-  }, [contentHits, debouncedQuery, query]);
+  const searchSnippets = useMemo(() => (query ? new Map<string, string>() : null), [query]);
   // A restored project filter can name a project deleted since it was saved;
   // once the project list is known, fall back to the full list instead of
   // showing an empty, unexplained view.
@@ -298,10 +285,7 @@ export function ChatPage() {
     );
     if (!searchSnippets) return inProject;
     const words = query.split(/\s+/).filter(Boolean);
-    return inProject.filter(
-      (session) =>
-        searchSnippets.has(session.id) || chatTitleMatches(session, words, query),
-    );
+    return inProject.filter((session) => chatTitleMatches(session, words, query));
   }, [c.sessions, projectFilter, query, searchSnippets]);
   useEffect(() => {
     // Read the LIVE store value for the same reason as the session sync

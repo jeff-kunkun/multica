@@ -202,68 +202,6 @@ func TestChatTickets_LinkBothWays(t *testing.T) {
 	}
 }
 
-// TestChatTickets_PlanApplyFromChat: `plan apply` from a chat run stamps every
-// node with the chat and refuses a node without 目标/验收.
-func TestChatTickets_PlanApplyFromChat(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-	ctx := context.Background()
-	var agentID, runtimeID string
-	if err := testPool.QueryRow(ctx,
-		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 AND name = $2`,
-		testWorkspaceID, "Handler Test Agent",
-	).Scan(&agentID, &runtimeID); err != nil {
-		t.Fatalf("find test agent: %v", err)
-	}
-	var sessionID, taskID string
-	if err := testPool.QueryRow(ctx,
-		`INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, runtime_id)
-		 VALUES ($1, $2, $3, 'plan chat', $4) RETURNING id`,
-		testWorkspaceID, agentID, testUserID, runtimeID,
-	).Scan(&sessionID); err != nil {
-		t.Fatalf("seed chat session: %v", err)
-	}
-	if err := testPool.QueryRow(ctx,
-		`INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, originator_user_id, accountable_user_id, chat_session_id)
-		 VALUES ($1, $2, 'running', 0, $3, $3, $4) RETURNING id`,
-		agentID, runtimeID, testUserID, sessionID,
-	).Scan(&taskID); err != nil {
-		t.Fatalf("seed chat task: %v", err)
-	}
-	t.Cleanup(func() {
-		bg := context.Background()
-		testPool.Exec(bg, `DELETE FROM issue WHERE origin_chat_session_id = $1 AND parent_issue_id IS NOT NULL`, sessionID)
-		testPool.Exec(bg, `DELETE FROM issue WHERE origin_chat_session_id = $1`, sessionID)
-		testPool.Exec(bg, `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
-		testPool.Exec(bg, `DELETE FROM chat_session WHERE id = $1`, sessionID)
-	})
-	stage := int32(1)
-	good := "## 目标\nx\n## 验收\n- y"
-	apply := func(childDesc string) *httptest.ResponseRecorder {
-		w := httptest.NewRecorder()
-		req := newRequest("POST", "/api/plans/apply?workspace_id="+testWorkspaceID, ApplyPlanRequest{
-			Key:      "dene-1665-" + sessionID,
-			Parent:   &ApplyPlanNode{Title: "Plan root (DENE-1665)", Description: good},
-			Children: []ApplyPlanNode{{Key: "a", Title: "Plan child (DENE-1665)", Description: childDesc, Stage: &stage}},
-		})
-		req.Header.Set("X-Agent-ID", agentID)
-		req.Header.Set("X-Task-ID", taskID)
-		testHandler.ApplyPlan(w, req)
-		return w
-	}
-	if w := apply("no sections"); w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "Plan child") {
-		t.Fatalf("plan child without sections: want 400 naming it, got %d: %s", w.Code, w.Body.String())
-	}
-	if w := apply(good); w.Code != http.StatusOK && w.Code != http.StatusCreated {
-		t.Fatalf("plan apply from chat: got %d: %s", w.Code, w.Body.String())
-	}
-	var n int
-	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM issue WHERE origin_chat_session_id = $1`, sessionID).Scan(&n); err != nil || n != 2 {
-		t.Fatalf("plan issues stamped with chat = %d (%v), want 2", n, err)
-	}
-}
-
 // TestChatTickets_FollowAndPin (DENE-1719): a chat lists the issues its run
 // acted on and the ones pinned by hand, each with its source; reading an issue
 // does not follow it, and a take-down sticks against later auto-follow.

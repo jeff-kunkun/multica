@@ -37,8 +37,6 @@ export const chatKeys = {
   directory: (wsId: string, projectId?: string) => [...chatKeys.all(wsId), "directory", projectId ?? "all"] as const,
   /** The once-per-person "your chats are now visible" notice. */
   visibilityNotice: (wsId: string) => [...chatKeys.all(wsId), "visibility-notice"] as const,
-  messageSearch: (wsId: string, q: string) =>
-    [...chatKeys.all(wsId), "message-search", q] as const,
   session: (wsId: string, id: string) => [...chatKeys.all(wsId), "session", id] as const,
   /** Who can see this chat. Nested under the session so every invalidation of it reaches here. */
   access: (wsId: string, id: string) => [...chatKeys.session(wsId, id), "access"] as const,
@@ -97,19 +95,6 @@ export function chatSessionsOptions(wsId: string) {
     queryKey: chatKeys.sessions(wsId),
     queryFn: () => api.listChatSessions({ status: "all" }),
     staleTime: Infinity,
-  });
-}
-
-/**
- * The chat page's content search: chats whose messages contain `q`. Titles are
- * matched locally against the sessions cache; this only adds what was said.
- */
-export function chatMessageSearchOptions(wsId: string, q: string) {
-  return queryOptions({
-    queryKey: chatKeys.messageSearch(wsId, q),
-    queryFn: ({ signal }) => api.searchChatMessages(q, signal),
-    enabled: q.trim().length > 0,
-    staleTime: 30_000,
   });
 }
 

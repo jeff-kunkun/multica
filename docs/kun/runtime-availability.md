@@ -22,19 +22,4 @@
 
 图形入口：系统设置中打开“接入电源且显示器关闭时防止自动进入睡眠”；位置随系统版本变化，见 [Apple 睡眠设置说明](https://support.apple.com/en-euro/guide/mac-help/mchle41a6ccd/27/mac/27)。也可以使用 [Mac App Store 的 Amphetamine](https://apps.apple.com/us/app/amphetamine/id937984704) 设置接电源或某个进程运行期间保持唤醒。上线窗口内保持电源和网络连接，并实测合盖后的运行时状态。
 
-## 告警规则与查询
-
-运行时页的“机器掉线告警”控制当前工作区里属于自己的机器。手机网页同一入口，原生 App 在设置 → 通知里也有此开关。CLI：
-
-```bash
-multica runtime alerts --output json
-multica runtime alerts on
-multica runtime outages --output json
-multica overview --output json
-```
-
-机器按主人及设备名聚合；同一物理主机的多个守护进程也合并，没有设备名时用守护进程标识。曾被监测为 online 的运行时进入 offline 后开始计时，超过 3 分钟才提醒；同机多个运行时合并为一条，短暂重启不提醒。受影响的运行时全部重新 online 后结束掉线记录，有过掉线提醒才发恢复通知。首次启动只建立基线，不给历史离线注册补发告警。监测每 30 秒一次，告警窗口从确认 offline 开始，心跳失联到确认 offline 还需要现有存活检查的时间。
-
-记录、收件箱和 Bot 队列在一个数据库事务里写入；重复扫描和服务端重启不会重复发提醒。关闭开关会同时停止新的收件箱和 Bot 告警，掉线历史仍可查询。Grok Bot 接收端需处理 `runtime.offline` / `runtime.online`，按事件 ID 去重后转发 Telegram；本地数据库与 HTTP 接收测试已验证事件投递，真实 Telegram 转发仍待上线演练。现有 Bot 的事件订阅、静默时段、限额和回执机制继续生效。被挡住的推送可从 `multica bot wake pending <bot-id>` 查看，不自动重放不确定投递。
-
-真实推送演练移交父票 DENE-1819 上线后核对，当前没有记为已通过。演练使用独立测试守护进程：确认在线基线，停掉测试进程，等待 offline 后超过 3 分钟，检查一条机器提醒和 Telegram 推送；再启动该测试进程，检查一条恢复提醒。不要停运行当前任务的守护进程，也不要用改绑制造故障。
+机器掉线告警（`multica runtime alerts` / `runtime outages`）已在 DENE-2315 删除；运行时在线状态看运行时页或 `multica runtime list --output json`。

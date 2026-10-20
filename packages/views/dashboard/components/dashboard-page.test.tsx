@@ -32,7 +32,6 @@ const runtimeMeteredCountRef = vi.hoisted(() => ({
 
 // Off by default: most tests only need the query to answer, not to populate the
 // per-issue card below the leaderboard.
-const issueUsageRef = vi.hoisted(() => ({ current: false }));
 
 // Kept out of the fixture ternary so the sentinel's shape reads at a glance.
 // Unlike the deleted-agents bucket this one carries real seconds / tasks: the
@@ -137,27 +136,6 @@ vi.mock("@tanstack/react-query", async () => {
                   : null;
         if (bulkRows) {
           return { data: bulkRows, isLoading: false, isSuccess: true };
-        }
-        if (kind === "by-issue") {
-          return {
-            data: issueUsageRef.current
-              ? [
-                  {
-                    issue_id: "issue-1",
-                    identifier: "DENE-1",
-                    title: "Pricey issue",
-                    provider: "anthropic",
-                    model: "claude-sonnet-4-6",
-                    input_tokens: 6_000_000,
-                    output_tokens: 0,
-                    cache_read_tokens: 0,
-                    cache_write_tokens: 0,
-                  },
-                ]
-              : [],
-            isLoading: false,
-            isSuccess: true,
-          };
         }
         const data =
           kind === "daily"
@@ -879,46 +857,5 @@ describe("DashboardPage — leaderboard density", () => {
       gridTemplateColumns:
         "minmax(10rem, 1.6fr) minmax(6rem, 1fr) 5rem 5rem 5rem 4rem",
     });
-  });
-});
-
-// DENE-709. The Usage tab is where the workspace's spend by issue lives, and
-// each row links to its issue. The per-row markup
-// is covered in issue-cost-list.test.tsx; what matters here is that the page
-// feeds the card from the by-issue rollup and puts it on the Usage tab.
-describe("DashboardPage — the costliest-issues card links to each issue", () => {
-  beforeEach(() => {
-    queryKeys.length = 0;
-    dashboardDataRef.current = true;
-    issueUsageRef.current = true;
-    replaceSpy.mockClear();
-  });
-
-  afterEach(() => {
-    issueUsageRef.current = false;
-  });
-
-  it("renders the ranking on the Usage tab and links every row", () => {
-    renderDashboard();
-
-    const list = within(screen.getByRole("list", { name: "Costliest issues" }));
-    expect(list.getByRole("link", { name: /DENE-1/ })).toHaveAttribute(
-      "href",
-      "/acme/issues/DENE-1",
-    );
-    // The page asks the server for the per-issue rollup in the same window as
-    // the leaderboard above it.
-    expect(queryKeys.some((key) => key[2] === "by-issue")).toBe(true);
-  });
-
-  it("is not on the Errors tab", async () => {
-    const user = userEvent.setup();
-    renderDashboard();
-
-    await openErrorsTab(user);
-
-    expect(
-      screen.queryByRole("list", { name: "Costliest issues" }),
-    ).not.toBeInTheDocument();
   });
 });

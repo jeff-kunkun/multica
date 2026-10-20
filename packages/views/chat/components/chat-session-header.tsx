@@ -61,7 +61,6 @@ import { AppLink, useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 import { useAuthStore } from "@multica/core/auth";
 import { conversationToMarkdown } from "../lib/copy-text";
-import { ProgressLine } from "../../common/progress-line";
 import { PrivateLinkPrompt, SharingHoverCard } from "../../common/sharing-guide";
 import { ChatAccessDialog } from "./chat-access-dialog";
 import { ChatTicketPinDialog } from "./chat-ticket-pin-dialog";
@@ -340,7 +339,7 @@ export function ChatSessionHeader({
             className="w-full rounded-sm bg-background px-1 py-0.5 text-body font-semibold outline-none ring-1 ring-border focus-visible:ring-brand"
           />
         ) : (
-          <div className="min-w-0"><div className="flex min-w-0 items-center gap-1 text-body font-semibold text-foreground"><span className="min-w-0 truncate">{title}</span>{session.title_locked && <span aria-label={t(($) => $.title_locked)} title={t(($) => $.title_locked)} className="shrink-0 text-micro text-muted-foreground">🔒</span>}</div><ProgressLine progress={session.progress} /></div>
+          <div className="flex min-w-0 items-center gap-1 text-body font-semibold text-foreground"><span className="min-w-0 truncate">{title}</span>{session.title_locked && <span aria-label={t(($) => $.title_locked)} title={t(($) => $.title_locked)} className="shrink-0 text-micro text-muted-foreground">🔒</span>}</div>
         )}
         {(agent || session.agent_name) && (
           <div className="truncate text-caption text-muted-foreground">

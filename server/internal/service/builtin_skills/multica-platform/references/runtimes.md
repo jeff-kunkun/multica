@@ -239,23 +239,6 @@ Do not add a project resource just because `repo checkout` failed. First
 determine whether the user asked for durable project context or just a task
 checkout.
 
-## Machine disconnect alerts
-
-`multica runtime outages --output json` reads the owner's latest 100 machine
-outages in the selected workspace. `machine_name` identifies the physical host;
-`runtime_ids` lists its runtimes. `started_at` is the confirmed offline
-transition, `ended_at` is null until recovery, and `alerted_at` is null for a
-short restart or muted alert. `overview --output json` includes `runtime_outages`.
-
-`multica runtime alerts --output json` reads the personal setting;
-`multica runtime alerts on|off` changes inbox and owner Bot alerts together.
-A previously-online runtime must stay offline for more than three
-minutes; machine-level grouping includes affected runtimes. Brief daemon
-restarts produce no disconnect/recovery pair. Recovery of all affected runtimes
-ends the outage. Only the owner reads these records.
-Bot delivery still follows the receiver's event subscriptions, quiet hours and
-hourly limit. It does not follow issue subscriptions or sender wake rules.
-
 ## Machine run capacity
 
 A device shares one simultaneous-run limit across its registered providers and
@@ -278,7 +261,7 @@ runtime owner can change the machine limit; workspace-admin access alone is
 insufficient. External Bot keys use their owner's same permission gate. The
 stable refusal codes are `invalid_machine_capacity` (choose an integer 1..100)
 and `machine_capacity_owner_required` (ask the machine owner to change it). The
-response and `overview` runtimes expose `machine_capacity.active_runs` and
+response and `runtime list` expose `machine_capacity.active_runs` and
 `machine_capacity.max_concurrent_runs`, counting all runs on that device without
 revealing other workspaces' tasks. Lowering the cap preserves active runs and
 holds new claims until the count drops below it. Web/Desktop machine cards edit

@@ -5,11 +5,9 @@ import (
 	"testing"
 )
 
-func TestRenderOrdersOverviewThenCapabilities(t *testing.T) {
+func TestRenderStartsWithCapabilities(t *testing.T) {
 	out := Render()
-	overview := strings.Index(out, "1. multica overview")
-	capabilities := strings.Index(out, "2. multica capabilities")
-	if overview < 0 || capabilities < 0 || overview > capabilities {
+	if !strings.HasPrefix(out, "1. multica capabilities") {
 		t.Fatalf("steps out of order:\n%s", out)
 	}
 	for _, step := range Steps() {

@@ -502,11 +502,5 @@
     "table_cache_r": "缓存读",
     "table_cache_w": "缓存写",
     "no_data": "还没有使用数据"
-  },
-  "alerts": {
-    "label": "机器掉线告警",
-    "description": "我的机器掉线超过 3 分钟及恢复时，通知我和我的 Bot。",
-    "retry": "加载失败，重试",
-    "save_failed": "保存失败，请重试"
   }
 }

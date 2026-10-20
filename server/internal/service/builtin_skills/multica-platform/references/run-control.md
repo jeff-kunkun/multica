@@ -240,6 +240,6 @@ and exits nonzero. Do not duplicate that message. A saved issue comment warns
 with each target's `bot_wake_chain_limit` outcome. Wait for a reply/completion or
 a human message; a workspace administrator can change the limit using
 `multica settings set bot_wake_chain_limit --value-json '6'`.
-`multica overview --output json` and routing health expose the current limit
+Routing health exposes the current limit
 and visibility-scoped recent blocks for patrol/daily reports. The initiating
 Bot also receives a `wake_blocked` operational webhook event.

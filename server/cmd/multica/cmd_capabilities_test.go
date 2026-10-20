@@ -75,7 +75,7 @@ func TestCapabilitiesNewCommandAppearsAutomatically(t *testing.T) {
 	if c := find("multica daemon status"); c.Access != "local" || c.BotKey != "local" {
 		t.Errorf("local command: %+v", c)
 	}
-	if len(m.Onboarding) < 2 || !strings.HasPrefix(m.Onboarding[0].Command, "multica overview") || !strings.HasPrefix(m.Onboarding[1].Command, "multica capabilities") {
+	if len(m.Onboarding) < 2 || !strings.HasPrefix(m.Onboarding[0].Command, "multica capabilities") {
 		t.Errorf("onboarding steps: %+v", m.Onboarding)
 	}
 }
@@ -115,7 +115,7 @@ func TestCapabilitiesJSONAndTableFromRealTree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"1. multica overview", "2. multica capabilities", "multica inbox board", "BOT KEY", "全景与收件 (overview)"} {
+	for _, want := range []string{"1. multica capabilities", "multica inbox board", "BOT KEY", "全景与收件 (overview)"} {
 		if !strings.Contains(table, want) {
 			t.Errorf("table missing %q:\n%s", want, table)
 		}

@@ -17,13 +17,9 @@ Read the invariants below, then open the reference(s) your task actually needs
 
 ## Workspace orientation
 
-When starting without a workspace map, call `multica overview --compact` first.
-One permission-scoped server request summarizes agents and their runtimes/projects,
-projects and repositories, active chats and tickets, automations, skills, squads
-and external Bots. Use `--output json` for structured data,
-`--project <id-or-exact-name>` or `--agent <id-or-exact-name>` to narrow it.
-Omitted sections are unavailable to this caller; do not try another identity.
-See `references/overview.md` for filter semantics and examples.
+When starting without a workspace map, call `multica capabilities` for the
+command map, then list only what the task needs (`multica agent list`,
+`multica project list`, `multica squad list`, `multica chat list`).
 
 ## Routing
 

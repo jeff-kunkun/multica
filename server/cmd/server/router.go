@@ -2285,8 +2285,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.RequireWorkspaceMember(queries))
 
-			r.Get("/api/overview", h.GetOverview)
-
 			// Assignee frequency
 			r.Get("/api/assignee-frequency", h.GetAssigneeFrequency)
 
@@ -2332,7 +2330,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/batch-update", h.BatchUpdateIssues)
 				// One plan file, one transaction, the whole staged tree
 				// (DENE-864) — `multica plan apply`.
-				r.Post("/plan-apply", h.ApplyPlan)
 				r.Post("/batch-delete", h.BatchDeleteIssues)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetIssue)
@@ -2573,10 +2570,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/repos", h.ListProjectRepos)
 					r.Post("/repos", h.AttachProjectRepo)
 					r.Delete("/repos/{repoId}", h.RemoveProjectRepo)
-					// Where a new task on this machine would run, computed by
-					// the same function the claim path uses. The project page
-					// displays it; it does not derive a directory of its own.
-					r.Get("/code-decision", h.PreviewProjectCodeDecision)
 					r.Post("/resources", h.CreateProjectResource)
 					r.Put("/resources/{resourceId}", h.UpdateProjectResource)
 					r.Delete("/resources/{resourceId}", h.DeleteProjectResource)
@@ -2824,7 +2817,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/dashboard", func(r chi.Router) {
 				r.Get("/usage/daily", h.GetDashboardUsageDaily)
 				r.Get("/usage/by-agent", h.GetDashboardUsageByAgent)
-				r.Get("/usage/by-issue", h.GetDashboardUsageByIssue)
 				r.Get("/agent-runtime", h.GetDashboardAgentRunTime)
 				r.Get("/runtime/daily", h.GetDashboardRunTimeDaily)
 				r.Get("/failures/daily", h.GetDashboardFailuresDaily)
@@ -2835,7 +2827,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/runtimes", func(r chi.Router) {
 				r.Use(h.RequireModule(permission.ModuleRuntimes))
 				r.Get("/", h.ListAgentRuntimes)
-				r.Get("/outages", h.ListRuntimeOutages)
 				r.Route("/{runtimeId}", func(r chi.Router) {
 					r.Patch("/", h.UpdateAgentRuntime)
 					r.Get("/usage", h.GetRuntimeUsage)
@@ -2926,7 +2917,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/make-private", h.MakeChatSessionsPrivate)
 				// Agent-only: open a chat from the chat this run belongs to (DENE-1271).
 				r.Post("/spawn", h.SpawnChatSession)
-				r.Get("/search", h.SearchChatMessages)
 				r.Route("/{sessionId}", func(r chi.Router) {
 					r.Get("/", h.GetChatSession)
 					r.Post("/stop", h.StopChatSession)

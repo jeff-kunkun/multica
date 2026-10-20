@@ -85,3 +85,6 @@ perf-report/
 .pnpm-store/
 # The production example is a tracked template; `.env*` above would hide it.
 !apps/mobile/.env.production.example
+
+# Locally built CLI binary
+server/cmd/multica/multica

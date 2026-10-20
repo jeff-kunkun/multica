@@ -144,7 +144,14 @@ func NewBotWakeSecretBox(secret string) (*secretbox.Box, error) {
 	return secretbox.New(mac.Sum(nil))
 }
 func wakeResponse(c db.BotWake) BotWakeResponse {
-	r := BotWakeResponse{InheritOwnerFollows: c.InheritOwnerFollows, WebhookConfigured: len(c.WebhookSecret) > 0, Events: c.Events, HourlyLimit: c.HourlyLimit}
+	r := BotWakeResponse{InheritOwnerFollows: c.InheritOwnerFollows, WebhookConfigured: len(c.WebhookSecret) > 0, Events: []string{}, HourlyLimit: c.HourlyLimit}
+	// Machine disconnect alerts were removed; drop their names from saved
+	// settings so a round-tripped save still validates.
+	for _, e := range c.Events {
+		if e != "runtime.offline" && e != "runtime.online" {
+			r.Events = append(r.Events, e)
+		}
+	}
 	_ = json.Unmarshal(c.QuietHours, &r.QuietHours)
 	_ = json.Unmarshal(c.WakeFrom, &r.WakeFrom)
 	return r
@@ -173,7 +180,7 @@ func validateWakeRules(r BotWakeResponse) error {
 	if r.HourlyLimit < 0 || r.HourlyLimit > 120 {
 		return errors.New("hourly_limit must be between 0 and 120")
 	}
-	allowed := map[string]bool{"mention": true, "started": true, "done": true, "blocked": true, "needs_kun": true, "task": true, "chat": true, "runtime.offline": true, "runtime.online": true}
+	allowed := map[string]bool{"mention": true, "started": true, "done": true, "blocked": true, "needs_kun": true, "task": true, "chat": true}
 	seen := map[string]bool{}
 	for _, e := range r.Events {
 		if !allowed[e] || seen[e] {
@@ -427,8 +434,7 @@ func (h *Handler) wakeVisible(ctx context.Context, e db.BotWakeEvent, user pgtyp
 		return false
 	}
 	if e.RuntimeOutageID.Valid {
-		o, err := h.Queries.GetRuntimeOutage(ctx, e.RuntimeOutageID)
-		return err == nil && o.WorkspaceID == e.WorkspaceID && o.OwnerID == user && e.AuthorType == "system" && e.AuthorID == user
+		return false // machine disconnect alerts were removed
 	}
 	if e.IssueID.Valid {
 		i, err := h.Queries.GetIssue(ctx, e.IssueID)
@@ -496,16 +502,7 @@ func (h *Handler) ListBotWakeEvents(w http.ResponseWriter, r *http.Request) {
 		if !h.wakeVisible(r.Context(), e, bot.UserID) || !h.wakeVisible(r.Context(), e, parseUUID(requestUserID(r))) {
 			continue
 		}
-		var runtimeDetails any
-		if e.RuntimeOutageID.Valid {
-			outage, err := h.Queries.GetRuntimeOutage(r.Context(), e.RuntimeOutageID)
-			if err != nil {
-				writeError(w, 500, "failed to load runtime event; try again")
-				return
-			}
-			runtimeDetails = runtimeOutageResponse(outage)
-		}
-		item := map[string]any{"runtime_outage": runtimeDetails, "runtime_outage_id": uuidToString(e.RuntimeOutageID), "delivery_id": uuidToString(e.DeliveryID), "event_id": uuidToString(e.EventID), "hop": e.Hop, "root_id": uuidToString(e.RootID), "source_task_id": uuidToString(e.SourceTaskID), "sequence": e.Sequence, "type": e.EventType, "issue_id": uuidToString(e.IssueID), "chat_session_id": uuidToString(e.ChatSessionID), "status": e.Status, "reason": e.Reason, "attempts": e.Attempts, "processing_attempts": e.ProcessingAttempts, "created_at": e.CreatedAt.Time, "sent_at": timestampToPtr(e.SentAt), "received_at": timestampToPtr(e.ReceivedAt), "woken_at": timestampToPtr(e.WokenAt), "result_at": timestampToPtr(e.ResultAt), "result_url": e.ResultUrl, "acknowledged_at": timestampToPtr(e.AcknowledgedAt)}
+		item := map[string]any{"delivery_id": uuidToString(e.DeliveryID), "event_id": uuidToString(e.EventID), "hop": e.Hop, "root_id": uuidToString(e.RootID), "source_task_id": uuidToString(e.SourceTaskID), "sequence": e.Sequence, "type": e.EventType, "issue_id": uuidToString(e.IssueID), "chat_session_id": uuidToString(e.ChatSessionID), "status": e.Status, "reason": e.Reason, "attempts": e.Attempts, "processing_attempts": e.ProcessingAttempts, "created_at": e.CreatedAt.Time, "sent_at": timestampToPtr(e.SentAt), "received_at": timestampToPtr(e.ReceivedAt), "woken_at": timestampToPtr(e.WokenAt), "result_at": timestampToPtr(e.ResultAt), "result_url": e.ResultUrl, "acknowledged_at": timestampToPtr(e.AcknowledgedAt)}
 		if includeContent {
 			payload, err := h.botWakePayloadFields(r.Context(), e)
 			if err != nil {

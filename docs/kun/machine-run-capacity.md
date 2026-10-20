@@ -17,8 +17,8 @@ multica runtime capacity <runtime-id> --max-concurrent-runs 8 --output json
 ```
 
 `PATCH /api/runtimes/:id` 接受 `max_concurrent_runs`。
-运行时列表、PATCH 返回与 `multica overview` 的 `runtimes` 包含
-`machine_capacity: {active_runs, max_concurrent_runs}`；概览只暴露计数，不暴露其他工作区任务。
+运行时列表与 PATCH 返回包含
+`machine_capacity: {active_runs, max_concurrent_runs}`，只暴露计数，不暴露其他工作区任务。
 CLI 能力地图列出命令、Bot 权限和使用示例。
 
 领取新运行与修改上限共用事务级机器 advisory lock；各智能体原有锁与上限继续生效。

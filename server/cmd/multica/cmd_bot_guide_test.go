@@ -18,7 +18,7 @@ func TestBotGuideReadsServerSetupTextWithoutAKey(t *testing.T) {
 		case strings.HasSuffix(r.URL.Path, "/bots"):
 			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "0b0d0000-0000-7000-8000-000000000001", "name": "管家"}})
 		case strings.HasSuffix(r.URL.Path, "/bots/setup-text"):
-			_ = json.NewEncoder(w).Encode(map[string]any{"setup_text": "你是「管家」\n1. multica overview --output json\n2. multica capabilities\nmultica login --token <钥匙>\n"})
+			_ = json.NewEncoder(w).Encode(map[string]any{"setup_text": "你是「管家」\n1. multica capabilities\nmultica login --token <钥匙>\n"})
 		default:
 			http.NotFound(w, r)
 		}
@@ -39,7 +39,7 @@ func TestBotGuideReadsServerSetupTextWithoutAKey(t *testing.T) {
 	if len(paths) != 2 || !strings.HasSuffix(paths[1], "/bots/setup-text?bot=0b0d0000-0000-7000-8000-000000000001") {
 		t.Fatalf("requests = %v", paths)
 	}
-	if !strings.Contains(out.String(), "2. multica capabilities") || strings.Contains(out.String(), "mul_test") {
+	if !strings.Contains(out.String(), "1. multica capabilities") || strings.Contains(out.String(), "mul_test") {
 		t.Fatalf("guide output: %q", out.String())
 	}
 }
