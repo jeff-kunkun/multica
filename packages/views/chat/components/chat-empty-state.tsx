@@ -1,7 +1,6 @@
 "use client";
 
 import { Settings2 } from "lucide-react";
-import { Button } from "@multica/ui/components/ui/button";
 import { selectConversationStarters } from "@multica/core/agents";
 import type { Agent } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -18,12 +17,10 @@ export function EmptyState({
   hasSessions = true,
   onPickPrompt,
   customizeHref = null,
-  onStartAlignment,
 }: {
   agent: Agent | null;
   hasSessions?: boolean;
   onPickPrompt: (prompt: string) => void;
-  onStartAlignment?: () => void;
   /**
    * Where "customize" sends this viewer, or `null` to hide the affordance.
    * The container resolves it: only someone who may edit THIS agent on a
@@ -92,18 +89,6 @@ export function EmptyState({
               </AppLink>
             </div>
           ) : null}
-        </div>
-      ) : null}
-      {agent && onStartAlignment ? (
-        <div className="w-full max-w-sm rounded-lg border border-border/80 bg-muted/20 px-3 py-3 text-left">
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-caption text-muted-foreground">
-              {t(($) => $.goal_flow.hint)}
-            </p>
-            <Button variant="outline" size="sm" onClick={onStartAlignment}>
-              {t(($) => $.goal_flow.action)}
-            </Button>
-          </div>
         </div>
       ) : null}
     </div>

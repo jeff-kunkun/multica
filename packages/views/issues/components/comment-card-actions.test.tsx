@@ -10,11 +10,9 @@ import { CommentCard } from "./comment-card";
 /**
  * The comment card's ⋯ menu.
  *
- * Two entries answer "turn this thread into work", and they answer it the two
- * different ways a thread can be read: file it as a sub-issue now, or hand it to
- * the alignment agent when it is not yet clear enough to file (DENE-452). Both
- * carry the comment id they were opened from, which is what the opener turns
- * into the captured source / the seeded request.
+ * "Create sub-issue from here" turns the thread into work. It carries the
+ * comment id it was opened from, which is what the opener turns into the
+ * captured source.
  */
 
 vi.mock("../../navigation", () => ({
@@ -117,34 +115,25 @@ beforeEach(() => {
 });
 
 describe("comment actions menu", () => {
-  it("offers both ways to turn the thread into work, each carrying the comment id", async () => {
+  it("files a sub-issue from the thread, carrying the comment id", async () => {
     const onCreateSubIssue = vi.fn();
-    const onOpenAlign = vi.fn();
-    renderCard({ onCreateSubIssue, onOpenAlign });
+    renderCard({ onCreateSubIssue });
 
     fireEvent.click(openMenu());
     await screen.findByText("Create sub-issue from here");
     fireEvent.click(screen.getByText("Create sub-issue from here"));
     expect(onCreateSubIssue).toHaveBeenCalledWith("comment-1");
-
-    // Re-open: picking an item closes the menu.
-    fireEvent.click(openMenu());
-    fireEvent.click(
-      await screen.findByRole("menuitem", { name: "Align on this first" }),
-    );
-    expect(onOpenAlign).toHaveBeenCalledWith("comment-1");
   });
 
-  it("offers neither action where the card was not given one", async () => {
+  it("offers no sub-issue action where the card was not given one", async () => {
     // A surface that has no issue context to file under must not render an
     // entry that would have nowhere to go.
     renderCard();
 
     fireEvent.click(openMenu());
-    // Something opened — otherwise the two assertions below would pass on a
-    // menu that never rendered at all.
+    // Something opened — otherwise the assertion below would pass on a menu
+    // that never rendered at all.
     await screen.findByText("Copy");
-    expect(screen.queryByText("Align on this first")).toBeNull();
     expect(screen.queryByText("Create sub-issue from here")).toBeNull();
   });
 });

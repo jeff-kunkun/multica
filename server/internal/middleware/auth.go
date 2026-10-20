@@ -75,15 +75,6 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 			r.Header.Del("X-Actor-Bot-Name")
 			r = r.WithContext(botsource.WithContext(r.Context(), botsource.Source{}))
 
-			// The carrier scope marker is server-set on the same terms, and
-			// for a sharper reason: the upload handler READS it to apply the
-			// extra restrictions an alignment carrier's upload is subject to.
-			// A client that could set it would only tighten its own request,
-			// but a client that could CLEAR it after the mat_ branch stamped
-			// it would loosen one — so it is deleted here and re-set below,
-			// never merged with whatever arrived.
-			r.Header.Del(IssueDraftScopeHeader)
-
 			// Agent identity is server-set for exactly the same reason,
 			// and the rest of the codebase already assumes it (see
 			// resolveActor, actor_guards.go, CreateIssue). Only the mat_
@@ -125,7 +116,7 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 			// `actorSourceFromRequest`. MUL-2600.
 			//
 			// The token's capability scope is decided here too, from the
-			// carrier that owns it. See issueDraftReadOnlyScope below.
+			// agent and task that own it.
 			if strings.HasPrefix(tokenString, "mat_") {
 				if queries == nil {
 					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
@@ -138,15 +129,14 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
 					return
 				}
-				carrierScope := isIssueDraftReadOnlyScope(tt.AgentKind, tt.AgentSystemKey)
-				if carrierScope && !isReadOnlyMethod(r.Method) && !isIssueDraftAllowedWrite(r.Method, r.URL.Path) {
+				if isRetiredAlignmentCarrier(tt.AgentKind, tt.AgentSystemKey) {
 					slog.Warn(
-						"auth: issue draft carrier attempted a write",
+						"auth: retired alignment carrier token used",
 						"path", r.URL.Path,
 						"method", r.Method,
 						"agent_id", uuidToString(tt.AgentID),
 					)
-					http.Error(w, `{"error":"issue draft sessions are read-only"}`, http.StatusForbidden)
+					http.Error(w, `{"error":"requirement alignment has been retired"}`, http.StatusForbidden)
 					return
 				}
 				if isConsultReadOnlyScope(tt.TaskKind) && !isReadOnlyMethod(r.Method) {
@@ -170,13 +160,6 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 				r.Header.Set("X-Actor-Source", "task_token")
 				if tt.ViaBotID.Valid {
 					r = r.WithContext(botsource.WithContext(r.Context(), botsource.Source{ID: tt.ViaBotID, Name: tt.ViaBotName.String}))
-				}
-				if carrierScope {
-					// Tells the upload handler that this credential is an
-					// alignment carrier's, so the one write it is allowed
-					// (see isIssueDraftAllowedWrite) can be held to the
-					// carrier's own reply.
-					r.Header.Set(IssueDraftScopeHeader, IssueDraftScopeValue)
 				}
 				serveAuthenticated(next, w, r)
 				return

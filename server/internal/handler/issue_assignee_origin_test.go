@@ -89,7 +89,7 @@ func TestAgentPickWithoutAQuoteIsDroppedWhenRoutingIsOn(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	enableDraftSuggestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
+	enableTestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
 	f := originRun(t, "noquote", "请帮我看看这个", "member", testUserID, testUserID)
 
 	resp := agentCreate(t, f, "agent picks alone", "")
@@ -109,7 +109,7 @@ func TestQuotedPickFromTheInitiatorIsKeptAndCredited(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	enableDraftSuggestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
+	enableTestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
 	name := "Origin Target quoted"
 	f := originRun(t, "quoted", "这张交给 "+name+" 做，别的不用管", "member", testUserID, testUserID)
 
@@ -133,7 +133,7 @@ func TestQuotedPickWorksForAnyMemberWhoStartedTheRun(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	enableDraftSuggestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
+	enableTestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
 	other := dbfx.User(t, "Origin Other Member", "origin-other@example.com")
 	dbfx.Member(t, testWorkspaceID, other, "member")
 	name := "Origin Target other"
@@ -150,7 +150,7 @@ func TestQuoteFromSomeoneElseOrAnAgentDoesNotCount(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	enableDraftSuggestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
+	enableTestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
 	bystander := dbfx.User(t, "Origin Bystander", "origin-bystander@example.com")
 	dbfx.Member(t, testWorkspaceID, bystander, "member")
 
@@ -180,7 +180,7 @@ func TestFabricatedQuoteIsNotAppliedAndGoesToRouting(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	enableDraftSuggestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
+	enableTestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
 	f := originRun(t, "fabricated", "只是随口一说，没点谁的名", "member", testUserID, testUserID)
 
 	resp := agentCreate(t, f, "made up quote", "用户说过：交给 "+f.name)
@@ -214,7 +214,7 @@ func TestQuoteThatDoesNotNameTheAssigneeIsRejected(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	enableDraftSuggestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
+	enableTestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
 	f := originRun(t, "unnamed", "用最强的那个做", "member", testUserID, testUserID)
 
 	resp := agentCreate(t, f, "quote names nobody", "用最强的那个做")
@@ -235,7 +235,7 @@ func TestQuoteNamingTheBaseRoleCoversItsSpecialisations(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	enableDraftSuggestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
+	enableTestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
 	f := originRun(t, "base", "交给 Origin Base 做，别的不用管", "member", testUserID, testUserID)
 	base := createHandlerTestAgent(t, "Origin Base", []byte("[]"))
 	f.target = specialisation(t, "Origin Base 出海", base)
@@ -251,7 +251,7 @@ func TestQuoteNamingOneSpecialisationDoesNotReachItsSibling(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	enableDraftSuggestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
+	enableTestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
 	f := originRun(t, "sibling", "交给 Origin Sib 出海 做", "member", testUserID, testUserID)
 	base := createHandlerTestAgent(t, "Origin Sib", []byte("[]"))
 	specialisation(t, "Origin Sib 出海", base)
@@ -282,7 +282,7 @@ func TestMemberPickIsHumanAndUntouchedByRouting(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	enableDraftSuggestRouting(t, tierJudge{tier: "weak", confidence: 0.95})
+	enableTestRouting(t, tierJudge{tier: "weak", confidence: 0.95})
 	target := createHandlerTestAgent(t, "Origin Human Target", []byte("[]"))
 
 	req := newRequest(http.MethodPost, "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
@@ -347,7 +347,7 @@ func TestSelfClaimedSubIssueUnderOwnParentIsKept(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	enableDraftSuggestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
+	enableTestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
 	f := originRun(t, "selfclaim", "请帮我看看这个", "member", testUserID, testUserID)
 	var home string
 	dbfx.QueryRow(t, `SELECT issue_id::text FROM agent_task_queue WHERE id = $1`, f.task).Scan(&home)

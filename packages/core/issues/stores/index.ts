@@ -2,9 +2,7 @@ export { useIssueSelectionStore } from "./selection-store";
 export {
   useCreateModeStore,
   openCreateIssueWithPreference,
-  openAlignIssue,
   type CreateMode,
-  type FilingCreateMode,
 } from "./create-mode-store";
 export { useIssueDraftStore } from "./draft-store";
 export {

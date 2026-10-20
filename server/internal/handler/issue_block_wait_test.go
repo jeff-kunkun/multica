@@ -327,7 +327,7 @@ func TestBlockedByWakeSeatsAnEmptyExecutorFirst(t *testing.T) {
 	// create-time pass's.
 	agentID := createHandlerTestAgent(t, "Unseated Wake Medium Seat", []byte("[]"))
 	dbfx.Exec(t, `UPDATE agent SET routing_tier = 'medium' WHERE id = $1`, agentID)
-	enableDraftSuggestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
+	enableTestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
 	var before string
 	dbfx.QueryRow(t, `SELECT COALESCE(assignee_id::text, '') FROM issue WHERE id = $1`, waiter.ID).Scan(&before)
 	if before != "" {

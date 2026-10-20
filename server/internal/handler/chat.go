@@ -1031,12 +1031,6 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to delete agent builder draft")
 		return
 	}
-	// Same no-FK chore, for the structured draft an alignment conversation was
-	// building. A no-op for ordinary chats, which never have one.
-	if err := qtx.DeleteIssueDraft(r.Context(), session.ID); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to delete issue draft")
-		return
-	}
 
 	// pinned_item has no FK onto chat_session, so every viewer's sidebar pin
 	// for this chat is pruned here (DENE-866).

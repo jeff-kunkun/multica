@@ -20,7 +20,7 @@ func routableSeat(t *testing.T, name string) string {
 	t.Helper()
 	seat := createHandlerTestAgent(t, name, []byte("[]"))
 	dbfx.Exec(t, `UPDATE agent SET routing_tier = 'medium' WHERE id = $1`, seat)
-	enableDraftSuggestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
+	enableTestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
 	return seat
 }
 
@@ -147,7 +147,7 @@ func TestPersonReplacingARouterSeatCancelsOnlyItsAssignmentRun(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	enableDraftSuggestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
+	enableTestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
 	f := originRun(t, "router-replaced", "这张交给 Origin Target router-replaced 做", "member", testUserID, testUserID)
 	routerSeat := createHandlerTestAgent(t, "Router Seat replaced", []byte("[]"))
 
@@ -197,7 +197,7 @@ func TestReplacingAPersonsSeatCancelsNothing(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	enableDraftSuggestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
+	enableTestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
 	seat := createHandlerTestAgent(t, "Human Seat kept", []byte("[]"))
 	next := createHandlerTestAgent(t, "Human Seat next", []byte("[]"))
 	issue, assignRun, _ := routerSeatedWithRuns(t, "human seat replaced", seat)
@@ -215,7 +215,7 @@ func TestBatchReplacingARouterSeatCancelsItsAssignmentRun(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	enableDraftSuggestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
+	enableTestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
 	seat := createHandlerTestAgent(t, "Router Seat batch", []byte("[]"))
 	next := createHandlerTestAgent(t, "Router Seat batch next", []byte("[]"))
 	issue, assignRun, mentionRun := routerSeatedWithRuns(t, "router replaced batch", seat)

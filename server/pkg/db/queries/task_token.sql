@@ -9,10 +9,9 @@ RETURNING *;
 --
 -- agent.kind / agent.system_key ride along on the same round trip because the
 -- middleware has to decide the request's capability scope before any handler
--- runs: hidden per-session carriers (currently the `issue_draft:*` alignment
--- conversation) hold a deliberately narrower token than an ordinary task, and a
--- second query on every authenticated agent request to learn that would buy
--- nothing. The join is on the primary key of agent, and agent_id carries an
+-- runs: a leftover `issue_draft:*` carrier of the retired requirement alignment
+-- is refused outright, and a second query on every authenticated agent request
+-- to learn that would buy nothing. The join is on the primary key of agent, and agent_id carries an
 -- index of its own, so this is still a single index lookup per request.
 --
 -- task_kind is the run's context.type (DENE-1721): a consult run answers one

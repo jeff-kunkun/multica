@@ -30,7 +30,7 @@ func TestRoutingDispatchPreviewConfirmAndHistory(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	enableDraftSuggestRouting(t, parsingJudge{
+	enableTestRouting(t, parsingJudge{
 		tierJudge: tierJudge{tier: "medium", confidence: 0.95},
 		rules: []routing.DispatchRule{
 			{Category: "前端", Hint: "ui", Series: "Claude", Source: "前端交给 Claude"},

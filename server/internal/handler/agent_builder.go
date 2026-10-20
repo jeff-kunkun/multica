@@ -390,8 +390,7 @@ func (h *Handler) resolveSessionCarrierRuntime(w http.ResponseWriter, r *http.Re
 // against the runtime it will actually run on, writing the 400 itself when it
 // refuses.
 //
-// It exists because agent create and the issue-draft carrier create have to
-// answer the same two questions and neither may answer differently (DENE-514):
+// It answers two questions (DENE-514):
 //
 //   - Is this a value this provider understands at all? A fixed-enum provider
 //     rejects an unknown literal here rather than persisting a word the daemon

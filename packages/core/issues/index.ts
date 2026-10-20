@@ -7,7 +7,6 @@ export * from "./workdir";
 export * from "./config";
 export * from "./stores";
 export * from "./blocker-tree";
-export * from "./alignment-origin";
 
 export {
   issueBehavesAs,

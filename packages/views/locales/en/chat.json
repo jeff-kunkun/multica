@@ -11,10 +11,6 @@
     "new_chat_unbound": "New chats are not tied to a project",
     "back_to_list": "Back to chats"
   },
-  "goal_flow": {
-    "hint": "Clarify it before creating the issue.",
-    "action": "Align first"
-  },
   "project_bar": {
     "all": "All",
     "more": "⋯ More ({{count}})",

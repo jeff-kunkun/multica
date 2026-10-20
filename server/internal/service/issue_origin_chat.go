@@ -8,14 +8,14 @@ import (
 )
 
 // chatOriginTypes are the origins whose origin_id is the chat itself: the IM
-// `/issue` commands and the alignment draft's root.
+// `/issue` commands and roots confirmed by the retired requirement alignment.
 var chatOriginTypes = map[string]bool{
 	"lark_chat": true, "slack_chat": true, "dingtalk_chat": true,
 	"wecom_chat": true, "telegram_chat": true, "issue_draft": true,
 }
 
 // chatOriginSession is the chat an issue opened by an IM `/issue` command or
-// an alignment came from (DENE-1672), so its receipts flow back there like a
+// the retired requirement alignment came from (DENE-1672), so its receipts flow back there like a
 // chat run's. Unset when the origin names no chat of this workspace.
 func chatOriginSession(ctx context.Context, q *db.Queries, p IssueCreateParams) pgtype.UUID {
 	if !p.OriginType.Valid || !chatOriginTypes[p.OriginType.String] || !p.OriginID.Valid {

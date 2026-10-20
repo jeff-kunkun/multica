@@ -97,10 +97,11 @@ func (h *Handler) routeIssueDetached(attrs []any, workspaceID, issueID string) {
 	}()
 }
 
-// RouteGroupNodeAsync is RouteIssueAsync for an issue an alignment confirm
-// just created as part of a group — see routing.RouteGroupNode for what it
-// does differently. Detached for the same reason: a group is many model calls,
-// and none of them belongs on the confirm's latency path.
+// RouteGroupNodeAsync is RouteIssueAsync for a node of a staged group — today
+// the parent seatStagedParent just moved to coordinating. See
+// routing.RouteGroupNode for what it does differently. Detached for the same
+// reason: a group is many model calls, and none of them belongs on the
+// request's latency path.
 func (h *Handler) RouteGroupNodeAsync(r *http.Request, workspaceID, issueID string) {
 	if h.Routing == nil || workspaceID == "" || issueID == "" {
 		return

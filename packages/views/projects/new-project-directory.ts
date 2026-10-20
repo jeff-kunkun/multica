@@ -3,7 +3,7 @@ import { defaultStorage } from "@multica/core/platform";
 import {
   inferNewProjectExecutionMode,
   sanitizeProjectDirectoryName,
-} from "@multica/core/issue-drafts";
+} from "@multica/core/projects";
 import {
   provisionProjectDirectory,
   removeProvisionedDirectory,

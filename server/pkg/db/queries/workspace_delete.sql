@@ -434,7 +434,7 @@ deleted_resource_shares AS (
 deleted_agent_builder_drafts AS (
     DELETE FROM agent_builder_draft WHERE workspace_id = $1
 ),
--- Same no-FK chore for the alignment conversations' structured drafts.
+-- Same no-FK chore for the drafts the retired requirement alignment left.
 deleted_issue_drafts AS (
     DELETE FROM issue_draft WHERE workspace_id = $1
 ),

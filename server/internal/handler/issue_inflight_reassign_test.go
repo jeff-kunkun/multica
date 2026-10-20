@@ -35,7 +35,7 @@ func TestAgentCannotReassignAnIssueInFlight(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	enableDraftSuggestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
+	enableTestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
 	f := originRun(t, "inflight", "这张交给 Origin Target inflight 做", "member", testUserID, testUserID)
 
 	cases := []struct {
@@ -109,7 +109,7 @@ func TestAgentCannotReassignInFlightThroughBatch(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	enableDraftSuggestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
+	enableTestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
 	f := originRun(t, "inflight-batch", "随便", "member", testUserID, testUserID)
 	id := heldIssue(t, "inflight batch", "in_progress", f.caller)
 
@@ -151,7 +151,7 @@ func TestInFlightFlowsWithoutAnExecutorWriteStillWork(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	enableDraftSuggestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
+	enableTestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
 	f := originRun(t, "inflight-flows", "随便", "member", testUserID, testUserID)
 	id := heldIssue(t, "inflight flows", "in_progress", f.caller)
 

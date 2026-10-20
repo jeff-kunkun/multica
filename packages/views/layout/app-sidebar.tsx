@@ -27,7 +27,6 @@ import {
   PinOff,
   Search,
   SquarePen,
-  Sparkles,
   X,
 } from "lucide-react";
 import { WorkspaceAvatar } from "../workspace/workspace-avatar";
@@ -35,10 +34,7 @@ import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@multica/ui/components/ui/collapsible";
 import { CappedNumberFlow } from "@multica/ui/components/ui/number-flow";
-import {
-  openAlignIssue,
-  openCreateIssueWithPreference,
-} from "@multica/core/issues/stores/create-mode-store";
+import { openCreateIssueWithPreference } from "@multica/core/issues/stores/create-mode-store";
 import {
   Sidebar,
   SidebarContent,
@@ -739,23 +735,6 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                 {createIssueShortcut ? (
                   <ShortcutKeycaps shortcut={createIssueShortcut} decorative className="pointer-events-none ml-auto" />
                 ) : null}
-              </SidebarMenuButton>
-              </WriteAction>
-            </SidebarMenuItem>
-            <SidebarMenuItem>
-              {/* The way into requirement alignment. It sits beside "New
-                  issue" rather than replacing it: skipping alignment stays a
-                  deliberate choice, not something a user has to undo. It opens
-                  the create-issue dialog on its alignment face — the same
-                  shell, so the shared draft and uploads come with it. */}
-              <WriteAction className="flex w-full">
-              <SidebarMenuButton
-                className="text-muted-foreground"
-                title={t(($) => $.sidebar.align_issue_hint)}
-                onClick={() => openAlignIssue()}
-              >
-                <Sparkles />
-                <span>{t(($) => $.sidebar.align_issue)}</span>
               </SidebarMenuButton>
               </WriteAction>
             </SidebarMenuItem>

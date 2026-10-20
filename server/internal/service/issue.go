@@ -127,10 +127,10 @@ type IssueCreateOpts struct {
 	// assignee, its broadcast and its analytics event all happen — but
 	// does not enqueue the assignee's run.
 	//
-	// Alignment groups use it on their coordination root: the root keeps
-	// its assignee so the stage barrier has someone to wake when a stage
-	// closes, yet confirming the group must not hand that assignee an
-	// implementation task of its own. This is a statement about THIS
+	// A group's coordination root uses it: the root keeps its assignee so
+	// the stage barrier has someone to wake when a stage closes, yet
+	// creating the group must not hand that assignee an implementation
+	// task of its own. This is a statement about THIS
 	// create, not a state the issue is parked in — the root is created
 	// active on purpose, and every later write to it (a reassignment, a
 	// status change, a stage closing) enqueues exactly as it would for
@@ -1031,8 +1031,8 @@ func classifyOrigin(issue db.Issue, opts IssueCreateOpts) (source, taskID, autop
 	case "autopilot":
 		return analytics.SourceAutopilot, "", originID
 	case "issue_draft":
-		// A human confirmed an aligned draft. The origin points at the
-		// alignment conversation, not at a task or a run, so there is nothing
+		// A human confirmed a draft in the retired requirement alignment.
+		// The origin points at that conversation, not at a task or a run, so there is nothing
 		// to attribute beyond "a person created this".
 		return analytics.SourceManual, "", ""
 	default:

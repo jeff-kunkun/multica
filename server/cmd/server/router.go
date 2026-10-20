@@ -2748,40 +2748,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Put("/{sessionId}/draft", h.SaveAgentBuilderDraft)
 			})
 
-			// Requirement alignment before an issue exists. Creating an issue
-			// enqueues agent work, so this flow is the one place a request can
-			// be discussed without anything being created: everything here
-			// writes only the draft, and POST /finalize is the single
-			// transition that produces an issue.
-			r.Route("/api/issue-drafts", func(r chi.Router) {
-				r.Use(h.RequireModule(permission.ModuleIssues))
-				// Alignment conversations are invisible to every chat list
-				// (their carrier is kind='system'), so this is the only route
-				// back to one. `?status=all` widens it from "the ones I can
-				// still act on" to "every alignment I have", which is what the
-				// chat sidebar's alignment records read back (DENE-371).
-				r.Get("/", h.ListIssueDrafts)
-				r.Post("/", h.CreateIssueDraftSession)
-				r.Route("/{sessionId}", func(r chi.Router) {
-					r.Patch("/", h.UpdateIssueDraft)
-					r.Patch("/runtime", h.SwitchIssueDraftRuntime)
-					// Guided questions, or plain dialogue. Rewrites the
-					// carrier's prompt and records which policy version is
-					// running; the draft's content is untouched.
-					r.Patch("/policy", h.SwitchIssueDraftPolicy)
-					// Read-only: which seat routing would put on each issue
-					// of the draft, shown in the confirm panel before create.
-					r.Post("/assignee-suggestions", h.SuggestIssueDraftAssignees)
-					r.Post("/finalize", h.FinalizeIssueDraft)
-					// Starts another round on an alignment that already
-					// produced its group: same session, same draft row, and
-					// the next confirm adds only the nodes that own no issue
-					// yet. Idempotent, so a client may call it on load.
-					r.Post("/reopen", h.ReopenIssueDraft)
-					r.Post("/abandon", h.AbandonIssueDraft)
-				})
-			})
-
 			// Skills
 			r.Route("/api/skills", func(r chi.Router) {
 				r.Get("/", h.ListSkills)

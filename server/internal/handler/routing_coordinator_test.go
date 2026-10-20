@@ -42,7 +42,7 @@ func TestNoSeatRoutesNotifyAndSubscribeGrok(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { testPool.Exec(context.Background(), "DELETE FROM personal_access_token WHERE id=$1", bot.ID) })
-	enableDraftSuggestRouting(t, tierJudge{tier: "medium", confidence: 1})
+	enableTestRouting(t, tierJudge{tier: "medium", confidence: 1})
 	for _, tc := range []struct {
 		name           string
 		empty, offline bool

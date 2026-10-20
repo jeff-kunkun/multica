@@ -29,7 +29,7 @@ func TestBotCommentCannotSupplyInitiatorQuote(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	enableDraftSuggestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
+	enableTestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
 	name := "Origin Target botquote"
 	f := originRun(t, "botquote", "我拍板交给 "+name+" 做", "member", testUserID, testUserID)
 	_, err := testPool.Exec(context.Background(), `UPDATE comment SET via_bot_id = '00000000-0000-0000-0000-000000000042', via_bot_name = 'Historical Bot' WHERE id = (SELECT trigger_comment_id FROM agent_task_queue WHERE id = $1)`, f.task)

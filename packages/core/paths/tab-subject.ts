@@ -45,7 +45,7 @@ export type TabSubject =
   /** The Chat container; `sessionId` is the path or `?session=` selection, or null. */
   | { kind: "chat"; sessionId: string | null }
   /** A creation flow that has not produced a resource yet. */
-  | { kind: "flow"; flow: "create-agent" | "create-issue" }
+  | { kind: "flow"; flow: "create-agent" }
   /** An unrecognized URL. Never impersonate a real page. */
   | { kind: "unknown" };
 
@@ -78,12 +78,6 @@ export function parseTabSubject(url: string): TabSubject {
 
   switch (segment) {
     case "issues":
-      // `/issues/new/:draftId` is the alignment conversation BEFORE an issue
-      // exists. Without this, it would resolve as an issue detail whose id is
-      // the literal "new" — a tab labelled with a resource that is not there.
-      if (id === "new" && segments[3]) {
-        return { kind: "flow", flow: "create-issue" };
-      }
       return id ? { kind: "issue", id } : { kind: "page", page: "issues" };
     case "my-issues":
       return { kind: "page", page: "myIssues" };

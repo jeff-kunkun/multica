@@ -164,7 +164,7 @@ func TestQuoteNamingTheBaseRoleLandsOnTheIssueDomainSpecialisation(t *testing.T)
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	enableDraftSuggestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
+	enableTestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
 	sea := createTestDomain(t, "T出海5")
 	project := createDomainProject(t, "domain quote project", sea)
 
@@ -273,7 +273,7 @@ func TestQuoteNamingTheBaseRoleInAMultiDomainProjectLandsOnAFittingSpecialisatio
 	}
 	// Rule 1 of DENE-1477: no issue domain picked, so the project's domains,
 	// all of them, are the scene — the base role's 游戏 seat fits.
-	enableDraftSuggestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
+	enableTestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
 	sea := createTestDomain(t, "T出海7")
 	game := createTestDomain(t, "T游戏7")
 	project := createDomainProject(t, "multi domain quote project", sea, game)

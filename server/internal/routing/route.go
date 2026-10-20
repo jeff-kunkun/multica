@@ -170,8 +170,8 @@ func (r *Router) Route(ctx context.Context, workspaceID, issueID string) (Outcom
 	}
 }
 
-// RouteGroupNode is the create-time pass for an issue an alignment confirm
-// just wrote as part of a group (DENE-812). Route alone cannot seat such a
+// RouteGroupNode is the seating pass for a node of a staged group (DENE-812):
+// a coordinating root or one of its staged sub-issues. Route alone cannot seat such a
 // group: the root is created in_progress so it coordinates instead of running,
 // and every sub-issue past stage 1 is created in backlog so it waits — two
 // statuses the state table deliberately leaves alone. Without this pass a

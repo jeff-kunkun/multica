@@ -23,12 +23,6 @@ import type { CommentSendMode } from "../types";
 import type {
   Issue,
   IssuePriority,
-  IssueDraft,
-  IssueDraftPayload,
-  IssueDraftSession,
-  IssueDraftSummary,
-  IssueDraftFinalizeResult,
-  IssueDraftRuntimeSwitch,
   CreateIssueRequest,
   MoveIssueRequest,
   UpdateIssueRequest,
@@ -320,10 +314,6 @@ import type {
   CreateCloudRuntimeNodeRequest,
   ListCloudRuntimeNodesParams,
 } from "../runtimes/cloud-runtime";
-import type {
-  DraftAssigneeSuggestion,
-  DraftAssigneeSuggestionRequest,
-} from "../issue-drafts/assignee-suggestions";
 import { type Logger, noopLogger } from "../logger";
 import { createRequestId, createSafeId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
@@ -389,17 +379,6 @@ import {
   AgentRuntimeListSchema,
   AgentBuilderRuntimeSwitchSchema,
   AgentBuilderSessionSchema,
-  IssueDraftSchema,
-  IssueDraftSessionSchema,
-  IssueDraftListSchema,
-  IssueDraftFinalizeSchema,
-  IssueDraftRuntimeSwitchSchema,
-  IssueDraftAssigneeSuggestionsSchema,
-  EMPTY_ISSUE_DRAFT_ASSIGNEE_SUGGESTIONS,
-  EMPTY_ISSUE_DRAFT,
-  EMPTY_ISSUE_DRAFT_SESSION,
-  EMPTY_ISSUE_DRAFT_LIST,
-  issueDraftRuntimeSwitchFallback,
   AgentSchema,
   AgentListSchema,
   EMPTY_AGENT_LIST,
@@ -2323,225 +2302,6 @@ export class ApiClient {
       AgentBuilderRuntimeSwitchSchema,
       agentBuilderRuntimeSwitchFallback(data.runtime_id),
       { endpoint: "PATCH /api/agent-builder/sessions/{id}/runtime" },
-    );
-  }
-
-  /**
-   * Opens an alignment conversation: a hidden carrier, its chat session, and
-   * an empty draft, created together server-side. Nothing about an issue
-   * exists yet — `finalizeIssueDraft` is the only call that creates one.
-   */
-  async createIssueDraftSession(data: {
-    runtime_id: string;
-    model?: string;
-    /**
-     * Reasoning effort for the carrier, empty meaning the local CLI's own
-     * default. Frozen onto the carrier at creation like `model` — the daemon
-     * reads both off the agent row — and validated server-side against the
-     * target runtime, so a level this runtime cannot take is a 400 rather than a
-     * value that silently never runs (DENE-514).
-     */
-    thinking_level?: string;
-    draft?: Partial<IssueDraftPayload>;
-    /** Which alignment policy to open under. Omitted means the guided
-     *  default; see packages/core/issue-drafts/policy.ts. */
-    policy?: string;
-    /**
-     * Which built-in alignment methods the carrier is given. Omitted means the
-     * server's built-in default set; an empty array means "none", which is how
-     * the picker's all-unchecked state is expressed. The keys this client
-     * offers are in packages/core/issue-drafts/capabilities.ts.
-     */
-    capabilities?: string[];
-  }): Promise<IssueDraftSession> {
-    const raw = await this.fetch<unknown>("/api/issue-drafts", {
-      method: "POST",
-      body: JSON.stringify(data),
-    });
-    return parseWithFallback(
-      raw,
-      IssueDraftSessionSchema,
-      EMPTY_ISSUE_DRAFT_SESSION,
-      { endpoint: "POST /api/issue-drafts" },
-    );
-  }
-
-  /**
-   * The caller's alignment conversations. They are hidden from every chat list
-   * (their carrier is `kind = 'system'`), so this is the only route back to
-   * one. A 404 means the backend predates the endpoint: degrade to "no drafts"
-   * rather than erroring the surface that lists them.
-   *
-   * `status: "all"` widens the read from "alignments I can still act on" to
-   * "every alignment I have", terminal ones included — the records the chat
-   * sidebar lists (DENE-371). The parameter is additive: a backend that
-   * predates it ignores the query string and answers with the live drafts
-   * only, which leaves the record surfaces empty rather than broken.
-   */
-  async listIssueDrafts(options?: { status?: "all" }): Promise<IssueDraftSummary[]> {
-    const path =
-      options?.status === "all" ? "/api/issue-drafts?status=all" : "/api/issue-drafts";
-    let raw: unknown;
-    try {
-      raw = await this.fetch<unknown>(path);
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 404) return [];
-      throw err;
-    }
-    return parseWithFallback(
-      raw,
-      IssueDraftListSchema,
-      EMPTY_ISSUE_DRAFT_LIST,
-      { endpoint: "GET /api/issue-drafts" },
-    ).drafts;
-  }
-
-  /**
-   * Saves what the conversation has agreed so far. `expected_revision` is the
-   * revision the caller was looking at; a save built on a superseded view is
-   * rejected with 409 rather than overwriting what it never saw.
-   */
-  async updateIssueDraft(
-    sessionId: string,
-    data: {
-      draft: IssueDraftPayload;
-      status?: "draft" | "ready";
-      expected_revision: number;
-    },
-  ): Promise<IssueDraft> {
-    const raw = await this.fetch<unknown>(`/api/issue-drafts/${sessionId}`, {
-      method: "PATCH",
-      body: JSON.stringify(data),
-    });
-    return parseWithFallback(raw, IssueDraftSchema, EMPTY_ISSUE_DRAFT, {
-      endpoint: "PATCH /api/issue-drafts/{id}",
-    });
-  }
-
-  /**
-   * Which seat routing would put on each issue of a draft, root first. Reads
-   * only: nothing is created or assigned. Advisory, so an unparseable body is
-   * "no suggestions" rather than an error on the confirm panel.
-   */
-  async suggestIssueDraftAssignees(
-    sessionId: string,
-    data: DraftAssigneeSuggestionRequest,
-  ): Promise<(DraftAssigneeSuggestion | null)[]> {
-    const raw = await this.fetch<unknown>(
-      `/api/issue-drafts/${sessionId}/assignee-suggestions`,
-      { method: "POST", body: JSON.stringify(data) },
-    );
-    return parseWithFallback(
-      raw,
-      IssueDraftAssigneeSuggestionsSchema,
-      EMPTY_ISSUE_DRAFT_ASSIGNEE_SUGGESTIONS,
-      { endpoint: "POST /api/issue-drafts/{id}/assignee-suggestions" },
-    ).suggestions;
-  }
-
-  /** Discards a draft. The conversation itself is left alone. */
-  async abandonIssueDraft(sessionId: string): Promise<IssueDraft> {
-    const raw = await this.fetch<unknown>(
-      `/api/issue-drafts/${sessionId}/abandon`,
-      { method: "POST" },
-    );
-    return parseWithFallback(raw, IssueDraftSchema, EMPTY_ISSUE_DRAFT, {
-      endpoint: "POST /api/issue-drafts/{id}/abandon",
-    });
-  }
-
-  /**
-   * Starts another round on an alignment that already produced its group, so
-   * the same conversation can be continued and the next confirm adds only the
-   * nodes that own no issue yet.
-   *
-   * The same session and the same draft row, never a new one — the group's
-   * identity is derived from the session, so a second session would mean a
-   * second group. Idempotent by construction: only a `completed` draft
-   * reopens, and an open round (`draft` / `ready`) answers with the row as it
-   * stands, so a client may call it on load as well as on an explicit
-   * "continue aligning" (DENE-414).
-   *
-   * Parsed with a fallback like the other draft writes: this is a lifecycle
-   * move whose answer the caller re-reads from the list anyway, and a body that
-   * cannot be parsed must not turn a reopen that committed into a failed
-   * request.
-   */
-  async reopenIssueDraft(sessionId: string): Promise<IssueDraft> {
-    const raw = await this.fetch<unknown>(
-      `/api/issue-drafts/${sessionId}/reopen`,
-      { method: "POST" },
-    );
-    return parseWithFallback(raw, IssueDraftSchema, EMPTY_ISSUE_DRAFT, {
-      endpoint: "POST /api/issue-drafts/{id}/reopen",
-    });
-  }
-
-  /**
-   * Confirms a draft into an issue. Safe to retry: the protocol creates at
-   * most one issue per draft and every repeat returns that same `issue_id`.
-   *
-   * No fallback — see IssueDraftFinalizeSchema. A 2xx means the issue exists,
-   * and the caller navigates to it, so an unparseable body must throw rather
-   * than hand the router an empty id.
-   */
-  async finalizeIssueDraft(
-    sessionId: string,
-    data: {
-      expected_revision: number;
-      new_project?: {
-        title: string;
-        icon?: string;
-        description?: string;
-        directory?: Record<string, unknown>;
-      };
-    },
-  ): Promise<IssueDraftFinalizeResult> {
-    const raw = await this.fetch<unknown>(
-      `/api/issue-drafts/${sessionId}/finalize`,
-      { method: "POST", body: JSON.stringify(data) },
-    );
-    return IssueDraftFinalizeSchema.parse(raw);
-  }
-
-  /**
-   * Switches a live alignment conversation's policy: guided questions, plain
-   * dialogue, or the front-end look round. The keys are the server registry's;
-   * the client's whitelist is packages/core/issue-drafts/policy.ts.
-   *
-   * The response is the updated draft, including the policy version the server
-   * recorded — the audit value, not an echo of the request. It is parsed with a
-   * fallback because a caller that cannot read the body can still re-read the
-   * list; the switch itself already committed server-side.
-   */
-  async switchIssueDraftPolicy(
-    sessionId: string,
-    data: { policy: string },
-  ): Promise<IssueDraft> {
-    const raw = await this.fetch<unknown>(
-      `/api/issue-drafts/${sessionId}/policy`,
-      { method: "PATCH", body: JSON.stringify(data) },
-    );
-    return parseWithFallback(raw, IssueDraftSchema, EMPTY_ISSUE_DRAFT, {
-      endpoint: "PATCH /api/issue-drafts/{id}/policy",
-    });
-  }
-
-  /** Rebinds a live alignment conversation to another runtime. Callers must
-   *  not show the new runtime as selected until this resolves. */
-  async switchIssueDraftRuntime(
-    sessionId: string,
-    data: { runtime_id: string },
-  ): Promise<IssueDraftRuntimeSwitch> {
-    const raw = await this.fetch<unknown>(
-      `/api/issue-drafts/${sessionId}/runtime`,
-      { method: "PATCH", body: JSON.stringify(data) },
-    );
-    return parseWithFallback(
-      raw,
-      IssueDraftRuntimeSwitchSchema,
-      issueDraftRuntimeSwitchFallback(data.runtime_id),
-      { endpoint: "PATCH /api/issue-drafts/{id}/runtime" },
     );
   }
 

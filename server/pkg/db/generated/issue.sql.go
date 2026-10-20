@@ -2492,10 +2492,9 @@ type ListIssuesByOriginsParams struct {
 
 // Finds every issue stamped with one of a set of (origin_type, origin_id)
 // pairs. The partial unique index on issue (origin_id) WHERE origin_type =
-// 'issue_draft' makes this the authoritative answer to "does this alignment
-// node already own an issue" — authoritative in a way a read by parent is not,
-// because a node's issue can be re-parented off the group and still own its
-// origin.
+// 'issue_draft' makes this the authoritative answer to "which issue did this
+// origin produce" — authoritative in a way a read by parent is not, because an
+// issue can be re-parented and still own its origin.
 func (q *Queries) ListIssuesByOrigins(ctx context.Context, arg ListIssuesByOriginsParams) ([]Issue, error) {
 	rows, err := q.db.Query(ctx, listIssuesByOrigins, arg.WorkspaceID, arg.OriginType, arg.OriginIds)
 	if err != nil {

@@ -118,15 +118,12 @@ type IssueResponse struct {
 	Visibility string  `json:"visibility,omitempty"`
 	Position   float64 `json:"position"`
 	// OriginType / OriginID are the issue's provenance for platform-internal
-	// flows — autopilot runs, quick-create tasks, and requirement alignment
-	// (`origin_type='issue_draft'`, `origin_id` = the alignment's
-	// chat_session_id). Detail-only and additive: absent on a row that has no
-	// origin, and on list rows, whose query does not select the columns.
-	//
-	// Read them as a PAIR: an alignment jump-off exists only when origin_type
-	// is exactly 'issue_draft', and treating a missing field as "not from an
-	// alignment" is correct, because every write path that sets one sets both
-	// (DENE-371).
+	// flows — autopilot runs, quick-create tasks, IM `/issue` commands, and
+	// issues confirmed by the retired requirement alignment
+	// (`origin_type='issue_draft'`, `origin_id` = its chat_session_id).
+	// Detail-only and additive: absent on a row that has no origin, and on list
+	// rows, whose query does not select the columns. Every write path that sets
+	// one sets both (DENE-371).
 	OriginType *string `json:"origin_type,omitempty"`
 	OriginID   *string `json:"origin_id,omitempty"`
 	// Stage groups sub-issues under the same parent into ordered barrier
@@ -536,7 +533,7 @@ func (h *Handler) fillDuplicateOf(ctx context.Context, wsID pgtype.UUID, resp *I
 
 // issueIdentifier is the human-readable issue reference ("HAN-42"). It is one
 // function because it is a wire contract: the create response, the list
-// projections and the alignment confirmation have to spell an issue the same
+// projections and every confirmation message have to spell an issue the same
 // way, or a person comparing two screens sees two different issues.
 func issueIdentifier(issuePrefix string, number int32) string {
 	return issuePrefix + "-" + strconv.Itoa(int(number))

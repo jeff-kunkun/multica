@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { clientErrorMessage } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
-import { provisionedDirectoryShouldBeRemoved } from "@multica/core/issue-drafts";
+import { provisionedDirectoryShouldBeRemoved } from "@multica/core/projects";
 import { useCreateProject } from "@multica/core/projects/mutations";
 import { useT } from "../../i18n";
 import { isDesktopShell } from "../../platform/local-directory";

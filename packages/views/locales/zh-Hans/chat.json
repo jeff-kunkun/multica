@@ -11,10 +11,6 @@
     "new_chat_unbound": "新对话不绑定项目",
     "back_to_list": "返回聊天列表"
   },
-  "goal_flow": {
-    "hint": "先聊清楚，再创建任务。",
-    "action": "先对齐需求"
-  },
   "project_bar": {
     "all": "全部",
     "more": "⋯ 更多 ({{count}})",

@@ -7,7 +7,6 @@ const AutopilotDetailPage = lazy(() => import("./pages/autopilot-detail-page").t
 const SkillDetailPage = lazy(() => import("./pages/skill-detail-page").then((m) => ({ default: m.SkillDetailPage })));
 const AgentDetailPage = lazy(() => import("./pages/agent-detail-page").then((m) => ({ default: m.AgentDetailPage })));
 const AiBuilderSessionPage = lazy(() => import("./pages/ai-builder-session-page").then((m) => ({ default: m.AiBuilderSessionPage })));
-const IssueDraftPage = lazy(() => import("./pages/issue-draft-page").then((m) => ({ default: m.IssueDraftPage })));
 const MemberDetailPage = lazy(() => import("./pages/member-detail-page").then((m) => ({ default: m.MemberDetailPage })));
 const RuntimeDetailPage = lazy(() => import("./pages/runtime-detail-page").then((m) => ({ default: m.RuntimeDetailPage })));
 const RuntimeSettingsPage = lazy(() => import("./pages/runtime-detail-page").then((m) => ({ default: m.RuntimeSettingsPage })));
@@ -146,14 +145,6 @@ export const appRoutes: RouteObject[] = [
             path: "issues",
             element: <IssuesPage />,
             handle: { title: "Issues" },
-          },
-          {
-            // Requirement alignment: a conversation before an issue exists.
-            // Declared above `issues/:id` and longer than it, so the literal
-            // `new` segment can never be read as an issue identifier.
-            path: "issues/new/:draftId",
-            element: <IssueDraftPage />,
-            handle: { title: "Align Issue" },
           },
           {
             path: "issues/:id",

@@ -24,7 +24,7 @@ func TestCreateChatSessionHonoursEveryProjectsExecutors(t *testing.T) {
 	testPool.Exec(ctx, `UPDATE agent SET routing_tier = 'medium' WHERE id = $1`, other)
 	// The judge wants a medium seat, so an unbounded pick would not land on
 	// the weak listed one.
-	enableDraftSuggestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
+	enableTestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
 
 	limited := createChatProjectTestProject(t, testWorkspaceID, "Executor chat limited", "")
 	open := createChatProjectTestProject(t, testWorkspaceID, "Executor chat open", "")

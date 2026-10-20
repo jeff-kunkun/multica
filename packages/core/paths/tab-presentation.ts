@@ -51,7 +51,6 @@ export type TabLabelKey =
   | "runtime"
   | "attachment"
   | "create_agent"
-  | "create_issue"
   | "unknown";
 
 /** How a tab's title should be produced. */
@@ -229,18 +228,10 @@ export function resolveTabPresentation(
       return { visual: { kind: "icon", icon: "MessageSquare" }, title };
     }
     case "flow":
-      // Both flows produce a resource that does not exist yet, so neither may
-      // borrow that resource's identity: an alignment tab is a new issue being
-      // discussed, not the issue itself.
-      return subject.flow === "create-issue"
-        ? {
-            visual: { kind: "icon", icon: "ListTodo" },
-            title: { kind: "tab", tabKey: "create_issue" },
-          }
-        : {
-            visual: { kind: "icon", icon: "Bot" },
-            title: { kind: "tab", tabKey: "create_agent" },
-          };
+      return {
+        visual: { kind: "icon", icon: "Bot" },
+        title: { kind: "tab", tabKey: "create_agent" },
+      };
     case "unknown":
       return {
         visual: DEFAULT_TAB_VISUAL,

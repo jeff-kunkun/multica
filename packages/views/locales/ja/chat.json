@@ -11,10 +11,6 @@
     "new_chat_unbound": "新しいチャットはプロジェクトに紐づきません",
     "back_to_list": "チャット一覧に戻る"
   },
-  "goal_flow": {
-    "hint": "タスクを作成する前に整理しましょう。",
-    "action": "先にすり合わせる"
-  },
   "project_bar": {
     "all": "すべて",
     "more": "⋯ その他 ({{count}})",

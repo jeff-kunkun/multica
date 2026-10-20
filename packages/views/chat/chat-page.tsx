@@ -64,7 +64,6 @@ import { ChatSessionHeader } from "./components/chat-session-header";
 import { EmptyState } from "./components/chat-empty-state";
 import { DirectNewChatButton, NewChatButton } from "./components/new-chat-button";
 import { CHAT_COLUMN, CHAT_GUTTER } from "./components/chat-column";
-import { AlignmentRecords } from "../issues/draft";
 import { useChatController } from "./components/use-chat-controller";
 import { OfflineBanner } from "./components/offline-banner";
 import { NoAgentBanner } from "./components/no-agent-banner";
@@ -77,7 +76,6 @@ import { WorkThreadPanel } from "../common/work-thread-panel";
 import { PageSearchInput } from "../common/page-search-input";
 import { matchesPinyin } from "../editor/extensions/pinyin-match";
 import { useRestoredScrollRef } from "../platform";
-import { openAlignIssue } from "@multica/core/issues/stores/create-mode-store";
 
 /**
  * Title half of the chat page search: every word in the title, or the whole
@@ -754,11 +752,6 @@ export function ChatPage() {
               : t(($) => $.project_bar.empty)
         }
       />
-      {/* Below the conversations and outside them: an alignment is a different
-          kind of thing, kept out of the chat list by the access boundary its
-          hidden carrier sits behind, so it gets its own group rather than a
-          tag on rows it can never appear among (DENE-371). */}
-      <AlignmentRecords wsId={c.wsId} />
     </div>
   );
 
@@ -857,11 +850,6 @@ export function ChatPage() {
           hasSessions={c.sessions.length > 0}
           onPickPrompt={c.sendConversationStarter}
           customizeHref={c.customizeConversationStartersHref}
-          onStartAlignment={() =>
-            openAlignIssue(
-              c.activeProjectIds[0] ? { project_id: c.activeProjectIds[0] } : undefined,
-            )
-          }
         />
       )}
 

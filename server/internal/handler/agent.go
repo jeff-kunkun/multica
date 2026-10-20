@@ -2337,12 +2337,6 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		// Pi has a fixed token universe and a daemon-discovered per-model subset.
 		// Per-model gaps are enforced by the daemon at execution time (MUL-2339):
 		// combination-invalid values are logged and omitted from the invocation.
-		//
-		// Shared with the issue-draft carrier create (DENE-514) rather than
-		// repeated: an alignment carrier that runs at the default effort while
-		// its picker says "Extra high" is the same lie as an agent whose saved
-		// level was silently dropped, and two copies of these three steps is
-		// how the two answers drift apart.
 		if !h.thinkingLevelAcceptedForRuntime(w, r, runtime, req.ThinkingLevel, req.Model) {
 			return
 		}

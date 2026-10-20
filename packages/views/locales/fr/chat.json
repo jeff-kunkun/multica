@@ -11,10 +11,6 @@
     "new_chat_unbound": "Les nouvelles discussions ne sont liées à aucun projet",
     "back_to_list": "Retour aux discussions"
   },
-  "goal_flow": {
-    "hint": "Clarifiez-la avant de créer la tâche.",
-    "action": "Aligner d'abord"
-  },
   "project_bar": {
     "all": "Tout",
     "more": "⋯ Plus ({{count}})",

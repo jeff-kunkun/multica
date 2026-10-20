@@ -37,3 +37,8 @@ export {
   resolveTaskCodeSource,
 } from "./source-rule";
 export type { DuplicateSourceGroup, TaskCodeSource } from "./source-rule";
+export {
+  inferNewProjectExecutionMode,
+  provisionedDirectoryShouldBeRemoved,
+  sanitizeProjectDirectoryName,
+} from "./directory-plan";

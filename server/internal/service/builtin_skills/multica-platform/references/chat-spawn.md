@@ -78,8 +78,7 @@ when the workspace limits issue creation from a chat or from a task.
 
 ## Receipts from the issues a chat opened
 
-An IM `/issue` command and an alignment also record their chat, like a chat
-run's `issue create`.
+An IM `/issue` command also records its chat, like a chat run's `issue create`.
 
 When such an issue enters 待验收, done, blocked or cancelled, the server posts a
 receipt card into the chat: status, summary, PRs. A

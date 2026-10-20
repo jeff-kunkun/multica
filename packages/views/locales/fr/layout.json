@@ -31,8 +31,7 @@
     "runtime": "Runtime",
     "attachment": "Pièce jointe",
     "create_agent": "Créer un agent",
-    "unknown": "Page inconnue",
-    "create_issue": "Aligner une nouvelle tâche"
+    "unknown": "Page inconnue"
   },
   "help": {
     "trigger": "Aide",
@@ -79,9 +78,7 @@
     "discord_card": {
       "title": "Rejoignez notre Discord",
       "dismiss": "Ignorer"
-    },
-    "align_issue": "Aligner une demande",
-    "align_issue_hint": "Discuter et aligner avant toute création"
+    }
   },
   "guest": {
     "badge": "Vous êtes invité — lecture seule",

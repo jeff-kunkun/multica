@@ -3,13 +3,13 @@
 /**
  * Issue-create binding for the coordinated-upload engine (MUL-5181, L2).
  *
- * All three create panels (manual form, agent prompt, alignment request) share
- * ONE upload pool — `draft.shared.attachments` — so a file survives a mode
- * switch from any side. What differs per mode is the BODY the upload's link
- * belongs to: the manual description, the agent prompt, or the alignment
- * request. The binding captures the mode that started the upload, so a settle
- * that arrives after the dialog closed (or after the user flipped modes)
- * writes the link back into the body it was pasted into, never another side's.
+ * Both create panels (manual form and agent prompt) share ONE upload pool —
+ * `draft.shared.attachments` — so a file survives a mode switch from either
+ * side. What differs per mode is the BODY the upload's link belongs to: the
+ * manual description or the agent prompt. The binding captures the mode that
+ * started the upload, so a settle that arrives after the dialog closed (or
+ * after the user flipped modes) writes the link back into the body it was
+ * pasted into, never the other side's.
  *
  * Uploads here carry no issue/comment context — the issue does not exist yet;
  * the server binds attachments at create time from `attachment_ids`.
@@ -92,16 +92,12 @@ export function useIssueCreateUploads(
       },
       getBody: () => {
         const { draft } = useIssueDraftStore.getState();
-        if (mode === "agent") return draft.agent.prompt;
-        if (mode === "align") return draft.align.request;
-        return draft.manual.description;
+        return mode === "agent" ? draft.agent.prompt : draft.manual.description;
       },
       appendToBody: (md) => {
         const state = useIssueDraftStore.getState();
         if (mode === "agent") {
           state.setAgent({ prompt: appendMarkdown(state.draft.agent.prompt, md) });
-        } else if (mode === "align") {
-          state.setAlign({ request: appendMarkdown(state.draft.align.request, md) });
         } else {
           state.setManual({ description: appendMarkdown(state.draft.manual.description, md) });
         }

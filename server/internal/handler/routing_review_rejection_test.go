@@ -28,7 +28,7 @@ func TestReviewTwoHoldsEscalateAndKeepReviewer(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	enableDraftSuggestRouting(t, tierJudge{tier: "medium", confidence: 1})
+	enableTestRouting(t, tierJudge{tier: "medium", confidence: 1})
 	executor := createHandlerTestAgent(t, "review-return-executor", []byte("[]"))
 	reviewer := createHandlerTestAgent(t, "review-return-reviewer", []byte("[]"))
 	stronger := createHandlerTestAgent(t, "review-return-stronger", []byte("[]"))

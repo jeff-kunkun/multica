@@ -147,9 +147,9 @@ describe("RuntimePicker (creation studio)", () => {
   /**
    * The empty-selection seed is an effect, and its caller builds `onSelect`
    * inline — so keying the effect on the callback identity made it fire once
-   * per render of the parent. The alignment page is a parent that re-renders
-   * while it writes (a rebind invalidates its own query and its own list), so
-   * that turned one empty selection into an endless switch loop: 53 PATCHes in
+   * per render of the parent. A parent that re-renders while it writes (a
+   * rebind invalidates its own query and its own list) turned one empty
+   * selection into an endless switch loop that way: 53 PATCHes in
    * a second, and a navigation that never committed (DENE-319). One empty
    * selection means one seed.
    */
