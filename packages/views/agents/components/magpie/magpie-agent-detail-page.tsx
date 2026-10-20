@@ -26,6 +26,7 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import {
   agentDetailOptions,
   agentListOptions,
+  cacheAgentResponse,
   memberListOptions,
   workspaceKeys,
 } from "@multica/core/workspace/queries";
@@ -46,6 +47,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { AppLink, useNavigation } from "../../../navigation";
 import { PAGE_GUTTER, PAGE_RAIL, PageHeader } from "../../../layout/page-header";
 import { ActorAvatar } from "../../../common/actor-avatar";
+import { AvatarUploadControl } from "../../../common/avatar-upload-control";
 import { runtimeCliLabel } from "../../../runtimes/components/runtime-machines";
 import { AgentPresenceIndicator } from "../agent-presence-indicator";
 import { VisibilityBadge } from "../visibility-badge";
@@ -61,6 +63,7 @@ export function MagpieAgentDetailPage({ agentId }: AgentDetailPageProps) {
   const { t } = useT("agents");
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
+  const queryClient = useQueryClient();
 
   const {
     data: agents = [],
@@ -219,6 +222,22 @@ export function MagpieAgentDetailPage({ agentId }: AgentDetailPageProps) {
       toast.error(t(($) => $.detail.runtime_required_toast));
     }
   };
+  // The mirror is read-only for routing config, but the avatar is
+  // presentation the office owns, so it stays editable here. The control
+  // announces upload success; a failed save toasts here and rethrows so the
+  // crop dialog stays open.
+  const handleAvatarChange = async (avatarUrl: string) => {
+    try {
+      const updated = await api.updateAgent(agent.id, { avatar_url: avatarUrl });
+      cacheAgentResponse(queryClient, wsId, updated, { insertIntoList: false });
+    } catch (e) {
+      toast.error(
+        e instanceof Error ? e.message : t(($) => $.detail.update_failed_toast),
+      );
+      throw e;
+    }
+  };
+
   const handleAssign = () => {
     if (!runtimeBound) {
       toast.error(t(($) => $.detail.runtime_required_toast));
@@ -242,6 +261,9 @@ export function MagpieAgentDetailPage({ agentId }: AgentDetailPageProps) {
         dmHref={`${paths.chat()}?agent=${agent.id}`}
         onDm={handleDm}
         onAssign={handleAssign}
+        onAvatarChange={
+          canEdit.allowed && !isArchived ? handleAvatarChange : undefined
+        }
       />
 
       {isArchived && (
@@ -284,6 +306,7 @@ function DetailHeader({
   dmHref,
   onDm,
   onAssign,
+  onAvatarChange,
 }: {
   agent: Agent;
   runtime: AgentRuntime | null;
@@ -297,6 +320,8 @@ function DetailHeader({
    *  the chat, which is what stops AppLink from pushing. */
   onDm: (e: React.MouseEvent<HTMLAnchorElement>) => void;
   onAssign: () => void;
+  /** Present when the caller may change the avatar; absent renders it static. */
+  onAvatarChange?: (avatarUrl: string) => Promise<void>;
 }) {
   const { t } = useT("agents");
   const timeAgo = useTimeAgo();
@@ -320,13 +345,25 @@ function DetailHeader({
 
         <div className="mt-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="flex min-w-0 items-start gap-4">
-            <ActorAvatar
-              actorType="agent"
-              actorId={agent.id}
-              size="2xl"
-              profileLink={false}
-              className="ring-1 ring-border"
-            />
+            {onAvatarChange ? (
+              <AvatarUploadControl
+                variant="agent"
+                value={agent.avatar_url ?? null}
+                name={agent.name}
+                size={56}
+                ariaLabel={t(($) => $.inspector.avatar_label)}
+                onUploaded={onAvatarChange}
+                onEmojiSelected={onAvatarChange}
+              />
+            ) : (
+              <ActorAvatar
+                actorType="agent"
+                actorId={agent.id}
+                size="2xl"
+                profileLink={false}
+                className="ring-1 ring-border"
+              />
+            )}
             <div className="min-w-0 pt-0.5">
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
                 <h1 className="min-w-0 text-balance text-title-lg font-semibold tracking-tight sm:text-display-sm">
