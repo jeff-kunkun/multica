@@ -31,6 +31,23 @@ vi.mock("./magpie-agent-overview-pane", () => ({
 vi.mock("../../../common/actor-avatar", () => ({
   ActorAvatar: () => <div>actor-avatar</div>,
 }));
+// The real control uploads through the crop dialog; the page only owns what
+// it does with the value, so the stub hands one straight back.
+vi.mock("../../../common/avatar-upload-control", () => ({
+  AvatarUploadControl: ({
+    ariaLabel,
+    onEmojiSelected,
+  }: {
+    ariaLabel?: string;
+    onEmojiSelected?: (value: string) => Promise<unknown>;
+  }) => (
+    <button
+      type="button"
+      aria-label={ariaLabel}
+      onClick={() => void onEmojiSelected?.("emoji:🚀")?.catch(() => {})}
+    />
+  ),
+}));
 vi.mock("../agent-presence-indicator", () => ({
   AgentPresenceIndicator: () => null,
 }));
@@ -47,6 +64,8 @@ const mockToastError = vi.hoisted(() => vi.fn());
 const mockModalOpen = vi.hoisted(() => vi.fn());
 const mockGetAgent = vi.hoisted(() => vi.fn());
 const mockDeleteAgent = vi.hoisted(() => vi.fn());
+const mockUpdateAgent = vi.hoisted(() => vi.fn());
+const mockCacheAgentResponse = vi.hoisted(() => vi.fn());
 const presenceRef = vi.hoisted(() => ({ current: new Map<string, unknown>() }));
 
 vi.mock("@multica/core/hooks", () => ({
@@ -59,6 +78,7 @@ vi.mock("@multica/core/agents", () => ({
 }));
 vi.mock("@multica/core/workspace/queries", () => ({
   workspaceKeys: { agents: (wsId: string) => ["agents", wsId] },
+  cacheAgentResponse: mockCacheAgentResponse,
   agentListOptions: (wsId: string) => ({
     queryKey: ["agents", wsId],
     queryFn: () => Promise.resolve(agentsRef.current),
@@ -114,7 +134,11 @@ vi.mock("@multica/core/api", () => {
     }
   }
   return {
-    api: { getAgent: mockGetAgent, deleteAgent: mockDeleteAgent },
+    api: {
+      getAgent: mockGetAgent,
+      deleteAgent: mockDeleteAgent,
+      updateAgent: mockUpdateAgent,
+    },
     ApiError,
   };
 });
@@ -457,5 +481,51 @@ describe("MagpieAgentDetailPage delete", () => {
       }),
     );
     expect(push).not.toHaveBeenCalled();
+  });
+});
+
+describe("MagpieAgentDetailPage avatar", () => {
+  it("saves a new avatar for an agent the caller can edit", async () => {
+    agentsRef.current = [{ ...baseAgent, owner_id: "user-1" }];
+    const updated = { ...baseAgent, owner_id: "user-1", avatar_url: "emoji:🚀" };
+    mockUpdateAgent.mockResolvedValue(updated);
+    const { queryClient } = renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Avatar" }));
+
+    await waitFor(() =>
+      expect(mockUpdateAgent).toHaveBeenCalledWith("agent-1", {
+        avatar_url: "emoji:🚀",
+      }),
+    );
+    await waitFor(() =>
+      expect(mockCacheAgentResponse).toHaveBeenCalledWith(
+        queryClient,
+        "ws-1",
+        updated,
+        { insertIntoList: false },
+      ),
+    );
+  });
+
+  it("toasts when the avatar save fails", async () => {
+    agentsRef.current = [{ ...baseAgent, owner_id: "user-1" }];
+    mockUpdateAgent.mockRejectedValue(new Error("nope"));
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Avatar" }));
+
+    await waitFor(() => expect(mockToastError).toHaveBeenCalledWith("nope"));
+    expect(mockCacheAgentResponse).not.toHaveBeenCalled();
+  });
+
+  it("keeps the avatar static for a caller who cannot edit the agent", async () => {
+    renderPage();
+
+    expect(
+      await screen.findByRole("button", { name: "Assign work" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Avatar" })).toBeNull();
+    expect(screen.getByText("actor-avatar")).toBeInTheDocument();
   });
 });
