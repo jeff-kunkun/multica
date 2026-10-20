@@ -21,6 +21,8 @@ import {
   X,
 } from "lucide-react";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { AvatarUploadControl } from "../../common/avatar-upload-control";
+import { AVATAR_SIZE_PX } from "@multica/ui/lib/avatar-size";
 import { AppLink, useOptionalNavigation } from "../../navigation";
 import type {
   Invitation,
@@ -230,6 +232,7 @@ function MemberRow({
   onRoleChange,
   onRemove,
   onResetPassword,
+  onAvatarUploaded,
 }: {
   member: MemberWithUser;
   canManage: boolean;
@@ -246,6 +249,8 @@ function MemberRow({
   onRemove: () => void;
   /** Present only when this instance signs in with username and password. */
   onResetPassword?: () => void;
+  /** Present only on the signed-in member's own row: persists a new avatar. */
+  onAvatarUploaded?: (url: string) => Promise<unknown>;
 }) {
   const { t } = useT("settings");
   const locale = useLocale();
@@ -271,7 +276,18 @@ function MemberRow({
 
   return (
     <div className="flex items-center gap-3 px-4 py-3">
-      <ActorAvatar actorType="member" actorId={member.user_id} size="lg" />
+      {onAvatarUploaded ? (
+        <AvatarUploadControl
+          variant="user"
+          value={member.avatar_url ?? null}
+          name={member.name}
+          size={AVATAR_SIZE_PX.lg}
+          ariaLabel={t(($) => $.account.click_avatar_hint)}
+          onUploaded={onAvatarUploaded}
+        />
+      ) : (
+        <ActorAvatar actorType="member" actorId={member.user_id} size="lg" />
+      )}
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">
           <span className="truncate text-body font-medium">{member.name}</span>
@@ -634,6 +650,7 @@ export function MembersTab() {
   const roleConfig = useRoleLabels();
   const capabilityLabels = useCapabilityLabels();
   const user = useAuthStore((s) => s.user);
+  const setUser = useAuthStore((s) => s.setUser);
   const workspace = useCurrentWorkspace();
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
@@ -1087,6 +1104,22 @@ export function MembersTab() {
     }
   };
 
+  // Your own row doubles as a shortcut to Settings → Account's avatar control
+  // (DENE-2325). Changing someone else's avatar is not offered: members own
+  // their profile.
+  const handleOwnAvatarUploaded = async (url: string) => {
+    try {
+      const updated = await api.updateMe({ avatar_url: url });
+      setUser(updated);
+      await qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
+    } catch (error) {
+      toast.error(
+        error instanceof Error ? error.message : t(($) => $.account.toast_avatar_failed),
+      );
+      throw error;
+    }
+  };
+
   const handleRemoveMember = (member: MemberWithUser) => {
     if (!workspace) return;
     setConfirmAction({
@@ -1324,6 +1357,9 @@ export function MembersTab() {
                     error={roleErrors[m.id] ?? null}
                     onRoleChange={(role) => handleRoleChange(m, role)}
                     onRemove={() => handleRemoveMember(m)}
+                    onAvatarUploaded={
+                      m.user_id === user?.id ? handleOwnAvatarUploaded : undefined
+                    }
                     onResetPassword={
                       canResetPasswords && m.user_id !== user?.id
                         ? () => handleResetPassword(m)

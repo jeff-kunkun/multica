@@ -7,6 +7,8 @@ import { BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG } from "@multica/core/feature-flag
 import { renderWithI18n } from "../../test/i18n";
 
 const mockCreateMember = vi.hoisted(() => vi.fn());
+const mockUpdateMe = vi.hoisted(() => vi.fn());
+const mockSetUser = vi.hoisted(() => vi.fn());
 // The URL the settings router holds; `setSearch` stands in for navigation.
 const url = vi.hoisted(() => {
   const listeners = new Set<() => void>();
@@ -57,10 +59,10 @@ vi.mock("@multica/core/paths", () => ({
 }));
 vi.mock("@multica/core/api", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/api")>()),
-  api: { createMember: mockCreateMember },
+  api: { createMember: mockCreateMember, updateMe: mockUpdateMe },
 }));
 vi.mock("@multica/core/auth", () => {
-  const state = { user: { id: "user-1" } };
+  const state = { user: { id: "user-1" }, setUser: mockSetUser };
   const useAuthStore = Object.assign(
     (selector?: (s: typeof state) => unknown) => (selector ? selector(state) : state),
     { getState: () => state },
@@ -68,6 +70,19 @@ vi.mock("@multica/core/auth", () => {
   return { useAuthStore };
 });
 vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => <span /> }));
+vi.mock("../../common/avatar-upload-control", () => ({
+  AvatarUploadControl: ({
+    name,
+    onUploaded,
+  }: {
+    name: string;
+    onUploaded: (url: string) => Promise<unknown>;
+  }) => (
+    <button type="button" onClick={() => void onUploaded("/uploads/new.png").catch(() => {})}>
+      change avatar of {name}
+    </button>
+  ),
+}));
 vi.mock("../../navigation", () => ({
   AppLink: ({ href, children, ...rest }: { href: string; children: ReactNode }) => (
     <a href={href} {...rest}>
@@ -141,6 +156,21 @@ describe("MembersTab", () => {
     expect(screen.getByRole("button", { name: "Actions for Grace Hopper" })).toBeInTheDocument();
     // Nobody manages their own membership from this list.
     expect(screen.queryByRole("button", { name: "Actions for Ada Lovelace" })).toBeNull();
+  });
+
+  it("lets you change only your own avatar from your row (DENE-2325)", async () => {
+    mockUpdateMe.mockResolvedValue({ id: "user-1", avatar_url: "/uploads/new.png" });
+    renderWithI18n(<MembersTab />);
+
+    expect(screen.getAllByRole("button", { name: /change avatar of/ })).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "change avatar of Ada Lovelace" }));
+
+    await waitFor(() =>
+      expect(mockUpdateMe).toHaveBeenCalledWith({ avatar_url: "/uploads/new.png" }),
+    );
+    await waitFor(() =>
+      expect(mockSetUser).toHaveBeenCalledWith({ id: "user-1", avatar_url: "/uploads/new.png" }),
+    );
   });
 
   it("filters members by name or email", () => {
