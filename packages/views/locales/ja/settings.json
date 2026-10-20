@@ -2223,9 +2223,11 @@
     "cancel": "キャンセル",
     "saved": "保存しました",
     "save_failed": "保存に失敗しました",
-    "magpie_title": "magpie",
-    "magpie_label": "magpie モード",
-    "magpie_description": "オフ：ルーティンググループがモデルを選び、エージェントはここで編集してアーカイブします。オン：課題ごとに magpie グループを選べ、エージェントページは magpie の読み取り専用ミラーになり、バックアップ後にエージェントを削除できます。"
+    "magpie_title": "Magpie",
+    "magpie_label": "Magpie に接続",
+    "magpie_state_on": "Magpie 接続中",
+    "magpie_state_off": "Magpie 未接続",
+    "magpie_description": "オン＝Magpie に接続：課題ごとに Magpie グループを選べ、エージェントページは Magpie の読み取り専用ミラーになり、バックアップ後にエージェントを削除できます。オフ＝Magpie 未接続：ルーティンググループがモデルを選び、エージェントはここで編集してアーカイブします。"
   },
   "bots": {
     "title": "External bots",

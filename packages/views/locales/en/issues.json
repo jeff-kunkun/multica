@@ -560,8 +560,8 @@
     "from_chat": "From chat",
     "from_chat_hidden": "From a chat you can't see",
     "magpie_group_default": "{{group}} (default)",
-    "magpie_group_save_failed": "Couldn't change the magpie group",
-    "prop_magpie_group": "magpie group"
+    "magpie_group_save_failed": "Couldn't change the Magpie group",
+    "prop_magpie_group": "Magpie group"
   },
   "timeline": {
     "loading": "Loading..."

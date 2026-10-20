@@ -65,7 +65,7 @@ func (h *Handler) GetWorkspaceMagpie(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) UpdateWorkspaceMagpie(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("X-Actor-Source") == "task_token" {
-		writeError(w, http.StatusForbidden, "agents cannot change the magpie mode; ask a workspace admin")
+		writeError(w, http.StatusForbidden, "agents cannot connect or disconnect Magpie; ask a workspace admin")
 		return
 	}
 	id, ok := parseUUIDOrBadRequest(w, workspaceIDFromURL(r, "id"), "workspace id")
@@ -95,7 +95,7 @@ func (h *Handler) UpdateWorkspaceMagpie(w http.ResponseWriter, r *http.Request) 
 	}
 	updated, err := h.Queries.UpdateWorkspace(r.Context(), db.UpdateWorkspaceParams{ID: id, Settings: raw})
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to update magpie mode")
+		writeError(w, http.StatusInternalServerError, "failed to update the Magpie connection")
 		return
 	}
 	h.publishWithSource(r.Context(), protocol.EventWorkspaceUpdated, uuidToString(updated.ID), "member", requestUserID(r), map[string]any{"workspace": h.workspaceToResponse(updated)})

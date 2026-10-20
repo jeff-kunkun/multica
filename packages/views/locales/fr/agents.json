@@ -1263,11 +1263,11 @@
     "current_work": "En cours"
   },
   "magpie": {
-    "unrouted": "Hors magpie",
+    "unrouted": "Contourne Magpie",
     "cli_models": "Modèles propres au CLI",
-    "edit_hint": "À modifier dans magpie",
-    "group_label": "Groupes magpie",
-    "save_failed": "Impossible de changer les groupes magpie",
+    "edit_hint": "À modifier dans Magpie",
+    "group_label": "Groupes Magpie",
+    "save_failed": "Impossible de changer les groupes Magpie",
     "default": "Par défaut",
     "make_default": "Définir par défaut"
   }

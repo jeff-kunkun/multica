@@ -1231,11 +1231,11 @@
     "current_work": "作業中の課題"
   },
   "magpie": {
-    "unrouted": "magpie 未接続",
+    "unrouted": "Magpie を経由しない",
     "cli_models": "CLI 標準のモデル",
-    "edit_hint": "magpie で変更",
-    "group_label": "magpie グループ",
-    "save_failed": "magpie グループを変更できませんでした",
+    "edit_hint": "Magpie で変更",
+    "group_label": "Magpie グループ",
+    "save_failed": "Magpie グループを変更できませんでした",
     "default": "既定",
     "make_default": "既定にする"
   }

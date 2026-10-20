@@ -2241,8 +2241,10 @@
     "saved": "Enregistré",
     "save_failed": "Échec de l'enregistrement",
     "magpie_title": "Magpie",
-    "magpie_label": "Mode magpie",
-    "magpie_description": "Désactivé : les groupes de routage choisissent le modèle, les agents se modifient ici et s'archivent. Activé : chaque ticket peut choisir un groupe magpie, la page des agents reflète magpie en lecture seule, et les agents peuvent être supprimés après sauvegarde."
+    "magpie_label": "Connecter à Magpie",
+    "magpie_state_on": "Connecté à Magpie",
+    "magpie_state_off": "Non connecté à Magpie",
+    "magpie_description": "Activé — connecté à Magpie : chaque ticket peut choisir un groupe Magpie, la page des agents reflète Magpie en lecture seule, et les agents peuvent être supprimés après sauvegarde. Désactivé — non connecté à Magpie : les groupes de routage choisissent le modèle, les agents se modifient ici et s'archivent."
   },
   "bots": {
     "title": "External bots",

@@ -83,7 +83,7 @@ func (h *Handler) DeleteAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !h.workspaceMagpieEnabledByID(r.Context(), agent.WorkspaceID) {
-		writeError(w, http.StatusConflict, "agents are deleted only in magpie mode; archive the agent instead")
+		writeError(w, http.StatusConflict, "agents are deleted only when the workspace is connected to Magpie; archive the agent instead")
 		return
 	}
 	if agent.Kind == "system" || (agent.SystemKey.Valid && agent.SystemKey.String != "") {

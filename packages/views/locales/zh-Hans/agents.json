@@ -1231,11 +1231,11 @@
     "current_work": "在做"
   },
   "magpie": {
-    "unrouted": "未接 magpie",
+    "unrouted": "不走 Magpie",
     "cli_models": "CLI 自带模型",
-    "edit_hint": "在 magpie 里修改",
-    "group_label": "magpie 组",
-    "save_failed": "magpie 组没改成",
+    "edit_hint": "在 Magpie 里修改",
+    "group_label": "Magpie 组",
+    "save_failed": "Magpie 组没改成",
     "default": "默认",
     "make_default": "设为默认"
   }

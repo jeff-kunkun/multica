@@ -173,12 +173,12 @@ describe("MagpieAgentsPage", () => {
     expect(within(routed).getByText("Sonnet 5.5")).toBeInTheDocument();
 
     const unrouted = row("Unrouted");
-    expect(within(unrouted).getByText("Not on magpie")).toBeInTheDocument();
+    expect(within(unrouted).getByText("Bypasses Magpie")).toBeInTheDocument();
     expect(within(unrouted).getByText("CLI's own models")).toBeInTheDocument();
 
     // No magpie on that machine: no route line at all.
     const plain = row("Plain");
-    expect(within(plain).queryByText("Not on magpie")).not.toBeInTheDocument();
+    expect(within(plain).queryByText("Bypasses Magpie")).not.toBeInTheDocument();
     expect(within(plain).queryByText("CLI's own models")).not.toBeInTheDocument();
   });
 

@@ -554,8 +554,8 @@
     "from_chat": "来自聊天",
     "from_chat_hidden": "来自一个你看不到的聊天",
     "magpie_group_default": "{{group}}（默认）",
-    "magpie_group_save_failed": "magpie 组没改成",
-    "prop_magpie_group": "magpie 组"
+    "magpie_group_save_failed": "Magpie 组没改成",
+    "prop_magpie_group": "Magpie 组"
   },
   "timeline": {
     "loading": "加载中…"

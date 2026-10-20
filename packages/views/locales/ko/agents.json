@@ -1231,11 +1231,11 @@
     "current_work": "작업 중"
   },
   "magpie": {
-    "unrouted": "magpie 미연결",
+    "unrouted": "Magpie 미경유",
     "cli_models": "CLI 기본 모델",
-    "edit_hint": "magpie에서 변경",
-    "group_label": "magpie 그룹",
-    "save_failed": "magpie 그룹을 바꾸지 못했습니다",
+    "edit_hint": "Magpie에서 변경",
+    "group_label": "Magpie 그룹",
+    "save_failed": "Magpie 그룹을 바꾸지 못했습니다",
     "default": "기본",
     "make_default": "기본으로 설정"
   }

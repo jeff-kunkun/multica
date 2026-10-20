@@ -2241,8 +2241,10 @@
     "saved": "Saved",
     "save_failed": "Failed to save",
     "magpie_title": "Magpie",
-    "magpie_label": "Magpie mode",
-    "magpie_description": "Off: routing groups pick the model, agents are edited here and archived. On: each issue can pick a magpie group, the agents page mirrors magpie read-only, and agents can be deleted after a backup."
+    "magpie_label": "Connect to Magpie",
+    "magpie_state_on": "Connected to Magpie",
+    "magpie_state_off": "Not connected to Magpie",
+    "magpie_description": "On — connected to Magpie: each issue can pick a Magpie group, the agents page mirrors Magpie read-only, and agents can be deleted after a backup. Off — not connected to Magpie: routing groups pick the model, agents are edited here and archived."
   },
   "bots": {
     "title": "External bots",

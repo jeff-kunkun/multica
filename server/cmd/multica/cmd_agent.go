@@ -88,7 +88,7 @@ var agentRestoreCmd = &cobra.Command{
 
 var agentDeleteCmd = &cobra.Command{
 	Use:   "delete <id>",
-	Short: "Delete an agent for good, after backing up its full configuration (magpie mode only; agent owner or workspace owner)",
+	Short: "Delete an agent for good, after backing up its full configuration (only when the workspace is connected to Magpie; agent owner or workspace owner)",
 	Args:  exactArgs(1),
 	RunE:  runAgentDelete,
 }

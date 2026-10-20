@@ -23,16 +23,18 @@ beforeEach(() => vi.clearAllMocks());
 describe("MagpieModeSection", () => {
   it("is off for a workspace without the setting, and turns it on", async () => {
     renderWithI18n(<MagpieModeSection workspace={workspace({})} canManage />);
-    const toggle = screen.getByRole("switch", { name: "Magpie mode" });
+    const toggle = screen.getByRole("switch", { name: "Connect to Magpie" });
     expect(toggle).not.toBeChecked();
+    expect(screen.getByTestId("magpie-state")).toHaveTextContent("Not connected to Magpie");
     await userEvent.click(toggle);
     expect(mocks.mutate).toHaveBeenCalledWith(true, expect.anything());
   });
 
   it("shows the stored state and is read-only for non-admins", () => {
     renderWithI18n(<MagpieModeSection workspace={workspace({ magpie: { enabled: true } })} canManage={false} />);
-    const toggle = screen.getByRole("switch", { name: "Magpie mode" });
+    const toggle = screen.getByRole("switch", { name: "Connect to Magpie" });
     expect(toggle).toBeChecked();
+    expect(screen.getByTestId("magpie-state")).toHaveTextContent("Connected to Magpie");
     expect(toggle).toHaveAttribute("aria-disabled", "true");
   });
 });
