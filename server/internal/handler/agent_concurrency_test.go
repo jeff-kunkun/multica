@@ -74,7 +74,7 @@ func TestUpdateAgent_MaxConcurrentTasksBoundsAndOmission(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	agentID := createHandlerTestAgent(t, "concurrency-update", nil)
+	agentID := createHandlerTestAgent(t, "concurrency-update")
 	if _, err := testPool.Exec(context.Background(),
 		`UPDATE agent SET max_concurrent_tasks = 17 WHERE id = $1`, agentID,
 	); err != nil {

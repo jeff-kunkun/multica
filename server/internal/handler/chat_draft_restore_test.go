@@ -74,7 +74,7 @@ func seedDetachedChatAttachment(t *testing.T, sessionID string) string {
 // creator whose client missed the event fetches the pending restore, gets the
 // prompt content plus re-bindable attachments, and consumes it idempotently.
 func TestChatDraftRestores_CreatorFetchesAndConsumes(t *testing.T) {
-	agentID := createHandlerTestAgent(t, "DraftRestoreAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "DraftRestoreAgent")
 	sessionID := createHandlerTestChatSession(t, agentID)
 	attachmentID := seedDetachedChatAttachment(t, sessionID)
 	restoreID := seedDraftRestore(t, sessionID, "run the thing", []string{attachmentID})
@@ -135,7 +135,7 @@ func TestChatDraftRestores_CreatorFetchesAndConsumes(t *testing.T) {
 // Draft restores hold the creator's private prompt: another workspace member
 // must not be able to read or consume them.
 func TestChatDraftRestores_NonCreatorForbidden(t *testing.T) {
-	agentID := createHandlerTestAgent(t, "DraftRestoreOtherAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "DraftRestoreOtherAgent")
 	sessionID := createHandlerTestChatSession(t, agentID)
 	restoreID := seedDraftRestore(t, sessionID, "secret prompt", nil)
 
@@ -188,7 +188,7 @@ func TestChatDraftRestores_NonCreatorForbidden(t *testing.T) {
 // chat_draft_restore has no chat_session FK (MUL-3515), so nothing but
 // DeleteChatSession's own transaction prunes an unconsumed restore.
 func TestDeleteChatSession_PrunesDraftRestores(t *testing.T) {
-	agentID := createHandlerTestAgent(t, "DraftRestorePruneAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "DraftRestorePruneAgent")
 	sessionID := createHandlerTestChatSession(t, agentID)
 	seedDraftRestore(t, sessionID, "unconsumed prompt", nil)
 

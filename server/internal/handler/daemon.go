@@ -2161,32 +2161,6 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			slog.Warn("failed to unmarshal agent custom_args", "agent_id", uuidToString(agent.ID), "error", err)
 		}
 	}
-	var mcpConfig json.RawMessage
-	if agent.McpConfig != nil {
-		mcpConfig = json.RawMessage(agent.McpConfig)
-	}
-	// Fold in the workspace MCP servers this agent has been explicitly
-	// given (GH #6062). Only bound AND enabled servers are read, so a
-	// workspace library entry nobody added reaches nothing. Read on every
-	// claim, exactly like the agent column, so an admin's edit or a toggle
-	// lands on the agent's next task with nothing to restart. Errors —
-	// including a failed read — leave the agent config untouched: a broken
-	// shared entry must never take away servers the agent runs with today.
-	if bound, err := h.Queries.ListEnabledAgentMcpServers(r.Context(), agent.ID); err != nil {
-		slog.Warn("daemon claim: load agent mcp servers failed; using agent mcp_config",
-			"task_id", uuidToString(task.ID), "agent_id", uuidToString(agent.ID), "error", err)
-	} else if len(bound) > 0 {
-		bindings := make([]WorkspaceMcpBinding, 0, len(bound))
-		for _, server := range bound {
-			bindings = append(bindings, WorkspaceMcpBinding{Name: server.Name, Config: json.RawMessage(server.Config)})
-		}
-		if resolved, err := ResolveAgentMcpConfig(bindings, mcpConfig); err != nil {
-			slog.Warn("daemon claim: resolve agent mcp servers failed; falling back to agent mcp_config",
-				"task_id", uuidToString(task.ID), "agent_id", uuidToString(agent.ID), "error", err)
-		} else {
-			mcpConfig = resolved
-		}
-	}
 	// runtime_config is stored as JSONB and may legitimately be the
 	// empty object `{}` for agents that haven't opted into any
 	// provider-specific tuning. Forward only non-empty payloads so the
@@ -2201,7 +2175,6 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		Instructions:  agent.Instructions,
 		CustomEnv:     customEnv,
 		CustomArgs:    customArgs,
-		McpConfig:     mcpConfig,
 		RuntimeConfig: runtimeConfig,
 	}
 	if !claimResponseAgentIdentityMatches(resp) {

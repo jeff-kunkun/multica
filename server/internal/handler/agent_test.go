@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -36,10 +35,10 @@ func TestListWorkspaceAgentTaskSnapshot(t *testing.T) {
 
 	ctx := context.Background()
 	// Four agents so we can verify per-agent semantics independently.
-	agentA := createHandlerTestAgent(t, "snapshot-agent-a", []byte(`{}`))
-	agentB := createHandlerTestAgent(t, "snapshot-agent-b", []byte(`{}`))
-	agentC := createHandlerTestAgent(t, "snapshot-agent-c", []byte(`{}`))
-	agentD := createHandlerTestAgent(t, "snapshot-agent-d", []byte(`{}`))
+	agentA := createHandlerTestAgent(t, "snapshot-agent-a")
+	agentB := createHandlerTestAgent(t, "snapshot-agent-b")
+	agentC := createHandlerTestAgent(t, "snapshot-agent-c")
+	agentD := createHandlerTestAgent(t, "snapshot-agent-d")
 
 	type taskFixture struct {
 		agentID     string
@@ -186,8 +185,8 @@ func TestListWorkspaceWorkingAgents(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	workingAgentID := createHandlerTestAgent(t, "working-agents-running", []byte(`{}`))
-	queuedAgentID := createHandlerTestAgent(t, "working-agents-queued", []byte(`{}`))
+	workingAgentID := createHandlerTestAgent(t, "working-agents-running")
+	queuedAgentID := createHandlerTestAgent(t, "working-agents-queued")
 
 	// An agent owned by someone else authors the fixture issues so they do
 	// not accidentally satisfy the "created by me" relation.
@@ -471,8 +470,8 @@ func TestListWorkspaceWorkingAgentsParentScope(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	childAgentID := createHandlerTestAgent(t, "working-agents-parent-child", []byte(`{}`))
-	siblingAgentID := createHandlerTestAgent(t, "working-agents-parent-sibling", []byte(`{}`))
+	childAgentID := createHandlerTestAgent(t, "working-agents-parent-child")
+	siblingAgentID := createHandlerTestAgent(t, "working-agents-parent-sibling")
 
 	insertedIssueIDs := make([]string, 0, 4)
 	insertIssue := func(title string, parentIssueID any) string {
@@ -664,7 +663,7 @@ func TestUpdateAgent_RejectsRenameToArchivedName(t *testing.T) {
 
 	// Agent A holds the name, then is archived — the name stays reserved.
 	const heldName = "rename-collision-archived-name"
-	idA := createHandlerTestAgent(t, heldName, nil)
+	idA := createHandlerTestAgent(t, heldName)
 	archiveReq := withURLParam(newRequest(http.MethodPost, "/api/agents/"+idA+"/archive", nil), "id", idA)
 	archiveW := httptest.NewRecorder()
 	testHandler.ArchiveAgent(archiveW, archiveReq)
@@ -673,7 +672,7 @@ func TestUpdateAgent_RejectsRenameToArchivedName(t *testing.T) {
 	}
 
 	// Agent B renames itself into the archived agent's name.
-	idB := createHandlerTestAgent(t, "rename-collision-source", nil)
+	idB := createHandlerTestAgent(t, "rename-collision-source")
 	w := httptest.NewRecorder()
 	testHandler.UpdateAgent(w, withURLParam(
 		newRequest(http.MethodPatch, "/api/agents/"+idB, map[string]any{"name": heldName}), "id", idB))
@@ -750,29 +749,6 @@ func TestCreateAgent_AssignsAvatarDefault(t *testing.T) {
 	}
 }
 
-func TestWorkspaceAlwaysRedactSecrets(t *testing.T) {
-	tests := []struct {
-		name     string
-		settings []byte
-		want     bool
-	}{
-		{"nil settings", nil, false},
-		{"empty settings", []byte(`{}`), false},
-		{"false", []byte(`{"always_redact_env": false}`), false},
-		{"true", []byte(`{"always_redact_env": true}`), true},
-		{"invalid json", []byte(`not json`), false},
-		{"other fields only", []byte(`{"theme": "dark"}`), false},
-		{"true among other fields", []byte(`{"theme": "dark", "always_redact_env": true}`), true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := workspaceAlwaysRedactSecrets(tt.settings); got != tt.want {
-				t.Errorf("workspaceAlwaysRedactSecrets(%q) = %v, want %v", tt.settings, got, tt.want)
-			}
-		})
-	}
-}
-
 // rawJSONResponse decodes the raw map so we can assert the literal
 // JSON shape — `custom_env` MUST be absent from the wire output, not
 // merely empty, otherwise a future caller decoding into a wider struct
@@ -796,7 +772,7 @@ func TestGetAgent_ResponseHasNoCustomEnv(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	agentID := createHandlerTestAgent(t, "noenv-get-agent", nil)
+	agentID := createHandlerTestAgent(t, "noenv-get-agent")
 	if _, err := testPool.Exec(ctx, `UPDATE agent SET custom_env = '{"SECRET_KEY": "super-secret"}' WHERE id = $1`, agentID); err != nil {
 		t.Fatalf("failed to set custom_env: %v", err)
 	}
@@ -848,7 +824,7 @@ func TestListAgents_ResponseHasNoCustomEnv(t *testing.T) {
 	ctx := context.Background()
 
 	agentName := "noenv-list-agent"
-	agentID := createHandlerTestAgent(t, agentName, nil)
+	agentID := createHandlerTestAgent(t, agentName)
 	if _, err := testPool.Exec(ctx, `UPDATE agent SET custom_env = '{"SECRET_KEY": "super-secret", "OTHER": "y"}' WHERE id = $1`, agentID); err != nil {
 		t.Fatalf("failed to set custom_env: %v", err)
 	}
@@ -896,7 +872,7 @@ func TestGetAgentEnv_OwnerSucceedsAndAudits(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	agentID := createHandlerTestAgent(t, "env-reveal-owner-agent", nil)
+	agentID := createHandlerTestAgent(t, "env-reveal-owner-agent")
 	if _, err := testPool.Exec(ctx, `UPDATE agent SET custom_env = '{"KEY_ONE": "v1", "KEY_TWO": "v2"}' WHERE id = $1`, agentID); err != nil {
 		t.Fatalf("failed to set custom_env: %v", err)
 	}
@@ -950,7 +926,7 @@ func TestAgentEnv_AgentActorRejected(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	targetID := createHandlerTestAgent(t, "env-target-agent", nil)
+	targetID := createHandlerTestAgent(t, "env-target-agent")
 	if _, err := testPool.Exec(context.Background(), `UPDATE agent SET custom_env = '{"K":"v"}' WHERE id = $1`, targetID); err != nil {
 		t.Fatalf("failed to set custom_env: %v", err)
 	}
@@ -959,7 +935,7 @@ func TestAgentEnv_AgentActorRejected(t *testing.T) {
 	// X-Task-ID header pair resolveActor checks. The owning member of
 	// the host agent is the same testUserID (workspace owner), which is
 	// the exact lateral-movement shape we want to block.
-	hostAgentID := createHandlerTestAgent(t, "env-host-agent", nil)
+	hostAgentID := createHandlerTestAgent(t, "env-host-agent")
 	hostTaskID := createHandlerTestTaskForAgent(t, hostAgentID)
 
 	cases := []struct {
@@ -1002,7 +978,7 @@ func TestAgentEnv_TaskTokenActorSource(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	targetID := createHandlerTestAgent(t, "env-tt-target-agent", nil)
+	targetID := createHandlerTestAgent(t, "env-tt-target-agent")
 	if _, err := testPool.Exec(context.Background(), `UPDATE agent SET custom_env = '{"K":"v"}' WHERE id = $1`, targetID); err != nil {
 		t.Fatalf("failed to set custom_env: %v", err)
 	}
@@ -1034,7 +1010,7 @@ func TestUpdateAgentEnv_PreservesSentinelValues(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	agentID := createHandlerTestAgent(t, "env-sentinel-agent", nil)
+	agentID := createHandlerTestAgent(t, "env-sentinel-agent")
 	if _, err := testPool.Exec(ctx, `UPDATE agent SET custom_env = '{"KEEP_ME":"real-secret","ALSO":"another-secret"}' WHERE id = $1`, agentID); err != nil {
 		t.Fatalf("failed to seed custom_env: %v", err)
 	}
@@ -1122,7 +1098,7 @@ func TestUpdateAgent_RejectsCustomEnvInBody(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	agentID := createHandlerTestAgent(t, "update-no-env-agent", nil)
+	agentID := createHandlerTestAgent(t, "update-no-env-agent")
 	if _, err := testPool.Exec(ctx, `UPDATE agent SET custom_env = '{"PRE":"existing"}' WHERE id = $1`, agentID); err != nil {
 		t.Fatalf("failed to seed custom_env: %v", err)
 	}
@@ -1224,95 +1200,6 @@ func TestMergeAgentEnv_PureFunction(t *testing.T) {
 				t.Errorf("audit: got %+v, want %+v", audit, tc.audit)
 			}
 		})
-	}
-}
-
-// TestUpdateAgent_RedactsMcpConfigForAgentActor closes the second leg
-// of MUL-2600 review #2: an agent process with a task token (or with
-// the X-Actor-Source server marker) must not be able to scrape another
-// agent's mcp_config via an unrelated mutation response. Even when the
-// host PAT would otherwise satisfy canManageAgent, the response body
-// must come back with mcp_config redacted.
-func TestUpdateAgent_RedactsMcpConfigForAgentActor(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-
-	// The target agent has a populated mcp_config that historically would
-	// be leaked back via the UpdateAgent / ArchiveAgent / RestoreAgent
-	// HTTP response.
-	target := createHandlerTestAgent(t, "mut-mcp-target", []byte(`{"server":"secret-config"}`))
-
-	// A second agent acts as the "calling" agent process whose task
-	// token authenticated the request. It is registered in the same
-	// workspace so resolveActor recognises X-Agent-ID as valid.
-	caller := createHandlerTestAgent(t, "mut-mcp-caller", nil)
-	taskID := insertHandlerTestTask(t, caller)
-
-	desc := "trivial mutation that should NOT leak target mcp_config"
-	req := newRequest(http.MethodPut, "/api/agents/"+target, map[string]any{
-		"description": desc,
-	})
-	req = withURLParam(req, "id", target)
-	// Simulate a task-token-authenticated agent request. The auth
-	// middleware would normally set these; we mimic both the modern
-	// path (X-Actor-Source) and the legacy header pair so the test is
-	// resilient to either resolveActor branch.
-	req.Header.Set("X-Actor-Source", "task_token")
-	req.Header.Set("X-Agent-ID", caller)
-	req.Header.Set("X-Task-ID", taskID)
-	w := httptest.NewRecorder()
-	testHandler.UpdateAgent(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("UpdateAgent: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-
-	var resp AgentResponse
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	// The response contract keeps `mcp_config` always-present so clients
-	// can distinguish "no config" vs "redacted" via the companion flag.
-	// `json.RawMessage` of a JSON null decodes to the literal bytes
-	// `null`, not Go nil — so check for "no secret-bearing content"
-	// rather than `!= nil`.
-	if len(resp.McpConfig) > 0 && !bytes.Equal(bytes.TrimSpace(resp.McpConfig), []byte("null")) {
-		t.Errorf("UpdateAgent response leaked mcp_config to agent actor: %s", string(resp.McpConfig))
-	}
-	if !resp.McpConfigRedacted {
-		t.Errorf("UpdateAgent response should set mcp_config_redacted=true for agent actor")
-	}
-}
-
-// TestUpdateAgent_KeepsMcpConfigForMemberActor is the matching positive
-// test — a normal member request (owner/admin) still receives the full
-// mcp_config in the mutation response, so the redaction does not
-// accidentally regress the legitimate Web admin flow.
-func TestUpdateAgent_KeepsMcpConfigForMemberActor(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-
-	target := createHandlerTestAgent(t, "mut-mcp-member", []byte(`{"server":"member-visible"}`))
-
-	req := newRequest(http.MethodPut, "/api/agents/"+target, map[string]any{
-		"description": "owner-visible mutation",
-	})
-	req = withURLParam(req, "id", target)
-	w := httptest.NewRecorder()
-	testHandler.UpdateAgent(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("UpdateAgent: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-	var resp AgentResponse
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if resp.McpConfig == nil {
-		t.Errorf("UpdateAgent response should keep mcp_config for member actor; got nil")
-	}
-	if resp.McpConfigRedacted {
-		t.Errorf("UpdateAgent response should NOT mark mcp_config redacted for member actor")
 	}
 }
 

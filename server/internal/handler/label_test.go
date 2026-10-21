@@ -528,7 +528,7 @@ func TestLabelResourceTypesHaveIndependentNamespaces(t *testing.T) {
 }
 
 func TestDeleteResourceLabelCleansAssignments(t *testing.T) {
-	agentID := createHandlerTestAgent(t, "Resource Label Cleanup", nil)
+	agentID := createHandlerTestAgent(t, "Resource Label Cleanup")
 
 	create := func(resourceType string) LabelResponse {
 		t.Helper()

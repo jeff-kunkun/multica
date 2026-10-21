@@ -34,7 +34,7 @@ func withChatTestWorkspaceCtx(t *testing.T, req *http.Request) *http.Request {
 }
 
 func TestSendChatMessage_ReportsPositionInsteadOfQueuedStatus(t *testing.T) {
-	agentID := createHandlerTestAgent(t, "ChatSendQueuePositionAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "ChatSendQueuePositionAgent")
 	sessionID := createHandlerTestChatSession(t, agentID)
 
 	send := func(content string) SendChatMessageResponse {
@@ -70,7 +70,7 @@ func TestSendChatMessage_DeferredPredecessorStaysHeadAcrossPromotion(t *testing.
 	}
 
 	ctx := context.Background()
-	agentID := createHandlerTestAgent(t, "ChatSendDeferredPositionAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "ChatSendDeferredPositionAgent")
 	sessionID := createHandlerTestChatSession(t, agentID)
 	send := func(content string) SendChatMessageResponse {
 		t.Helper()
@@ -139,7 +139,7 @@ func TestSendChatMessage_LinksAttachments(t *testing.T) {
 	testHandler.Storage = &mockStorage{}
 	defer func() { testHandler.Storage = origStorage }()
 
-	agentID := createHandlerTestAgent(t, "ChatSendAttachAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "ChatSendAttachAgent")
 	sessionID := createHandlerTestChatSession(t, agentID)
 
 	// 1. Upload a file against the chat session.
@@ -228,7 +228,7 @@ func TestSendChatMessage_LinksAttachments(t *testing.T) {
 // without the handler's preflight a stale client would leave an orphan user
 // message with no task or reply.
 func TestSendChatMessage_ArchivedAgent(t *testing.T) {
-	agentID := createHandlerTestAgent(t, "ChatArchivedAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "ChatArchivedAgent")
 	sessionID := createHandlerTestChatSession(t, agentID)
 
 	// Archive the agent out from under the (stale) client.
@@ -274,7 +274,7 @@ func TestSendChatMessage_LinksUnattachedAttachments(t *testing.T) {
 	testHandler.Storage = &mockStorage{}
 	defer func() { testHandler.Storage = origStorage }()
 
-	agentID := createHandlerTestAgent(t, "ChatSendUnattachedAttachAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "ChatSendUnattachedAttachAgent")
 	sessionID := createHandlerTestChatSession(t, agentID)
 
 	var body bytes.Buffer
@@ -344,7 +344,7 @@ func TestSendChatMessage_LinksUnattachedAttachments(t *testing.T) {
 // TestUpdateChatSession_RenamesTitle confirms PATCH writes the new title,
 // returns the updated row, and the server-side row reflects it.
 func TestUpdateChatSession_RenamesTitle(t *testing.T) {
-	agentID := createHandlerTestAgent(t, "ChatRenameAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "ChatRenameAgent")
 	sessionID := createHandlerTestChatSession(t, agentID)
 
 	req := newRequest("PATCH", "/api/chat/sessions/"+sessionID, map[string]any{
@@ -383,7 +383,7 @@ func TestUpdateChatSession_RenamesTitle(t *testing.T) {
 // pin and clears it on unpin, returns the new state, and does not bump
 // updated_at (pinning is a list-ordering preference, not activity).
 func TestSetChatSessionPinned_TogglesPin(t *testing.T) {
-	agentID := createHandlerTestAgent(t, "ChatPinAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "ChatPinAgent")
 	sessionID := createHandlerTestChatSession(t, agentID)
 
 	var updatedBefore time.Time
@@ -453,7 +453,7 @@ func TestSetChatSessionPinned_TogglesPin(t *testing.T) {
 // asserting the response + DB status column flip and that updated_at is bumped
 // (so the row re-sorts in whichever list it lands).
 func TestSetChatSessionArchived_TogglesStatus(t *testing.T) {
-	agentID := createHandlerTestAgent(t, "ChatArchiveAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "ChatArchiveAgent")
 	sessionID := createHandlerTestChatSession(t, agentID)
 
 	archive := func(archived bool) ChatSessionResponse {
@@ -506,7 +506,7 @@ func TestSetChatSessionArchived_TogglesStatus(t *testing.T) {
 // TestUpdateChatSession_RejectsBlank refuses an empty/whitespace title with 400.
 // (Untitled is a render-side fallback, not a stored value.)
 func TestUpdateChatSession_RejectsBlank(t *testing.T) {
-	agentID := createHandlerTestAgent(t, "ChatRenameBlankAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "ChatRenameBlankAgent")
 	sessionID := createHandlerTestChatSession(t, agentID)
 
 	req := newRequest("PATCH", "/api/chat/sessions/"+sessionID, map[string]any{
@@ -524,7 +524,7 @@ func TestUpdateChatSession_RejectsBlank(t *testing.T) {
 // TestSendChatMessage_InvalidAttachmentIDs rejects malformed UUIDs in
 // attachment_ids with 400 before any side effects (no message row created).
 func TestSendChatMessage_InvalidAttachmentIDs(t *testing.T) {
-	agentID := createHandlerTestAgent(t, "ChatBadAttachAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "ChatBadAttachAgent")
 	sessionID := createHandlerTestChatSession(t, agentID)
 
 	req := newRequest("POST", "/api/chat-sessions/"+sessionID+"/messages", map[string]any{
@@ -576,7 +576,7 @@ func fetchChatMessagesPageForTest(t *testing.T, sessionID string, params url.Val
 }
 
 func TestListChatMessagesPage_UsesCursorWithoutChangingLegacyList(t *testing.T) {
-	agentID := createHandlerTestAgent(t, "ChatCursorPaginationAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "ChatCursorPaginationAgent")
 	sessionID := createHandlerTestChatSession(t, agentID)
 
 	for i, content := range []string{"oldest", "middle", "newest"} {
@@ -632,7 +632,7 @@ func TestListChatMessagesPage_UsesCursorWithoutChangingLegacyList(t *testing.T) 
 }
 
 func TestListChatMessagesPage_CursorTieBreaksSameTimestampWithoutDupesOrGaps(t *testing.T) {
-	agentID := createHandlerTestAgent(t, "ChatCursorTieBreakAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "ChatCursorTieBreakAgent")
 	sessionID := createHandlerTestChatSession(t, agentID)
 
 	contents := []string{"a", "b", "c", "d", "e"}
@@ -698,7 +698,7 @@ func TestListChatMessagesPage_CursorTieBreaksSameTimestampWithoutDupesOrGaps(t *
 }
 
 func TestListChatMessagesPage_RejectsInvalidLimit(t *testing.T) {
-	agentID := createHandlerTestAgent(t, "ChatPaginationBadLimitAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "ChatPaginationBadLimitAgent")
 	sessionID := createHandlerTestChatSession(t, agentID)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/chat/sessions/"+sessionID+"/messages/page?limit=0", nil)
@@ -719,7 +719,7 @@ func TestListChatMessagesPage_RejectsInvalidLimit(t *testing.T) {
 // header). Because archiving deliberately does NOT advance last_read_at,
 // unarchiving must restore the session's true unread count.
 func TestListChatSessions_ArchivedSessionReportsZeroUnread(t *testing.T) {
-	agentID := createHandlerTestAgent(t, "ChatArchivedUnreadAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "ChatArchivedUnreadAgent")
 	sessionID := createHandlerTestChatSession(t, agentID)
 	ctx := context.Background()
 

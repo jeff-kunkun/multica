@@ -148,7 +148,7 @@ func TestListTasksByIssueHydratesAttribution(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	agentID := createHandlerTestAgent(t, "AttributionListAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "AttributionListAgent")
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `

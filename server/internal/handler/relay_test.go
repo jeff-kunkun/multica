@@ -35,8 +35,8 @@ func TestRelay(t *testing.T) {
 	t.Cleanup(func() {
 		testPool.Exec(ctx, `DELETE FROM workspace_bot WHERE workspace_id = $1 AND name = 'relay-test'`, testWorkspaceID)
 	})
-	agentA := createHandlerTestAgent(t, "RelayA", []byte("[]"))
-	agentB := createHandlerTestAgent(t, "RelayB", []byte("[]"))
+	agentA := createHandlerTestAgent(t, "RelayA")
+	agentB := createHandlerTestAgent(t, "RelayB")
 	issueID := createCommentTriggerPreviewIssue(t, "relay issue", "agent", agentA)
 	if _, err := testPool.Exec(ctx, `UPDATE issue SET description = $2 WHERE id = $1`, issueID,
 		"做完后交棒\n完成后 [@RelayB](mention://agent/"+agentB+")"); err != nil {

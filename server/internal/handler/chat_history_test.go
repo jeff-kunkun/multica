@@ -29,7 +29,7 @@ func insertChatMessageRole(t *testing.T, sessionID, role, content string, create
 // returns the task id. With chatSession=false it inserts a non-chat task.
 func newChatHistoryTask(t *testing.T, chatSession bool) string {
 	t.Helper()
-	agentID := createHandlerTestAgent(t, "ChatHistoryAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "ChatHistoryAgent")
 	runtimeID := handlerTestRuntimeID(t)
 	var sessionArg any
 	if chatSession {
@@ -53,7 +53,7 @@ func newChatHistoryTask(t *testing.T, chatSession bool) string {
 // session and returns the task id.
 func newChatHistoryTaskForSession(t *testing.T, sessionID string) string {
 	t.Helper()
-	agentID := createHandlerTestAgent(t, "ChatHistorySessionAgent-"+uuid.NewString(), []byte("[]"))
+	agentID := createHandlerTestAgent(t, "ChatHistorySessionAgent-"+uuid.NewString())
 	runtimeID := handlerTestRuntimeID(t)
 	var taskID string
 	if err := testPool.QueryRow(context.Background(), `
@@ -106,7 +106,7 @@ func TestGetChatHistory_ReadsStoredTranscript(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("requires test database")
 	}
-	agentID := createHandlerTestAgent(t, "ChatHistoryTranscriptAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "ChatHistoryTranscriptAgent")
 	sessionID := createHandlerTestChatSession(t, agentID)
 	taskID := newChatHistoryTaskForSession(t, sessionID)
 
@@ -149,7 +149,7 @@ func TestGetChatHistory_TranscriptPagesWithoutDuplicatesOrGaps(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("requires test database")
 	}
-	agentID := createHandlerTestAgent(t, "ChatHistoryPagingAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "ChatHistoryPagingAgent")
 	sessionID := createHandlerTestChatSession(t, agentID)
 	taskID := newChatHistoryTaskForSession(t, sessionID)
 

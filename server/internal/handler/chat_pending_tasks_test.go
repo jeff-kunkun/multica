@@ -147,7 +147,7 @@ func TestGetPendingChatTask_ReturnsActiveHeadAndFIFOQueue(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	agentID := createHandlerTestAgent(t, "PendingSessionQueueAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "PendingSessionQueueAgent")
 	sessionID := createHandlerTestChatSession(t, agentID)
 	activeID := insertPendingChatTask(t, agentID, sessionID, "running")
 	nextID := insertPendingChatTask(t, agentID, sessionID, "queued")
@@ -342,7 +342,7 @@ func TestListChatMessagesPage_QueuedFollowUpsDoNotConsumeLimit(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	agentID := createHandlerTestAgent(t, "QueuedPageBudgetAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "QueuedPageBudgetAgent")
 	sessionID := createHandlerTestChatSession(t, agentID)
 	settledID := insertPendingChatTask(t, agentID, sessionID, "completed")
 	if _, err := testPool.Exec(ctx, `
@@ -409,7 +409,7 @@ func TestPendingQueueHeadMatchesClaimForEqualCreatedAt(t *testing.T) {
 		t.Skip("database not available")
 	}
 	ctx := context.Background()
-	agentID := createHandlerTestAgent(t, "Pending Equal Timestamp Agent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "Pending Equal Timestamp Agent")
 	sessionID := createHandlerTestChatSession(t, agentID)
 
 	lowID := uuid.New()
@@ -452,7 +452,7 @@ func TestPrioritizeQueuedChatTask_StaleTargetPreservesExistingPriority(t *testin
 		t.Skip("database not available")
 	}
 
-	agentID := createHandlerTestAgent(t, "StalePrioritizeQueueAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "StalePrioritizeQueueAgent")
 	sessionID := createHandlerTestChatSession(t, agentID)
 	existingID := insertPendingChatTask(t, agentID, sessionID, "queued")
 	staleID := insertPendingChatTask(t, agentID, sessionID, "completed")
@@ -508,7 +508,7 @@ func TestPrioritizeQueuedChatTask_RejectsWhileVisibleHeadIsUnclaimed(t *testing.
 	}
 
 	ctx := context.Background()
-	agentID := createHandlerTestAgent(t, "UnclaimedPrioritizeQueueAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "UnclaimedPrioritizeQueueAgent")
 	sessionID := createHandlerTestChatSession(t, agentID)
 	headID := insertPendingChatTask(t, agentID, sessionID, "queued")
 	targetID := insertPendingChatTask(t, agentID, sessionID, "queued")
@@ -559,7 +559,7 @@ func TestPrioritizeQueuedChatTask_BroadcastsQueueInvalidation(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	agentID := createHandlerTestAgent(t, "PrioritizeQueueBroadcastAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "PrioritizeQueueBroadcastAgent")
 	sessionID := createHandlerTestChatSession(t, agentID)
 	insertPendingChatTask(t, agentID, sessionID, "running")
 	taskID := insertPendingChatTask(t, agentID, sessionID, "queued")
@@ -603,7 +603,7 @@ func TestClearQueuedChatTasks_PreservesUnclaimedHeadAndDeletesFollowUps(t *testi
 		t.Skip("database not available")
 	}
 
-	agentID := createHandlerTestAgent(t, "ClearPendingQueueAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "ClearPendingQueueAgent")
 	sessionID := createHandlerTestChatSession(t, agentID)
 	var taskIDs, messageIDs, attachmentIDs []string
 	for _, content := range []string{"queued prompt A", "queued prompt B"} {
@@ -683,7 +683,7 @@ func TestListPendingChatTasks_HidesPrivateAgentFromLostAccessCreator(t *testing.
 	}
 
 	privateAgentID, _, memberID := privateAgentTestFixture(t)
-	publicAgentID := createHandlerTestAgent(t, "PendingPublicAgent", []byte("[]"))
+	publicAgentID := createHandlerTestAgent(t, "PendingPublicAgent")
 
 	// The plain member is the creator of BOTH sessions, so the creator_id
 	// filter admits both; only the private-agent gate should drop one.
@@ -730,7 +730,7 @@ func TestPendingChatTaskAggregatesIncludeDeferredRetry(t *testing.T) {
 	}
 
 	_, _, memberID := privateAgentTestFixture(t)
-	publicAgentID := createHandlerTestAgent(t, "PendingDeferredAggregateAgent", []byte("[]"))
+	publicAgentID := createHandlerTestAgent(t, "PendingDeferredAggregateAgent")
 	sessionID := insertChatSessionAs(t, publicAgentID, memberID)
 	taskID := insertPendingChatTask(t, publicAgentID, sessionID, "deferred")
 
@@ -786,7 +786,7 @@ func TestHasPendingChatTasks_TrueWhenAccessiblePublicAgent(t *testing.T) {
 	}
 
 	privateAgentID, _, memberID := privateAgentTestFixture(t)
-	publicAgentID := createHandlerTestAgent(t, "PendingPublicAgentHasAny", []byte("[]"))
+	publicAgentID := createHandlerTestAgent(t, "PendingPublicAgentHasAny")
 
 	privateSession := insertChatSessionAs(t, privateAgentID, memberID)
 	publicSession := insertChatSessionAs(t, publicAgentID, memberID)
@@ -829,7 +829,7 @@ func TestHasPendingChatTasks_IgnoresTerminalTasks(t *testing.T) {
 	// creator so no stray in-flight task from another test can bleed into the
 	// assertion — this user exists only for the duration of this test.
 	_, _, memberID := privateAgentTestFixture(t)
-	publicAgentID := createHandlerTestAgent(t, "PendingTerminalAgent", []byte("[]"))
+	publicAgentID := createHandlerTestAgent(t, "PendingTerminalAgent")
 	session := insertChatSessionAs(t, publicAgentID, memberID)
 	insertPendingChatTask(t, publicAgentID, session, "completed")
 
@@ -853,7 +853,7 @@ func TestHasPendingChatTasks_HidesOtherCreatorsTask(t *testing.T) {
 	// ownerID = user A (task creator), memberID = user B (different member).
 	// Both are plain workspace members who can access a workspace-visible agent.
 	_, creatorA, otherB := privateAgentTestFixture(t)
-	publicAgentID := createHandlerTestAgent(t, "PendingCrossCreatorAgent", []byte("[]"))
+	publicAgentID := createHandlerTestAgent(t, "PendingCrossCreatorAgent")
 	session := insertChatSessionAs(t, publicAgentID, creatorA)
 	insertPendingChatTask(t, publicAgentID, session, "running")
 

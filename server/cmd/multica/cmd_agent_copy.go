@@ -32,9 +32,9 @@ Copied by default, each overridable with the matching flag: name (suffixed
 " (copy)"), description, instructions, avatar, custom_args, max_concurrent_tasks
 and invocation permission (permission_mode + allow-list).
 
-Secret and machine-local fields are never copied: custom_env, mcp_config and
-runtime_config. Supply fresh values for the copy with the same secret-safe flags
-as 'agent create' when the target machine needs them.
+Secret and machine-local fields are never copied: custom_env and runtime_config. Supply fresh values
+for the copy with the same secret-safe flags as 'agent create' when the target
+machine needs them.
 `,
 	Args: exactArgs(1),
 	RunE: runAgentCopy,
@@ -63,15 +63,12 @@ func registerAgentCopyFlags(cmd *cobra.Command) {
 	cmd.Flags().String("custom-env", "", "Set custom_env on the copy as a JSON object (never copied from the source). Prefer --custom-env-stdin/--custom-env-file for secrets. Pass '{}' for an empty map.")
 	cmd.Flags().Bool("custom-env-stdin", false, "Read --custom-env from stdin. Mutually exclusive with --custom-env and --custom-env-file.")
 	cmd.Flags().String("custom-env-file", "", "Read --custom-env from a file path (suggested mode: 0600). Mutually exclusive with --custom-env and --custom-env-stdin.")
-	cmd.Flags().String("mcp-config", "", "Set mcp_config on the copy as a JSON object (never copied from the source). Prefer --mcp-config-stdin/--mcp-config-file for secrets.")
-	cmd.Flags().Bool("mcp-config-stdin", false, "Read --mcp-config from stdin. Mutually exclusive with --mcp-config and --mcp-config-file.")
-	cmd.Flags().String("mcp-config-file", "", "Read --mcp-config from a file path (suggested mode: 0600). Mutually exclusive with --mcp-config and --mcp-config-stdin.")
 	cmd.Flags().String("runtime-config", "", "Set runtime_config on the copy as a JSON string (never copied from the source).")
 	cmd.Flags().String("output", "json", "Output format: table or json")
 }
 
 // runAgentCopy reads the source agent and assembles a create request from its
-// portable fields, then POSTs it. custom_env, mcp_config and runtime_config are
+// portable fields, then POSTs it. custom_env and runtime_config are
 // never read back from the source — GET redacts / masks them anyway — and are
 // set only when supplied explicitly on the command line.
 func runAgentCopy(cmd *cobra.Command, args []string) error {
@@ -201,11 +198,6 @@ func runAgentCopy(cmd *cobra.Command, args []string) error {
 		return err
 	} else if ok {
 		body["custom_env"] = ce
-	}
-	if mc, ok, err := resolveMcpConfig(cmd); err != nil {
-		return err
-	} else if ok {
-		body["mcp_config"] = mc
 	}
 	if cmd.Flags().Changed("runtime-config") {
 		v, _ := cmd.Flags().GetString("runtime-config")

@@ -1390,7 +1390,7 @@ func TestCountNewCommentsSince_IssueWideExcludesAgentOwnAndTrigger(t *testing.T)
 		t.Skip("database not available")
 	}
 	fx := newCommentListFixture(t)
-	agentID := createHandlerTestAgent(t, "count-agent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "count-agent")
 
 	if _, err := testPool.Exec(context.Background(), `
 		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id, created_at)

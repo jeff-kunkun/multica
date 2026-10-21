@@ -128,7 +128,7 @@ func TestUploadFile_TaskScopedChatAttachment(t *testing.T) {
 	testHandler.Storage = &mockStorage{}
 	defer func() { testHandler.Storage = origStorage }()
 
-	agentID := createHandlerTestAgent(t, "ChatReplyAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "ChatReplyAgent")
 	sessionID := createHandlerTestChatSession(t, agentID)
 	taskID := seedRunningChatTask(t, agentID, sessionID)
 
@@ -194,7 +194,7 @@ func TestUploadFile_TaskScopedChatAttachment(t *testing.T) {
 	})
 
 	t.Run("different agent's task rejected", func(t *testing.T) {
-		otherAgent := createHandlerTestAgent(t, "OtherReplyAgent", []byte("[]"))
+		otherAgent := createHandlerTestAgent(t, "OtherReplyAgent")
 		otherTask := createHandlerTestTaskForAgent(t, otherAgent)
 		// Actor is agentID (valid X-Agent-ID/X-Task-ID pair), but the upload
 		// targets a task owned by a different agent.
@@ -243,7 +243,7 @@ func TestChatAttachment_UnboundOrphanReapedOnSessionDelete(t *testing.T) {
 	if testPool == nil {
 		t.Skip("test database not available")
 	}
-	agentID := createHandlerTestAgent(t, "OrphanCleanupAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "OrphanCleanupAgent")
 	sessionID := createHandlerTestChatSession(t, agentID)
 	taskID := seedRunningChatTask(t, agentID, sessionID)
 	attID := seedAgentChatAttachment(t, agentID, sessionID, taskID)
@@ -269,7 +269,7 @@ func TestCompleteTask_BindsChatAttachments(t *testing.T) {
 	if testPool == nil {
 		t.Skip("test database not available")
 	}
-	agentID := createHandlerTestAgent(t, "BindReplyAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "BindReplyAgent")
 	sessionID := createHandlerTestChatSession(t, agentID)
 
 	t.Run("output + attachment binds to reply", func(t *testing.T) {

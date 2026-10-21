@@ -166,7 +166,7 @@ func newArchiveCancelFixture(t *testing.T, agentName string) *archiveCancelFixtu
 	ctx := context.Background()
 
 	f := &archiveCancelFixture{}
-	f.agentID = createHandlerTestAgent(t, agentName, []byte("[]"))
+	f.agentID = createHandlerTestAgent(t, agentName)
 	f.sessionID = createHandlerTestChatSession(t, f.agentID)
 	f.queuedTaskID = queueArchiveTestTask(t, f.agentID, f.sessionID, "queued")
 	f.runningTaskID = queueArchiveTestTask(t, f.agentID, f.sessionID, "running")

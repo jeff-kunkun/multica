@@ -163,7 +163,7 @@ func TestDeleteAgent_KeepsTheEnvGate(t *testing.T) {
 		t.Fatalf("unrelated member: expected 403, got %d: %s", w.Code, w.Body.String())
 	}
 
-	hostAgentID := createHandlerTestAgent(t, "delete-gate-host-agent", nil)
+	hostAgentID := createHandlerTestAgent(t, "delete-gate-host-agent")
 	hostTaskID := createHandlerTestTaskForAgent(t, hostAgentID)
 	w := httptest.NewRecorder()
 	req := withURLParam(newRequestAs(ownerUserID, http.MethodDelete, "/api/agents/"+agentID, nil), "id", agentID)

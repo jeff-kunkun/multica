@@ -643,7 +643,7 @@ func TestUpdateAgent_AccessChangeIsOwnerOnly(t *testing.T) {
 	ctx := context.Background()
 
 	// Agent owned by testUserID, public_to workspace (createHandlerTestAgent).
-	agentID := createHandlerTestAgent(t, "owner-only-access-agent", nil)
+	agentID := createHandlerTestAgent(t, "owner-only-access-agent")
 	coOwnerID := createPermissionTestCoOwner(t, "perm-access-coowner@multica.test")
 
 	put := func(actorID string, body map[string]any) int {

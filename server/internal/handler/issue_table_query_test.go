@@ -279,8 +279,8 @@ func TestIssueTableWorkingIssueProjectionMatchesTaskIssuesNotAssignees(t *testin
 	}
 
 	ctx := context.Background()
-	workingAgentID := createHandlerTestAgent(t, "table-working-task-agent", []byte(`{}`))
-	otherAgentID := createHandlerTestAgent(t, "table-other-working-agent", []byte(`{}`))
+	workingAgentID := createHandlerTestAgent(t, "table-working-task-agent")
+	otherAgentID := createHandlerTestAgent(t, "table-other-working-agent")
 
 	var finalNumber int
 	if err := testPool.QueryRow(ctx, `

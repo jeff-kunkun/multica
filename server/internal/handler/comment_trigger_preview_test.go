@@ -160,7 +160,7 @@ func TestCommentTriggers_PlainReplyToUnownedMemberRootSkipsAssigneeFallback(t *t
 		t.Skip("database not available")
 	}
 
-	assigneeID := createHandlerTestAgent(t, "Unowned Member Thread Assignee", nil)
+	assigneeID := createHandlerTestAgent(t, "Unowned Member Thread Assignee")
 
 	tests := []struct {
 		name          string
@@ -205,8 +205,8 @@ func TestPreviewCommentTriggers_PlainReplyToMemberRootMentionRoutesToMentionedAg
 	}
 	ctx := context.Background()
 
-	waltID := createHandlerTestAgent(t, "Preview Member Reply Walt", nil)
-	kimID := createHandlerTestAgent(t, "Preview Member Reply Kim", nil)
+	waltID := createHandlerTestAgent(t, "Preview Member Reply Walt")
+	kimID := createHandlerTestAgent(t, "Preview Member Reply Kim")
 	issueID := createCommentTriggerPreviewIssue(t, "comment trigger preview member reply fallback", "agent", waltID)
 
 	topLevelPreview := previewCommentTriggersForTest(t, issueID, CommentTriggerPreviewRequest{
@@ -259,9 +259,9 @@ func TestPreviewCommentTriggers_PlainReplyToMultiAgentRootRoutesFirstMentionedOw
 	}
 	ctx := context.Background()
 
-	assigneeID := createHandlerTestAgent(t, "Preview Multi Root Assignee", nil)
-	agentAID := createHandlerTestAgent(t, "Preview Multi Root A", nil)
-	agentBID := createHandlerTestAgent(t, "Preview Multi Root B", nil)
+	assigneeID := createHandlerTestAgent(t, "Preview Multi Root Assignee")
+	agentAID := createHandlerTestAgent(t, "Preview Multi Root A")
+	agentBID := createHandlerTestAgent(t, "Preview Multi Root B")
 	issueID := createCommentTriggerPreviewIssue(t, "multi-agent root owner reply", "agent", assigneeID)
 
 	rootContent := fmt.Sprintf(
@@ -327,8 +327,8 @@ func TestPreviewCommentTriggers_AssigneePlainReplyKeepsRootMentionOwner(t *testi
 	}
 	ctx := context.Background()
 
-	leaderID := createHandlerTestAgent(t, "Preview Assignee L", nil)
-	kimID := createHandlerTestAgent(t, "Preview Mention Kim", nil)
+	leaderID := createHandlerTestAgent(t, "Preview Assignee L")
+	kimID := createHandlerTestAgent(t, "Preview Mention Kim")
 	issueID := createCommentTriggerPreviewIssue(t, "reply mention inheritance MUL-3744", "agent", leaderID)
 
 	// Sanity: a plain top-level "hello" by a member on this agent-assigned
@@ -386,8 +386,8 @@ func TestPreviewCommentTriggers_ReturnsMentionedAgentsAndSuppressFiltersCreate(t
 		t.Skip("database not available")
 	}
 
-	agentA := createHandlerTestAgent(t, "Preview Mention A", nil)
-	agentB := createHandlerTestAgent(t, "Preview Mention B", nil)
+	agentA := createHandlerTestAgent(t, "Preview Mention A")
+	agentB := createHandlerTestAgent(t, "Preview Mention B")
 	issueID := createCommentTriggerPreviewIssue(t, "comment trigger preview mentions", "", "")
 	content := fmt.Sprintf("[@A](mention://agent/%s) [@B](mention://agent/%s) please inspect", agentA, agentB)
 
@@ -419,8 +419,8 @@ func TestPreviewCommentTriggers_ExplicitMentionSuppressesAssigneeFallback(t *tes
 		t.Skip("database not available")
 	}
 
-	assigneeID := createHandlerTestAgent(t, "Exclusive Mention Assignee", nil)
-	mentionedID := createHandlerTestAgent(t, "Exclusive Mention Target", nil)
+	assigneeID := createHandlerTestAgent(t, "Exclusive Mention Assignee")
+	mentionedID := createHandlerTestAgent(t, "Exclusive Mention Target")
 	issueID := createCommentTriggerPreviewIssue(t, "explicit mention is exclusive", "agent", assigneeID)
 	content := fmt.Sprintf("[@Target](mention://agent/%s) please take this", mentionedID)
 
@@ -444,7 +444,7 @@ func TestCreateComment_ExplicitMentionCoalescesAcrossThreads(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	mentionedID := createHandlerTestAgent(t, "Explicit Pending Route Target", nil)
+	mentionedID := createHandlerTestAgent(t, "Explicit Pending Route Target")
 	issueID := createCommentTriggerPreviewIssue(t, "explicit mention pending route", "", "")
 	content := fmt.Sprintf("[@Target](mention://agent/%s) please take this", mentionedID)
 
@@ -471,8 +471,8 @@ func TestCreateComment_TopLevelNewThreadFallsBackToAssignee(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	assigneeID := createHandlerTestAgent(t, "Conversation Assignee", nil)
-	conversationAgentID := createHandlerTestAgent(t, "Conversation Target", nil)
+	assigneeID := createHandlerTestAgent(t, "Conversation Assignee")
+	conversationAgentID := createHandlerTestAgent(t, "Conversation Target")
 	issueID := createCommentTriggerPreviewIssue(t, "top-level new thread falls back to assignee", "agent", assigneeID)
 
 	rootID := postCommentForTriggerPreviewTest(t, issueID, map[string]any{
@@ -533,7 +533,7 @@ func TestPreviewCommentTriggers_MemberMentionSuppressesAssigneeFallback(t *testi
 		t.Skip("database not available")
 	}
 
-	assigneeID := createHandlerTestAgent(t, "Member Mention Assignee", nil)
+	assigneeID := createHandlerTestAgent(t, "Member Mention Assignee")
 	issueID := createCommentTriggerPreviewIssue(t, "member mention suppresses fallback", "agent", assigneeID)
 	content := fmt.Sprintf("[@Human](mention://member/%s) can you answer?", testUserID)
 
@@ -561,10 +561,10 @@ func TestCreateComment_ThreadReplyDoesNotEscalateToAssignee(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctx := context.Background()
-			ownerID := createHandlerTestAgent(t, "Thread Owner", nil)
+			ownerID := createHandlerTestAgent(t, "Thread Owner")
 			assigneeID := ownerID
 			if !tc.sameAssignee {
-				assigneeID = createHandlerTestAgent(t, "Issue Assignee", nil)
+				assigneeID = createHandlerTestAgent(t, "Issue Assignee")
 			}
 			issueID := dbfx.Issue(t, "thread reply", testutil.Cols{"assignee_type": "agent", "assignee_id": assigneeID})
 			parentID := ""
@@ -606,7 +606,7 @@ func TestPreviewCommentTriggers_EditExcludesSameCommentPendingTask(t *testing.T)
 		t.Skip("database not available")
 	}
 
-	agentID := createHandlerTestAgent(t, "Edit Preview Exclude Agent", nil)
+	agentID := createHandlerTestAgent(t, "Edit Preview Exclude Agent")
 
 	t.Run("agent assignee on-comment", func(t *testing.T) {
 		issueID := createCommentTriggerPreviewIssue(t, "edit preview assignee", "agent", agentID)
@@ -653,7 +653,7 @@ func TestPreviewCommentTriggers_EditExclusionDoesNotIgnoreOtherCommentPendingTas
 		t.Skip("database not available")
 	}
 
-	agentID := createHandlerTestAgent(t, "Edit Preview Other Pending Agent", nil)
+	agentID := createHandlerTestAgent(t, "Edit Preview Other Pending Agent")
 	issueID := createCommentTriggerPreviewIssue(t, "edit preview other pending", "", "")
 	content := fmt.Sprintf("[@Agent](mention://agent/%s) inspect this", agentID)
 	_ = postCommentForTriggerPreviewTest(t, issueID, map[string]any{
@@ -681,8 +681,8 @@ func TestUpdateComment_SuppressAgentIDsFiltersEditRetrigger(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	agentA := createHandlerTestAgent(t, "Edit Suppress A", nil)
-	agentB := createHandlerTestAgent(t, "Edit Suppress B", nil)
+	agentA := createHandlerTestAgent(t, "Edit Suppress A")
+	agentB := createHandlerTestAgent(t, "Edit Suppress B")
 	issueID := createCommentTriggerPreviewIssue(t, "edit suppress agent ids", "", "")
 	commentID := postCommentForTriggerPreviewTest(t, issueID, map[string]any{
 		"content": "plain comment",
@@ -707,7 +707,7 @@ func TestCreateComment_SuppressUnknownAgentIDIsNoop(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	agentID := createHandlerTestAgent(t, "Suppress Noop Agent", nil)
+	agentID := createHandlerTestAgent(t, "Suppress Noop Agent")
 	issueID := createCommentTriggerPreviewIssue(t, "comment trigger suppress noop", "", "")
 	content := fmt.Sprintf("[@Agent](mention://agent/%s) please inspect", agentID)
 
@@ -728,7 +728,7 @@ func TestPreviewCommentTriggers_NoteReturnsNoAgents(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	agentID := createHandlerTestAgent(t, "Preview Note Agent", nil)
+	agentID := createHandlerTestAgent(t, "Preview Note Agent")
 	issueID := createCommentTriggerPreviewIssue(t, "comment trigger note", "agent", agentID)
 	content := fmt.Sprintf("/note [@Agent](mention://agent/%s) human-only context", agentID)
 
@@ -743,7 +743,7 @@ func TestCreateComment_NoteMentionDoesNotQueueAgent(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	agentID := createHandlerTestAgent(t, "Create Note Agent", nil)
+	agentID := createHandlerTestAgent(t, "Create Note Agent")
 	issueID := createCommentTriggerPreviewIssue(t, "comment trigger create note", "agent", agentID)
 	content := fmt.Sprintf("/note [@Agent](mention://agent/%s) human-only context", agentID)
 
@@ -759,7 +759,7 @@ func TestPreviewCommentTriggers_AssigneeAndSuppress(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	agentID := createHandlerTestAgent(t, "Preview Assignee", nil)
+	agentID := createHandlerTestAgent(t, "Preview Assignee")
 	issueID := createCommentTriggerPreviewIssue(t, "comment trigger assignee", "agent", agentID)
 
 	preview := previewCommentTriggersForTest(t, issueID, map[string]any{"content": "can you continue here?"})
@@ -792,8 +792,8 @@ func TestPreviewCommentTriggers_AllPlusExplicitAgentMentionStillTriggers(t *test
 		t.Skip("database not available")
 	}
 
-	assigneeID := createHandlerTestAgent(t, "Preview All Assignee", nil)
-	mentionedID := createHandlerTestAgent(t, "Preview All Mentioned", nil)
+	assigneeID := createHandlerTestAgent(t, "Preview All Assignee")
+	mentionedID := createHandlerTestAgent(t, "Preview All Mentioned")
 	issueID := createCommentTriggerPreviewIssue(t, "comment trigger all plus mention", "agent", assigneeID)
 	content := fmt.Sprintf("[@all](mention://all/all) heads up — [@Mentioned](mention://agent/%s) please take this", mentionedID)
 
@@ -822,7 +822,7 @@ func TestPreviewCommentTriggers_AllPlusMemberMentionStaysSuppressed(t *testing.T
 		t.Skip("database not available")
 	}
 
-	assigneeID := createHandlerTestAgent(t, "Preview All Member Assignee", nil)
+	assigneeID := createHandlerTestAgent(t, "Preview All Member Assignee")
 	issueID := createCommentTriggerPreviewIssue(t, "comment trigger all plus member mention", "agent", assigneeID)
 	content := fmt.Sprintf("[@all](mention://all/all) and [@Member](mention://member/%s) heads up", testUserID)
 
@@ -856,7 +856,7 @@ func TestPreviewCommentTriggers_MalformedMentionIDDoesNotPanic(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	assigneeID := createHandlerTestAgent(t, "Preview Malformed Assignee", nil)
+	assigneeID := createHandlerTestAgent(t, "Preview Malformed Assignee")
 	issueID := createCommentTriggerPreviewIssue(t, "comment trigger malformed mention id", "agent", assigneeID)
 
 	cases := []struct {
@@ -924,7 +924,7 @@ func TestPreviewCommentTriggers_AllSuppressesAssigneeAndNewThreadCoalesces(t *te
 	}
 
 	ctx := context.Background()
-	agentID := createHandlerTestAgent(t, "Preview Dedup Assignee", nil)
+	agentID := createHandlerTestAgent(t, "Preview Dedup Assignee")
 	issueID := createCommentTriggerPreviewIssue(t, "comment trigger all pending", "agent", agentID)
 
 	allPreview := previewCommentTriggersForTest(t, issueID, map[string]any{

@@ -58,9 +58,9 @@ func TestConversationRootOwnersReadOnlyRoutingData(t *testing.T) {
 		t.Skip("database not available")
 	}
 	ctx := context.Background()
-	agentA := createHandlerTestAgent(t, "Root owner A", nil)
-	agentB := createHandlerTestAgent(t, "Root owner B", nil)
-	otherAgent := createHandlerTestAgent(t, "Other root owner", nil)
+	agentA := createHandlerTestAgent(t, "Root owner A")
+	agentB := createHandlerTestAgent(t, "Root owner B")
+	otherAgent := createHandlerTestAgent(t, "Other root owner")
 	issueID := dbfx.Issue(t, "Routing projection")
 	otherIssueID := dbfx.Issue(t, "Other issue")
 	rootID := dbfx.Comment(t, issueID, "No explicit owner")

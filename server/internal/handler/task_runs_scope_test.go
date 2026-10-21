@@ -29,7 +29,7 @@ type familyFixture struct {
 func newFamilyFixture(t *testing.T) familyFixture {
 	t.Helper()
 	f := familyFixture{
-		agentID:  createHandlerTestAgent(t, "FamilyRunsAgent", []byte("[]")),
+		agentID:  createHandlerTestAgent(t, "FamilyRunsAgent"),
 		parentID: dbfx.Issue(t, "family-parent"),
 	}
 	f.childA = dbfx.Issue(t, "family-child-a", testutil.Cols{"parent_issue_id": f.parentID})
@@ -136,7 +136,7 @@ func TestTaskHistoryOmitsUnusedAssigneeFallbacks(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
-	agentID := createHandlerTestAgent(t, "FallbackHistoryAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "FallbackHistoryAgent")
 	issueID := dbfx.Issue(t, "fallback history")
 	runtimeID := handlerTestRuntimeID(t)
 	primaryID := dbfx.Task(t, agentID, testutil.Cols{"issue_id": issueID, "status": "completed", "runtime_id": runtimeID})

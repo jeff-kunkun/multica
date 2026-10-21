@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -74,12 +73,11 @@ type AgentResponse struct {
 	// every user- or template-created agent. The UI keys "this is maintained
 	// by Multica" off this rather than off the display name, which owners may
 	// change.
-	SystemKey     string          `json:"system_key,omitempty"`
-	AvatarURL     *string         `json:"avatar_url"`
-	RuntimeMode   string          `json:"runtime_mode"`
-	RuntimeConfig any             `json:"runtime_config"`
-	CustomArgs    []string        `json:"custom_args"`
-	McpConfig     json.RawMessage `json:"mcp_config"`
+	SystemKey     string   `json:"system_key,omitempty"`
+	AvatarURL     *string  `json:"avatar_url"`
+	RuntimeMode   string   `json:"runtime_mode"`
+	RuntimeConfig any      `json:"runtime_config"`
+	CustomArgs    []string `json:"custom_args"`
 	// custom_env is intentionally NOT serialized on agent resources. The
 	// agent_list/get/create/update/archive/restore responses and WS events
 	// only expose coarse metadata (has_custom_env, custom_env_key_count) so
@@ -89,7 +87,6 @@ type AgentResponse struct {
 	// same path. agent-actor tokens are denied there. See MUL-2600.
 	HasCustomEnv      bool   `json:"has_custom_env"`
 	CustomEnvKeyCount int    `json:"custom_env_key_count"`
-	McpConfigRedacted bool   `json:"mcp_config_redacted"`
 	Visibility        string `json:"visibility"`
 	// PermissionMode is the invocation-permission mode (MUL-3963):
 	// "private" (owner only) or "public_to" (allow-list in InvocationTargets).
@@ -152,11 +149,6 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		customArgs = []string{}
 	}
 
-	var mcpConfig json.RawMessage
-	if a.McpConfig != nil {
-		mcpConfig = json.RawMessage(a.McpConfig)
-	}
-
 	conversationStarters := []AgentConversationStarter{}
 	if len(a.ConversationStarters) > 0 {
 		if err := json.Unmarshal(a.ConversationStarters, &conversationStarters); err != nil {
@@ -179,7 +171,6 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		RuntimeMode:          a.RuntimeMode,
 		RuntimeConfig:        rc,
 		CustomArgs:           customArgs,
-		McpConfig:            mcpConfig,
 		HasCustomEnv:         envKeyCount > 0,
 		CustomEnvKeyCount:    envKeyCount,
 		Visibility:           a.Visibility,
@@ -676,7 +667,6 @@ type TaskAgentData struct {
 	Instructions string            `json:"instructions"`
 	CustomEnv    map[string]string `json:"custom_env,omitempty"`
 	CustomArgs   []string          `json:"custom_args,omitempty"`
-	McpConfig    json.RawMessage   `json:"mcp_config,omitempty"`
 	// RuntimeConfig is the agent's saved runtime_config JSON as-is. The
 	// daemon decodes it per-provider — e.g. the openclaw backend reads
 	// `mode` + `gateway.*` to choose between embedded and gateway routing
@@ -1025,19 +1015,6 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// mcp_config still uses the workspace-level always-redact setting and
-	// the per-row owner/admin gate — secrets in MCP server configs follow
-	// the same exposure rules as custom_env used to. custom_env itself is
-	// never serialized on agent resources anymore (MUL-2600); see the
-	// AgentResponse comment.
-	ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(workspaceID))
-	if err != nil {
-		slog.Warn("GetWorkspace failed for redact check", "workspace_id", workspaceID, "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
-		return
-	}
-	alwaysRedact := workspaceAlwaysRedactSecrets(ws.Settings)
-
 	// Resolve the request actor once. Agents bypass the view gate to preserve
 	// A2A collaboration; members see a private agent only when they own it or
 	// are workspace owner, and a public_to agent only when on its
@@ -1065,14 +1042,6 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 			resp.RuntimeAvailability = availability
 		}
 		applyInvocationTargetsToResponse(&resp, targets)
-		// Agent actors NEVER see mcp_config secrets, even when their host's
-		// PAT would normally satisfy the owner/admin role gate. Otherwise an
-		// agent running under an owner's daemon could read other agents'
-		// MCP configs (which routinely embed third-party API tokens) — the
-		// same lateral-movement vector MUL-2600 closed for custom_env.
-		if actorType == "agent" || alwaysRedact || !canViewAgentSecrets(a, userID, member.Role) {
-			redactMcpConfig(&resp)
-		}
 		visible = append(visible, resp)
 	}
 
@@ -1112,24 +1081,6 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 	if !h.enrichAgentResponseWithTargetsHTTP(w, r, &resp, agent.ID) {
 		return
 	}
-	// mcp_config redaction (custom_env was removed from this response shape
-	// in MUL-2600; secrets are now fetched via GET /api/agents/{id}/env).
-	ws, err := h.Queries.GetWorkspace(r.Context(), agent.WorkspaceID)
-	if err != nil {
-		slog.Warn("GetWorkspace failed for redact check", "workspace_id", uuidToString(agent.WorkspaceID), "error", err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "internal error"})
-		return
-	}
-	alwaysRedact := workspaceAlwaysRedactSecrets(ws.Settings)
-	// Agent actors NEVER see mcp_config (see ListAgents for the rationale).
-	if actorType == "agent" || alwaysRedact {
-		redactMcpConfig(&resp)
-	} else if member, ok := ctxMember(r.Context()); ok {
-		if !canViewAgentSecrets(agent, userID, member.Role) {
-			redactMcpConfig(&resp)
-		}
-	}
-
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -1143,7 +1094,6 @@ type CreateAgentRequest struct {
 	RuntimeConfig        any                        `json:"runtime_config"`
 	CustomEnv            map[string]string          `json:"custom_env"`
 	CustomArgs           []string                   `json:"custom_args"`
-	McpConfig            json.RawMessage            `json:"mcp_config"`
 	Visibility           string                     `json:"visibility"`
 	// PermissionMode + InvocationTargets are the new invocation-permission
 	// inputs (MUL-3963). When permission_mode is present it is authoritative
@@ -1314,11 +1264,6 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 
 	sp, _ := json.Marshal(conversationStarters)
 
-	var mc []byte
-	if rawMcpConfig, ok := rawFields["mcp_config"]; ok && !bytes.Equal(bytes.TrimSpace(rawMcpConfig), []byte("null")) {
-		mc = append([]byte(nil), rawMcpConfig...)
-	}
-
 	avatarURL, ok := h.newAgentAvatar(w, r, req.AvatarURL)
 	if !ok {
 		return
@@ -1347,7 +1292,6 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		OwnerID:              parseUUID(ownerID),
 		CustomEnv:            ce,
 		CustomArgs:           ca,
-		McpConfig:            mc,
 		ConversationStarters: sp,
 	})
 	if err != nil {
@@ -1394,7 +1338,6 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		isFirstAgent,
 	))
 
-	redactAgentResponseForActor(&resp, actorType)
 	writeJSON(w, http.StatusCreated, resp)
 }
 
@@ -1416,9 +1359,8 @@ type UpdateAgentRequest struct {
 	// actually unchanged, and so a client that round-tripped a
 	// previously-returned masked map cannot silently overwrite real
 	// secret values with literal `****`. See MUL-2600.
-	CustomArgs *[]string        `json:"custom_args"`
-	McpConfig  *json.RawMessage `json:"mcp_config"`
-	Visibility *string          `json:"visibility"`
+	CustomArgs *[]string `json:"custom_args"`
+	Visibility *string   `json:"visibility"`
 	// PermissionMode + InvocationTargets are the invocation-permission inputs
 	// (MUL-3963). Owner-only writes: a
 	// non-owner admin passing them is silently ignored, because the invoke
@@ -1431,54 +1373,11 @@ type UpdateAgentRequest struct {
 	MaxConcurrentTasks *int32                      `json:"max_concurrent_tasks"`
 }
 
-// workspaceAlwaysRedactSecrets reports whether the workspace has opted
-// into unconditional redaction of secret-bearing fields (currently
-// `mcp_config`) on read responses, regardless of the caller's role.
-//
-// The legacy JSON key is still `always_redact_env` for backwards-
-// compatibility with workspaces that flipped the setting before MUL-2600
-// shipped. The setting no longer affects `custom_env` because that field
-// is never serialized on agent resources anymore — secrets there are
-// fetched exclusively through `GET /api/agents/{id}/env` with audit
-// logging — so the flag now only governs `mcp_config` exposure.
-func workspaceAlwaysRedactSecrets(settings []byte) bool {
-	if len(settings) == 0 {
-		return false
-	}
-	var s struct {
-		AlwaysRedactEnv bool `json:"always_redact_env"`
-	}
-	if err := json.Unmarshal(settings, &s); err != nil {
-		return false
-	}
-	return s.AlwaysRedactEnv
-}
-
-// canViewAgentSecrets checks whether the requesting user is allowed to
-// see the agent's secret-bearing fields (currently `mcp_config`). Only
-// the agent owner or workspace owner qualify; for everyone else
-// the response is redacted. `custom_env` is no longer part of an agent
-// resource response (see MUL-2600), so this predicate is shared only by
-// the remaining mcp_config redaction path.
-func canViewAgentSecrets(agent db.Agent, userID string, memberRole string) bool {
-	if memberRole == "owner" {
-		return true
-	}
-	return uuidToString(agent.OwnerID) == userID
-}
-
-// broadcastAgentResponse strips secret-bearing fields from an
-// AgentResponse before it goes onto the WebSocket bus. Mutation
-// handlers call this when fanning out create/update/archive/restore
-// events: subscribers (which include agent processes that have
-// authenticated with their own task tokens) must not learn another
-// agent's mcp_config via a WS push that bypassed the read-path
-// redaction in ListAgents / GetAgent. The caller still receives the
-// canonical form in the HTTP response; only the broadcast copy is
-// redacted.
+// broadcastAgentResponse prepares an AgentResponse for the WebSocket bus.
+// Subscribers include agent processes authenticated with their own task
+// tokens, so secret-bearing fields must never ride along.
 func broadcastAgentResponse(resp AgentResponse) AgentResponse {
 	out := resp
-	redactMcpConfig(&out)
 	// Belt-and-suspenders: agentToResponse already masks gateway.token on
 	// every read, so by the time a response reaches this broadcast helper
 	// the field is already "***". Re-mask anyway so a future refactor that
@@ -1487,29 +1386,6 @@ func broadcastAgentResponse(resp AgentResponse) AgentResponse {
 	// WebSocket subscriber on the workspace, agent processes included.
 	maskGatewayToken(out.RuntimeConfig)
 	return out
-}
-
-// redactMcpConfig removes the mcp_config value from the response when the caller is not
-// authorised to view it. The field is set to null; McpConfigRedacted is set to true so
-// callers know a config exists without seeing its contents (which may contain secrets).
-func redactMcpConfig(resp *AgentResponse) {
-	if resp.McpConfig != nil {
-		resp.McpConfig = nil
-		resp.McpConfigRedacted = true
-	}
-}
-
-// redactAgentResponseForActor strips secret-bearing fields from an agent
-// resource HTTP response when the request actor is an agent. Read
-// handlers already gate on actorType — mutation handlers
-// (create/update/archive/restore) must apply the same rule, otherwise
-// an agent with a host owner/admin token can do an unrelated mutation
-// (e.g. flip max_concurrent_tasks) on a target agent and harvest the
-// target's mcp_config from the mutation response. MUL-2600.
-func redactAgentResponseForActor(resp *AgentResponse, actorType string) {
-	if actorType == "agent" {
-		redactMcpConfig(resp)
-	}
 }
 
 // canManageAgent checks whether the current user can update or archive an agent.
@@ -1604,11 +1480,6 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	if req.CustomArgs != nil {
 		ca, _ := json.Marshal(*req.CustomArgs)
 		params.CustomArgs = ca
-	}
-	rawMcpConfig, hasMcpConfig := rawFields["mcp_config"]
-	shouldClearMcpConfig := hasMcpConfig && bytes.Equal(bytes.TrimSpace(rawMcpConfig), []byte("null"))
-	if hasMcpConfig && !shouldClearMcpConfig {
-		params.McpConfig = append([]byte(nil), rawMcpConfig...)
 	}
 
 	if req.RuntimeID != nil {
@@ -1714,17 +1585,6 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Nullable runtime overrides: null/empty in the request means explicitly
-	// clear the field. COALESCE in UpdateAgent cannot set a column to NULL, so
-	// mcp_config uses a dedicated clear query.
-	if shouldClearMcpConfig {
-		updated, err = h.Queries.ClearAgentMcpConfig(r.Context(), updated.ID)
-		if err != nil {
-			slog.Warn("clear agent mcp_config failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
-			writeError(w, http.StatusInternalServerError, "failed to clear mcp_config")
-			return
-		}
-	}
 	// Invocation targets (MUL-3963): replace wholesale when the owner touched
 	// permission. Done after the row update so a permission_mode flip and its
 	// targets land together.
@@ -1746,7 +1606,6 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	userID := requestUserID(r)
 	actorType, actorID := h.resolveActor(r, userID, uuidToString(updated.WorkspaceID))
 	h.publish(protocol.EventAgentStatus, uuidToString(updated.WorkspaceID), actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
-	redactAgentResponseForActor(&resp, actorType)
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -1796,7 +1655,6 @@ func (h *Handler) ArchiveAgent(w http.ResponseWriter, r *http.Request) {
 	resp := h.agentToResponse(archived)
 	actorType, actorID := h.resolveActor(r, userID, wsID)
 	h.publish(protocol.EventAgentArchived, wsID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
-	redactAgentResponseForActor(&resp, actorType)
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -1827,7 +1685,6 @@ func (h *Handler) RestoreAgent(w http.ResponseWriter, r *http.Request) {
 	userID := requestUserID(r)
 	actorType, actorID := h.resolveActor(r, userID, wsID)
 	h.publish(protocol.EventAgentRestored, wsID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
-	redactAgentResponseForActor(&resp, actorType)
 	writeJSON(w, http.StatusOK, resp)
 }
 

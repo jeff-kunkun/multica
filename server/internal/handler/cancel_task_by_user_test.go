@@ -148,7 +148,7 @@ func TestCancelTaskByUser_QueuedOnlyDoesNotCancelPromotedTask(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	agentID := createHandlerTestAgent(t, "CancelQueuedOnlyAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "CancelQueuedOnlyAgent")
 	sessionID := createHandlerTestChatSession(t, agentID)
 	taskID := insertPendingChatTask(t, agentID, sessionID, "running")
 	req := newRequestAs(
@@ -174,7 +174,7 @@ func TestCancelTaskByUser_QueuedEditPersistsDraftRestore(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	agentID := createHandlerTestAgent(t, "QueuedEditRestoreAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "QueuedEditRestoreAgent")
 	sessionID := createHandlerTestChatSession(t, agentID)
 	taskID, messageID, attachmentID := insertQueuedChatInputWithAttachment(
 		t,
@@ -245,7 +245,7 @@ func TestCancelTaskByUser_QueuedEditRollsBackOnRestoreFailure(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	agentID := createHandlerTestAgent(t, "QueuedEditRollbackAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "QueuedEditRollbackAgent")
 	sessionID := createHandlerTestChatSession(t, agentID)
 	taskID, messageID, attachmentID := insertQueuedChatInputWithAttachment(
 		t,
@@ -290,7 +290,7 @@ func TestCancelTaskByUser_QueuedRemoveDeletesAttachment(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	agentID := createHandlerTestAgent(t, "QueuedRemoveAttachmentAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "QueuedRemoveAttachmentAgent")
 	sessionID := createHandlerTestChatSession(t, agentID)
 	taskID, messageID, attachmentID := insertQueuedChatInputWithAttachment(
 		t,
@@ -364,7 +364,7 @@ func TestCancelTaskByUser_StartedEmptyChat_WithDraftRestoreCapability_Defers(t *
 		t.Skip("database not available")
 	}
 
-	agentID := createHandlerTestAgent(t, "CancelChatDeferCapableAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "CancelChatDeferCapableAgent")
 	sessionID := createHandlerTestChatSession(t, agentID)
 	taskID, userMessageID := createStartedEmptyChatTask(t, sessionID, agentID, "defer this prompt")
 
@@ -401,7 +401,7 @@ func TestCancelTaskByUser_StartedEmptyChat_LegacyClient_StillGetsSynchronousRest
 		t.Skip("database not available")
 	}
 
-	agentID := createHandlerTestAgent(t, "CancelChatDeferLegacyAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "CancelChatDeferLegacyAgent")
 	sessionID := createHandlerTestChatSession(t, agentID)
 	const userContent = "an old client must not lose this"
 	taskID, userMessageID := createStartedEmptyChatTask(t, sessionID, agentID, userContent)
@@ -452,7 +452,7 @@ func TestCancelTaskByUser_RunOnlyAutopilot_Succeeds(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	agentID := createHandlerTestAgent(t, "CancelRunOnlyAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "CancelRunOnlyAgent")
 	taskID := createAutopilotRunOnlyTask(t, agentID)
 
 	w := httptest.NewRecorder()
@@ -494,7 +494,7 @@ func TestCancelTaskByUser_QuickCreate_Succeeds(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	agentID := createHandlerTestAgent(t, "CancelQuickCreateAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "CancelQuickCreateAgent")
 
 	var taskID string
 	dbfx.QueryRow(t, `
@@ -523,7 +523,7 @@ func TestCancelTaskByUser_RetryClone_Autopilot_Succeeds(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	agentID := createHandlerTestAgent(t, "CancelRetryCloneAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "CancelRetryCloneAgent")
 	parentID := createAutopilotRunOnlyTask(t, agentID)
 
 	var cloneID string
@@ -552,7 +552,7 @@ func TestCancelTaskByUser_IssueTask_Succeeds(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	agentID := createHandlerTestAgent(t, "CancelIssueTaskAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "CancelIssueTaskAgent")
 
 	var issueID, taskID string
 	dbfx.QueryRow(t, `
@@ -584,7 +584,7 @@ func TestCancelTaskByUser_DelegatedFailureRecoveryAcknowledgesSignal(t *testing.
 		t.Skip("database not available")
 	}
 
-	agentID := createHandlerTestAgent(t, "CancelRecoveryTaskAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "CancelRecoveryTaskAgent")
 	issueID := dbfx.Issue(t, "cancel-recovery-task", testutil.Cols{
 		"status":   "in_progress",
 		"priority": "medium",
@@ -643,7 +643,7 @@ func TestCancelTaskByUser_ChatTask_NonCreator_Returns403(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	agentID := createHandlerTestAgent(t, "CancelChatAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "CancelChatAgent")
 	sessionID := createHandlerTestChatSession(t, agentID) // creator = testUserID
 	otherUserID := createWorkspaceMemberUser(t, "Chat Bystander", "cancel-chat-bystander@multica.test")
 
@@ -670,7 +670,7 @@ func TestCancelTaskByUser_ChatTaskWithTranscript_PersistsAssistantSnapshot(t *te
 		t.Skip("database not available")
 	}
 
-	agentID := createHandlerTestAgent(t, "CancelChatTranscriptAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "CancelChatTranscriptAgent")
 	sessionID := createHandlerTestChatSession(t, agentID)
 
 	var taskID string
@@ -722,7 +722,7 @@ func TestCancelTaskByUser_ChatTaskWithoutTranscript_RestoresUserDraft(t *testing
 		t.Skip("database not available")
 	}
 
-	agentID := createHandlerTestAgent(t, "CancelChatNoTranscriptAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "CancelChatNoTranscriptAgent")
 	sessionID := createHandlerTestChatSession(t, agentID)
 
 	var taskID string
@@ -781,7 +781,7 @@ func TestCancelTaskByUser_ChatRetryRestoresRootInput(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	agentID := createHandlerTestAgent(t, "CancelChatRetryAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "CancelChatRetryAgent")
 	sessionID := createHandlerTestChatSession(t, agentID)
 	var rootTaskID string
 	dbfx.QueryRow(t, `
@@ -872,7 +872,7 @@ func TestCancelTaskByUser_ChatTaskWithBoundAttachment_SurvivesCancelAndRebinds(t
 		t.Skip("database not available")
 	}
 
-	agentID := createHandlerTestAgent(t, "CancelChatAttachAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "CancelChatAttachAgent")
 	sessionID := createHandlerTestChatSession(t, agentID)
 
 	var taskID string

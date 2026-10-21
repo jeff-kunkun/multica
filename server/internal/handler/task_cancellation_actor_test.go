@@ -7,7 +7,7 @@ import (
 
 func TestTaskCancellationActor_SnapshotsAgentName(t *testing.T) {
 	const name = "Cancellation actor agent"
-	agentID := createHandlerTestAgent(t, name, nil)
+	agentID := createHandlerTestAgent(t, name)
 
 	actor := testHandler.taskCancellationActor(context.Background(), "agent", agentID)
 	if actor.Type != "agent" || !actor.ID.Valid || uuidToString(actor.ID) != agentID || actor.Name != name {

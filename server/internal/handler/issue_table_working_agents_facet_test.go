@@ -225,9 +225,9 @@ func TestIssueTableWorkingAgentsFacetFollowsSurfaceScopeAndFilters(t *testing.T)
 	}
 
 	ctx := context.Background()
-	insideAgentID := createHandlerTestAgent(t, "facet-working-inside", []byte(`{}`))
-	outsideAgentID := createHandlerTestAgent(t, "facet-working-outside", []byte(`{}`))
-	idleAgentID := createHandlerTestAgent(t, "facet-working-idle", []byte(`{}`))
+	insideAgentID := createHandlerTestAgent(t, "facet-working-inside")
+	outsideAgentID := createHandlerTestAgent(t, "facet-working-outside")
+	idleAgentID := createHandlerTestAgent(t, "facet-working-idle")
 
 	var projectID string
 	if err := testPool.QueryRow(ctx, `

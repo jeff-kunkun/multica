@@ -66,8 +66,7 @@ type UpdateAgentEnvRequest struct {
 //
 // Rule 2 used to be workspace-role-only, which made env the single
 // endpoint in the agent permission model that ignored agent ownership:
-// canManageAgent already lets the owner update/archive/restore, and
-// canViewAgentSecrets already lets the owner read mcp_config. The
+// canManageAgent already lets the owner update/archive/restore. The
 // asymmetry was worst on create — POST /api/agents accepts custom_env
 // from any member — so a member could write secrets into their own
 // agent and then never read or rotate them.

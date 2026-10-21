@@ -24,7 +24,7 @@ func TestListTasksByIssueHydratesUsage(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	agentID := createHandlerTestAgent(t, "UsageListAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "UsageListAgent")
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `

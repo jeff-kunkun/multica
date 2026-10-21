@@ -23,8 +23,8 @@ func TestListAgentTasksHydratesUsage(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	agentID := createHandlerTestAgent(t, "AgentTaskUsage", []byte("[]"))
-	otherAgentID := createHandlerTestAgent(t, "AgentTaskUsageOther", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "AgentTaskUsage")
+	otherAgentID := createHandlerTestAgent(t, "AgentTaskUsageOther")
 
 	newTask := func(agentID string) string {
 		return dbfx.Task(t, agentID, testutil.Cols{
@@ -164,7 +164,7 @@ func TestListAgentTasksReturnsErrorWhenUsageLoadFails(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	agentID := createHandlerTestAgent(t, "AgentTaskUsageFailure", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "AgentTaskUsageFailure")
 	dbfx.Task(t, agentID, testutil.Cols{
 		"runtime_id": handlerTestRuntimeID(t),
 		"status":     "completed",

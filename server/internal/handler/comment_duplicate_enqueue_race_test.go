@@ -24,7 +24,7 @@ const (
 func dupRaceFixture(t *testing.T, agentName string, issueNumber int) (agentID, issueID, runtimeID string) {
 	t.Helper()
 	ctx := context.Background()
-	agentID = createHandlerTestAgent(t, agentName, nil)
+	agentID = createHandlerTestAgent(t, agentName)
 	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, agentID).Scan(&runtimeID); err != nil {
 		t.Fatalf("load runtime: %v", err)
 	}

@@ -68,8 +68,8 @@ func TestCommentTriggers_NullByteHiddenMention_PreviewMatchesEnqueue(t *testing.
 	// Distinct agents for create vs edit: a single (issue, agent) pair allows
 	// only one pending task (idx_one_pending_task_per_issue_agent), which would
 	// mask the second enqueue.
-	createTarget := createHandlerTestAgent(t, "Preview NUL Parity Create", nil)
-	editTarget := createHandlerTestAgent(t, "Preview NUL Parity Edit", nil)
+	createTarget := createHandlerTestAgent(t, "Preview NUL Parity Create")
+	editTarget := createHandlerTestAgent(t, "Preview NUL Parity Edit")
 
 	// mentionWithHiddenNull places the NUL between the agent UUID and the
 	// closing ')', so MentionRe does not match the raw text but does match once

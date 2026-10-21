@@ -383,7 +383,7 @@ func itoa64(v int64) string {
 // TestBotStandsInForItsCreator: on chat and inbox routes a Bot is its creator,
 // so it reads the creator's chats and answers in them under its own name.
 func TestBotStandsInForItsCreator(t *testing.T) {
-	agentID := createHandlerTestAgent(t, "StandInAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "StandInAgent")
 	sessionID := createHandlerTestChatSession(t, agentID)
 	bot := createTestBot(t, map[string]any{"name": "Stand-in"})
 

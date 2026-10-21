@@ -220,7 +220,7 @@ func TestRerunIssue_PrivateHistoricalAgent(t *testing.T) {
 	// the source task's HISTORICAL agent differ: if the rerun wrongly validated
 	// the current assignee, testUserID would be allowed — so the 403 below proves
 	// the gate is keyed on the historical private agent named by task_id.
-	currentAgentID := createHandlerTestAgent(t, "RerunCurrentAssignee", []byte("[]"))
+	currentAgentID := createHandlerTestAgent(t, "RerunCurrentAssignee")
 	if _, err := testPool.Exec(ctx, `UPDATE issue SET assignee_id = $1 WHERE id = $2`, currentAgentID, issueID); err != nil {
 		t.Fatalf("reassign issue to second agent: %v", err)
 	}

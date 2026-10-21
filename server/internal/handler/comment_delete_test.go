@@ -282,8 +282,8 @@ func TestReplyUnderDeletedAgentCommentWakesNoOne(t *testing.T) {
 		t.Skip("database not available")
 	}
 	ctx := context.Background()
-	authorID := createHandlerTestAgent(t, "Deleted Comment Author", nil)
-	assigneeID := createHandlerTestAgent(t, "Issue Assignee", nil)
+	authorID := createHandlerTestAgent(t, "Deleted Comment Author")
+	assigneeID := createHandlerTestAgent(t, "Issue Assignee")
 	issueID := dbfx.Issue(t, "reply under deleted agent comment", testutil.Cols{
 		"assignee_type": "agent", "assignee_id": assigneeID,
 	})

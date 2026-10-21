@@ -11,7 +11,7 @@ func TestCreateCommentConcurrentTopLevelMentionsShareOneTask(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
-	agentID := createHandlerTestAgent(t, "Concurrent issue recipient", nil)
+	agentID := createHandlerTestAgent(t, "Concurrent issue recipient")
 	issueID := createCommentTriggerPreviewIssue(t, "concurrent issue mentions", "", "")
 	const count = 6
 	responses := make([]*httptest.ResponseRecorder, count)

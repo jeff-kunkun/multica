@@ -48,8 +48,8 @@ func TestUpdateIssueReassignDoesNotCancelActiveTasks(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	ownerAgent := createHandlerTestAgent(t, "ReassignNoCancelOwner", []byte("[]"))
-	mentionAgent := createHandlerTestAgent(t, "ReassignNoCancelMention", []byte("[]"))
+	ownerAgent := createHandlerTestAgent(t, "ReassignNoCancelOwner")
+	mentionAgent := createHandlerTestAgent(t, "ReassignNoCancelMention")
 
 	issueID := insertAgentAssignedIssue(t, ownerAgent, 92110, "reassign-no-cancel")
 	ownerTask := insertRunningIssueTask(t, ownerAgent, issueID)
@@ -85,8 +85,8 @@ func TestBatchUpdateIssueReassignDoesNotCancelActiveTasks(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	ownerAgent := createHandlerTestAgent(t, "BatchReassignNoCancelOwner", []byte("[]"))
-	mentionAgent := createHandlerTestAgent(t, "BatchReassignNoCancelMention", []byte("[]"))
+	ownerAgent := createHandlerTestAgent(t, "BatchReassignNoCancelOwner")
+	mentionAgent := createHandlerTestAgent(t, "BatchReassignNoCancelMention")
 
 	issueID := insertAgentAssignedIssue(t, ownerAgent, 92111, "batch-reassign-no-cancel")
 	ownerTask := insertRunningIssueTask(t, ownerAgent, issueID)
@@ -137,8 +137,8 @@ func TestUpdateIssueReassignToAgentKeepsOldTaskAndEnqueuesNew(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	ownerAgent := createHandlerTestAgent(t, "ReassignAgentToAgentOwner", []byte("[]"))
-	newAgent := createHandlerTestAgent(t, "ReassignAgentToAgentNew", []byte("[]"))
+	ownerAgent := createHandlerTestAgent(t, "ReassignAgentToAgentOwner")
+	newAgent := createHandlerTestAgent(t, "ReassignAgentToAgentNew")
 
 	issueID := insertAgentAssignedIssue(t, ownerAgent, 92112, "reassign-agent-to-agent")
 	ownerTask := insertRunningIssueTask(t, ownerAgent, issueID)

@@ -216,7 +216,7 @@ func handlerTestRuntimeID(t *testing.T) string {
 	return runtimeID
 }
 
-func createHandlerTestAgent(t *testing.T, name string, mcpConfig []byte) string {
+func createHandlerTestAgent(t *testing.T, name string) string {
 	t.Helper()
 
 	agentID := dbfx.Agent(t, name, handlerTestRuntimeID(t), testutil.Cols{
@@ -225,7 +225,6 @@ func createHandlerTestAgent(t *testing.T, name string, mcpConfig []byte) string 
 		"instructions":    "",
 		"custom_env":      testutil.Raw("'{}'::jsonb"),
 		"custom_args":     testutil.Raw("'[]'::jsonb"),
-		"mcp_config":      mcpConfig,
 	})
 	// Generic test agents are workspace-invocable (MUL-3963): seed the
 	// matching workspace invocation target so canInvokeAgent admits workspace
@@ -283,42 +282,6 @@ func createHandlerTestTaskForAgentOnIssue(t *testing.T, agentID, issueID string)
 		"started_at": testutil.Raw("now()"),
 	})
 	return taskID
-}
-
-func fetchAgentMcpConfig(t *testing.T, agentID string) []byte {
-	t.Helper()
-
-	var mcpConfig []byte
-	dbfx.QueryRow(t, `SELECT mcp_config FROM agent WHERE id = $1`, agentID).Scan(&mcpConfig)
-
-	return mcpConfig
-}
-
-func assertJSONEqual(t *testing.T, got []byte, want string) {
-	t.Helper()
-
-	var gotValue any
-	if err := json.Unmarshal(got, &gotValue); err != nil {
-		t.Fatalf("failed to unmarshal got JSON %q: %v", string(got), err)
-	}
-
-	var wantValue any
-	if err := json.Unmarshal([]byte(want), &wantValue); err != nil {
-		t.Fatalf("failed to unmarshal want JSON %q: %v", want, err)
-	}
-
-	gotJSON, err := json.Marshal(gotValue)
-	if err != nil {
-		t.Fatalf("failed to marshal normalized got JSON: %v", err)
-	}
-	wantJSON, err := json.Marshal(wantValue)
-	if err != nil {
-		t.Fatalf("failed to marshal normalized want JSON: %v", err)
-	}
-
-	if string(gotJSON) != string(wantJSON) {
-		t.Fatalf("expected JSON %s, got %s", string(wantJSON), string(gotJSON))
-	}
 }
 
 func TestIssueCRUD(t *testing.T) {
@@ -1250,7 +1213,7 @@ func TestCreateAgentRejectsMalformedRuntimeID(t *testing.T) {
 }
 
 func TestUpdateAgentRejectsMalformedRuntimeID(t *testing.T) {
-	agentID := createHandlerTestAgent(t, "Handler Malformed Runtime Update", nil)
+	agentID := createHandlerTestAgent(t, "Handler Malformed Runtime Update")
 
 	req := newRequest("PUT", "/api/agents/"+agentID, map[string]any{
 		"runtime_id": "not-a-uuid",
@@ -1417,98 +1380,6 @@ func TestAgentCRUD(t *testing.T) {
 	}
 	if updated.Name != agents[0].Name {
 		t.Fatalf("UpdateAgent: name should be preserved, got '%s'", updated.Name)
-	}
-}
-
-func TestUpdateAgentMcpConfigAbsentPreservesValue(t *testing.T) {
-	agentID := createHandlerTestAgent(t, "Handler Mcp Preserve", []byte(`{"preset":"keep"}`))
-
-	req := newRequest("PUT", "/api/agents/"+agentID, map[string]any{
-		"name": "Handler Mcp Preserve Updated",
-	})
-	req = withURLParam(req, "id", agentID)
-	w := testutil.Call(t, testHandler.UpdateAgent, req).Want(http.StatusOK)
-
-	var updated AgentResponse
-	w.JSON(&updated)
-	assertJSONEqual(t, updated.McpConfig, `{"preset":"keep"}`)
-	assertJSONEqual(t, fetchAgentMcpConfig(t, agentID), `{"preset":"keep"}`)
-}
-
-func TestUpdateAgentMcpConfigNullClearsValue(t *testing.T) {
-	agentID := createHandlerTestAgent(t, "Handler Mcp Clear", []byte(`{"preset":"clear"}`))
-
-	req := newRequest("PUT", "/api/agents/"+agentID, map[string]any{
-		"mcp_config": nil,
-	})
-	req = withURLParam(req, "id", agentID)
-	w := testutil.Call(t, testHandler.UpdateAgent, req).Want(http.StatusOK)
-
-	var updated AgentResponse
-	w.JSON(&updated)
-	assertJSONEqual(t, updated.McpConfig, `null`)
-	if fetchAgentMcpConfig(t, agentID) != nil {
-		t.Fatalf("UpdateAgent: expected DB mcp_config to be SQL NULL")
-	}
-}
-
-func TestUpdateAgentMcpConfigObjectUpdatesValue(t *testing.T) {
-	agentID := createHandlerTestAgent(t, "Handler Mcp Update", []byte(`{"preset":"old"}`))
-
-	req := newRequest("PUT", "/api/agents/"+agentID, map[string]any{
-		"mcp_config": map[string]any{"preset": "new"},
-	})
-	req = withURLParam(req, "id", agentID)
-	w := testutil.Call(t, testHandler.UpdateAgent, req).Want(http.StatusOK)
-
-	var updated AgentResponse
-	w.JSON(&updated)
-	assertJSONEqual(t, updated.McpConfig, `{"preset":"new"}`)
-	assertJSONEqual(t, fetchAgentMcpConfig(t, agentID), `{"preset":"new"}`)
-}
-
-func TestUpdateAgentMcpConfigPreservesBoundaryEmptyArguments(t *testing.T) {
-	agentID := createHandlerTestAgent(t, "Handler Mcp Empty Args", nil)
-	want := `{"mcpServers":{"fetch":{"command":"uvx","args":["","2222","","333",""]}}}`
-
-	req := newRequest("PUT", "/api/agents/"+agentID, map[string]any{
-		"mcp_config": map[string]any{
-			"mcpServers": map[string]any{
-				"fetch": map[string]any{
-					"command": "uvx",
-					"args":    []string{"", "2222", "", "333", ""},
-				},
-			},
-		},
-	})
-	req = withURLParam(req, "id", agentID)
-	w := testutil.Call(t, testHandler.UpdateAgent, req).Want(http.StatusOK)
-
-	var updated AgentResponse
-	w.JSON(&updated)
-	assertJSONEqual(t, updated.McpConfig, want)
-	assertJSONEqual(t, fetchAgentMcpConfig(t, agentID), want)
-}
-
-func TestCreateAgentMcpConfigNullStoresSQLNull(t *testing.T) {
-	req := newRequest("POST", "/api/agents", map[string]any{
-		"name":        "Handler Mcp Create Null",
-		"runtime_id":  handlerTestRuntimeID(t),
-		"mcp_config":  nil,
-		"custom_env":  map[string]string{},
-		"custom_args": []string{},
-	})
-	w := testutil.Call(t, testHandler.CreateAgent, req).Want(http.StatusCreated)
-
-	var created AgentResponse
-	w.JSON(&created)
-	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, created.ID)
-	})
-
-	assertJSONEqual(t, created.McpConfig, `null`)
-	if fetchAgentMcpConfig(t, created.ID) != nil {
-		t.Fatalf("CreateAgent: expected DB mcp_config to be SQL NULL")
 	}
 }
 
@@ -2162,8 +2033,8 @@ func TestBacklogToTodoByAgentTriggersDifferentAssignee(t *testing.T) {
 	ctx := context.Background()
 
 	// Parent agent (the actor) + child agent (the assignee).
-	parentAgent := createHandlerTestAgent(t, "Backlog Parent Agent", nil)
-	childAgent := createHandlerTestAgent(t, "Backlog Child Agent", nil)
+	parentAgent := createHandlerTestAgent(t, "Backlog Parent Agent")
+	childAgent := createHandlerTestAgent(t, "Backlog Child Agent")
 	parentTask := createHandlerTestTaskForAgent(t, parentAgent)
 
 	// Create a backlog issue assigned to the child agent — should NOT trigger
@@ -2217,7 +2088,7 @@ func TestBacklogToTodoByAgentSameIssueDoesNotSelfTrigger(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	selfAgent := createHandlerTestAgent(t, "Backlog Self Agent", nil)
+	selfAgent := createHandlerTestAgent(t, "Backlog Self Agent")
 
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":         "Self-promoted backlog",
@@ -2264,7 +2135,7 @@ func TestBacklogToTodoByAgentSameAgentDifferentIssue(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	agentID := createHandlerTestAgent(t, "Backlog Same-Agent Chain", nil)
+	agentID := createHandlerTestAgent(t, "Backlog Same-Agent Chain")
 
 	// Step 1 issue — the one the agent is currently working on.
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
@@ -2323,7 +2194,7 @@ func TestAssignIssueToSelfWithActiveTargetRunDoesNotDuplicate(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	agentID := createHandlerTestAgent(t, "Self Assign Active Target", nil)
+	agentID := createHandlerTestAgent(t, "Self Assign Active Target")
 
 	issue := createIssueForTest(t, map[string]any{"title": "self-assign active target", "status": "todo"})
 	runningTask := createHandlerTestTaskForAgentOnIssue(t, agentID, issue.ID)
@@ -2384,7 +2255,7 @@ func TestAssignDifferentIssueToSelfStillEnqueues(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	agentID := createHandlerTestAgent(t, "Cross Issue Self Assign", nil)
+	agentID := createHandlerTestAgent(t, "Cross Issue Self Assign")
 	source := createIssueForTest(t, map[string]any{"title": "cross-issue source", "status": "todo"})
 	target := createIssueForTest(t, map[string]any{"title": "cross-issue target", "status": "todo"})
 	sourceTask := createHandlerTestTaskForAgentOnIssue(t, agentID, source.ID)
@@ -2408,7 +2279,7 @@ func TestBatchAssignFreshIssuesToSelfEnqueuesEach(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	agentID := createHandlerTestAgent(t, "Batch Fresh Self Assign", nil)
+	agentID := createHandlerTestAgent(t, "Batch Fresh Self Assign")
 	source := createIssueForTest(t, map[string]any{"title": "batch source", "status": "todo"})
 	target1 := createIssueForTest(t, map[string]any{"title": "batch target one", "status": "todo"})
 	target2 := createIssueForTest(t, map[string]any{"title": "batch target two", "status": "todo"})
@@ -2438,8 +2309,8 @@ func TestAssignActiveIssueToDifferentAgentStillEnqueues(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	actorAgent := createHandlerTestAgent(t, "Active Transfer Actor", nil)
-	targetAgent := createHandlerTestAgent(t, "Active Transfer Target", nil)
+	actorAgent := createHandlerTestAgent(t, "Active Transfer Actor")
+	targetAgent := createHandlerTestAgent(t, "Active Transfer Target")
 	issue := createIssueForTest(t, map[string]any{"title": "active transfer", "status": "todo"})
 	actorTask := createHandlerTestTaskForAgentOnIssue(t, actorAgent, issue.ID)
 
@@ -2469,8 +2340,8 @@ func TestBatchBacklogToTodoByAgentTriggersAssignee(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	parentAgent := createHandlerTestAgent(t, "Batch Parent Agent", nil)
-	childAgent := createHandlerTestAgent(t, "Batch Child Agent", nil)
+	parentAgent := createHandlerTestAgent(t, "Batch Parent Agent")
+	childAgent := createHandlerTestAgent(t, "Batch Child Agent")
 	parentTask := createHandlerTestTaskForAgent(t, parentAgent)
 
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
@@ -2531,8 +2402,8 @@ func TestRootMentionOwnerRoutesMemberReplyButNotAgentReply(t *testing.T) {
 	ctx := context.Background()
 
 	// Create two agents.
-	agentA := createHandlerTestAgent(t, "Loop Agent A", nil)
-	agentB := createHandlerTestAgent(t, "Loop Agent B", nil)
+	agentA := createHandlerTestAgent(t, "Loop Agent A")
+	agentB := createHandlerTestAgent(t, "Loop Agent B")
 
 	// Create an unassigned issue so on_comment doesn't fire.
 	w := httptest.NewRecorder()
@@ -2652,8 +2523,8 @@ func TestMemberReplyToAgentRootDoesNotInheritParentMentions(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	jAgent := createHandlerTestAgent(t, "J", nil)
-	reviewerAgent := createHandlerTestAgent(t, "Reviewer", nil)
+	jAgent := createHandlerTestAgent(t, "J")
+	reviewerAgent := createHandlerTestAgent(t, "Reviewer")
 
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":  "PR review delegation no-leak test",
@@ -2731,9 +2602,9 @@ func TestNestedMemberReplyUsesDirectParentForMentionInheritance(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	assigneeAgent := createHandlerTestAgent(t, "Nested Mention Assignee", nil)
-	mentionedAgent := createHandlerTestAgent(t, "Nested Mention Target", nil)
-	parentAgent := createHandlerTestAgent(t, "Nested Direct Parent", nil)
+	assigneeAgent := createHandlerTestAgent(t, "Nested Mention Assignee")
+	mentionedAgent := createHandlerTestAgent(t, "Nested Mention Target")
+	parentAgent := createHandlerTestAgent(t, "Nested Direct Parent")
 
 	var number int
 	dbfx.QueryRow(t, `
@@ -2814,7 +2685,7 @@ func TestNestedMemberReplyUnderMemberSkipsAssigneeFallback(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	assigneeAgent := createHandlerTestAgent(t, "Nested Participation Assignee", nil)
+	assigneeAgent := createHandlerTestAgent(t, "Nested Participation Assignee")
 
 	var number int
 	dbfx.QueryRow(t, `
@@ -2889,8 +2760,8 @@ func TestAgentExplicitMentionStillTriggers(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	agentA := createHandlerTestAgent(t, "Handoff Agent A", nil)
-	agentB := createHandlerTestAgent(t, "Handoff Agent B", nil)
+	agentA := createHandlerTestAgent(t, "Handoff Agent A")
+	agentB := createHandlerTestAgent(t, "Handoff Agent B")
 
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":  "Agent explicit handoff test",

@@ -18,7 +18,7 @@ func TestBacklogToCustomUnstartedStatusTriggers(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	agentID := createHandlerTestAgent(t, "Backlog Category Move Agent", nil)
+	agentID := createHandlerTestAgent(t, "Backlog Category Move Agent")
 	parkedKey := fmt.Sprintf("later_%d", time.Now().UnixNano())
 	if _, err := testPool.Exec(ctx, `
 		INSERT INTO issue_status (workspace_id, key, name, description, category, color, position)

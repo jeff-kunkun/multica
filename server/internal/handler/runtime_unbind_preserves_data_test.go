@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -280,11 +281,12 @@ func TestUnbindAgentsAndDeleteRuntime_RedactsAgentBroadcast(t *testing.T) {
 	if broadcast == nil {
 		t.Fatal("expected agent:status broadcast for unbound agent")
 	}
-	if broadcast.McpConfig != nil {
-		t.Fatalf("broadcast leaked mcp_config: %s", string(broadcast.McpConfig))
+	raw, err := json.Marshal(broadcast)
+	if err != nil {
+		t.Fatalf("marshal broadcast: %v", err)
 	}
-	if !broadcast.McpConfigRedacted {
-		t.Fatal("broadcast must mark mcp_config as redacted")
+	if strings.Contains(string(raw), "mcp_config") || strings.Contains(string(raw), "secret") {
+		t.Fatalf("broadcast leaked the stored mcp_config: %s", raw)
 	}
 }
 

@@ -78,7 +78,7 @@ func TestAssignAgent_DenialReasonNamesPermissionNotMode(t *testing.T) {
 	// judged by the top of the chain, so this fails closed like any other
 	// principal — there is no unconditional agent-to-agent bypass.
 	t.Run("agent actor with no originator is refused without naming the mode", func(t *testing.T) {
-		callerAgentID := createHandlerTestAgent(t, "assign-denial-caller-agent", nil)
+		callerAgentID := createHandlerTestAgent(t, "assign-denial-caller-agent")
 		req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, assignBody(privateAgentID))
 		req.Header.Set("X-Agent-ID", callerAgentID)
 		resp := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusForbidden)

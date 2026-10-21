@@ -33,7 +33,7 @@ func TestCreateComment_MixedMentionSurfacesPartialTriggerOutcomes(t *testing.T) 
 	}
 	ctx := context.Background()
 
-	allowedAgentID := createHandlerTestAgent(t, "Outcome Allowed Agent", nil)
+	allowedAgentID := createHandlerTestAgent(t, "Outcome Allowed Agent")
 	// A private agent owned by someone other than testUserID: the workspace
 	// owner can VIEW it but cannot INVOKE it (no admin bypass).
 	privateAgentID, _, _ := privateAgentTestFixture(t)

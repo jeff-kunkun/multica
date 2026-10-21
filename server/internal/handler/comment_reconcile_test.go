@@ -227,7 +227,7 @@ func TestCompleteTask_DoesNotReTriggerOtherAgentMentionedDuringRun(t *testing.T)
 		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 AND runtime_id IS NOT NULL LIMIT 1`,
 		testWorkspaceID).Scan(&agentA, &runtimeID)
 	// A second, workspace-invocable agent that a member can @mention.
-	agentB := createHandlerTestAgent(t, "Reconcile Other Agent B", nil)
+	agentB := createHandlerTestAgent(t, "Reconcile Other Agent B")
 
 	// Issue assigned to A so A's completion is the one that reconciles.
 	issueID := dbfx.Issue(t, "reconcile-other-agent fixture", testutil.Cols{
@@ -305,8 +305,8 @@ func TestCompleteTask_ReconcilesAgentAuthoredMentionToCompletedAgent(t *testing.
 		testWorkspaceID).Scan(&runtimeID)
 	// Two workspace-invocable agents: A authors the mention, B is the target
 	// (and the agent whose run completes / reconciles).
-	agentA := createHandlerTestAgent(t, "Reconcile A2A Author A", nil)
-	agentB := createHandlerTestAgent(t, "Reconcile A2A Target B", nil)
+	agentA := createHandlerTestAgent(t, "Reconcile A2A Author A")
+	agentB := createHandlerTestAgent(t, "Reconcile A2A Target B")
 
 	// Issue assigned to B so B's completion is the one that reconciles.
 	issueID := dbfx.Issue(t, "reconcile-a2a-mention fixture", testutil.Cols{
@@ -392,8 +392,8 @@ func TestCompleteTask_DoesNotReconcilePlainAgentReply(t *testing.T) {
 	dbfx.QueryRow(t,
 		`SELECT runtime_id FROM agent WHERE workspace_id = $1 AND runtime_id IS NOT NULL LIMIT 1`,
 		testWorkspaceID).Scan(&runtimeID)
-	agentA := createHandlerTestAgent(t, "Reconcile PlainReply Author A", nil)
-	agentB := createHandlerTestAgent(t, "Reconcile PlainReply Target B", nil)
+	agentA := createHandlerTestAgent(t, "Reconcile PlainReply Author A")
+	agentB := createHandlerTestAgent(t, "Reconcile PlainReply Target B")
 
 	issueID := dbfx.Issue(t, "reconcile-plain-agent-reply fixture", testutil.Cols{
 		"status":        "in_progress",

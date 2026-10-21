@@ -1738,48 +1738,6 @@ func (q *Queries) ClaimChatFinalizeDeferred(ctx context.Context, id pgtype.UUID)
 	return i, err
 }
 
-const clearAgentMcpConfig = `-- name: ClearAgentMcpConfig :one
-UPDATE agent SET mcp_config = NULL, updated_at = now()
-WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, service_tier, conversation_starters
-`
-
-func (q *Queries) ClearAgentMcpConfig(ctx context.Context, id pgtype.UUID) (Agent, error) {
-	row := q.db.QueryRow(ctx, clearAgentMcpConfig, id)
-	var i Agent
-	err := row.Scan(
-		&i.ID,
-		&i.WorkspaceID,
-		&i.Name,
-		&i.AvatarUrl,
-		&i.RuntimeMode,
-		&i.RuntimeConfig,
-		&i.Visibility,
-		&i.Status,
-		&i.MaxConcurrentTasks,
-		&i.OwnerID,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.Description,
-		&i.RuntimeID,
-		&i.Instructions,
-		&i.ArchivedAt,
-		&i.ArchivedBy,
-		&i.CustomEnv,
-		&i.CustomArgs,
-		&i.McpConfig,
-		&i.Model,
-		&i.ThinkingLevel,
-		&i.ComposioToolkitAllowlist,
-		&i.PermissionMode,
-		&i.Kind,
-		&i.SystemKey,
-		&i.ServiceTier,
-		&i.ConversationStarters,
-	)
-	return i, err
-}
-
 const completeAgentTask = `-- name: CompleteAgentTask :one
 UPDATE agent_task_queue
 SET status = 'completed', completed_at = now(), result = $2,
@@ -1929,14 +1887,14 @@ const createAgent = `-- name: CreateAgent :one
 INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode,
     runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
-    instructions, custom_env, custom_args, mcp_config,
+    instructions, custom_env, custom_args,
     conversation_starters, permission_mode
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9, $10,
-    $11, $12, $13, $14,
-    COALESCE($15::jsonb, '[]'::jsonb),
-    COALESCE($16, 'private')
+    $11, $12, $13,
+    COALESCE($14::jsonb, '[]'::jsonb),
+    COALESCE($15, 'private')
 )
 RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, service_tier, conversation_starters
 `
@@ -1955,7 +1913,6 @@ type CreateAgentParams struct {
 	Instructions         string      `json:"instructions"`
 	CustomEnv            []byte      `json:"custom_env"`
 	CustomArgs           []byte      `json:"custom_args"`
-	McpConfig            []byte      `json:"mcp_config"`
 	ConversationStarters []byte      `json:"conversation_starters"`
 	PermissionMode       interface{} `json:"permission_mode"`
 }
@@ -1975,7 +1932,6 @@ func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent
 		arg.Instructions,
 		arg.CustomEnv,
 		arg.CustomArgs,
-		arg.McpConfig,
 		arg.ConversationStarters,
 		arg.PermissionMode,
 	)
@@ -7398,8 +7354,7 @@ UPDATE agent SET
     instructions = COALESCE($12, instructions),
     custom_env = COALESCE($13, custom_env),
     custom_args = COALESCE($14, custom_args),
-    mcp_config = COALESCE($15, mcp_config),
-    conversation_starters = COALESCE($16, conversation_starters),
+    conversation_starters = COALESCE($15, conversation_starters),
     updated_at = now()
 WHERE id = $1
 RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, service_tier, conversation_starters
@@ -7420,7 +7375,6 @@ type UpdateAgentParams struct {
 	Instructions         pgtype.Text `json:"instructions"`
 	CustomEnv            []byte      `json:"custom_env"`
 	CustomArgs           []byte      `json:"custom_args"`
-	McpConfig            []byte      `json:"mcp_config"`
 	ConversationStarters []byte      `json:"conversation_starters"`
 }
 
@@ -7440,7 +7394,6 @@ func (q *Queries) UpdateAgent(ctx context.Context, arg UpdateAgentParams) (Agent
 		arg.Instructions,
 		arg.CustomEnv,
 		arg.CustomArgs,
-		arg.McpConfig,
 		arg.ConversationStarters,
 	)
 	var i Agent

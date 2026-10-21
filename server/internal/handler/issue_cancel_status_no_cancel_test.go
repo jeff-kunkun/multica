@@ -52,8 +52,8 @@ func TestUpdateIssueCancelStatusDoesNotCancelActiveTasks(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	ownerAgent := createHandlerTestAgent(t, "CancelStatusNoCancelOwner", []byte("[]"))
-	mentionAgent := createHandlerTestAgent(t, "CancelStatusNoCancelMention", []byte("[]"))
+	ownerAgent := createHandlerTestAgent(t, "CancelStatusNoCancelOwner")
+	mentionAgent := createHandlerTestAgent(t, "CancelStatusNoCancelMention")
 
 	for i, status := range activeTaskStatuses {
 		t.Run(status, func(t *testing.T) {
@@ -91,7 +91,7 @@ func TestBatchUpdateIssueCancelStatusDoesNotCancelActiveTasks(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	ownerAgent := createHandlerTestAgent(t, "BatchCancelStatusNoCancelOwner", []byte("[]"))
+	ownerAgent := createHandlerTestAgent(t, "BatchCancelStatusNoCancelOwner")
 
 	issueIDs := make([]string, 0, len(activeTaskStatuses))
 	taskByStatus := make(map[string]string, len(activeTaskStatuses))

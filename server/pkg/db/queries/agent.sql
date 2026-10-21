@@ -43,12 +43,12 @@ WHERE id = $1 AND workspace_id = $2 AND kind = 'user';
 INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode,
     runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
-    instructions, custom_env, custom_args, mcp_config,
+    instructions, custom_env, custom_args,
     conversation_starters, permission_mode
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9, $10,
-    $11, $12, $13, $14,
+    $11, $12, $13,
     COALESCE(sqlc.narg('conversation_starters')::jsonb, '[]'::jsonb),
     COALESCE(sqlc.narg('permission_mode'), 'private')
 )
@@ -76,14 +76,8 @@ UPDATE agent SET
     instructions = COALESCE(sqlc.narg('instructions'), instructions),
     custom_env = COALESCE(sqlc.narg('custom_env'), custom_env),
     custom_args = COALESCE(sqlc.narg('custom_args'), custom_args),
-    mcp_config = COALESCE(sqlc.narg('mcp_config'), mcp_config),
     conversation_starters = COALESCE(sqlc.narg('conversation_starters'), conversation_starters),
     updated_at = now()
-WHERE id = $1
-RETURNING *;
-
--- name: ClearAgentMcpConfig :one
-UPDATE agent SET mcp_config = NULL, updated_at = now()
 WHERE id = $1
 RETURNING *;
 

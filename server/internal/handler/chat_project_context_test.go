@@ -51,7 +51,7 @@ func TestCreateChatSession_ProjectContext(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	agentID := createHandlerTestAgent(t, "ChatProjectContextAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "ChatProjectContextAgent")
 	projectID := createChatProjectTestProject(t, testWorkspaceID, "Chat project", "Durable context")
 
 	t.Run("persists a workspace project", func(t *testing.T) {
@@ -177,7 +177,7 @@ func TestUpdateChatSession_UpdatesProjectContext(t *testing.T) {
 
 	projectID := createChatProjectTestProject(t, testWorkspaceID, "Removable chat project", "")
 	replacementProjectID := createChatProjectTestProject(t, testWorkspaceID, "Replacement chat project", "")
-	agentID := createHandlerTestAgent(t, "RemoveChatProjectAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "RemoveChatProjectAgent")
 	sessionID := createChatSessionWithProjectForTest(t, agentID, projectID)
 
 	updateProject := func(projectID any) *httptest.ResponseRecorder {
@@ -253,7 +253,7 @@ func TestDeleteProject_ClearsChatSessionContext(t *testing.T) {
 	}
 
 	projectID := createChatProjectTestProject(t, testWorkspaceID, "Deleted chat project", "")
-	agentID := createHandlerTestAgent(t, "DeletedChatProjectAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "DeletedChatProjectAgent")
 	sessionID := createChatSessionWithProjectForTest(t, agentID, projectID)
 
 	w := httptest.NewRecorder()
@@ -303,7 +303,7 @@ func TestClaimTaskByRuntime_ChatProjectContext(t *testing.T) {
 		t.Fatalf("create project resource: %v", err)
 	}
 
-	agentID := createHandlerTestAgent(t, "ChatProjectClaimAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "ChatProjectClaimAgent")
 	runtimeID := handlerTestRuntimeID(t)
 	sessionID := createChatSessionWithProjectForTest(t, agentID, projectID)
 	if _, err := testPool.Exec(ctx, `

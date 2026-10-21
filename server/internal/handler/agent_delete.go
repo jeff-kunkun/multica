@@ -283,6 +283,5 @@ func (h *Handler) RestoreAgentBackup(w http.ResponseWriter, r *http.Request) {
 			append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(restored.ID))...)
 	}
 	h.publish(protocol.EventAgentCreated, workspaceID, "member", uuidToString(member.UserID), map[string]any{"agent": broadcastAgentResponse(resp)})
-	redactAgentResponseForActor(&resp, "member")
 	writeJSON(w, http.StatusOK, resp)
 }

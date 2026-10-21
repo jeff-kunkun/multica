@@ -59,7 +59,7 @@ func agentEnvOwnerFixture(t *testing.T, agentName, email string) (agentID, owner
 	t.Helper()
 
 	ownerUserID = createPermissionTestMember(t, email)
-	agentID = createHandlerTestAgent(t, agentName, nil)
+	agentID = createHandlerTestAgent(t, agentName)
 	if _, err := testPool.Exec(context.Background(), `
 		UPDATE agent SET owner_id = $1, custom_env = '{"API_KEY":"secret-value"}' WHERE id = $2
 	`, ownerUserID, agentID); err != nil {
@@ -212,7 +212,7 @@ func TestAgentEnv_AgentActorRejectedForOwnedAgent(t *testing.T) {
 
 	// The calling agent runs on behalf of the same human who owns the
 	// target agent, so the owner check alone would let it through.
-	hostAgentID := createHandlerTestAgent(t, "env-actor-host-agent", nil)
+	hostAgentID := createHandlerTestAgent(t, "env-actor-host-agent")
 	if _, err := testPool.Exec(ctx, `UPDATE agent SET owner_id = $1 WHERE id = $2`, ownerUserID, hostAgentID); err != nil {
 		t.Fatalf("assign host agent owner: %v", err)
 	}

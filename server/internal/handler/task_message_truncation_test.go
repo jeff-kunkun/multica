@@ -21,7 +21,7 @@ func TestCreateTaskMessagesKeepsTruncationTriState(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	agentID := createHandlerTestAgent(t, "TaskMessageTruncation", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "TaskMessageTruncation")
 	taskID := dbfx.Task(t, agentID, testutil.Cols{
 		"runtime_id": handlerTestRuntimeID(t),
 		"status":     "running",

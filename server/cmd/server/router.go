@@ -592,11 +592,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// are admin-gated below).
 					r.Get("/runtime-profiles", h.ListRuntimeProfiles)
 					r.Get("/runtime-profiles/{profileId}", h.GetRuntimeProfile)
-					// The workspace MCP library — member-visible so an agent
-					// owner can see what is available to add to their agent.
-					// The payload is names and transports only; the stored
-					// entries are write-only.
-					r.Get("/mcp-servers", h.ListWorkspaceMcpServers)
 				})
 				// Owner-only access
 				r.Group(func(r chi.Router) {
@@ -606,12 +601,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/members", h.CreateInvitation)
 					r.Delete("/members/{memberId}", h.DeleteMember)
 					r.Delete("/invitations/{invitationId}", h.RevokeInvitation)
-					// Curating the shared MCP library is an admin action.
-					// Creating an entry binds it to no agent; an agent owner
-					// adds it to their own agent through the agent routes.
-					r.Post("/mcp-servers", h.CreateWorkspaceMcpServer)
-					r.Put("/mcp-servers/{serverId}", h.UpdateWorkspaceMcpServer)
-					r.Delete("/mcp-servers/{serverId}", h.DeleteWorkspaceMcpServer)
 					r.Post("/share-links", h.CreateShareLink)
 					r.Delete("/share-links/{linkId}", h.RevokeShareLink)
 					r.Get("/share-links", h.ListShareLinks)
@@ -905,13 +894,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/labels", h.ListLabelsForAgent)
 					r.Post("/labels", h.AttachLabelToAgent)
 					r.Delete("/labels/{labelId}", h.DetachLabelFromAgent)
-					// Workspace MCP servers assigned to this agent. A library
-					// entry does nothing until it is added here, and the
-					// binding carries its own enabled toggle.
-					r.Get("/mcp-servers", h.ListAgentMcpServers)
-					r.Post("/mcp-servers", h.AddAgentMcpServer)
-					r.Put("/mcp-servers/{serverId}/enabled", h.SetAgentMcpServerEnabled)
-					r.Delete("/mcp-servers/{serverId}", h.RemoveAgentMcpServer)
 					// Dedicated env-management endpoint. Admits the agent
 					// owner or a workspace owner/admin; agent actors are
 					// denied. Every reveal / write is audited to

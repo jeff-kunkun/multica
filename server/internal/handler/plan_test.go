@@ -27,7 +27,7 @@ func newPlanTestSetup(t *testing.T) planTestSetup {
 	issueID := parent.ID
 	dbfx.Cleanup(t, `DELETE FROM comment WHERE issue_id = $1`, issueID)
 	dbfx.Cleanup(t, `DELETE FROM issue WHERE id = $1`, issueID)
-	agentID := createHandlerTestAgent(t, "Plan Agent "+t.Name(), nil)
+	agentID := createHandlerTestAgent(t, "Plan Agent "+t.Name())
 	// Step issues the handler creates hang off the parent; remove them and
 	// their queued tasks before the parent's own cleanup runs.
 	dbfx.Cleanup(t, `DELETE FROM issue WHERE parent_issue_id = $1`, issueID)

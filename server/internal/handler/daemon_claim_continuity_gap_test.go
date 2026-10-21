@@ -48,7 +48,7 @@ func TestClaimTaskByRuntime_ChatRolloutMissingDisclosesGap(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	agentID := createHandlerTestAgent(t, "ChatGapClaimAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "ChatGapClaimAgent")
 	runtimeID := handlerTestRuntimeID(t)
 
 	// Chat session that still carries a good resume pointer from an earlier turn.
@@ -101,7 +101,7 @@ func TestClaimTaskByRuntime_RerunSourceRolloutMissingDisclosesGap(t *testing.T) 
 	}
 	ctx := context.Background()
 
-	agentID := createHandlerTestAgent(t, "RerunGapClaimAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "RerunGapClaimAgent")
 	runtimeID := handlerTestRuntimeID(t)
 
 	var issueID string

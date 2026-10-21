@@ -364,7 +364,7 @@ func TestUploadFile_AttachesToChatSession(t *testing.T) {
 	testHandler.Storage = &mockStorage{}
 	defer func() { testHandler.Storage = origStorage }()
 
-	agentID := createHandlerTestAgent(t, "ChatUploadAgent", []byte("[]"))
+	agentID := createHandlerTestAgent(t, "ChatUploadAgent")
 	sessionID := createHandlerTestChatSession(t, agentID)
 
 	var body bytes.Buffer
