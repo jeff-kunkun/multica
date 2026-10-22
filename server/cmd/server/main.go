@@ -763,7 +763,6 @@ func main() {
 		go telemetryWorker.Run(sweepCtx)
 	}
 	go runDelegatedFailureRecoverySweeper(sweepCtx, taskSvc)
-	go runPickupDeadlineSweeper(sweepCtx, taskSvc)
 	go runBlockWaitSweeper(sweepCtx, h)
 	// Hand-off and manager alerts; additive to the block-wait resumes above.
 	h.RegisterRelay(bus)

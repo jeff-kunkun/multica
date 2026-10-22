@@ -5204,14 +5204,6 @@ func (h *Handler) StartTask(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		slog.Warn("start task failed", "task_id", taskID, "error", err)
 		switch {
-		case errors.Is(err, service.ErrTaskPickupExpired):
-			// The urgent turn was failed with pickup_timeout in the start
-			// transaction (DENE-1884). 409 makes the daemon discard the claim
-			// instead of reporting a second failure for the same task.
-			writeJSON(w, http.StatusConflict, map[string]string{
-				"error": "urgent task missed its pickup deadline; it was failed with pickup_timeout",
-				"code":  string(taskfailure.ReasonPickupTimeout),
-			})
 		case errors.Is(err, pgx.ErrNoRows):
 			status := http.StatusConflict
 			if legacy {

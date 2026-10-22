@@ -1089,12 +1089,6 @@ type SendChatMessageRequest struct {
 	// steer, queue and restart preserve their requested delivery behavior;
 	// replace also voids every older queued instruction (DENE-1932).
 	Mode string `json:"mode,omitempty"`
-	// Urgent (DENE-1844) refuses the send when the agent's runtime is offline
-	// and no online fallback runtime is configured, dispatches to the fallback
-	// otherwise, puts the turn at the head of the queue (restart semantics),
-	// and fails it with pickup_timeout when no daemon starts it within
-	// service.UrgentChatPickupDeadline.
-	Urgent bool `json:"urgent,omitempty"`
 }
 
 // ChatReplaceOutcome is what a replace send changed: the stopped and cancelled
@@ -1125,20 +1119,13 @@ func newChatReplaceOutcome(sent *service.DirectChatSendResult) *ChatReplaceOutco
 }
 
 type SendChatMessageResponse struct {
-	Runtime *ChatRuntimeResponse `json:"runtime"`
-	// Urgent echoes the request flag; PickupDeadlineAt is when the turn fails
-	// with pickup_timeout unless a daemon starts it first. FallbackRuntime is
-	// true when the turn went to the configured fallback because the primary
-	// runtime was offline.
-	Urgent           bool    `json:"urgent,omitempty"`
-	PickupDeadlineAt *string `json:"pickup_deadline_at,omitempty"`
-	FallbackRuntime  bool    `json:"fallback_runtime,omitempty"`
-	Warning          string  `json:"warning,omitempty"`
-	ReasonCode       string  `json:"reason_code,omitempty"`
-	MessageID        string  `json:"message_id"`
-	TaskID           string  `json:"task_id"`
-	SupportsQueue    bool    `json:"supports_queue"`
-	Queued           bool    `json:"queued"`
+	Runtime       *ChatRuntimeResponse `json:"runtime"`
+	Warning       string               `json:"warning,omitempty"`
+	ReasonCode    string               `json:"reason_code,omitempty"`
+	MessageID     string               `json:"message_id"`
+	TaskID        string               `json:"task_id"`
+	SupportsQueue bool                 `json:"supports_queue"`
+	Queued        bool                 `json:"queued"`
 	// Mode is what actually happened: steer, queue, restart, replace, or start
 	// when nothing was replying. A steer whose reply ended first reports queue.
 	Mode string `json:"mode"`
@@ -1183,21 +1170,6 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		writeError(w, http.StatusBadRequest, "mode must be steer, queue, restart or replace")
 		return
-	}
-	// An urgent turn must start within its pickup deadline, and the claim
-	// serialises turns per chat: while an earlier reply is still running the
-	// urgent one could not be picked up at all. Restart is the one mode that
-	// clears the way, so urgent implies it (DENE-1844); PrioritizeQueuedChatTask
-	// then gives the turn the same head-of-queue rank a restart already uses.
-	if req.Urgent {
-		if mode == sendModeSteer {
-			writeError(w, http.StatusBadRequest, "urgent cannot be combined with mode=steer; an urgent message restarts the reply")
-			return
-		}
-		// Replace already stops the reply and takes the head of the queue.
-		if mode != sendModeReplace {
-			mode = sendModeRestart
-		}
 	}
 
 	// Pre-validate attachment ids early so invalid input returns 400 before
@@ -1352,33 +1324,14 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	// web chat the person who typed is actorID (attachment owner). The task
 	// itself is authorized as taskUserID — the creator, when somebody else
 	// is speaking in a shared chat — so the run uses the creator's quota.
-	// Urgent delivery decides the runtime before anything is persisted: an
-	// offline primary with no online fallback is a refusal with the reason and
-	// the next steps, and nothing is written (DENE-1844).
 	sendOpts := service.DirectChatSendOptions{Mode: req.Mode}
 	if mode == sendModeReplace {
 		sendOpts.Replace = true
 		sendOpts.CancelledBy = h.taskCancellationActor(r.Context(), actorType, actorID)
 	}
-	if req.Urgent {
-		opts, refusal, err := h.urgentChatDispatch(r.Context(), agent)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to check the agent's runtime")
-			return
-		}
-		if refusal != nil {
-			writeJSON(w, http.StatusConflict, refusal)
-			return
-		}
-		opts.Mode = mode
-		opts.Replace, opts.CancelledBy = sendOpts.Replace, sendOpts.CancelledBy
-		sendOpts = opts
-	}
 	sent, err := h.TaskService.SendDirectChatMessageWithOptions(r.Context(), session, agent, taskUserID, req.Content, attachmentIDs, actorType, parseUUID(actorID), sendOpts)
 	if err != nil {
 		switch {
-		case errors.Is(err, service.ErrChatFallbackRuntimeChanged):
-			writeError(w, http.StatusConflict, "the agent's fallback runtime changed while sending; send again")
 		case errors.Is(err, service.ErrChatMergeUnsupported):
 			writeSteerUnsupported(w, "the running reply cannot read this message; send with queue or restart")
 		case errors.Is(err, service.ErrChatSessionConverted):
@@ -1515,16 +1468,8 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	if mode == sendModeReplace && applied != "blocked" {
 		replaceOutcome = newChatReplaceOutcome(sent)
 	}
-	var pickupDeadline *string
-	if task.PickupDeadlineAt.Valid {
-		deadline := timestampToString(task.PickupDeadlineAt)
-		pickupDeadline = &deadline
-	}
 	writeJSON(w, http.StatusCreated, SendChatMessageResponse{
 		Runtime: diagnostics.Runtime, Warning: warning, ReasonCode: reason,
-		Urgent:             req.Urgent,
-		PickupDeadlineAt:   pickupDeadline,
-		FallbackRuntime:    sendOpts.RuntimeID.Valid,
 		MessageID:          uuidToString(msg.ID),
 		TaskID:             uuidToString(task.ID),
 		SupportsQueue:      true,
