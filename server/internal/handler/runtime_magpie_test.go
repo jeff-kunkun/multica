@@ -138,19 +138,15 @@ func TestReportRuntimeMagpie(t *testing.T) {
 		t.Fatalf("refreshes = %d, want 4", refreshes)
 	}
 
-	// Magpie mode off: a report is accepted but stores nothing, and a route
-	// left from when the switch was on is dropped.
+	// Magpie mode off still keeps the route: it is what tells the owner the
+	// switch is worth offering.
 	report(route, http.StatusOK)
 	if readRuntimeMagpie(t, runtimeID) == "" || refreshes != 5 {
 		t.Fatalf("route with magpie mode on not stored: refreshes=%d", refreshes)
 	}
 	setTestWorkspaceMagpie(t, false)
 	report(route, http.StatusOK)
-	if got := readRuntimeMagpie(t, runtimeID); got != "" {
-		t.Fatalf("route stored with magpie mode off: %s", got)
-	}
-	report(route, http.StatusOK)
-	if got := readRuntimeMagpie(t, runtimeID); got != "" || refreshes != 6 {
+	if got := readRuntimeMagpie(t, runtimeID); got == "" || refreshes != 5 {
 		t.Fatalf("magpie mode off: route=%q refreshes=%d", got, refreshes)
 	}
 }
@@ -199,6 +195,16 @@ func TestWorkspaceMagpieSwitch(t *testing.T) {
 	testutil.Call(t, testHandler.UpdateWorkspaceMagpie, put(map[string]any{"enabled": true}, func(r *http.Request) {
 		r.Header.Set("X-Actor-Source", "task_token")
 	})).Want(http.StatusForbidden)
+	// An admin is not the owner; the switch is the owner's alone.
+	var adminID string
+	dbfx.QueryRow(t, `INSERT INTO "user" (name, email) VALUES ('Magpie Admin', 'magpie-admin@multica.test') RETURNING id`).Scan(&adminID)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM "user" WHERE email = 'magpie-admin@multica.test'`)
+	})
+	dbfx.Exec(t, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'admin')`, testWorkspaceID, adminID)
+	testutil.Call(t, testHandler.UpdateWorkspaceMagpie, put(map[string]any{"enabled": true}, func(r *http.Request) {
+		r.Header.Set("X-User-ID", adminID)
+	})).Want(http.StatusForbidden)
 	if get() {
 		t.Fatal("refused writes turned magpie mode on")
 	}
@@ -221,6 +227,22 @@ func TestWorkspaceMagpieSwitch(t *testing.T) {
 	testutil.Call(t, testHandler.UpdateWorkspaceMagpie, put(map[string]any{"enabled": false}, nil)).Want(http.StatusOK)
 	if get() {
 		t.Fatal("magpie mode not off after PUT")
+	}
+}
+
+func TestRuntimeHasMagpieRoute(t *testing.T) {
+	for metadata, want := range map[string]bool{
+		`{"magpie":{"group":"office-claude","models":[{"id":"claude/opus"}]}}`: true,
+		`{"magpie":{"group":"","models":[]}}`:                                  false,
+		`{"magpie":null}`:                                                      false,
+		`{"version":"1.2.3"}`:                                                  false,
+		`{"magpie":"office-claude"}`:                                           false,
+		``:                                                                     false,
+		`not json`:                                                             false,
+	} {
+		if got := runtimeHasMagpieRoute([]byte(metadata)); got != want {
+			t.Errorf("runtimeHasMagpieRoute(%q) = %v, want %v", metadata, got, want)
+		}
 	}
 }
 
