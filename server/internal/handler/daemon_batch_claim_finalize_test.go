@@ -264,9 +264,8 @@ func TestClaimTasksByRuntime_RequiresDaemonID(t *testing.T) {
 		t.Skip("database not available")
 	}
 	w := httptest.NewRecorder()
-	req := newDaemonTokenRequest("POST", "/api/daemon/tasks/claim",
-		map[string]any{"runtime_ids": []string{}, "max_tasks": 5},
-		testWorkspaceID, batchClaimTestDaemonID)
+	req := newOwnerDaemonRequest("POST", "/api/daemon/tasks/claim",
+		map[string]any{"runtime_ids": []string{}, "max_tasks": 5})
 	testHandler.ClaimTasksByRuntime(w, req)
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 when daemon_id is missing, got %d: %s", w.Code, w.Body.String())
@@ -380,7 +379,7 @@ func TestClaimTasksByRuntime_RecoversUndeliveredDispatch(t *testing.T) {
 			body[k] = v
 		}
 		w := httptest.NewRecorder()
-		testHandler.ClaimTasksByRuntime(w, newDaemonTokenRequest(http.MethodPost, "/api/daemon/tasks/claim", body, testWorkspaceID, batchClaimTestDaemonID))
+		testHandler.ClaimTasksByRuntime(w, newOwnerDaemonRequest(http.MethodPost, "/api/daemon/tasks/claim", body))
 		if w.Code != http.StatusOK {
 			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 		}
@@ -437,7 +436,7 @@ func TestClaimTasksByRuntime_RecoveryAnswersPendingUntilDispatchIsOldEnough(t *t
 			body[k] = v
 		}
 		w := httptest.NewRecorder()
-		testHandler.ClaimTasksByRuntime(w, newDaemonTokenRequest(http.MethodPost, "/api/daemon/tasks/claim", body, testWorkspaceID, batchClaimTestDaemonID))
+		testHandler.ClaimTasksByRuntime(w, newOwnerDaemonRequest(http.MethodPost, "/api/daemon/tasks/claim", body))
 		if w.Code != http.StatusOK {
 			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 		}

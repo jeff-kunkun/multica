@@ -219,23 +219,14 @@ beforeEach(() => {
   telegramListingRef.current = { installations: [], configured: false };
 });
 
-// DENE-2009: MCP, environment, custom args and runtime config run on what is
-// saved and are changed through `multica agent update / env / mcp`.
-describe("AgentOverviewPane settings kept to what a person decides", () => {
-  it.each([["claude"], ["openclaw"]])("offers no MCP or execution-config tabs on %s", (provider) => {
+describe("AgentOverviewPane skills and MCP", () => {
+  // Each runtime's own agent installs its skills and MCP servers; the office
+  // offers no editor for them (DENE-2386).
+  it.each([["claude"], ["codex"], ["opencode"]])("offers no Skills or MCP tab on %s", (provider) => {
     renderPane([makeRuntime(provider)]);
     openCapabilities();
-    expect(screen.getByRole("tab", { name: /^Skills$/i })).toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: /MCP/i })).not.toBeInTheDocument();
-    openSettings();
-    for (const name of [/^Environment$/i, /^Custom args$/i, /^Routing$/i]) {
-      expect(screen.queryByRole("tab", { name })).not.toBeInTheDocument();
-    }
-  });
-
-  it("falls back to Overview for a stale link to a hidden tab", () => {
-    renderPane([makeRuntime("claude")], { view: "env" });
-    expect(screen.queryByText("env-tab")).toBeNull();
+    expect(screen.queryByRole("tab", { name: /^MCP$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: /^Skills$/i })).not.toBeInTheDocument();
   });
 });
 
@@ -404,6 +395,38 @@ describe("AgentOverviewPane accounts quota warning", () => {
     expect(
       screen.queryByRole("tab", { name: /Quota used up/i }),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("AgentOverviewPane on a Qoder Cloud Agents runtime", () => {
+  const tabNames = () =>
+    screen
+      .getAllByRole("tab")
+      .filter((tab) => tab.closest("aside"))
+      .map((tab) => tab.textContent);
+
+  it("offers only Instructions under Capabilities", () => {
+    larkListingRef.current = { installations: [], configured: true };
+    renderPane([makeRuntime("qoder_cloud")]);
+    openCapabilities();
+    expect(tabNames()).toEqual(["Instructions"]);
+  });
+
+  it("drops Environment and Custom Args and names the QCA agent tab", () => {
+    renderPane([makeRuntime("qoder_cloud")]);
+    openSettings();
+    expect(tabNames()).toEqual(["General", "Access", "QCA Agent"]);
+  });
+
+  it("keeps Routing off for other runtimes", () => {
+    renderPane([makeRuntime("claude")]);
+    openSettings();
+    expect(tabNames()).toEqual([
+      "General",
+      "Access",
+      "Environment",
+      "Custom Args",
+    ]);
   });
 });
 

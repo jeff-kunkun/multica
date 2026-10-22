@@ -150,21 +150,23 @@ export function useAwayFromLiveEnd(store: AwayStore): boolean {
 export function useStickToBottom(
   scrollEl: HTMLElement | null,
   pinToLiveEnd: () => void,
+  active = true,
 ): StickToBottom {
   const followRef = useRef<LiveEndFollow | null>(null);
   if (followRef.current === null) {
     followRef.current = createLiveEndFollow();
-    // Unlike the transcript, the chat list is always live. Activated at
-    // creation, not in an effect: `followOutput` reads the latch on the
-    // very first render.
-    followRef.current.setActive(true);
   }
   const follow = followRef.current;
+  // followOutput reads this latch in the same render, so an effect would update
+  // it too late. Retained exit callbacks must also stop before the list unmounts.
+  follow.setActive(active);
+  const activeRef = useRef(active);
+  activeRef.current = active;
 
   const pinRef = useRef(pinToLiveEnd);
   pinRef.current = pinToLiveEnd;
   const pin = useCallback(() => {
-    pinRef.current();
+    if (activeRef.current) pinRef.current();
   }, []);
 
   // Polled rather than driven off Virtuoso's callbacks: `atBottomStateChange`
@@ -174,13 +176,14 @@ export function useStickToBottom(
   // as the list holds still costs a handful of rect reads at open.
   const [hasReachedLiveEnd, setHasReachedLiveEnd] = useState(false);
   useEffect(() => {
-    if (!scrollEl || hasReachedLiveEnd) return;
+    if (!active || !scrollEl || hasReachedLiveEnd) return;
     let frame = 0;
     // The scroll extent is the cheapest proxy for "some row changed size":
     // every late arrival that would shift the view also moves it.
     let lastHeight = -1;
     let steadySince: number | null = null;
     const poll = (now: number) => {
+      if (!activeRef.current) return;
       const height = scrollEl.scrollHeight;
       const steady = height === lastHeight && isShowingLiveEndRow(scrollEl);
       lastHeight = height;
@@ -198,7 +201,7 @@ export function useStickToBottom(
       cancelAnimationFrame(frame);
       clearTimeout(deadline);
     };
-  }, [scrollEl, hasReachedLiveEnd]);
+  }, [active, scrollEl, hasReachedLiveEnd]);
 
   // Content grew or the viewport resized — displacement with no scroll event,
   // so it can never promote staged reader input.
@@ -224,18 +227,19 @@ export function useStickToBottom(
   }, []);
   const setAwayFromLiveEnd = awayStore.set;
   const onResize = useCallback(() => {
-    if (!scrollEl) return;
+    if (!activeRef.current || !scrollEl) return;
     setAwayFromLiveEnd(!isAtLiveEnd(scrollEl));
     if (follow.onResize(distanceFromBottom(scrollEl))) pin();
   }, [scrollEl, follow, pin, setAwayFromLiveEnd]);
 
   useEffect(() => {
-    if (!scrollEl) return;
+    if (!active || !scrollEl) return;
 
     // Mirror of the transcript dialog's wiring with the live end at the
     // BOTTOM: away from it is up, so every input sign flips.
     let inputFrame: number | null = null;
     const stageInput = (delta: number) => {
+      if (!activeRef.current) return;
       follow.input(delta);
       if (inputFrame !== null) cancelAnimationFrame(inputFrame);
       inputFrame = requestAnimationFrame(() => {
@@ -298,6 +302,7 @@ export function useStickToBottom(
     };
     let atEdge = isAtLiveEnd(scrollEl);
     const onScroll = () => {
+      if (!activeRef.current) return;
       const nowAtEdge = isAtLiveEnd(scrollEl);
       setAwayFromLiveEnd(!nowAtEdge);
       if (nowAtEdge !== atEdge) {
@@ -341,7 +346,7 @@ export function useStickToBottom(
       follow.pointerUp();
       follow.touchEnd();
     };
-  }, [scrollEl, follow, pin, onResize, setAwayFromLiveEnd]);
+  }, [active, scrollEl, follow, pin, onResize, setAwayFromLiveEnd]);
 
   return useMemo(
     () => ({

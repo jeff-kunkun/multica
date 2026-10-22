@@ -430,11 +430,6 @@ export function builderArgsForTarget(
   // the additional architectures to explicit channels. updater.ts pins the
   // matching channel at runtime. A `-test.N` tag swaps the `latest` prefix
   // for `test` and keeps those same suffixes.
-  if (target.platform === "mac" && target.arch === "x64") {
-    // Scope the Electron 39 platform floor to the new Intel package so this
-    // change does not rewrite established Apple Silicon bundle metadata.
-    builderArgs.push("-c.mac.minimumSystemVersion=12.0.0");
-  }
   const publishChannel = publishChannelForTarget(
     version,
     target.platform,

@@ -212,7 +212,8 @@
     "./skills/pack-archive": "./skills/pack-archive.ts",
     "./skills/stores": "./skills/stores/index.ts",
     "./autopilots/stores": "./autopilots/stores/index.ts",
-    "./query-persistence": "./query-persistence.ts"
+    "./query-persistence": "./query-persistence.ts",
+    "./runtimes/qoder": "./runtimes/qoder.ts"
   },
   "dependencies": {
     "@formatjs/intl-localematcher": "catalog:",

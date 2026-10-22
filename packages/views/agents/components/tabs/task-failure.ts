@@ -11,6 +11,7 @@ export const FAILURE_REASON_I18N_KEYS = {
   queued_expired: "queued_expired",
   runtime_offline: "runtime_offline",
   pickup_timeout: "pickup_timeout",
+  runtime_access_revoked: "runtime_access_revoked",
   runtime_reconnect_timeout: "runtime_reconnect_timeout",
   runtime_recovery: "runtime_recovery",
   timeout: "timeout",

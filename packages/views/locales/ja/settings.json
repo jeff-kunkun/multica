@@ -711,9 +711,7 @@
     },
     "system": {
       "title": "システム通知",
-      "description": "Multica がバックグラウンドにあるときにシステム通知を表示します。",
-      "label": "システム通知を表示",
-      "hint": "アプリが前面にないとき、新しい受信箱の項目をシステム通知で知らせます。"
+      "label": "Multica がバックグラウンドにあるときにシステム通知を表示"
     },
     "browser": {
       "label": "ブラウザ通知",
@@ -1469,6 +1467,15 @@
       "restart_description": "保存しました。{{shortcut}} で終了して Multica Desktop を開き直すと反映されます。",
       "invalid_url": "有効な http または https の URL を入力してください。",
       "switch_failed": "サーバーを切り替えできませんでした"
+    },
+    "tab_bar": {
+      "pin": "タブをピン留め",
+      "unpin": "タブのピン留めを解除",
+      "close": "タブを閉じる",
+      "close_others": "他のタブを閉じる",
+      "open_window": "新しいウィンドウで開く",
+      "new": "新しいタブ",
+      "pinned_name": "{{title}}（ピン留め）"
     },
     "updates": {
       "title": "アップデート",

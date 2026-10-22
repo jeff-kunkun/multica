@@ -78,6 +78,8 @@ import { memberListOptions } from "@multica/core/workspace/queries";
 // ─── Public component ────────────────────────────────────────────────────
 
 interface ChatMessageListProps {
+  /** Pause bottom-stick effects while a closing floating window fades out. */
+  active?: boolean;
   messages: ChatMessage[];
   /**
    * The chat these messages belong to. When set, the issues this chat opened
@@ -206,6 +208,7 @@ const LIST_COMPONENTS: Components<ChatRenderItem, ChatListContext> = {
 };
 
 export function ChatMessageList({
+  active = true,
   messages,
   pendingTask,
   availability,
@@ -235,7 +238,7 @@ export function ChatMessageList({
     virtuosoRef.current?.scrollToIndex({ index: "LAST", align: "end" });
   }, []);
   const { isFollowing, onContentHeightChanged, hasReachedLiveEnd, awayFromLiveEnd } =
-    useStickToBottom(scrollContainerEl, pinToLiveEnd);
+    useStickToBottom(scrollContainerEl, pinToLiveEnd, active);
   // Same route as the pin, animated: Virtuoso measures the last row before it
   // decides where to stop, so it converges over unmeasured rows too.
   const scrollToLiveEnd = useCallback(() => {
@@ -1257,6 +1260,7 @@ function FailureBubble({
     codex_semantic_inactivity: t(($) => $.message_list.failure.codex_semantic_inactivity),
     runtime_offline: t(($) => $.message_list.failure.runtime_offline),
     runtime_access_denied: t(($) => $.message_list.failure.runtime_access_denied),
+    runtime_access_revoked: t(($) => $.message_list.failure.runtime_access_revoked),
     runtime_recovery: t(($) => $.message_list.failure.runtime_recovery),
     manual: t(($) => $.message_list.failure.manual),
     cancelled: t(($) => $.message_list.failure.manual),

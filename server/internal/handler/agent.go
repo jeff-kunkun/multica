@@ -2331,6 +2331,18 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusForbidden, "this runtime is private; only its owner can create agents on it")
 			return
 		}
+		if runtime.Provider == "qoder_cloud" {
+			raw, _ := json.Marshal(req.RuntimeConfig)
+			if err := validateQoderAgentConfig(raw); err != nil {
+				writeError(w, 400, err.Error())
+				return
+			}
+			overrides := qoderOverrides{skills: len(req.SkillIDs), customEnv: len(req.CustomEnv), customArgs: len(req.CustomArgs), mcpConfig: req.McpConfig, model: req.Model, thinkingLevel: req.ThinkingLevel, serviceTier: req.ServiceTier}
+			if err := overrides.validate(); err != nil {
+				writeError(w, 400, err.Error())
+				return
+			}
+		}
 
 		// thinking_level validation: fixed-enum providers reject unknown literals;
 		// dynamic-catalog providers (Codex/OpenCode) reject malformed tokens here.
@@ -2482,6 +2494,38 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
+
+	// The preflight runtime can become private while validation is in flight.
+	// Serialize with revocation and keep the authorization lock through INSERT.
+	// Workspace teardown takes workspace -> runtime/agent locks in that order.
+	if _, err := qtx.LockWorkspaceForChatSessionCreate(r.Context(), wsUUID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "workspace not found")
+		} else {
+			writeError(w, http.StatusInternalServerError, "failed to lock workspace")
+		}
+		return
+	}
+	// An inherited specialisation binds to its base role's runtime, so that is
+	// the one to hold.
+	boundRuntimeID := runtime.ID
+	if inheritRuntime {
+		boundRuntimeID = parentAgent.RuntimeID
+	}
+	if boundRuntimeID.Valid {
+		locked, err := qtx.LockAgentRuntimeForAccessChange(r.Context(), boundRuntimeID)
+		if err != nil || locked.WorkspaceID != wsUUID {
+			writeError(w, http.StatusBadRequest, "invalid runtime_id")
+			return
+		}
+		if !canUseRuntimeForAgent(member, locked) {
+			writeError(w, http.StatusForbidden, "this runtime is private; only its owner can create agents on it")
+			return
+		}
+		if !inheritRuntime {
+			runtime = locked
+		}
+	}
 
 	created, err := qtx.CreateAgent(r.Context(), db.CreateAgentParams{
 		WorkspaceID:              wsUUID,
@@ -3185,6 +3229,61 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// Validate the settings the agent will have after this update, not only the
+	// fields in the request: a Qoder agent must never be left with settings the
+	// bridge refuses at run time.
+	runtimeChange := req.RuntimeConfig != nil || req.RuntimeID != nil
+	if runtimeChange || req.CustomArgs != nil || req.McpConfig != nil || req.Model != nil || req.ThinkingLevel != nil || req.ServiceTier != nil {
+		provider := targetProvider
+		if provider == "" {
+			var ok bool
+			provider, ok = h.resolveAgentProvider(r, existing.WorkspaceID, targetRuntimeID)
+			if !ok {
+				writeError(w, 400, "cannot resolve agent runtime")
+				return
+			}
+		}
+		if provider == "qoder_cloud" {
+			if runtimeChange {
+				raw := existing.RuntimeConfig
+				if req.RuntimeConfig != nil {
+					raw, _ = json.Marshal(req.RuntimeConfig)
+				}
+				if err := validateQoderAgentConfig(raw); err != nil {
+					writeError(w, 400, err.Error())
+					return
+				}
+			}
+			overrides := storedQoderOverrides(existing)
+			if req.RuntimeID != nil {
+				skills, err := h.Queries.ListAgentSkills(r.Context(), existing.ID)
+				if err != nil {
+					writeError(w, http.StatusInternalServerError, "failed to load agent skills")
+					return
+				}
+				overrides.skills = len(skills)
+			}
+			if req.CustomArgs != nil {
+				overrides.customArgs = len(*req.CustomArgs)
+			}
+			if req.McpConfig != nil {
+				overrides.mcpConfig = *req.McpConfig
+			}
+			if req.Model != nil {
+				overrides.model = *req.Model
+			}
+			if req.ThinkingLevel != nil {
+				overrides.thinkingLevel = *req.ThinkingLevel
+			}
+			if req.ServiceTier != nil {
+				overrides.serviceTier = *req.ServiceTier
+			}
+			if err := overrides.validate(); err != nil {
+				writeError(w, 400, err.Error())
+				return
+			}
+		}
+	}
 	// Invocation permission (MUL-3963). OWNER-ONLY write: access is the one
 	// agent property a workspace admin may NOT change (only the owner decides
 	// who can run their agent — the overlay uses the owner's own Composio
@@ -3517,21 +3616,53 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// A base role's routing edit and the copy onto the specialisations that
-	// follow it commit together (DENE-1016). Anything else stays on the
-	// request-scoped queries, one statement at a time, as before.
+	// One transaction holds the update together when either of two writes
+	// needs it. A base role's routing edit and the copy onto the
+	// specialisations that follow it commit together (DENE-1016). A runtime
+	// move holds the same runtime lock as revocation until the new binding
+	// commits, because a preflight-only check is stale as soon as a public
+	// runtime becomes private. Anything else stays on the request-scoped
+	// queries, one statement at a time, as before.
 	q := h.Queries
-	var routingTx pgx.Tx
-	if routingTouched && !parentAfter.Valid {
+	var updateTx pgx.Tx
+	if (routingTouched && !parentAfter.Valid) || req.RuntimeID != nil {
 		var beginErr error
-		routingTx, beginErr = h.TxStarter.Begin(r.Context())
+		updateTx, beginErr = h.TxStarter.Begin(r.Context())
 		if beginErr != nil {
-			slog.Warn("update agent: begin routing transaction failed", append(logger.RequestAttrs(r), "error", beginErr, "agent_id", id)...)
+			slog.Warn("update agent: begin transaction failed", append(logger.RequestAttrs(r), "error", beginErr, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to update agent")
 			return
 		}
-		defer routingTx.Rollback(r.Context())
-		q = h.Queries.WithTx(routingTx)
+		defer updateTx.Rollback(r.Context())
+		q = h.Queries.WithTx(updateTx)
+	}
+	if req.RuntimeID != nil && params.RuntimeID.Valid {
+		member, ok := h.workspaceMember(w, r, uuidToString(existing.WorkspaceID))
+		if !ok {
+			return
+		}
+		if _, err := q.LockWorkspaceForChatSessionCreate(r.Context(), existing.WorkspaceID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				writeError(w, http.StatusNotFound, "workspace not found")
+			} else {
+				writeError(w, http.StatusInternalServerError, "failed to lock workspace")
+			}
+			return
+		}
+		runtime, err := q.LockAgentRuntimeForAccessChange(r.Context(), params.RuntimeID)
+		if err != nil || runtime.WorkspaceID != existing.WorkspaceID {
+			writeError(w, http.StatusBadRequest, "invalid runtime_id")
+			return
+		}
+		if !canUseRuntimeForAgent(member, runtime) {
+			writeError(w, http.StatusForbidden, "this runtime is private; only its owner can move agents onto it")
+			return
+		}
+		if runtime.Visibility == "private" && runtime.OwnerID != existing.OwnerID {
+			writeError(w, http.StatusForbidden, "this runtime is private; its owner must match the agent owner")
+			return
+		}
+		params.RuntimeMode = pgtype.Text{String: runtime.RuntimeMode, Valid: true}
 	}
 
 	updated, err := q.UpdateAgent(r.Context(), params)
@@ -3597,7 +3728,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			h.TaskService.RequeueStrandedIssues(r.Context(), spec.ID)
 		}
 	}
-	if routingTx == nil {
+	if updateTx == nil {
 		recoverTurnedOnSeats()
 	}
 
@@ -3694,7 +3825,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	case !updated.ParentAgentID.Valid && (runtimeFieldsTouched || executionConfigTouched || routingTouched):
-		if routingTx != nil {
+		if updateTx != nil {
 			syncedChildren, err = q.SyncInheritedAgentRuntimeProfiles(r.Context(), updated.ID)
 			if err != nil {
 				slog.Warn("sync following agent routing failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
@@ -3705,9 +3836,9 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			syncedChildren = h.syncInheritedAgentRuntimeProfiles(r.Context(), updated.ID, r)
 		}
 	}
-	if routingTx != nil {
-		if err := routingTx.Commit(r.Context()); err != nil {
-			slog.Warn("update agent: commit routing transaction failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+	if updateTx != nil {
+		if err := updateTx.Commit(r.Context()); err != nil {
+			slog.Warn("update agent: commit transaction failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to update agent")
 			return
 		}

@@ -45,6 +45,7 @@ import { IssuePeekHost } from "../components/issue-peek";
 import { IssueSurfaceSelectionProvider } from "./selection-context";
 import { IssueSurfacePinnedProvider } from "./pinned-context";
 import { ParentIssueLookupProvider } from "./parent-issue-context";
+import { ColumnStatusesProvider } from "./column-statuses-context";
 import type { IssueCreateDefaults, IssueSurfaceProps } from "./types";
 import {
   useIssueSurfaceController,
@@ -275,6 +276,7 @@ function IssueSurfaceContent({
           sorts (Swimlane cells, drag anchors). One provider, so every consumer
           reads the same window. (DENE-500) */}
       <IssueSurfacePinnedProvider pinnedIssueIds={controller.pinnedIssueIds}>
+      <ColumnStatusesProvider statuses={controller.columnStatuses}>
         {renderHeader ? (
           renderHeader(renderContext)
         ) : (
@@ -356,7 +358,6 @@ function IssueSurfaceContent({
               <BoardView
                 issues={issues}
                 visibleStatuses={controller.visibleStatuses}
-                hiddenStatuses={controller.hiddenStatuses}
                 onMoveIssue={controller.moveIssue}
                 childProgressMap={controller.childProgressMap}
                 projectMap={controller.projectMap}
@@ -370,7 +371,6 @@ function IssueSurfaceContent({
               <ListView
                 issues={issues}
                 visibleStatuses={controller.visibleStatuses}
-                hiddenStatuses={controller.hiddenStatuses}
                 childProgressMap={controller.childProgressMap}
                 projectMap={controller.projectMap}
                 projectId={controller.projectId}
@@ -398,7 +398,6 @@ function IssueSurfaceContent({
                 unfilteredIssues={swimlaneIssues}
                 activeFilters={controller.activeFilters}
                 visibleStatuses={controller.visibleStatuses}
-                hiddenStatuses={controller.hiddenStatuses}
                 onMoveIssue={controller.moveIssue}
                 childProgressMap={controller.childProgressMap}
                 projectMap={controller.projectMap}
@@ -417,6 +416,7 @@ function IssueSurfaceContent({
             }
           />
         )}
+      </ColumnStatusesProvider>
       </IssueSurfacePinnedProvider>
       </IssueSurfaceSelectionProvider>
       </IssueContextMenuProvider>

@@ -105,7 +105,7 @@ describe("AgentDetailInspector runtime inheritance", () => {
     renderInspector(
       agentFixture({ parent_agent_id: "base-1", runtime_inherited: true }),
     );
-    for (const testId of ["runtime-picker", "model-picker"]) {
+    for (const testId of ["runtime-picker", "model-picker", "thinking-field", "service-tier-field"]) {
       expect(screen.getByTestId(testId)).toHaveAttribute("data-can-edit", "false");
     }
   });
@@ -114,7 +114,7 @@ describe("AgentDetailInspector runtime inheritance", () => {
     renderInspector(
       agentFixture({ parent_agent_id: "base-1", runtime_inherited: false }),
     );
-    for (const testId of ["runtime-picker", "model-picker"]) {
+    for (const testId of ["runtime-picker", "model-picker", "thinking-field", "service-tier-field"]) {
       expect(screen.getByTestId(testId)).toHaveAttribute("data-can-edit", "true");
     }
   });
@@ -128,22 +128,16 @@ describe("AgentDetailInspector runtime inheritance", () => {
     expect(screen.getByTestId("runtime-picker")).toHaveAttribute("data-can-edit", "false");
   });
 
-  it("shows only what a person must decide (DENE-2009)", () => {
+  // Official settings stay reachable; office-only routing extras stay off the form.
+  it("shows the official runtime settings and no office extras", () => {
     renderInspector(agentFixture({}));
-    expect(screen.getByText("Model")).toBeInTheDocument();
-    for (const gone of [
-      "Series",
-      "Standby runtime",
-      "Concurrency",
-      "Auto retry",
-      "Routing",
-      "Tier",
-      "Dispatch",
-      "Usage",
-    ]) {
+    for (const shown of ["Model", "Concurrency"]) {
+      expect(screen.getByText(shown)).toBeInTheDocument();
+    }
+    expect(screen.getByTestId("thinking-field")).toBeInTheDocument();
+    expect(screen.getByTestId("service-tier-field")).toBeInTheDocument();
+    for (const gone of ["Series", "Standby runtime", "Auto retry", "Routing", "Tier", "Dispatch", "Usage"]) {
       expect(screen.queryByText(gone)).not.toBeInTheDocument();
     }
-    expect(screen.queryByTestId("thinking-field")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("service-tier-field")).not.toBeInTheDocument();
   });
 });

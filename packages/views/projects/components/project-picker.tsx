@@ -21,6 +21,7 @@ export function ProjectPicker({
   projectId,
   onUpdate,
   triggerRender,
+  tooltip,
   align = "start",
   defaultOpen = false,
   open: controlledOpen,
@@ -30,6 +31,8 @@ export function ProjectPicker({
   projectId: string | null;
   onUpdate: (updates: Partial<UpdateIssueRequest>) => void;
   triggerRender?: React.ReactElement;
+  /** Hover tooltip naming the property; hidden while the picker is open. */
+  tooltip?: React.ReactNode;
   align?: "start" | "center" | "end";
   /** Open the dropdown on first mount. Used by progressive-disclosure
    *  sidebars so a newly-added field immediately enters edit state. */
@@ -98,6 +101,7 @@ export function ProjectPicker({
           ) : null
         }
         triggerRender={resolvedTriggerRender}
+        tooltip={tooltip}
         trigger={
           current ? (
             <>

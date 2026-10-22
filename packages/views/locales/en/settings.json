@@ -716,9 +716,7 @@
     },
     "system": {
       "title": "System Notifications",
-      "description": "Show system notifications when Multica is in the background.",
-      "label": "Show system notifications",
-      "hint": "Show a system notification for new inbox items when the app isn't focused."
+      "label": "Show system notifications when Multica is in the background"
     },
     "browser": {
       "label": "Browser notifications",
@@ -1480,6 +1478,15 @@
       "restart_description": "Saved. Quit with {{shortcut}} and reopen Multica Desktop to apply.",
       "invalid_url": "Enter a valid http or https URL.",
       "switch_failed": "Could not switch server"
+    },
+    "tab_bar": {
+      "pin": "Pin tab",
+      "unpin": "Unpin tab",
+      "close": "Close tab",
+      "close_others": "Close other tabs",
+      "open_window": "Open as new window",
+      "new": "New tab",
+      "pinned_name": "{{title}} (pinned)"
     },
     "updates": {
       "title": "Updates",

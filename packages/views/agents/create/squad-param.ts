@@ -10,14 +10,18 @@
  * the runtime the user just picked cannot be read back from anywhere. It rides
  * in the URL rather than in component state so a refresh on that first turn
  * still knows where the conversation runs.
+ *
+ * `parent` is the base role chosen by "derive a specialization"; it survives
+ * the runtime step so the configure screen still shows it preselected.
  */
 export function createPathWithParams(
   path: string,
-  params: { squad?: string | null; runtime?: string | null },
+  params: { squad?: string | null; runtime?: string | null; parent?: string | null },
 ): string {
   const query = new URLSearchParams();
   if (params.squad) query.set("squad", params.squad);
   if (params.runtime) query.set("runtime", params.runtime);
+  if (params.parent) query.set("parent", params.parent);
   const suffix = query.toString();
   return suffix ? `${path}?${suffix}` : path;
 }

@@ -3,6 +3,7 @@
 import React, { useState } from "react";
 import { Plus, Route } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { PickerItem, PropertyPicker } from "../../issues/components/pickers/property-picker";
@@ -44,6 +45,7 @@ export function AgentPicker({
   routedCurrent = false,
   trigger,
   triggerRender,
+  tooltip,
   side = "bottom",
   align = "start",
 }: {
@@ -58,6 +60,7 @@ export function AgentPicker({
   routedCurrent?: boolean;
   trigger: React.ReactNode;
   triggerRender: React.ReactElement;
+  tooltip?: React.ReactNode;
   side?: "top" | "bottom";
   align?: "start" | "center" | "end";
 }) {
@@ -81,6 +84,7 @@ export function AgentPicker({
       onSearchChange={setFilter}
       triggerRender={triggerRender}
       trigger={trigger}
+      tooltip={tooltip}
     >
       {onSelectRouted && (
         <RoutedPickerItem
@@ -246,11 +250,12 @@ export function NewChatButton({
       side={side}
       align="start"
       triggerRender={
-        <Button
+        <IconButton
           variant="ghost"
           size="icon-sm"
           className="rounded-full text-muted-foreground"
-          aria-label={label}
+          label={label}
+          tooltipSide={side === "top" ? "top" : "bottom"}
         />
       }
       trigger={<Plus />}

@@ -105,6 +105,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	// Single-use browser links for the App manifest page. No workspace column
 	// and a 10-minute expiry; a leftover link fails the owner check on open.
 	"github_app_launch_token":            workspaceDeleteKeep,
+	"cloud_agent_connection":             workspaceDelete,
 	"github_installation":                workspaceDelete,
 	"github_pending_check_suite":         workspaceDelete,
 	"github_pending_installation":        workspaceDeleteKeep,

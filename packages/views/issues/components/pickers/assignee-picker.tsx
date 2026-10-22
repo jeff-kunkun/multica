@@ -54,6 +54,8 @@ interface AssigneePickerProps {
   onUpdate: (updates: Partial<UpdateIssueRequest>) => void;
   trigger?: React.ReactNode;
   triggerRender?: React.ReactElement<Record<string, unknown>>;
+  /** Hover tooltip naming the property; hidden while the picker is open. */
+  tooltip?: React.ReactNode;
   open?: boolean;
   onOpenChange?: (v: boolean) => void;
   align?: "start" | "center" | "end";
@@ -89,6 +91,7 @@ export function AssigneePicker(props: AssigneePickerProps) {
       trigger={props.trigger}
       triggerRender={props.triggerRender}
       triggerClassName={PICKER_TRIGGER_CLASS}
+      tooltip={props.tooltip}
     >
       {(open, onOpenChange) => (
         <AssigneePickerImpl {...props} open={open} onOpenChange={onOpenChange} />
@@ -104,6 +107,7 @@ function AssigneePickerImpl({
   onUpdate,
   trigger: customTrigger,
   triggerRender,
+  tooltip,
   open: controlledOpen,
   onOpenChange: controlledOnOpenChange,
   align,
@@ -175,6 +179,7 @@ function AssigneePickerImpl({
       searchPlaceholder={t(($) => $.pickers.assignee.search_placeholder)}
       onSearchChange={setFilter}
       triggerRender={triggerRender}
+      tooltip={tooltip}
       trigger={
         customTrigger ? customTrigger : assigneeType && assigneeId ? (
           <>

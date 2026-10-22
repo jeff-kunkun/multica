@@ -29,7 +29,7 @@ func TestReportRuntimeMagpie(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	_, runtimeID, _ := createRuntimeGuardAgent(t, context.Background())
+	_, runtimeID, daemonID := createRuntimeGuardAgent(t, context.Background())
 	setTestWorkspaceMagpie(t, true)
 
 	h := *testHandler
@@ -40,7 +40,7 @@ func TestReportRuntimeMagpie(t *testing.T) {
 	report := func(body any, want int) {
 		t.Helper()
 		req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/magpie", body,
-			testWorkspaceID, "test-report-magpie")
+			testWorkspaceID, daemonID)
 		testutil.Call(t, h.ReportRuntimeMagpie, withURLParam(req, "runtimeId", runtimeID)).Want(want)
 	}
 	route := map[string]any{"magpie": map[string]any{
@@ -73,11 +73,6 @@ func TestReportRuntimeMagpie(t *testing.T) {
 	}
 
 	// Re-registering keeps the route.
-	var daemonID string
-	if err := testPool.QueryRow(context.Background(),
-		`SELECT daemon_id FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&daemonID); err != nil {
-		t.Fatalf("read daemon_id: %v", err)
-	}
 	if _, err := h.Queries.UpsertAgentRuntime(context.Background(), db.UpsertAgentRuntimeParams{
 		WorkspaceID: parseUUID(testWorkspaceID),
 		DaemonID:    strToText(daemonID),

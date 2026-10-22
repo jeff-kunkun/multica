@@ -533,9 +533,12 @@ describe("InboxPage", () => {
     render(<InboxPage />);
 
     expect(screen.queryByTestId("row")).toBeNull();
-    // The header's back-to-board button shares the mocked name; the clear
-    // action is the last button on the page.
-    fireEvent.click(screen.getAllByRole("button", { name: "Inbox" }).at(-1)!);
+    // The test's `useT` names every control "Inbox"; the header's batch menu
+    // shares the name, so skip the menu trigger.
+    const clearFilters = screen
+      .getAllByRole("button", { name: "Inbox" })
+      .find((button) => !button.hasAttribute("aria-haspopup"));
+    fireEvent.click(clearFilters!);
     expect(screen.getByTestId("row")).toHaveTextContent("todo-high");
   });
 

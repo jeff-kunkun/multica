@@ -22,6 +22,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useT } from "../i18n";
+import { DeferredTooltip } from "../common/deferred-tooltip";
 import { formatBytes } from "../common/format-bytes";
 import { fileIcon } from "./utils/file-icon";
 import { canOpenPreview, fileTypeLabel, getPreviewKind } from "./utils/preview";
@@ -76,19 +77,23 @@ function AttachmentCardChrome({
         </span>
       )}
       {!uploading && canPreview && (
-        <button
-          type="button"
-          className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-          title={t(($) => $.attachment.preview)}
-          aria-label={t(($) => $.attachment.preview)}
-          onMouseDown={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            onPreview();
-          }}
-        >
-          <Eye className="size-3.5" />
-        </button>
+        <DeferredTooltip
+          content={t(($) => $.attachment.preview)}
+          trigger={
+            <button
+              type="button"
+              className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+              aria-label={t(($) => $.attachment.preview)}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onPreview();
+              }}
+            >
+              <Eye className="size-3.5" />
+            </button>
+          }
+        />
       )}
       {!uploading && local && (
         <>
@@ -121,34 +126,42 @@ function AttachmentCardChrome({
         </>
       )}
       {!uploading && canDownload && (
-        <button
-          type="button"
-          className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-          title={t(($) => $.image.download)}
-          aria-label={t(($) => $.image.download)}
-          onMouseDown={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            onDownload();
-          }}
-        >
-          <Download className="size-3.5" />
-        </button>
+        <DeferredTooltip
+          content={t(($) => $.image.download)}
+          trigger={
+            <button
+              type="button"
+              className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+              aria-label={t(($) => $.image.download)}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onDownload();
+              }}
+            >
+              <Download className="size-3.5" />
+            </button>
+          }
+        />
       )}
       {!uploading && canDelete && onDelete && (
-        <button
-          type="button"
-          className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-          title={t(($) => $.attachment.remove)}
-          aria-label={t(($) => $.attachment.remove)}
-          onMouseDown={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            onDelete();
-          }}
-        >
-          <Trash2 className="size-3.5" />
-        </button>
+        <DeferredTooltip
+          content={t(($) => $.attachment.remove)}
+          trigger={
+            <button
+              type="button"
+              className="shrink-0 rounded-md p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+              aria-label={t(($) => $.attachment.remove)}
+              onMouseDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                onDelete();
+              }}
+            >
+              <Trash2 className="size-3.5" />
+            </button>
+          }
+        />
       )}
     </div>
   );
@@ -325,26 +338,34 @@ export function AttachmentFileCard({
             </>
           )}
           {canDownload && (
-            <button
-              type="button"
-              className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-              title={t(($) => $.image.download)}
-              aria-label={t(($) => $.image.download)}
-              onClick={onDownload}
-            >
-              <Download className="size-4" />
-            </button>
+            <DeferredTooltip
+              content={t(($) => $.image.download)}
+              trigger={
+                <button
+                  type="button"
+                  className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                  aria-label={t(($) => $.image.download)}
+                  onClick={onDownload}
+                >
+                  <Download className="size-4" />
+                </button>
+              }
+            />
           )}
           {onDelete && (
-            <button
-              type="button"
-              className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-              title={t(($) => $.attachment.remove)}
-              aria-label={t(($) => $.attachment.remove)}
-              onClick={onDelete}
-            >
-              <Trash2 className="size-4" />
-            </button>
+            <DeferredTooltip
+              content={t(($) => $.attachment.remove)}
+              trigger={
+                <button
+                  type="button"
+                  className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                  aria-label={t(($) => $.attachment.remove)}
+                  onClick={onDelete}
+                >
+                  <Trash2 className="size-4" />
+                </button>
+              }
+            />
           )}
         </span>
       )}

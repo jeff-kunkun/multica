@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { createQueryClient } from "./query-client";
+import { bindWorkspaceSlugLookup, createQueryClient } from "./query-client";
 import { createPersistedQueryCache, clearPersistedQueryCache } from "./query-persistence";
 import { useAuthStore } from "./auth";
 import { defaultStorage } from "./platform/storage";
@@ -17,6 +17,11 @@ export function QueryProvider({
   storage?: StorageAdapter;
 }) {
   const [queryClient] = useState(createQueryClient);
+  // Bind the client React actually kept. Effects never run during server
+  // rendering, so account state is never shared between requests. Lookups
+  // read the cache lazily, and the workspace list only arrives after mount.
+  useEffect(() => bindWorkspaceSlugLookup(queryClient), [queryClient]);
+
   const userId = useAuthStore((state) => state.user?.id ?? null);
   const activeUserRef = useRef<string | null>(null);
   const stopPersistenceRef = useRef<(() => void) | null>(null);

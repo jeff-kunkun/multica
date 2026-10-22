@@ -20,7 +20,7 @@ func TestClaimTaskByRuntime_InlinesIssueContextComments(t *testing.T) {
 	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "120 seconds", false)
 	dbfx.Exec(t, "UPDATE agent_task_queue SET trigger_comment_id = $2 WHERE id = $1", taskID, rootID)
 
-	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil, testWorkspaceID, "issue-context-claim")
+	req := newOwnerDaemonRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil)
 	req = withURLParam(req, "runtimeId", runtimeID)
 	var response struct {
 		Task *AgentTaskResponse `json:"task"`

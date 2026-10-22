@@ -20,6 +20,7 @@ import {
   providerSeatModelDisplay,
   seatModelIsExactly,
 } from "../provider-seat-model";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 
 /**
  * Inline model picker for the agent inspector. Lighter cousin of
@@ -317,14 +318,15 @@ export function ModelPicker({
       )}
 
       {value && (
-        <button
-          type="button"
-          onClick={() => void select("")}
-          className="mt-1 flex w-full items-center border-t px-3 py-2 text-left text-caption text-muted-foreground transition-colors hover:bg-accent/50"
-          title={t(($) => $.pickers.model_clear_title)}
-        >
-          {t(($) => $.pickers.model_clear)}
-        </button>
+        <TooltipHint label={t(($) => $.pickers.model_clear_title)}>
+          <button
+            type="button"
+            onClick={() => void select("")}
+            className="mt-1 flex w-full items-center border-t px-3 py-2 text-left text-caption text-muted-foreground transition-colors hover:bg-accent/50"
+          >
+            {t(($) => $.pickers.model_clear)}
+          </button>
+        </TooltipHint>
       )}
     </PropertyPicker>
   );

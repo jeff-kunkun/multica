@@ -83,7 +83,7 @@ type inheritanceClaim struct {
 func claimInheritanceTask(t *testing.T, runtimeID, capabilities string) inheritanceClaim {
 	t.Helper()
 
-	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil, testWorkspaceID, "dene-302-daemon")
+	req := newOwnerDaemonRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil)
 	if capabilities != "" {
 		req.Header.Set("X-Client-Capabilities", capabilities)
 	}
@@ -331,13 +331,12 @@ func TestClaim_SpecialisationCarriesTheSkillUnion(t *testing.T) {
 				wanted = ref
 			}
 		}
-		req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+fx.RuntimeID+"/tasks/"+claim.TaskID+"/skill-bundles/resolve",
+		req := newOwnerDaemonRequest("POST", "/api/daemon/runtimes/"+fx.RuntimeID+"/tasks/"+claim.TaskID+"/skill-bundles/resolve",
 			resolveSkillBundlesRequest{Skills: []resolveSkillBundleRef{{
 				ID:     wanted.ID,
 				Source: wanted.Source,
 				Hash:   wanted.Hash,
-			}}},
-			testWorkspaceID, "dene-302-daemon")
+			}}})
 		req = withURLParams(req, "runtimeId", fx.RuntimeID, "taskId", claim.TaskID)
 
 		var resolved struct {
@@ -420,7 +419,7 @@ func TestClaim_SpecialisationRefusesDispatchWhenBaseRoleIsUnreadable(t *testing.
 		Config{},
 	)
 
-	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+fx.RuntimeID+"/tasks/claim", nil, testWorkspaceID, "dene-302-daemon")
+	req := newOwnerDaemonRequest("POST", "/api/daemon/runtimes/"+fx.RuntimeID+"/tasks/claim", nil)
 	req = withURLParam(req, "runtimeId", fx.RuntimeID)
 	w := testutil.Call(t, failing.ClaimTaskByRuntime, req).Want(http.StatusInternalServerError)
 	if !strings.Contains(w.Text(), "failed to load agent instructions") {

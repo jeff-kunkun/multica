@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { LoaderCircle, Plus, Search, Trash2 } from "lucide-react";
 import { Input } from "@multica/ui/components/ui/input";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import {
@@ -537,15 +538,15 @@ export function RepositoriesSection() {
                   audienceSize={shareAudienceSizes[repository.url]}
                   onClick={() => setShareScopeIndex(index)}
                 />
-                <Button
+                <IconButton
                   variant="ghost"
                   size="icon-sm"
-                  aria-label={t(($) => $.repositories.delete_aria)}
+                  label={t(($) => $.repositories.delete_aria)}
                   className="text-muted-foreground hover:text-destructive"
                   onClick={() => setPendingRemovalIndex(index)}
                 >
                   <Trash2 className="size-3.5" />
-                </Button>
+                </IconButton>
               </div>
             ) : null;
             const reach = showReach ? reachOf(repository.url) : undefined;

@@ -22,6 +22,7 @@ import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
 import { cn } from "@multica/ui/lib/utils";
 import {
   DropdownMenu,
@@ -415,11 +416,10 @@ export function ChatSessionHeader({
       <DropdownMenu>
         <DropdownMenuTrigger
           render={
-            <Button
-              variant="ghost"
-              size="icon-sm"
+            <IconButton
+              label={t(($) => $.list.row_actions_aria)}
+              tooltipSide="bottom"
               className="text-muted-foreground"
-              aria-label={t(($) => $.list.row_actions_aria)}
             />
           }
         >

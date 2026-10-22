@@ -5609,24 +5609,42 @@ func (q *Queries) GetAgentTaskInWorkspace(ctx context.Context, arg GetAgentTaskI
 }
 
 const getAgentTaskStatus = `-- name: GetAgentTaskStatus :one
-SELECT atq.status, a.workspace_id
+SELECT atq.status, a.workspace_id, atq.runtime_id,
+       rt.workspace_id AS runtime_workspace_id,
+       rt.daemon_id AS runtime_daemon_id,
+       rt.owner_id AS runtime_owner_id
 FROM agent_task_queue atq
 JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN agent_runtime rt ON rt.id = atq.runtime_id
 WHERE atq.id = $1
 `
 
 type GetAgentTaskStatusRow struct {
-	Status      string      `json:"status"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Status             string      `json:"status"`
+	WorkspaceID        pgtype.UUID `json:"workspace_id"`
+	RuntimeID          pgtype.UUID `json:"runtime_id"`
+	RuntimeWorkspaceID pgtype.UUID `json:"runtime_workspace_id"`
+	RuntimeDaemonID    pgtype.Text `json:"runtime_daemon_id"`
+	RuntimeOwnerID     pgtype.UUID `json:"runtime_owner_id"`
 }
 
 // Hot-path status polling needs only the task status and the owning agent's
 // workspace for authorization. Keep this independent of optional source links
 // (issue, chat session, autopilot run) so it needs no source-entity lookup.
+// The bound runtime's workspace / daemon / owner ride along (LEFT JOIN: a
+// terminal task outlives a deleted runtime) so the daemon route can enforce
+// runtime ownership without a second round trip (MUL-8154).
 func (q *Queries) GetAgentTaskStatus(ctx context.Context, id pgtype.UUID) (GetAgentTaskStatusRow, error) {
 	row := q.db.QueryRow(ctx, getAgentTaskStatus, id)
 	var i GetAgentTaskStatusRow
-	err := row.Scan(&i.Status, &i.WorkspaceID)
+	err := row.Scan(
+		&i.Status,
+		&i.WorkspaceID,
+		&i.RuntimeID,
+		&i.RuntimeWorkspaceID,
+		&i.RuntimeDaemonID,
+		&i.RuntimeOwnerID,
+	)
 	return i, err
 }
 
@@ -7518,6 +7536,165 @@ func (q *Queries) ListChatFinalizeDeferredExpired(ctx context.Context, arg ListC
 			&i.PickupDeadlineAt,
 			&i.OnBehalfOfUserID,
 			&i.WorkflowStep,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listNonOwnerAgentsByRuntime = `-- name: ListNonOwnerAgentsByRuntime :many
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier, conversation_starters, switchable_models, auto_retry_enabled, parent_agent_id, runtime_inherited, routing_tier, work_enabled, plan_limits, doorbell_enabled, routing_usage, domain_id, dispatch_mode, dispatch_projects, series_override, fallback_runtime_id FROM agent
+WHERE runtime_id = $1
+  AND owner_id IS DISTINCT FROM $2
+ORDER BY name ASC
+`
+
+type ListNonOwnerAgentsByRuntimeParams struct {
+	RuntimeID      pgtype.UUID `json:"runtime_id"`
+	RuntimeOwnerID pgtype.UUID `json:"runtime_owner_id"`
+}
+
+// Returns every agent bound to a runtime whose owner differs from its owner,
+// including hidden Builder execution carriers. This is the dependency plan shown before a public
+// runtime is made private: owner-owned agents keep their binding, while every
+// teammate-owned agent loses machine access.
+func (q *Queries) ListNonOwnerAgentsByRuntime(ctx context.Context, arg ListNonOwnerAgentsByRuntimeParams) ([]Agent, error) {
+	rows, err := q.db.Query(ctx, listNonOwnerAgentsByRuntime, arg.RuntimeID, arg.RuntimeOwnerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Agent{}
+	for rows.Next() {
+		var i Agent
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.AvatarUrl,
+			&i.RuntimeMode,
+			&i.RuntimeConfig,
+			&i.Visibility,
+			&i.Status,
+			&i.MaxConcurrentTasks,
+			&i.OwnerID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Description,
+			&i.RuntimeID,
+			&i.Instructions,
+			&i.ArchivedAt,
+			&i.ArchivedBy,
+			&i.CustomEnv,
+			&i.CustomArgs,
+			&i.McpConfig,
+			&i.Model,
+			&i.ThinkingLevel,
+			&i.ComposioToolkitAllowlist,
+			&i.PermissionMode,
+			&i.Kind,
+			&i.SystemKey,
+			&i.DisabledRuntimeSkills,
+			&i.ServiceTier,
+			&i.ConversationStarters,
+			&i.SwitchableModels,
+			&i.AutoRetryEnabled,
+			&i.ParentAgentID,
+			&i.RuntimeInherited,
+			&i.RoutingTier,
+			&i.WorkEnabled,
+			&i.PlanLimits,
+			&i.DoorbellEnabled,
+			&i.RoutingUsage,
+			&i.DomainID,
+			&i.DispatchMode,
+			&i.DispatchProjects,
+			&i.SeriesOverride,
+			&i.FallbackRuntimeID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listNonOwnerAgentsByRuntimeForUpdate = `-- name: ListNonOwnerAgentsByRuntimeForUpdate :many
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier, conversation_starters, switchable_models, auto_retry_enabled, parent_agent_id, runtime_inherited, routing_tier, work_enabled, plan_limits, doorbell_enabled, routing_usage, domain_id, dispatch_mode, dispatch_projects, series_override, fallback_runtime_id FROM agent
+WHERE runtime_id = $1
+  AND owner_id IS DISTINCT FROM $2
+ORDER BY id
+FOR UPDATE NOWAIT
+`
+
+type ListNonOwnerAgentsByRuntimeForUpdateParams struct {
+	RuntimeID      pgtype.UUID `json:"runtime_id"`
+	RuntimeOwnerID pgtype.UUID `json:"runtime_owner_id"`
+}
+
+// Runtime access-change locking serializes new bindings. NOWAIT avoids waiting
+// behind a writer that already holds an agent and needs the runtime row.
+func (q *Queries) ListNonOwnerAgentsByRuntimeForUpdate(ctx context.Context, arg ListNonOwnerAgentsByRuntimeForUpdateParams) ([]Agent, error) {
+	rows, err := q.db.Query(ctx, listNonOwnerAgentsByRuntimeForUpdate, arg.RuntimeID, arg.RuntimeOwnerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Agent{}
+	for rows.Next() {
+		var i Agent
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.AvatarUrl,
+			&i.RuntimeMode,
+			&i.RuntimeConfig,
+			&i.Visibility,
+			&i.Status,
+			&i.MaxConcurrentTasks,
+			&i.OwnerID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Description,
+			&i.RuntimeID,
+			&i.Instructions,
+			&i.ArchivedAt,
+			&i.ArchivedBy,
+			&i.CustomEnv,
+			&i.CustomArgs,
+			&i.McpConfig,
+			&i.Model,
+			&i.ThinkingLevel,
+			&i.ComposioToolkitAllowlist,
+			&i.PermissionMode,
+			&i.Kind,
+			&i.SystemKey,
+			&i.DisabledRuntimeSkills,
+			&i.ServiceTier,
+			&i.ConversationStarters,
+			&i.SwitchableModels,
+			&i.AutoRetryEnabled,
+			&i.ParentAgentID,
+			&i.RuntimeInherited,
+			&i.RoutingTier,
+			&i.WorkEnabled,
+			&i.PlanLimits,
+			&i.DoorbellEnabled,
+			&i.RoutingUsage,
+			&i.DomainID,
+			&i.DispatchMode,
+			&i.DispatchProjects,
+			&i.SeriesOverride,
+			&i.FallbackRuntimeID,
 		); err != nil {
 			return nil, err
 		}

@@ -26,7 +26,8 @@ import { useChatStore, DRAFT_NEW_SESSION } from "@multica/core/chat";
 import { replaceProjectId } from "@multica/core/chat/project-context";
 import { attachmentToDraftUpload, type DraftUpload } from "@multica/core/drafts";
 import { createLogger } from "@multica/core/logger";
-import { formatShortcut, useShortcut } from "@multica/core/shortcuts";
+import { useShortcut } from "@multica/core/shortcuts";
+import { ShortcutKeycaps } from "../../common/shortcut-keycaps";
 import type { MentionItem } from "../../editor/extensions/mention-suggestion";
 import type { Attachment, ChatSendMode, Project } from "@multica/core/types";
 import { agentSceneOf } from "@multica/core/agents";
@@ -792,7 +793,7 @@ export function ChatInput({
                         )
                       }
                       clearLabel={t(($) => $.input.remove_project_context)}
-                      className="h-6 border-surface-border bg-surface-raised font-medium text-foreground"
+                      className="border-surface-border bg-surface-raised font-medium text-foreground"
                     />
                   }
                 />
@@ -908,11 +909,20 @@ export function ChatInput({
               // stop-only while a reply runs.
               running={!!isRunning}
               onStop={requestStop}
-              tooltip={gate.uploading
+              // While blocked, the placeholder copy is exactly the reason.
+              disabledReason={gate.uploading
                 ? tEditor(($) => $.upload.in_progress)
-                : sendShortcut
-                  ? `${t(($) => $.input.send_tooltip)} · ${formatShortcut(sendShortcut)}`
-                  : t(($) => $.input.send_tooltip)}
+                : disabled || noAgent
+                  ? placeholder
+                  : undefined}
+              tooltip={sendShortcut
+                ? (
+                  <>
+                    {t(($) => $.input.send_tooltip)}
+                    <ShortcutKeycaps shortcut={sendShortcut} decorative />
+                  </>
+                )
+                : t(($) => $.input.send_tooltip)}
               ariaLabel={gate.uploading
                 ? tEditor(($) => $.upload.in_progress)
                 : t(($) => $.input.send_tooltip)}

@@ -72,7 +72,7 @@ import { isImeComposing } from "@multica/core/utils";
 import type { Workspace } from "@multica/core/types";
 import { WorkspaceOrganizeDialog } from "./workspace-organize-dialog";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { inboxUnreadSummaryOptions, useInboxUnreadCount, hasOtherWorkspaceUnread, unreadWorkspaceIds } from "@multica/core/inbox/queries";
+import { inboxUnreadSummaryEnabled, inboxUnreadSummaryOptions, useInboxUnreadCount, hasOtherWorkspaceUnread, unreadWorkspaceIds } from "@multica/core/inbox/queries";
 import { api, ApiError } from "@multica/core/api";
 import { useConfigStore } from "@multica/core/config";
 import { pinListOptions } from "@multica/core/pins/queries";
@@ -155,7 +155,6 @@ const workNav: { key: NavKey; labelKey: NavLabelKey }[] = [
 const aiTeamNav: { key: NavKey; labelKey: NavLabelKey }[] = [
   { key: "agents", labelKey: "agents" },
   { key: "squads", labelKey: "squads" },
-  { key: "skills", labelKey: "skills" },
   { key: "runtimes", labelKey: "runtimes" },
 ];
 
@@ -353,7 +352,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   // the endpoint resolves through the workspace-member middleware.
   const { data: unreadSummary = EMPTY_INBOX_SUMMARY } = useQuery({
     ...inboxUnreadSummaryOptions(),
-    enabled: !!wsId,
+    enabled: inboxUnreadSummaryEnabled(wsId),
   });
   const otherWorkspaceUnread = React.useMemo(
     () => hasOtherWorkspaceUnread(unreadSummary, wsId),

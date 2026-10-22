@@ -17,7 +17,6 @@ import {
   MessagesSquare,
   Plug,
   Search,
-  Server,
   Route,
   Settings,
   SlidersHorizontal,
@@ -47,6 +46,7 @@ import {
 } from "@multica/core/feature-flags";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { cn } from "@multica/ui/lib/utils";
 import { resolveSettingsLocation, settingsHref } from "./settings-navigation";
 import { AppLink, useNavigation } from "../../navigation";
@@ -71,7 +71,6 @@ import { QuickActionsTab } from "./quick-actions-tab";
 import { RoutingTab } from "./routing-tab";
 import { KeyboardShortcutsTab } from "./keyboard-shortcuts-tab";
 import { PluginsTab } from "./plugins-tab";
-import { McpTab } from "./mcp-tab";
 import { BillingTab } from "./billing-tab";
 import { ConfigTransferTab } from "./config-transfer-tab";
 import { ProjectSharingTab } from "./project-sharing-tab";
@@ -137,8 +136,6 @@ export function SettingsPage({ extraDeviceTabs: deviceTabs = [] }: SettingsPageP
   const reposAllowed = canAccessModule(moduleAccess, "repos");
   const { role } = useCurrentMember(workspace?.id ?? "");
   const isMember = role === "member";
-  // Member management is owner-only (DENE-1022): only owners get the nav entry.
-  const isOwner = role === "owner";
   // External bot keys (DENE-1788) carry the admin's own power: owners and
   // admins only, and the entry is hidden (not locked) for everyone else.
   const isAdmin = role === "owner" || role === "admin";
@@ -165,22 +162,9 @@ export function SettingsPage({ extraDeviceTabs: deviceTabs = [] }: SettingsPageP
     { adminOnly: true },
   );
 
-  // DENE-2009: settings keep only what a person has to decide. Everything that
-  // reaches people goes through the group chat (external Bots), and the rest
-  // is either decided by the system or changed by agents through the CLI.
-  // Retired pages are no longer listed or searchable, but their URLs still
-  // open, since server redirects (GitHub App, Composio OAuth) land on them.
-  const retired: SettingsEntry[] = [
-    entry("notifications", t(($) => $.page.tabs.notifications), Bell, <NotificationsTab />),
-    entry("shortcuts", t(($) => $.page.tabs.shortcuts), Keyboard, <KeyboardShortcutsTab />),
-    ...(appsAvailable ? [entry("apps", t(($) => $.page.tabs.apps), Plug, <ConnectedAppsTab />)] : []),
-    entry("tokens", t(($) => $.page.tabs.tokens), KeyRound, <TokensTab />),
-    entry(
-      "agent-permissions",
-      t(($) => $.page.tabs.agent_permissions),
-      BotMessageSquare,
-      <AgentPermissionsTab />,
-    ),
+  // Office pages that are not official: they still open from a link (server
+  // redirects, CLI hints), but the list stays the official one.
+  const unlisted: SettingsEntry[] = [
     entry(
       "project-sharing",
       t(($) => $.page.tabs.project_sharing),
@@ -188,9 +172,6 @@ export function SettingsPage({ extraDeviceTabs: deviceTabs = [] }: SettingsPageP
       <ProjectSharingTab />,
       { wide: true },
     ),
-    ...(billingEnabled
-      ? [entry("billing", t(($) => $.page.tabs.billing), CreditCard, <BillingTab />)]
-      : []),
     entry(
       "config-transfer",
       t(($) => $.page.tabs.config_transfer),
@@ -198,49 +179,9 @@ export function SettingsPage({ extraDeviceTabs: deviceTabs = [] }: SettingsPageP
       <ConfigTransferTab />,
       { wide: true },
     ),
-    // MUL-7420: with project workflows on, the workflow editor replaces the
-    // status library page.
-    ...(workflowsEnabled
-      ? [entry("workflows", t(($) => $.page.tabs.workflows), Workflow, <WorkflowsTab />, {
-          wide: true,
-          adminOnly: true,
-        })]
-      : [entry("issue-statuses", t(($) => $.page.tabs.issue_statuses), CircleDot, <IssueStatusesTab />, {
-          wide: true,
-          adminOnly: true,
-        })]),
-    entry("wakeups", t(($) => $.page.tabs.wakeups), AlarmClock, <WakeupsTab />, {
-      wide: true,
-      adminOnly: true,
-    }),
-    entry("labels", t(($) => $.page.tabs.labels), Tags, <LabelsTab />, { wide: true }),
-    entry("properties", t(($) => $.page.tabs.properties), ListPlus, <PropertiesTab />, {
-      wide: true,
-      adminOnly: true,
-    }),
-    entry("quick-actions", t(($) => $.page.tabs.quick_actions), Zap, <QuickActionsTab />, {
-      wide: true,
-    }),
     entry("routing", t(($) => $.page.tabs.routing), Route, <RoutingTab />),
-    // Plan approval rights: unlisted so workspaces that never use plans see
-    // no new page; owners open it by URL or use `multica plan approver`.
+    // Plan approval rights: owners open it by URL or use `multica plan approver`.
     entry("approvers", t(($) => $.page.tabs.approvers), Stamp, <ApproversTab />),
-    ...(reposAllowed
-      ? [
-          entry(
-            "git-connections",
-            t(($) => $.page.tabs.git_connections),
-            Link2,
-            <GitConnectionsTab />,
-            { wide: true },
-          ),
-        ]
-      : []),
-    entry("channels", t(($) => $.page.tabs.channels), MessagesSquare, <ChannelsTab />),
-    entry("mcp", t(($) => $.page.tabs.mcp), Server, <McpTab />, { adminOnly: true }),
-    ...(pluginsEnabled
-      ? [entry("plugins", t(($) => $.page.tabs.plugins), Blocks, <PluginsTab />, { adminOnly: true })]
-      : []),
   ];
 
   const groups: SettingsScopeGroup[] = [
@@ -267,6 +208,22 @@ export function SettingsPage({ extraDeviceTabs: deviceTabs = [] }: SettingsPageP
               SlidersHorizontal,
               <PreferencesTab />,
             ),
+            entry(
+              "notifications",
+              t(($) => $.page.tabs.notifications),
+              Bell,
+              <NotificationsTab />,
+            ),
+            entry(
+              "shortcuts",
+              t(($) => $.page.tabs.shortcuts),
+              Keyboard,
+              <KeyboardShortcutsTab />,
+            ),
+            ...(appsAvailable
+              ? [entry("apps", t(($) => $.page.tabs.apps), Plug, <ConnectedAppsTab />)]
+              : []),
+            entry("tokens", t(($) => $.page.tabs.tokens), KeyRound, <TokensTab />),
           ],
         },
       ],
@@ -290,9 +247,19 @@ export function SettingsPage({ extraDeviceTabs: deviceTabs = [] }: SettingsPageP
             entry("workspace", t(($) => $.page.tabs.general), Settings, <WorkspaceTab />, {
               adminOnly: true,
             }),
-            ...(isOwner ? [membersEntry] : []),
-            // The one place people are reached: Bots relay decisions and
-            // activity into the group chat.
+            membersEntry,
+            ...(billingEnabled
+              ? [
+                  entry(
+                    "billing",
+                    t(($) => $.page.tabs.billing),
+                    CreditCard,
+                    <BillingTab />,
+                  ),
+                ]
+              : []),
+            // Bots relay decisions and activity into the group chat. Their
+            // keys carry the admin's own power, so others do not see the entry.
             ...(isAdmin
               ? [
                   entry(
@@ -303,10 +270,81 @@ export function SettingsPage({ extraDeviceTabs: deviceTabs = [] }: SettingsPageP
                   ),
                 ]
               : []),
-            // Repos module visibility (kun) hides the code page.
+            // Office: agent rules, run limits and the 接入 Magpie switch.
+            entry(
+              "agent-permissions",
+              t(($) => $.page.tabs.agent_permissions),
+              BotMessageSquare,
+              <AgentPermissionsTab />,
+            ),
+          ],
+        },
+        {
+          key: "issues",
+          label: t(($) => $.page.groups.issues),
+          entries: [
+            // MUL-7420: with project workflows on, the workflow editor replaces
+            // the status library page.
+            ...(workflowsEnabled
+              ? [entry("workflows", t(($) => $.page.tabs.workflows), Workflow, <WorkflowsTab />, {
+                  wide: true,
+                })]
+              : [entry("issue-statuses", t(($) => $.page.tabs.issue_statuses), CircleDot, <IssueStatusesTab />, {
+                  wide: true,
+                  adminOnly: true,
+                })]),
+            entry("wakeups", t(($) => $.page.tabs.wakeups), AlarmClock, <WakeupsTab />, {
+              wide: true,
+              adminOnly: true,
+            }),
+            entry("labels", t(($) => $.page.tabs.labels), Tags, <LabelsTab />, {
+              wide: true,
+            }),
+            entry(
+              "properties",
+              t(($) => $.page.tabs.properties),
+              ListPlus,
+              <PropertiesTab />,
+              { wide: true, adminOnly: true },
+            ),
+            entry(
+              "quick-actions",
+              t(($) => $.page.tabs.quick_actions),
+              Zap,
+              <QuickActionsTab />,
+              { wide: true },
+            ),
+          ],
+        },
+        {
+          key: "connections",
+          label: t(($) => $.page.groups.connections),
+          entries: [
+            // Repos module visibility (kun) hides the code pages.
             ...(reposAllowed
               ? [
                   entry("code", t(($) => $.page.tabs.code), FolderGit2, <CodeTab />, {
+                    adminOnly: true,
+                  }),
+                  // Hosts, GitHub Apps and repo tokens connect here (DENE-961).
+                  entry(
+                    "git-connections",
+                    t(($) => $.page.tabs.git_connections),
+                    Link2,
+                    <GitConnectionsTab />,
+                    { wide: true },
+                  ),
+                ]
+              : []),
+            entry(
+              "channels",
+              t(($) => $.page.tabs.channels),
+              MessagesSquare,
+              <ChannelsTab />,
+            ),
+            ...(pluginsEnabled
+              ? [
+                  entry("plugins", t(($) => $.page.tabs.plugins), Blocks, <PluginsTab />, {
                     adminOnly: true,
                   }),
                 ]
@@ -332,10 +370,8 @@ export function SettingsPage({ extraDeviceTabs: deviceTabs = [] }: SettingsPageP
   const location = resolveSettingsLocation(navigation.searchParams);
   const candidate =
     location.tab === "billing" && !billingEnabled ? "workspace" : location.tab;
-  // A non-owner who opens the members link directly still lands on it and is
-  // told why it is closed, instead of being bounced to another tab unexplained.
   const active =
-    [...allEntries, membersEntry, ...retired, ...(deviceTabs as SettingsEntry[])].find((item) => item.value === candidate) ??
+    [...allEntries, ...unlisted, ...(deviceTabs as SettingsEntry[])].find((item) => item.value === candidate) ??
     allEntries[0]!;
   const href = (value: string) =>
     settingsHref(navigation.pathname, navigation.searchParams, value);
@@ -552,14 +588,16 @@ export function SettingsPage({ extraDeviceTabs: deviceTabs = [] }: SettingsPageP
             className="h-8 w-full rounded-lg border border-input bg-transparent pl-8 pr-8 text-body outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 dark:bg-input/30 [&::-webkit-search-cancel-button]:hidden"
           />
           {query ? (
-            <button
-              type="button"
-              onClick={() => setQuery("")}
-              aria-label={t(($) => $.page.search_clear)}
-              className="absolute right-1.5 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-surface-hover hover:text-foreground"
-            >
-              <X className="size-3.5" aria-hidden="true" />
-            </button>
+            <TooltipHint label={t(($) => $.page.search_clear)}>
+              <button
+                type="button"
+                onClick={() => setQuery("")}
+                aria-label={t(($) => $.page.search_clear)}
+                className="absolute right-1.5 top-1/2 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-surface-hover hover:text-foreground"
+              >
+                <X className="size-3.5" aria-hidden="true" />
+              </button>
+            </TooltipHint>
           ) : null}
         </div>
         <nav

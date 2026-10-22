@@ -711,9 +711,7 @@
     },
     "system": {
       "title": "系统通知",
-      "description": "Multica 在后台时显示系统通知。",
-      "label": "显示系统通知",
-      "hint": "App 不在前台时，用系统通知提醒新的收件箱条目。"
+      "label": "Multica 在后台时显示系统通知"
     },
     "browser": {
       "label": "浏览器通知",
@@ -1469,6 +1467,15 @@
       "restart_description": "已保存。用 {{shortcut}} 退出并重新打开 Multica Desktop 后生效。",
       "invalid_url": "请输入有效的 http 或 https 地址。",
       "switch_failed": "无法切换服务器"
+    },
+    "tab_bar": {
+      "pin": "固定标签页",
+      "unpin": "取消固定标签页",
+      "close": "关闭标签页",
+      "close_others": "关闭其他标签页",
+      "open_window": "在新窗口打开",
+      "new": "新建标签页",
+      "pinned_name": "{{title}}（已固定）"
     },
     "updates": {
       "title": "更新",
