@@ -144,8 +144,6 @@ function IssueContextMenuSingleton({
           assigneeType={issue.assignee_type}
           assigneeId={issue.assignee_id}
           onUpdate={actions.updateField}
-          sceneProjectIds={[issue.project_id]}
-          sceneDomainId={issue.domain_id}
           open={assigneeOpen}
           onOpenChange={setAssigneeOpen}
           triggerRender={

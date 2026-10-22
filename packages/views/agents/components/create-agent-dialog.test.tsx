@@ -3,7 +3,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import type { Agent, MemberWithUser, RuntimeDevice } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { WorkspaceSlugProvider } from "@multica/core/paths";
@@ -99,14 +98,10 @@ function makeRuntime(overrides: Partial<RuntimeDevice>): RuntimeDevice {
 }
 
 function makeDuplicateSource(runtimeId: string): Agent {
-  return makeWorkspaceAgent({ id: "agent-source", runtime_id: runtimeId });
-}
-
-function makeWorkspaceAgent(overrides: Partial<Agent>): Agent {
   return {
     id: "agent-source",
     workspace_id: "ws-1",
-    runtime_id: "rt",
+    runtime_id: runtimeId,
     name: "Source Agent",
     description: "",
     instructions: "",
@@ -126,15 +121,10 @@ function makeWorkspaceAgent(overrides: Partial<Agent>): Agent {
     updated_at: "2026-04-01T00:00:00Z",
     archived_at: null,
     archived_by: null,
-    ...overrides,
   };
 }
 
-function renderDialog(
-  runtimes: RuntimeDevice[],
-  template?: Agent,
-  workspaceAgents: Agent[] = [],
-) {
+function renderDialog(runtimes: RuntimeDevice[], template?: Agent) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -148,7 +138,6 @@ function renderDialog(
           <CreateAgentDialog
             runtimes={runtimes}
             members={members}
-            agents={workspaceAgents}
             currentUserId={ME}
             template={template}
             onClose={onClose}
@@ -418,95 +407,5 @@ describe("CreateAgentDialog access picker (MUL-4010, feature-flag gated)", () =>
     expect(payload.invocation_targets).toEqual([
       { target_type: "member", target_id: OTHER },
     ]);
-  });
-});
-
-// DENE-304: the create surface has to be able to say "this agent is a
-// specialisation of X", and it may only offer things the server accepts as a
-// base role — a non-archived agent that is not itself a specialisation.
-describe("CreateAgentDialog base-role picker (DENE-304)", () => {
-  beforeEach(() => vi.clearAllMocks());
-  afterEach(() => {
-    cleanup();
-    document.body.innerHTML = "";
-  });
-
-  const runtime = () =>
-    makeRuntime({ id: "rt-mine", name: "My Runtime", owner_id: ME });
-  const baseRole = () =>
-    makeWorkspaceAgent({ id: "agent-base", name: "Base Role" });
-  const specialization = () =>
-    makeWorkspaceAgent({
-      id: "agent-spec",
-      name: "Spec Agent",
-      parent_agent_id: "agent-base",
-      parent_agent_name: "Base Role",
-    });
-  const archivedBase = () =>
-    makeWorkspaceAgent({
-      id: "agent-archived",
-      name: "Archived Base",
-      archived_at: "2026-04-02T00:00:00Z",
-    });
-
-  it("offers base roles only and defaults to independent", async () => {
-    const user = userEvent.setup();
-    renderDialog([runtime()], undefined, [
-      baseRole(),
-      specialization(),
-      archivedBase(),
-    ]);
-
-    expect(
-      screen.getByRole("combobox", { name: "Base role" }),
-    ).toHaveTextContent("Independent base role");
-
-    await user.click(screen.getByRole("combobox", { name: "Base role" }));
-    expect(
-      await screen.findByRole("option", { name: "Base Role" }),
-    ).toBeInTheDocument();
-    // A specialisation can never be a parent ("特化角色不能再派生"), and an
-    // archived agent cannot be one either — both would be a server-side 400.
-    expect(screen.queryByRole("option", { name: "Spec Agent" })).toBeNull();
-    expect(screen.queryByRole("option", { name: "Archived Base" })).toBeNull();
-  });
-
-  it("sends parent_agent_id for the chosen base role", async () => {
-    const user = userEvent.setup();
-    const { onCreate } = renderDialog([runtime()], undefined, [baseRole()]);
-
-    fireEvent.change(screen.getByPlaceholderText("e.g. Deep Research Agent"), {
-      target: { value: "Nightly Variant" },
-    });
-    await user.click(screen.getByRole("combobox", { name: "Base role" }));
-    await user.click(await screen.findByRole("option", { name: "Base Role" }));
-    fireEvent.click(screen.getByText("Create"));
-    await new Promise((r) => setTimeout(r, 0));
-
-    expect(onCreate.mock.calls[0]?.[0].parent_agent_id).toBe("agent-base");
-  });
-
-  it("omits parent_agent_id for an independent base role", async () => {
-    const { onCreate } = renderDialog([runtime()], undefined, [baseRole()]);
-
-    fireEvent.change(screen.getByPlaceholderText("e.g. Deep Research Agent"), {
-      target: { value: "Standalone" },
-    });
-    fireEvent.click(screen.getByText("Create"));
-    await new Promise((r) => setTimeout(r, 0));
-
-    expect(onCreate.mock.calls[0]?.[0]).not.toHaveProperty("parent_agent_id");
-  });
-
-  it("states what the new specialisation inherits", async () => {
-    const user = userEvent.setup();
-    renderDialog([runtime()], undefined, [baseRole()]);
-
-    await user.click(screen.getByRole("combobox", { name: "Base role" }));
-    await user.click(await screen.findByRole("option", { name: "Base Role" }));
-
-    expect(screen.getByTestId("agent-base-role-hint")).toHaveTextContent(
-      /prepended to this agent's own prompt/i,
-    );
   });
 });

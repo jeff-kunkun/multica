@@ -30,8 +30,6 @@
  * bidirectional Markdown ↔ ProseMirror JSON conversion.
  */
 
-import type { AgentScene } from "@multica/core/agents";
-import { useContextAgentScene } from "../agents/components/agent-scene-context";
 import {
   forwardRef,
   useCallback,
@@ -424,10 +422,6 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         ? { chat_session_id: currentChatSessionId }
         : {};
     const mentionSourceRef = useRef<BotMentionSource>(mentionSource);
-    // The surrounding surface's scene (DENE-1477) ranks @ agents by fit; a ref
-    // because the mention extension is built once at mount.
-    const agentScene = useContextAgentScene();
-    const agentSceneRef = useRef<AgentScene | null>(agentScene);
     // Kept in a ref for the same reason as mentionContextItems: the extension
     // set is built once at mount, so a directly-captured options object would
     // freeze whatever closures existed then and stop seeing new quick actions.
@@ -533,7 +527,6 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     pasteAsFileThresholdRef.current = pasteAsFileThreshold;
     mentionContextItemsRef.current = mentionContextItems ?? [];
     mentionSourceRef.current = mentionSource;
-    agentSceneRef.current = agentScene;
     quickActionMenuRef.current = quickActionMenu;
     flushPendingOnUnmountRef.current = flushPendingOnUnmount;
 
@@ -654,7 +647,6 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         disableMentions,
         mentionMode,
         getMentionContextItems: () => mentionContextItemsRef.current,
-        getAgentScene: () => agentSceneRef.current,
         getMentionSource: () => mentionSourceRef.current,
         enableSlashCommands,
         slashCommandMode,

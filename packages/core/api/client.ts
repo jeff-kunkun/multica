@@ -5,18 +5,8 @@ import type { WorkspaceWakeupPage, WorkspaceWakeupFilters } from "../types/issue
 import { WorkspaceWakeupPageSchema, IssueWakeupSchema, IssueWakeupSummaryRowSchema, PausedWakeupSchema, SystemWakeupSchema, WakeupRunSchema, WorkspaceSystemWakeupSchema } from "./schemas";
 import type { ArchivedInboxFilters } from "../inbox/filter-store";
 import type { ArchivedInboxPage, ArchivedInboxFacets } from "../types/inbox";
-import type { InboxBoardResponse, ParkingRecordsResponse, UnreadInboxIssue, WaitingSummon } from "../types/home";
+import type { InboxBoardResponse, UnreadInboxIssue } from "../types/home";
 import type { WorkThreadSnapshot } from "../types/work_thread";
-import type { Ask, CreateAskRequest, AnswerAskRequest } from "../types/ask";
-import type { IssuePlans, Plan, PlanApprover } from "../types/plan";
-import {
-  IssuePlansSchema,
-  EMPTY_ISSUE_PLANS,
-  ApprovePlanResponseSchema,
-  PlanApproverListSchema,
-  PlanApproverSchema,
-  EMPTY_PLAN_APPROVER,
-} from "./schemas";
 import { parseQoderConnection, parseQoderCatalog, type QoderInput } from "../runtimes/qoder-schema";
 import { configStore } from "../config";
 import type { CommentSendMode } from "../types";
@@ -54,8 +44,6 @@ import type {
   AgentBuilderSessionSummary,
   StoredAgentDraft,
   UpdateAgentRequest,
-  BulkUpdateAgentRoutingRequest,
-  BulkUpdateAgentRoutingResponse,
   AgentEnvResponse,
   UpdateAgentEnvRequest,
   AgentTask,
@@ -78,8 +66,6 @@ import type {
   Reaction,
   IssueReaction,
   IssueAgentGuardResponse,
-  IssueDisposeRequest,
-  IssueDisposeResponse,
   Workspace,
   WorkspaceRepo,
   ModuleKey,
@@ -105,7 +91,6 @@ import type {
   BotBinding,
   PutBotBindingRequest,
   BotWriteAuditPage,
-  OfficeDeliveryPage,
   UpdateBotWakeRequest,
   BotWakeEventPage,
   BotMentionTarget,
@@ -136,7 +121,6 @@ import type {
   ChatMessage,
   ChatMessagesPage,
   ChatDraftRestoresResponse,
-  ChatTicketsResponse,
   ChatPendingTask,
   PrioritizeQueuedChatTaskResponse,
   PendingChatTasksResponse,
@@ -156,8 +140,6 @@ import type {
   UpdateProjectResourceRequest,
   ListProjectResourcesResponse,
   Label,
-  Domain,
-  ListDomainsResponse,
   IssueProperty,
   IssuePropertyValue,
   CreatePropertyRequest,
@@ -322,21 +304,6 @@ import { compressImageForUpload } from "../attachments/compress-image";
 import { isFileReadable, UnreadableFileError } from "../attachments/file-readable";
 import { defaultStorage } from "../platform/storage";
 import {
-  parseRoutingHealth,
-  type RoutingHealth,
-} from "../workspace/routing-health";
-import {
-  parseRoutingModels,
-  type RoutingModels,
-} from "../workspace/routing-models";
-import {
-  parseDispatchPreview,
-  parseRoutingDispatch,
-  type DispatchPreview,
-  type RoutingDispatch,
-  type RoutingDispatchUpdate,
-} from "../workspace/routing-dispatch";
-import {
   parseConfigBundle,
   parseConfigImportReport,
   reportFromImportError,
@@ -346,7 +313,6 @@ import {
   type ConfigImportResult,
 } from "./config-transfer";
 import {
-  BotWakeDeliveryStatsSchema,
   RuntimeProfileSchema,
   RuntimeProfileListSchema,
   AgentTaskListSchema,
@@ -354,7 +320,6 @@ import {
   AgentActivityBucketListSchema,
   WorkStopResponseSchema,
   IssueAgentGuardResponseSchema,
-  IssueDisposeResponseSchema,
   AttachmentResponseSchema,
   CancelTaskResponseSchema,
   ChatDraftRestoresResponseSchema,
@@ -2147,9 +2112,7 @@ export class ApiClient {
   // Both reads go through the zod boundary (DENE-304). Installed desktop
   // builds talk to newer servers, and the agents list is the surface the whole
   // product is navigated from: a malformed row must degrade to the empty state
-  // rather than throw during render. The two-level specialisation fields
-  // (`parent_agent_id`, `inherited_*`, `child_count`) are optional-and-caught
-  // in AgentSchema, so a backend that predates them still yields agents.
+  // rather than throw during render.
   async listAgents(params?: { workspace_id?: string; include_archived?: boolean }): Promise<Agent[]> {
     const search = new URLSearchParams();
     if (params?.workspace_id) search.set("workspace_id", params.workspace_id);
@@ -2161,31 +2124,13 @@ export class ApiClient {
   }
 
   /**
-   * Reads one agent, including the inherited half of a specialisation
-   * (`inherited_instructions` / `inherited_skills`) that only this endpoint
-   * loads. Degrades to `null` instead of a blank-named agent when the payload
-   * fails validation; callers fall back to the list row they already hold.
+   * Reads one agent. Degrades to `null` instead of a blank-named agent when the
+   * payload fails validation; callers fall back to the list row they already hold.
    */
   async getAgent(id: string): Promise<Agent | null> {
     const raw = await this.fetch<unknown>(`/api/agents/${id}`);
     return parseWithFallback<Agent | null>(raw, AgentSchema, null, {
       endpoint: "GET /api/agents/:id",
-    });
-  }
-
-  /**
-   * Bakes a specialisation's inherited prompt into its own `instructions` and
-   * detaches it from its base role (DENE-301) — the documented escape hatch
-   * that lets the base role be archived. Server-side this is `POST
-   * /api/agents/{id}/solidify`; every refusal is a 409 with a readable reason
-   * (not a specialisation, parent gone, parent has no prompt).
-   */
-  async solidifyAgent(id: string): Promise<Agent | null> {
-    const raw = await this.fetch<unknown>(`/api/agents/${id}/solidify`, {
-      method: "POST",
-    });
-    return parseWithFallback<Agent | null>(raw, AgentSchema, null, {
-      endpoint: "POST /api/agents/:id/solidify",
     });
   }
 
@@ -2308,16 +2253,6 @@ export class ApiClient {
   async updateAgent(id: string, data: UpdateAgentRequest): Promise<Agent> {
     assertAgentConversationStartersWriteSupported(data);
     return this.fetch(`/api/agents/${id}`, {
-      method: "PUT",
-      body: JSON.stringify(data),
-    });
-  }
-
-  /** Tier and/or usage on several seats in one all-or-nothing write. */
-  async bulkUpdateAgentRouting(
-    data: BulkUpdateAgentRoutingRequest,
-  ): Promise<BulkUpdateAgentRoutingResponse> {
-    return this.fetch("/api/agents/routing", {
       method: "PUT",
       body: JSON.stringify(data),
     });
@@ -3213,25 +3148,6 @@ export class ApiClient {
     return this.fetch(`/api/agent-task-snapshot`);
   }
 
-  // Latest parking record of every issue that has one (DENE-881): running or
-  // parked, why it stopped, what came before, who moves next.
-  async listIssueParkingRecords(params?: {
-    unexplainedOnly?: boolean;
-    limit?: number;
-  }): Promise<ParkingRecordsResponse> {
-    const search = new URLSearchParams();
-    if (params?.unexplainedOnly) search.set("unexplained_only", "true");
-    if (params?.limit) search.set("limit", String(params.limit));
-    const query = search.toString();
-    return this.fetch(`/api/issues/parking${query ? `?${query}` : ""}`);
-  }
-
-  // The current user's unanswered calls in this workspace (DENE-880). A call
-  // closes server-side when the person replies on the issue.
-  async listWaitingSummons(): Promise<WaitingSummon[]> {
-    return this.fetch(`/api/summons/waiting`);
-  }
-
   // Independent workspace-level projection. Unlike the task snapshot, this
   // already deduplicates running agents and returns only the display fields
   // consumers need. Callers may narrow the projection by task source and, for
@@ -3341,16 +3257,6 @@ export class ApiClient {
     return parseWithFallback(raw, IssueAgentGuardResponseSchema, { issue_id: issueId, halted: false }, {
       endpoint: "POST /api/issues/:id/resume",
     });
-  }
-
-  async disposeIssue(issueId: string, body: IssueDisposeRequest): Promise<IssueDisposeResponse> {
-    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/dispose`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
-    const parsed = IssueDisposeResponseSchema.safeParse(raw);
-    if (!parsed.success) throw new Error("Invalid dispose response");
-    return parsed.data;
   }
 
   async rerunIssue(issueId: string, taskId?: string): Promise<AgentTask> {
@@ -3587,17 +3493,6 @@ export class ApiClient {
     return this.fetch(`/api/workspaces/${id}`);
   }
 
-  async getWorkspaceNaming(workspaceId: string): Promise<import("../types").WorkspaceNaming> {
-    return this.fetch(`/api/workspaces/${workspaceId}/naming`);
-  }
-
-  async updateWorkspaceNaming(workspaceId: string, source: "server_llm" | "runtime" | "rules"): Promise<import("../types").WorkspaceNaming> {
-    return this.fetch(`/api/workspaces/${workspaceId}/naming`, {
-      method: "PUT",
-      body: JSON.stringify({ source }),
-    });
-  }
-
   async listModuleVisibility(): Promise<ModuleVisibility[]> {
     const raw = await this.fetch<unknown>("/api/modules");
     const parsed = parseWithFallback(
@@ -3754,75 +3649,6 @@ export class ApiClient {
       method: "PUT",
       body: JSON.stringify({ visibility }),
     });
-  }
-
-  /**
-   * Read whether routing is actually working for this workspace.
-   *
-   * Read-only and cheap: the server reports breaker state and never dials the
-   * model, so an open settings tab cannot turn into an outbound request loop.
-   */
-  async getRoutingHealth(workspaceId: string): Promise<RoutingHealth> {
-    const raw = await this.fetch<unknown>(
-      `/api/workspaces/${workspaceId}/routing/health`,
-    );
-    return parseRoutingHealth(raw);
-  }
-
-  /**
-   * The "re-check" button. This one DOES dial the model, which is the only way
-   * out of a cooldown short of waiting it out.
-   */
-  async checkRoutingHealth(workspaceId: string): Promise<RoutingHealth> {
-    const raw = await this.fetch<unknown>(
-      `/api/workspaces/${workspaceId}/routing/health/check`,
-      { method: "POST" },
-    );
-    return parseRoutingHealth(raw);
-  }
-
-  /**
-   * Discover model ids from the routing target. The server resolves the
-   * workspace/deployment endpoint and keeps the API key entirely server-side.
-   */
-  async listRoutingModels(workspaceId: string): Promise<RoutingModels> {
-    const raw = await this.fetch<unknown>(
-      `/api/workspaces/${workspaceId}/routing/models`,
-      { method: "POST" },
-    );
-    return parseRoutingModels(raw);
-  }
-
-  /** The 分工规则 as the server holds it, plus the series and tiers a row may name. */
-  async getRoutingDispatch(workspaceId: string): Promise<RoutingDispatch> {
-    const raw = await this.fetch<unknown>(
-      `/api/workspaces/${workspaceId}/routing/dispatch`,
-    );
-    return parseRoutingDispatch(raw);
-  }
-
-  /**
-   * Ask the routing judge to read rows out of plain text. Writes nothing:
-   * the rows come back for a person to check before `updateRoutingDispatch`.
-   */
-  async previewRoutingDispatch(workspaceId: string, text: string): Promise<DispatchPreview> {
-    const raw = await this.fetch<unknown>(
-      `/api/workspaces/${workspaceId}/routing/dispatch/preview`,
-      { method: "POST", body: JSON.stringify({ text }) },
-    );
-    return parseDispatchPreview(raw);
-  }
-
-  /** Confirm the reviewed rows (or reset to default); the server records the revision. */
-  async updateRoutingDispatch(
-    workspaceId: string,
-    update: RoutingDispatchUpdate,
-  ): Promise<RoutingDispatch> {
-    const raw = await this.fetch<unknown>(
-      `/api/workspaces/${workspaceId}/routing/dispatch`,
-      { method: "PUT", body: JSON.stringify(update) },
-    );
-    return parseRoutingDispatch(raw);
   }
 
   async exportWorkspaceConfig(workspaceId: string): Promise<ConfigBundle> {
@@ -4533,9 +4359,7 @@ export class ApiClient {
 
   // Bot wake (DENE-1792): owner/admin or the bot's own key.
   async getBotWake(workspaceId: string, botId: string): Promise<BotWakeSettings> {
-    const path = `/api/workspaces/${workspaceId}/bots/${botId}/wake`;
-    const raw = await this.fetch<BotWakeSettings>(path);
-    return parseWithFallback(raw, BotWakeDeliveryStatsSchema, raw, { endpoint: `GET ${path}` });
+    return this.fetch(`/api/workspaces/${workspaceId}/bots/${botId}/wake`);
   }
 
   async updateBotWake(
@@ -4543,12 +4367,10 @@ export class ApiClient {
     botId: string,
     data: UpdateBotWakeRequest,
   ): Promise<BotWakeSettings> {
-    const path = `/api/workspaces/${workspaceId}/bots/${botId}/wake`;
-    const raw = await this.fetch<BotWakeSettings>(path, {
+    return this.fetch(`/api/workspaces/${workspaceId}/bots/${botId}/wake`, {
       method: "PUT",
       body: JSON.stringify(data),
     });
-    return parseWithFallback(raw, BotWakeDeliveryStatsSchema, raw, { endpoint: `PUT ${path}` });
   }
 
   // What Bots did in people's names (DENE-1936): route and field names only.
@@ -4561,30 +4383,6 @@ export class ApiClient {
     if (params.before) search.set("before", params.before);
     const qs = search.toString();
     return this.fetch(`/api/workspaces/${workspaceId}/bot-writes${qs ? `?${qs}` : ""}`);
-  }
-
-  // Your Bot's office-event ledger (DENE-1963): what was sent, confirmed,
-  // passed on to you, or is stuck and why.
-  async listMyOfficeDeliveries(
-    workspaceId: string,
-    params: { before?: number; limit?: number; status?: string[] } = {},
-  ): Promise<OfficeDeliveryPage> {
-    const search = new URLSearchParams();
-    if (params.limit) search.set("limit", String(params.limit));
-    if (params.before) search.set("before", String(params.before));
-    if (params.status?.length) search.set("status", params.status.join(","));
-    const qs = search.toString();
-    return this.fetch(`/api/workspaces/${workspaceId}/me/office-deliveries${qs ? `?${qs}` : ""}`);
-  }
-
-  async retryMyOfficeDeliveries(
-    workspaceId: string,
-    eventId?: string,
-  ): Promise<{ requeued: number }> {
-    return this.fetch(`/api/workspaces/${workspaceId}/me/office-deliveries/retry`, {
-      method: "POST",
-      body: JSON.stringify(eventId ? { event_id: eventId } : {}),
-    });
   }
 
   async listBotWakeEvents(
@@ -4956,11 +4754,7 @@ export class ApiClient {
 
   async createChatSession(
     data: {
-      /** Leave out and the server routes the chat to an agent from `brief`
-       *  (DENE-1834); the response's `routing` says who and why. */
-      agent_id?: string;
-      /** The first message, for routing. Ignored when `agent_id` is set. */
-      brief?: string;
+      agent_id: string;
       title?: string;
       /** The session's project set, in selection order (DENE-522). Mutually
        *  exclusive with `project_id` — the server rejects both at once rather
@@ -5166,26 +4960,6 @@ export class ApiClient {
     const raw = await this.fetch<unknown>(`/api/chat/sessions/${sessionId}/pending-task`);
     return parseWithFallback(raw, ChatPendingTaskSchema, EMPTY_CHAT_PENDING_TASK, {
       endpoint: "GET /api/chat/sessions/:id/pending-task",
-    });
-  }
-
-  /** Issues this chat opened or follows, in the order they joined it (DENE-1665, DENE-1719). */
-  async listChatTickets(sessionId: string): Promise<ChatTicketsResponse> {
-    return this.fetch(`/api/chat/sessions/${sessionId}/tickets`);
-  }
-
-  /** Pin an issue (id or identifier) to a chat by hand — `multica chat tickets add` (DENE-1719). */
-  async addChatTicket(sessionId: string, issue: string): Promise<void> {
-    await this.fetch(`/api/chat/sessions/${sessionId}/tickets`, {
-      method: "POST",
-      body: JSON.stringify({ issue }),
-    });
-  }
-
-  /** Take an issue off a chat — `multica chat tickets remove` (DENE-1719). */
-  async removeChatTicket(sessionId: string, issueId: string): Promise<void> {
-    await this.fetch(`/api/chat/sessions/${sessionId}/tickets/${encodeURIComponent(issueId)}`, {
-      method: "DELETE",
     });
   }
 
@@ -5487,31 +5261,6 @@ export class ApiClient {
     await this.fetch(`/api/projects/${projectId}/members/${memberId}`, {
       method: "DELETE",
     });
-  }
-
-  // Workspace domains (DENE-1451). Reads are open to any member; writes are
-  // owner/admin only.
-  async listDomains(): Promise<ListDomainsResponse> {
-    const raw = await this.fetch<ListDomainsResponse>(`/api/domains`);
-    return { domains: Array.isArray(raw?.domains) ? raw.domains : [] };
-  }
-
-  async createDomain(name: string): Promise<Domain> {
-    return this.fetch<Domain>(`/api/domains`, {
-      method: "POST",
-      body: JSON.stringify({ name }),
-    });
-  }
-
-  async renameDomain(id: string, name: string): Promise<Domain> {
-    return this.fetch<Domain>(`/api/domains/${id}`, {
-      method: "PATCH",
-      body: JSON.stringify({ name }),
-    });
-  }
-
-  async deleteDomain(id: string): Promise<void> {
-    await this.fetch(`/api/domains/${id}`, { method: "DELETE" });
   }
 
   // Labels
@@ -6945,70 +6694,5 @@ export class ApiClient {
       EMPTY_REDEEM_TELEGRAM_BINDING_TOKEN_RESPONSE,
       { endpoint: "POST /api/telegram/binding/redeem" },
     );
-  }
-
-  async createAsk(body: CreateAskRequest): Promise<Ask> {
-    return this.fetch<Ask>("/api/asks", { method: "POST", body: JSON.stringify(body) });
-  }
-
-  async listAsks(status = "open", issueId?: string): Promise<{ asks: Ask[] }> {
-    const params = new URLSearchParams();
-    if (status) params.set("status", status);
-    if (issueId) params.set("issue_id", issueId);
-    const query = params.toString() ? `?${params.toString()}` : "";
-    return this.fetch<{ asks: Ask[] }>(`/api/asks${query}`);
-  }
-
-  async getAsk(id: string): Promise<Ask> {
-    return this.fetch<Ask>(`/api/asks/${encodeURIComponent(id)}`);
-  }
-
-  async answerAsk(id: string, body: AnswerAskRequest): Promise<Pick<Ask, "id" | "status" | "answers">> {
-    return this.fetch<Pick<Ask, "id" | "status" | "answers">>(`/api/asks/${encodeURIComponent(id)}/answer`, {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
-  }
-
-  /** Every plan version on an issue (newest first) and whether the caller may approve. */
-  async listIssuePlans(issueId: string): Promise<IssuePlans> {
-    const raw = await this.fetch<unknown>(`/api/issues/${encodeURIComponent(issueId)}/plans`);
-    return parseWithFallback(raw, IssuePlansSchema, EMPTY_ISSUE_PLANS, {
-      endpoint: "GET /api/issues/{id}/plans",
-    });
-  }
-
-  /** Approves one plan version; each step becomes a child issue and starts. */
-  async approvePlan(issueId: string, version: number): Promise<Plan | null> {
-    const raw = await this.fetch<unknown>(
-      `/api/issues/${encodeURIComponent(issueId)}/plans/${version}/approve`,
-      { method: "POST" },
-    );
-    return parseWithFallback(raw, ApprovePlanResponseSchema, { plan: null }, {
-      endpoint: "POST /api/issues/{id}/plans/{version}/approve",
-    }).plan;
-  }
-
-  async listPlanApprovers(): Promise<PlanApprover[]> {
-    const raw = await this.fetch<unknown>("/api/plan-approvers");
-    return parseWithFallback(raw, PlanApproverListSchema, { approvers: [] }, {
-      endpoint: "GET /api/plan-approvers",
-    }).approvers;
-  }
-
-  async addPlanApprover(userId: string): Promise<PlanApprover> {
-    const raw = await this.fetch<unknown>("/api/plan-approvers", {
-      method: "POST",
-      body: JSON.stringify({ user_id: userId }),
-    });
-    return parseWithFallback(raw, PlanApproverSchema, EMPTY_PLAN_APPROVER, {
-      endpoint: "POST /api/plan-approvers",
-    });
-  }
-
-  async removePlanApprover(userId: string): Promise<void> {
-    await this.fetch<unknown>(`/api/plan-approvers/${encodeURIComponent(userId)}`, {
-      method: "DELETE",
-    });
   }
 }

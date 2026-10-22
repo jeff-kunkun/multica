@@ -44,7 +44,6 @@ import { availabilityConfig, workloadConfig } from "../../agents/presence";
 import { HealthBadge } from "./shared";
 import { ProviderLogo } from "./provider-logo";
 import { UsageSection } from "./usage-section";
-import { PlanLimitsCard } from "./plan-limits";
 import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
 import {
   RevokeRuntimeAccessDialog,
@@ -208,7 +207,6 @@ export function RuntimeDetail({
                 canManage={!!canEditRuntime}
               />
             )}
-            <PlanLimitsCard runtime={runtime} now={now} />
             {canReadRuntime && <UsageSection runtime={runtime} />}
           </div>
 

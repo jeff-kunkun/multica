@@ -81,22 +81,6 @@ export interface IssueDriver {
   escalated?: boolean;
 }
 
-export type IssueDisposeAction = "rerun" | "reroute" | "split" | "cancel";
-
-export interface IssueDisposeRequest {
-  action: IssueDisposeAction;
-  reason?: string;
-  into?: string[];
-}
-
-export interface IssueDisposeResponse {
-  action: IssueDisposeAction;
-  status: string;
-  driver?: IssueDriver;
-  created?: string[];
-  note?: string;
-}
-
 export interface IssueAgentGuardResponse {
   issue_id: string;
   halted: boolean;
@@ -214,17 +198,6 @@ export interface IssueSourceContext {
   snapshot: SourceContextSnapshot;
 }
 
-/** Who decided the executor: a person's own hand, an automation a person
- *  configured, a person's words an agent relayed, an agent's own idea, or
- *  routing. */
-export type IssueAssigneeSource =
-  | "human"
-  | "automation"
-  | "quote"
-  | "agent"
-  | "router"
-  // The agent working the parent split off this sub-issue and kept it (自领).
-  | "self_claim";
 /** The original a duplicate points at: enough to link it and show its status. */
 export interface IssueDuplicateOf {
   id: string;
@@ -260,14 +233,6 @@ export interface Issue {
   priority: IssuePriority;
   assignee_type: IssueAssigneeType | null;
   assignee_id: string | null;
-  // Whose decision the executor is (DENE-1033). Null on tickets that predate
-  // the record and on a ticket with no executor. `assignee_ignored` only ever
-  // rides on the response to the write that named an executor the server did
-  // not accept — routing then fills the slot — and is never stored.
-  assignee_source?: IssueAssigneeSource | null;
-  assignee_source_user_id?: string | null;
-  assignee_quote?: string | null;
-  assignee_ignored?: boolean;
   // 验收席. Both null = nobody has decided yet. reviewer_type "none" carries a
   // null reviewer_id and means the issue needs no acceptance pass.
   reviewer_type: IssueReviewerType | null;

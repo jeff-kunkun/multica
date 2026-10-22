@@ -15,7 +15,6 @@ import { getCurrentWsId, getCurrentSlug } from "../platform/workspace-storage";
 import { issueKeys } from "../issues/queries";
 import { homeKeys } from "../home/queries";
 import { projectKeys } from "../projects/queries";
-import { planKeys } from "../plans/queries";
 import { invalidateProjectMemberLists } from "../projects/member-queries";
 import { pinKeys } from "../pins/queries";
 import { autopilotKeys } from "../autopilots/queries";
@@ -135,7 +134,6 @@ import type {
   Progress,
   ChatSessionCreatedPayload,
   InvitationCreatedPayload,
-  DaemonHeartbeatPayload,
 } from "../types";
 
 const chatWsLogger = createLogger("chat.ws");
@@ -980,9 +978,8 @@ export interface RealtimeSyncStores {
  *
  * Per-issue events (comments, activity, reactions, subscribers) are handled
  * both here (invalidation fallback) and by per-page useWSEvent hooks (granular
- * updates). Daemon register events invalidate runtimes globally. Routine
- * heartbeats stay off the prefix path to avoid a 15s refetch storm; a
- * plan_limits snapshot change is handled by a dedicated listener.
+ * updates). Daemon register events invalidate runtimes globally; heartbeats
+ * are skipped to avoid excessive refetches.
  *
  * @param ws - WebSocket client instance (null when not yet connected)
  * @param stores - Platform-created Zustand store instances for auth and workspace
@@ -1189,7 +1186,7 @@ export function useRealtimeSync(
         if (!wsId) return;
         qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.list(wsId) });
         // Working-agent projections have their own bounded refresh below.
-        // A run's end writes the parking record the inbox board reads.
+        // A run's start and end move its issue between inbox board lanes.
         qc.invalidateQueries({ queryKey: homeKeys.all(wsId) });
         // 30d activity series shares the same lifecycle signal — any task
         // completion / failure shifts the histogram. (Dispatch alone
@@ -1305,13 +1302,10 @@ export function useRealtimeSync(
       "reaction:added", "reaction:removed",
       "issue_reaction:added", "issue_reaction:removed",
       "subscriber:added", "subscriber:removed",
-      // Routine daemon heartbeats are high-frequency; plan_limits updates
-      // use the dedicated handler below instead of the daemon: prefix path.
       "daemon:heartbeat",
       // Chat events are handled explicitly below; do not double-invalidate.
       "chat:message", "chat:done", "chat:quick_actions", "chat:cancel_finalized", "chat:session_read",
       "chat:session_created", "chat:session_deleted", "chat:session_updated", "chat:session_invalidated",
-      "chat:tickets_changed",
       // task:message stays out of the prefix path because it fires per
       // streamed message during a long run — invalidating the snapshot on
       // every message would flood the network. Specific chat handlers below
@@ -1344,23 +1338,6 @@ export function useRealtimeSync(
     // Filtering by actor_id would block other tabs of the same user.
     // Instead, both mutations and WS handlers use dedup checks to be idempotent.
 
-    const unsubDaemonHeartbeat = ws.on("daemon:heartbeat", (p) => {
-      const payload = p as DaemonHeartbeatPayload;
-      // The server sets a flag only when the stored row actually changed, so a
-      // routine beat still short-circuits.
-      if (payload?.plan_limits_updated !== true) return;
-      const wsId = getCurrentWsId();
-      if (!wsId) return;
-      // An agent-scoped snapshot lives on the agent row, so refetching runtimes
-      // would not move the number the panel reads (DENE-715). The runtime row
-      // and the agent row are separate carriers with separate readers.
-      if (payload.agent_id) {
-        qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-        return;
-      }
-      qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
-    });
-
     const unsubIssueUpdated = ws.on("issue:updated", (p) => {
       const payload = p as IssueUpdatedPayload;
       const { issue } = payload;
@@ -1385,8 +1362,6 @@ export function useRealtimeSync(
         if (payload.status_changed) {
           qc.invalidateQueries({ queryKey: homeKeys.all(wsId) });
         }
-        // A chat's ticket card shows its issues' status and executor (DENE-1665).
-        qc.invalidateQueries({ queryKey: chatKeys.ticketsAll(wsId) });
       }
     });
 
@@ -1396,7 +1371,6 @@ export function useRealtimeSync(
       const wsId = getCurrentWsId();
       if (wsId) {
         onIssueCreated(qc, wsId, issue);
-        qc.invalidateQueries({ queryKey: chatKeys.ticketsAll(wsId) });
       }
     });
 
@@ -1407,7 +1381,6 @@ export function useRealtimeSync(
       if (wsId) {
         onIssueDeleted(qc, wsId, issue_id);
         void onInboxIssueDeleted(qc, wsId, issue_id);
-        qc.invalidateQueries({ queryKey: chatKeys.ticketsAll(wsId) });
       }
     });
 
@@ -1423,7 +1396,6 @@ export function useRealtimeSync(
       const wsId = getCurrentWsId();
       if (!wsId) return;
       applyIssueInvalidatedToCache(qc, wsId, p as IssueInvalidatedPayload);
-      qc.invalidateQueries({ queryKey: chatKeys.ticketsAll(wsId) });
     });
 
     const unsubIssueLabelsChanged = ws.on("issue_labels:changed", (p) => {
@@ -1521,8 +1493,6 @@ export function useRealtimeSync(
         qc.invalidateQueries({ queryKey: homeKeys.all(wsId) });
         invalidateUpdatedAtSortedIssueLists(qc, wsId);
         invalidateLastActivitySortedIssueLists(qc, wsId);
-        // Proposing or approving a plan posts its card as a comment.
-        qc.invalidateQueries({ queryKey: planKeys.issue(wsId, comment.issue_id) });
         // A comment carries only the aggregate owner revision, not a full
         // Issue snapshot. Mark stale projections for an authoritative fetch
         // without making a later full snapshot look older than the cache.
@@ -2129,13 +2099,6 @@ export function useRealtimeSync(
       qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
     });
 
-    // An issue joined or left a chat's tickets (DENE-1719).
-    const unsubChatTicketsChanged = ws.on("chat:tickets_changed", (p) => {
-      const payload = p as { chat_session_id: string };
-      const id = getCurrentWsId();
-      if (id) qc.invalidateQueries({ queryKey: chatKeys.tickets(id, payload.chat_session_id) });
-    });
-
     const unsubChatSessionDeleted = ws.on("chat:session_deleted", (p) => {
       const payload = p as { chat_session_id: string };
       chatWsLogger.info("chat:session_deleted (global)", payload);
@@ -2157,7 +2120,6 @@ export function useRealtimeSync(
 
     return () => {
       unsubAny();
-      unsubDaemonHeartbeat();
       unsubIssueUpdated();
       unsubIssueCreated();
       unsubIssueDeleted();
@@ -2204,7 +2166,6 @@ export function useRealtimeSync(
       unsubChatSessionRead();
       unsubChatSessionCreated();
       unsubChatSessionInvalidated();
-      unsubChatTicketsChanged();
       unsubChatSessionDeleted();
       unsubChatSessionUpdated();
       if (taskMessageFlushTimer) clearTimeout(taskMessageFlushTimer);

@@ -16,9 +16,6 @@ const data = vi.hoisted(() => ({
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => route.workspaceId,
 }));
-vi.mock("./use-routed-pick", () => ({
-  useRoutingPicksAgents: () => false,
-}));
 vi.mock("@multica/core/auth", () => ({
   useAuthStore: (selector: (state: { user: { id: string } }) => unknown) =>
     selector({ user: { id: "user-1" } }),

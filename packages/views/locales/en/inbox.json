@@ -138,16 +138,6 @@
     "activity_link": "All activity",
     "back_to_board": "One row per issue",
     "lanes": {
-      "waiting": {
-        "title": "Waiting on you",
-        "hint": "Issues waiting on you; once you reply, the agent continues.",
-        "empty": "Nothing is waiting on you"
-      },
-      "stalled": {
-        "title": "Stopped · unexplained",
-        "hint": "Issues with no agent running that were never closed out.",
-        "empty": "Nothing stopped without an explanation"
-      },
       "running": {
         "title": "Running",
         "hint": "Just a marker, no noise",
@@ -175,66 +165,19 @@
       }
     },
     "tag": {
-      "needs_human": "Your call",
-      "manual": "Your turn",
-      "mention": "Asked for you",
-      "routing": "Nobody picked up",
-      "patrol": "No reviewer",
-      "unseated": "No executor",
-      "time_limit": "Timed out",
-      "quota_relay": "Out of quota",
-      "waiting_person": "Your call",
-      "waiting_default": "Waiting",
-      "stalled_delivery": "Delivery stuck",
-      "stalled_unclosed": "Done, not closed",
-      "stalled_reply_unclosed": "Replied, not closed",
       "running": "Running",
       "blocked": "Waiting on",
       "todo": "To do",
       "fresh": "New",
       "done": "Done"
     },
-    "stuck": {
-      "branch_refused": "The platform refused to record the delivery branch",
-      "pr_not_linked": "No linked PR, so the move to review was refused",
-      "review_refused": "The move to review was refused",
-      "close_refused": "Closing was refused",
-      "run_failed": "The run ended in failure",
-      "no_wait_record": "Blocked, but nothing says what it waits on",
-      "woken_no_close": "Replied after being woken, but did not close out again",
-      "no_close": "The run ended and the issue was not closed out",
-      "default": "Stopped without an explanation"
-    },
-    "event": {
-      "run_started": "Run started",
-      "run_completed": "Run finished",
-      "run_failed": "Run failed",
-      "run_cancelled": "Run cancelled",
-      "pr_linked": "PR linked",
-      "pr_merged": "PR merged",
-      "rejected": "Refused by the platform",
-      "closed": "Closed out",
-      "after": "No run and no close since"
-    },
-    "server_mark": "Server verdict",
     "unread_one": "{{count}} new",
     "unread_other": "{{count}} new",
-    "before": "Before: {{text}}",
-    "next": "Next: {{name}}",
-    "next_none": "Next: nobody",
     "next_issue": "Waiting on {{id}}",
-    "from_to_you": "{{name}} → you",
     "you": "you",
     "running_for": "running {{time}}",
     "children_one": "{{count}} sub-issue",
     "children_other": "{{count}} sub-issues",
-    "expand": "Why",
-    "collapse": "Hide",
-    "reply_placeholder": "Reply here; it posts on the issue and wakes {{name}}",
-    "reply_placeholder_default": "Reply here; it posts on the issue",
-    "reply": "Reply",
-    "reply_sent": "Replied; the agent will pick it up",
-    "reply_failed": "The reply was not sent",
     "open_issue": "Open issue",
     "seen_one": "{{count}} already seen",
     "seen_other": "{{count}} already seen",
@@ -251,33 +194,11 @@
     "filter_bar": "Highlighting notifications in “{{lane}}”",
     "filter_clear": "Clear",
     "short": {
-      "waiting": "Waiting",
-      "stalled": "Stopped",
       "running": "Running",
       "blocked": "Waiting on",
       "todo": "To do",
       "fresh": "New",
       "done": "Done"
-    },
-    "actions": {
-      "backlog": "Do later",
-      "done": "Complete",
-      "cancelled": "Not doing this",
-      "return_to_do": "Return to to-do",
-      "return_to_agent": "Return to to-do (wake {{name}})",
-      "more": "More actions",
-      "select": "Select {{title}}",
-      "selected": "{{count}} selected",
-      "clear_selection": "Clear selection",
-      "undo": "Undo"
-    },
-    "toasts": {
-      "status_changed": "Status updated",
-      "cancelled": "Marked as not doing this — running work will continue"
-    },
-    "errors": {
-      "status_failed": "Could not update status",
-      "undo_failed": "Could not undo the status change"
     }
   },
   "fast_access": {

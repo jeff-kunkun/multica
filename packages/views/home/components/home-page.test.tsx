@@ -1,10 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import type { BoardRow, InboxBoard } from "@multica/core/home";
 import { renderWithI18n } from "../../test/i18n";
 
 const push = vi.fn();
-const mutate = vi.fn();
 let searchParams = new URLSearchParams();
 let board: InboxBoard;
 let seenAt: string | null = null;
@@ -16,9 +15,6 @@ const PROJECTS = [
 ] as unknown as import("@multica/core/types").Project[];
 let boardProjectId: string | null = null;
 const setBoardProject = vi.fn();
-const invalidateQueries = vi.fn();
-const updateIssue = vi.fn(() => Promise.resolve({}));
-const batchUpdateIssues = vi.fn(() => Promise.resolve({ updated: 1 }));
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
 vi.mock("@multica/core/auth", () => ({
@@ -33,15 +29,6 @@ vi.mock("@multica/core/paths", () => ({
 }));
 vi.mock("@multica/core/workspace/hooks", () => ({
   useActorName: () => ({ getActorName: (_t: string, id: string) => `name:${id}` }),
-}));
-vi.mock("@multica/core/issues/mutations", () => ({
-  useCreateComment: () => ({ mutate, isPending: false }),
-  useUpdateIssue: () => ({ mutateAsync: updateIssue, isPending: false }),
-  useBatchUpdateIssues: () => ({ mutateAsync: batchUpdateIssues, isPending: false }),
-}));
-vi.mock("@tanstack/react-query", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@tanstack/react-query")>()),
-  useQueryClient: () => ({ invalidateQueries }),
 }));
 vi.mock("@multica/core/home", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@multica/core/home")>();
@@ -96,15 +83,11 @@ function row(over: Partial<BoardRow> & { issueId: string; lane: BoardRow["lane"]
     title: `title ${over.issueId}`,
     parentIssueId: null,
     kind: over.lane,
-    stuckKind: "",
-    reason: "",
-    before: "",
     from: null,
     fromName: "",
     next: null,
     nextName: "",
     at: "2026-09-26T08:00:00Z",
-    timeline: [],
     unread: 0,
     children: [],
     ...over,
@@ -115,33 +98,12 @@ beforeEach(() => {
   boardProjectId = null;
   setBoardProject.mockClear();
   push.mockReset();
-  mutate.mockReset();
   markSeen.mockReset();
   readBoard.mockReset();
   searchParams = new URLSearchParams();
   seenAt = null;
   compact = true;
   board = {
-    waiting: [
-      row({
-        issueId: "822",
-        lane: "waiting",
-        kind: "needs_human",
-        reason: "Answer three questions first",
-        fromName: "Goku",
-      }),
-    ],
-    stalled: [
-      row({
-        issueId: "871",
-        lane: "stalled",
-        kind: "stalled_unclosed",
-        stuckKind: "no_close",
-        before: "PR merged",
-        next: { type: "agent", id: "a-1" },
-        timeline: [{ at: "2026-09-26T07:00:00Z", kind: "pr_merged", detail: "#370" }],
-      }),
-    ],
     running: [row({ issueId: "882", lane: "running", next: { type: "agent", id: "a-2" } })],
     blocked: [],
     todo: [row({ issueId: "890", lane: "todo", kind: "todo" })],
@@ -184,68 +146,11 @@ describe("HomePage project filter (DENE-1019)", () => {
 });
 
 describe("HomePage", () => {
-  it("offers waiting-row quick status actions and removes the row immediately", async () => {
-    board.waiting[0] = {
-      ...board.waiting[0]!,
-      status: "in_review",
-    };
-    renderWithI18n(<InboxBoardLanes board={board} isLoading={false} isError={false} />);
-    fireEvent.click(screen.getByRole("button", { name: "Complete" }));
-    expect(updateIssue).toHaveBeenCalledWith({ id: "822", status: "done" });
-    await waitFor(() => expect(within(screen.getByTestId("board-lane-waiting")).getByText("Nothing is waiting on you")).toBeInTheDocument());
-  });
-
-  it("batch-updates selected waiting rows", async () => {
-    board.waiting = [
-      ...board.waiting,
-      row({ issueId: "823", lane: "waiting", kind: "needs_human", status: "in_review" }),
-    ];
-    renderWithI18n(<InboxBoardLanes board={board} isLoading={false} isError={false} />);
-    fireEvent.click(screen.getAllByTestId("waiting-row-checkbox")[0]!);
-    fireEvent.click(screen.getAllByTestId("waiting-row-checkbox")[1]!);
-    fireEvent.click(within(screen.getByTestId("waiting-selection-toolbar")).getByRole("button", { name: "Complete" }));
-    expect(batchUpdateIssues).toHaveBeenCalledWith({ ids: ["822", "823"], updates: { status: "done" } });
-    await waitFor(() => expect(screen.queryByTestId("waiting-selection-toolbar")).toBeNull());
-  });
-
-  it("returns selected waiting rows to to-do", () => {
-    board.waiting = [
-      ...board.waiting,
-      row({ issueId: "823", lane: "waiting", kind: "needs_human" }),
-    ];
-    renderWithI18n(<InboxBoardLanes board={board} isLoading={false} isError={false} />);
-    fireEvent.click(screen.getAllByTestId("waiting-row-checkbox")[0]!);
-    fireEvent.click(screen.getAllByTestId("waiting-row-checkbox")[1]!);
-    fireEvent.click(within(screen.getByTestId("waiting-selection-toolbar")).getByRole("button", { name: "Return to to-do" }));
-    expect(batchUpdateIssues).toHaveBeenCalledWith({ ids: ["822", "823"], updates: { status: "todo" } });
-  });
-
-  it("names the agent that will be woken when returning work to to-do", () => {
-    board.waiting[0] = {
-      ...board.waiting[0]!,
-      next: { type: "agent", id: "agent-1" },
-      nextName: "Trunks",
-    };
-    renderWithI18n(<InboxBoardLanes board={board} isLoading={false} isError={false} />);
-    fireEvent.click(screen.getByRole("button", { name: "More actions" }));
-    expect(screen.getByText("Return to to-do (wake Trunks)")).toBeInTheDocument();
-  });
-
-  it("shows one row per issue in the five lanes", () => {
+  it("shows one row per issue in the three lanes", () => {
     renderWithI18n(<HomePage />);
-    for (const lane of ["waiting", "stalled", "running", "todo", "done"]) {
+    for (const lane of ["running", "todo", "done"]) {
       expect(screen.getByTestId(`board-lane-${lane}`)).toBeInTheDocument();
     }
-    const waiting = screen.getByTestId("board-lane-waiting");
-    expect(within(waiting).getByText("Answer three questions first")).toBeInTheDocument();
-    expect(within(waiting).getByText("Goku → you")).toBeInTheDocument();
-
-    const stalled = screen.getByTestId("board-lane-stalled");
-    expect(
-      within(stalled).getByText("The run ended and the issue was not closed out"),
-    ).toBeInTheDocument();
-    expect(within(stalled).getByText("Before: PR merged")).toBeInTheDocument();
-    expect(within(stalled).getByText("Next: name:a-1")).toBeInTheDocument();
 
     expect(within(screen.getByTestId("board-lane-running")).getByText("name:a-2")).toBeInTheDocument();
 
@@ -269,21 +174,18 @@ describe("HomePage", () => {
     expect(screen.getAllByTestId("board-row-unread")).toHaveLength(2);
   });
 
-  it("shows tickets waiting on other tickets in their own lane, not as waiting on you (DENE-1409)", () => {
+  it("shows tickets waiting on other tickets in their own lane (DENE-1409)", () => {
     board.blocked = [
       row({
         issueId: "1396",
         lane: "blocked",
         kind: "blocked",
-        reason: "Resume once DENE-1393 merges",
         next: { type: "issue", id: "DENE-1393" },
       }),
     ];
     renderWithI18n(<HomePage />);
     const blocked = screen.getByTestId("board-lane-blocked");
-    expect(within(blocked).getByText("Resume once DENE-1393 merges")).toBeInTheDocument();
     expect(within(blocked).getByText("Waiting on DENE-1393")).toBeInTheDocument();
-    expect(within(screen.getByTestId("board-lane-waiting")).queryByText("title 1396")).toBeNull();
     const lanes = screen.getAllByTestId(/^board-lane-/).map((el) => el.dataset.testid);
     expect(lanes.indexOf("board-lane-blocked")).toBe(lanes.indexOf("board-lane-running") + 1);
   });
@@ -301,9 +203,9 @@ describe("HomePage", () => {
 
   it("opens the issue preview when a row is clicked", () => {
     renderWithI18n(<HomePage />);
-    fireEvent.click(screen.getByTestId("board-row-stalled").firstElementChild!);
+    fireEvent.click(screen.getByTestId("board-row-running").firstElementChild!);
     expect(push).not.toHaveBeenCalled();
-    expect(screen.getByTestId("board-row-stalled")).toHaveAttribute("data-highlighted");
+    expect(screen.getByTestId("board-row-running")).toHaveAttribute("data-highlighted");
   });
 
   it("publishes the board order as one cross-lane preview sequence", () => {
@@ -319,17 +221,10 @@ describe("HomePage", () => {
       </IssuePeekActionsContext.Provider>,
     );
     expect(peek.publishColumns).toHaveBeenCalledWith([
-      ["822", "871", "882", "890", "880", "879"],
+      ["882", "890", "880", "879"],
     ]);
     fireEvent.click(screen.getByTestId("board-row-running").firstElementChild!);
     expect(peek.open).toHaveBeenCalledWith("882");
-  });
-
-  it("expands a stalled row into its timeline without leaving the page", () => {
-    renderWithI18n(<HomePage />);
-    fireEvent.click(screen.getByRole("button", { name: "Why" }));
-    expect(screen.getByTestId("board-timeline")).toHaveTextContent("PR merged：#370");
-    expect(push).not.toHaveBeenCalled();
   });
 
   it("keeps expanded child rows readable on narrow screens", () => {
@@ -346,25 +241,16 @@ describe("HomePage", () => {
     expect(childRow?.parentElement?.parentElement?.parentElement).toHaveClass("px-4", "sm:pl-[8.75rem]");
   });
 
-  it("gives waiting titles the full row width on narrow screens", () => {
+  it("gives titles the full row width on narrow screens", () => {
     renderWithI18n(<InboxBoardLanes board={board} isLoading={false} isError={false} />);
 
-    const waitingRow = screen.getByTestId("board-row-waiting").firstElementChild!;
-    expect(waitingRow).toHaveClass(
+    const todoRow = screen.getByTestId("board-row-todo").firstElementChild!;
+    expect(todoRow).toHaveClass(
       "grid-cols-[minmax(0,1fr)_auto]",
-      "sm:grid-cols-[auto_6.5rem_minmax(0,1fr)_auto]",
+      "sm:grid-cols-[6.5rem_minmax(0,1fr)_auto]",
     );
-    const titleBlock = within(waitingRow as HTMLElement).getByRole("link", { name: /title/ }).closest(".space-y-0\\.5");
+    const titleBlock = within(todoRow as HTMLElement).getByRole("link", { name: /title/ }).closest(".space-y-0\\.5");
     expect(titleBlock).toHaveClass("col-span-2", "sm:col-span-1");
-  });
-
-  it("replies to a waiting row in place", () => {
-    renderWithI18n(<HomePage />);
-    const waiting = screen.getByTestId("board-lane-waiting");
-    fireEvent.click(within(waiting).getByRole("button", { name: "Reply" }));
-    fireEvent.change(within(waiting).getByRole("textbox"), { target: { value: "go ahead" } });
-    fireEvent.submit(within(waiting).getByRole("textbox").closest("form")!);
-    expect(mutate).toHaveBeenCalledWith({ content: "go ahead" }, expect.anything());
   });
 
   it("folds done rows the viewer already saw and moves the mark", () => {
@@ -382,7 +268,7 @@ describe("HomePage", () => {
 describe("InboxPage layers", () => {
   it("shows the board by default", () => {
     renderWithI18n(<InboxPage />);
-    expect(screen.getByTestId("board-lane-waiting")).toBeInTheDocument();
+    expect(screen.getByTestId("board-lane-running")).toBeInTheDocument();
   });
 
   it.each(["layer=activity", "issue=issue-1", "view=archived"])(
@@ -412,10 +298,10 @@ describe("InboxBoardLanes linked to the list (DENE-1004)", () => {
   it("opens rows in place instead of navigating away", () => {
     const linking = linked();
     renderWithI18n(<InboxBoardLanes board={board} isLoading={false} isError={false} linking={linking} />);
-    fireEvent.click(screen.getByTestId("board-row-stalled").firstElementChild!);
-    fireEvent.click(screen.getByText("title 822"));
-    expect(linking.onSelectIssue).toHaveBeenNthCalledWith(1, "871");
-    expect(linking.onSelectIssue).toHaveBeenNthCalledWith(2, "822");
+    fireEvent.click(screen.getByTestId("board-row-running").firstElementChild!);
+    fireEvent.click(screen.getByText("title 890"));
+    expect(linking.onSelectIssue).toHaveBeenNthCalledWith(1, "882");
+    expect(linking.onSelectIssue).toHaveBeenNthCalledWith(2, "890");
     expect(push).not.toHaveBeenCalled();
   });
 
@@ -424,8 +310,8 @@ describe("InboxBoardLanes linked to the list (DENE-1004)", () => {
     renderWithI18n(<InboxBoardLanes board={board} isLoading={false} isError={false} linking={linking} />);
     const heading = screen.getByTestId("board-lane-filter-running");
     expect(heading).toHaveAttribute("aria-pressed", "true");
-    fireEvent.click(screen.getByTestId("board-lane-filter-waiting"));
-    expect(linking.onToggleLane).toHaveBeenCalledWith("waiting");
+    fireEvent.click(screen.getByTestId("board-lane-filter-todo"));
+    expect(linking.onToggleLane).toHaveBeenCalledWith("todo");
     expect(screen.getByTestId("board-row-running")).toHaveAttribute("data-highlighted");
   });
 

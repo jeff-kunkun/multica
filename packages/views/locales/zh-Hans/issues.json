@@ -150,34 +150,7 @@
   },
   "stage": {
     "none": "无阶段",
-    "value": "阶段 {{n}}",
-    "blocking": "挡路中",
-    "queued": "排队中"
-  },
-  "assignee_source": {
-    "human": "{{name}} 亲自选的",
-    "human_unknown": "有人亲自选的",
-    "quote": "按 {{name}} 原话指派",
-    "quote_unknown": "按某位成员的原话指派",
-    "automation": "自动化指派",
-    "agent": "智能体自己点的名",
-    "router": "路由选的",
-    "self_claim": "做父票的智能体自领的子票",
-    "quote_text": "“{{quote}}”"
-  },
-  "driver": {
-    "none": "没人在推进",
-    "revived": "已重跑 {{count}} 次",
-    "escalated": "已上报父票负责人",
-    "rerun": "原席位再跑",
-    "reroute": "重新选执行人",
-    "split": "拆成子票",
-    "cancel": "取消任务",
-    "split_placeholder": "子票标题",
-    "cancel_placeholder": "取消原因",
-    "back": "返回",
-    "done": "已处置",
-    "failed": "处置失败"
+    "value": "阶段 {{n}}"
   },
   "blocker_summary": {
     "title": "已阻塞 · {{count}} 个根因",
@@ -486,10 +459,7 @@
     "prop_status": "状态",
     "prop_priority": "优先级",
     "prop_stage": "阶段",
-    "prop_waiting_for": "在等",
-    "prop_review_skip": "跳过验收",
     "prop_assignee": "负责人",
-    "prop_reviewer": "验收席",
     "prop_start_date": "开始日期",
     "prop_due_date": "截止日期",
     "prop_project": "项目",
@@ -572,12 +542,6 @@
     "description_updated": "更新了描述",
     "task_completed_other": "完成了运行（{{count}} 次）",
     "task_failed_other": "运行失败（{{count}} 次）",
-    "consult_answered": "咨询了 {{name}}",
-    "consult_failed": "咨询了 {{name}}，没有得到回答",
-    "consult_cost": "{{tokens}} token · {{seconds}} 秒",
-    "consult_question": "问题",
-    "consult_answer": "回答",
-    "consult_reason": "没有回答的原因",
     "squad_leader_evaluated": "评估了小队触发",
     "squad_leader_action": "已评估并采取了操作",
     "squad_leader_action_reason": "已评估并采取了操作：{{reason}}",
@@ -991,14 +955,6 @@
       "agent_runtime_required": "请先为该智能体绑定运行时，再分配工作",
       "squad_runtime_required": "请先为该小队的负责人绑定运行时，再分配工作"
     },
-    "reviewer": {
-      "trigger_undecided": "未指定",
-      "trigger_no_review": "不需要验收",
-      "search_placeholder": "交给谁验收...",
-      "no_review": "不需要验收",
-      "members_group": "成员",
-      "agents_group": "智能体"
-    },
     "start_date": {
       "trigger_label": "开始日期",
       "none": "无开始日期"
@@ -1383,8 +1339,6 @@
       "blocked_backlog": "任务在待规划中，暂不唤醒",
       "blocked_member": "负责人是成员，会收到收件箱通知",
       "blocked_none": "没有负责人，阶段结束时平台自动推进",
-      "assign": "指派负责人",
-      "assign_error": "无法指派负责人。",
       "turned_off": "已在此任务上关闭",
       "target_title": "唤醒",
       "target_current": "负责人（当前 {{name}}）",

@@ -259,7 +259,7 @@ describe("SettingsPage information architecture", () => {
       "Connections",
       "Messaging",
     ]);
-    for (const name of ["MCP servers", "Export & import", "Routing", "Permissions & sharing", "Approval rights"]) {
+    for (const name of ["MCP servers", "Export & import", "Permissions & sharing"]) {
       expect(within(nav()).queryByRole("link", { name })).not.toBeInTheDocument();
     }
   });

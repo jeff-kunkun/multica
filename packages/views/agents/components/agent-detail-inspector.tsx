@@ -46,10 +46,6 @@ import {
 import { RuntimePicker } from "./inspector/runtime-picker";
 import { ThinkingSettingField } from "./inspector/thinking-prop-row";
 import { ServiceTierSettingField } from "./inspector/service-tier-setting-field";
-import {
-  canEditRuntimeProfile,
-  runtimeInheritanceState,
-} from "../specialization";
 
 interface InspectorProps {
   agent: Agent;
@@ -192,11 +188,6 @@ export function AgentDetailInspector({
         : runtimes.filter((r) => r.provider !== "qoder_cloud"),
     [qoderRuntime, runtimes],
   );
-
-  // Runtime inheritance (DENE-505): while a specialisation follows its base
-  // role the runtime and model stay visible but read-only.
-  const runtimeInherited = runtimeInheritanceState(agent) === "inherited";
-  const canEditRuntime = canEditRuntimeProfile(agent, canEdit);
 
   // Same query the Thinking / Speed fields already use, so switching model
   // costs no extra request. `null` = not authoritative (offline runtime, still
@@ -350,11 +341,6 @@ export function AgentDetailInspector({
             <SettingsCard>
               <SettingsRow
                 label={t(($) => $.inspector.prop_runtime)}
-                description={
-                  runtimeInherited
-                    ? t(($) => $.inspector.prop_runtime_inherit_hint_on)
-                    : undefined
-                }
                 size="select-wide"
               >
                 <RuntimePicker
@@ -364,7 +350,7 @@ export function AgentDetailInspector({
                   runtimes={runtimeOptions}
                   members={members}
                   currentUserId={currentUserId}
-                  canEdit={canEditRuntime && !qoderRuntime}
+                  canEdit={canEdit && !qoderRuntime}
                   // Model, thinking level, and service tier are runtime/model
                   // native. Clear them together so the new runtime resolves its
                   // own defaults instead of inheriting incompatible tokens.
@@ -391,7 +377,7 @@ export function AgentDetailInspector({
                       runtimeOnline={canDiscoverRuntimeModels}
                       agentId={agent.id}
                       value={agent.model ?? ""}
-                      canEdit={canEditRuntime}
+                      canEdit={canEdit}
                       onChange={handleModelChange}
                     />
                   </SettingsRow>
@@ -402,7 +388,7 @@ export function AgentDetailInspector({
                     provider={runtime?.provider ?? ""}
                     model={agent.model ?? ""}
                     value={agent.thinking_level ?? ""}
-                    canEdit={canEditRuntime}
+                    canEdit={canEdit}
                     onChange={(thinkingLevel) =>
                       update({ thinking_level: thinkingLevel })
                     }
@@ -414,7 +400,7 @@ export function AgentDetailInspector({
                     provider={runtime?.provider ?? ""}
                     model={agent.model ?? ""}
                     value={agent.service_tier ?? ""}
-                    canEdit={canEditRuntime}
+                    canEdit={canEdit}
                     onChange={(serviceTier) =>
                       update({ service_tier: serviceTier })
                     }
@@ -433,15 +419,7 @@ export function AgentDetailInspector({
               </SettingsRow>
               <SettingsRow
                 label={t(($) => $.inspector.prop_work_enabled)}
-                description={
-                  isAgentWorkEnabled(agent) || !agent.work_pause
-                    ? t(($) => $.inspector.prop_work_enabled_hint)
-                    : agent.work_pause.reason === "balance_exhausted"
-                      ? t(($) => $.inspector.prop_work_pause_balance)
-                      : agent.work_pause.reason === "auth_failure"
-                        ? t(($) => $.inspector.prop_work_pause_auth)
-                        : t(($) => $.inspector.prop_work_pause_quota)
-                }
+                description={t(($) => $.inspector.prop_work_enabled_hint)}
               >
                 <Switch
                   checked={isAgentWorkEnabled(agent)}

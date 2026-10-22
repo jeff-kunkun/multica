@@ -101,7 +101,6 @@ function account(
     key_ref: "",
     lever: "",
     signed_in: true,
-    quota_reset_at: 0,
     ...overrides,
   };
 }
@@ -122,9 +121,6 @@ const CLAUDE_ACCOUNT2 = account("claude", "account2", `${RUNTIME_HOME}/.claude-a
   lever: "env:CLAUDE_CONFIG_DIR",
 });
 const CODEX_DEFAULT = account("codex", "default", `${RUNTIME_HOME}/.codex`, {
-  lever: "",
-});
-const CODEX_ACCOUNT2 = account("codex", "account2", `${RUNTIME_HOME}/.codex-account2`, {
   lever: "",
 });
 
@@ -332,102 +328,6 @@ describe("AgentAccountsTab rest state", () => {
       screen.getAllByText(/cannot be switched from here/i).length,
     ).toBeGreaterThan(0);
     expect(screen.queryByText(/each task gets its own/i)).not.toBeInTheDocument();
-  });
-});
-
-// The one-click switch (DENE-468). Which situation qualifies is decided by
-// `quotaSwitchCandidate` and its matrix is covered in
-// `agent-accounts-model.test.ts`; what is checked here is the wiring — that the
-// button appears, performs the write through the same path as "save and
-// switch", and moves the summary bar.
-describe("AgentAccountsTab one-click switch", () => {
-  // 2100-01-01, so a spent quota stays spent for the life of this suite.
-  const FUTURE_RESET_AT = 4_102_444_800;
-  const SPENT = { quota_reset_at: FUTURE_RESET_AT };
-  const SIGNED_OUT = { signed_in: false };
-
-  function quickSwitchButton() {
-    return screen.queryByRole("button", { name: /^switch to /i });
-  }
-
-  it("writes the env key when the sibling's lever is an environment variable", async () => {
-    const { onSave } = renderTab({
-      device: runtimeWith("dsh", [
-        account("dsh", "default", `${RUNTIME_HOME}/.dsh`, {
-          lever: "env:DSH_HOME",
-          ...SPENT,
-        }),
-        DSH_ACCOUNT2,
-      ]),
-    });
-
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Switch to account2" }),
-    );
-
-    // The write is the drawer's own path: one env update, no agent write, and
-    // the summary bar moves to the account that took over.
-    await waitFor(() => expect(updateAgentEnv).toHaveBeenCalledTimes(1));
-    expect(updateAgentEnv).toHaveBeenCalledWith("agent-1", {
-      custom_env: { DSH_HOME: DSH_ACCOUNT2.home },
-    });
-    expect(onSave).not.toHaveBeenCalled();
-    expect(
-      await screen.findByText(`DSH_HOME=${DSH_ACCOUNT2.home}`),
-    ).toBeInTheDocument();
-    expect(quickSwitchButton()).not.toBeInTheDocument();
-  });
-
-  it("offers nothing when the only sibling is spent or signed out too", async () => {
-    renderTab({
-      device: runtimeWith("dsh", [
-        account("dsh", "default", `${RUNTIME_HOME}/.dsh`, {
-          lever: "env:DSH_HOME",
-          ...SPENT,
-        }),
-        account("dsh", "account2", `${RUNTIME_HOME}/.dsh-account2`, {
-          lever: "env:DSH_HOME",
-          ...SIGNED_OUT,
-        }),
-      ]),
-    });
-
-    // The state still announces itself; it just has no one-click way out, and
-    // "manage" stays the escape hatch.
-    expect(await screen.findByText("Quota used up", { exact: false })).toBeInTheDocument();
-    expect(quickSwitchButton()).not.toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /manage accounts/i }),
-    ).toBeInTheDocument();
-  });
-
-  it("offers nothing for a CLI the daemon reports no lever for", async () => {
-    // codex and cursor cannot be pointed at another directory at all, so a
-    // button here would be dead on click (DENE-305's read-only group rule).
-    renderTab({
-      agent: { ...baseAgent, model: "", runtime_id: "runtime-1" },
-      device: runtimeWith("codex", [
-        account("codex", "default", `${RUNTIME_HOME}/.codex`, {
-          lever: "",
-          ...SPENT,
-        }),
-        CODEX_ACCOUNT2,
-      ]),
-    });
-
-    expect(await screen.findByText("Codex · default")).toBeInTheDocument();
-    expect(quickSwitchButton()).not.toBeInTheDocument();
-  });
-
-  it("keeps the binding untouched while the account in effect has quota left", async () => {
-    const { onSave } = renderTab({
-      device: runtimeWith("dsh", [DSH_DEFAULT, DSH_ACCOUNT2]),
-    });
-
-    expect(await screen.findByText("DSH · default")).toBeInTheDocument();
-    expect(quickSwitchButton()).not.toBeInTheDocument();
-    expect(onSave).not.toHaveBeenCalled();
-    expect(updateAgentEnv).not.toHaveBeenCalled();
   });
 });
 

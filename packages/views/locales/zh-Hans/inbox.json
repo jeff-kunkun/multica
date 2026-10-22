@@ -135,16 +135,6 @@
     "activity_link": "全部动态",
     "back_to_board": "一票一行",
     "lanes": {
-      "waiting": {
-        "title": "等你",
-        "hint": "需要你回复或处理的任务，回复后智能体会继续。",
-        "empty": "没有在等你的票"
-      },
-      "stalled": {
-        "title": "停了 · 没交代",
-        "hint": "没有智能体在运行、也还没收口的任务。",
-        "empty": "没有停了没交代的票"
-      },
       "running": {
         "title": "在跑",
         "hint": "只亮一个标记，不打扰你",
@@ -172,64 +162,17 @@
       }
     },
     "tag": {
-      "needs_human": "等你决定",
-      "manual": "等你处理",
-      "mention": "有人找你",
-      "routing": "没人接手",
-      "patrol": "验收席空缺",
-      "unseated": "缺执行人",
-      "time_limit": "运行超时",
-      "quota_relay": "额度用完",
-      "waiting_person": "等你决定",
-      "waiting_default": "等你",
-      "stalled_delivery": "交付卡住",
-      "stalled_unclosed": "做完没收口",
-      "stalled_reply_unclosed": "回了话没收口",
       "running": "在跑",
       "blocked": "在等",
       "todo": "待做",
       "fresh": "新动态",
       "done": "做完"
     },
-    "stuck": {
-      "branch_refused": "运行结束时平台拒绝登记交付分支",
-      "pr_not_linked": "PR 没关联上，转待验收被拒",
-      "review_refused": "转待验收被拒",
-      "close_refused": "关单被拒",
-      "run_failed": "运行以失败结束",
-      "no_wait_record": "挂在阻塞，但没写在等什么",
-      "woken_no_close": "被叫醒后回了话，没有重新收口",
-      "no_close": "运行结束了，票没有收口",
-      "default": "停下了，没有交代"
-    },
-    "event": {
-      "run_started": "开始运行",
-      "run_completed": "运行结束",
-      "run_failed": "运行失败",
-      "run_cancelled": "运行被取消",
-      "pr_linked": "关联 PR",
-      "pr_merged": "PR 合并",
-      "rejected": "被平台拒绝",
-      "closed": "收口",
-      "after": "之后没有新的运行，也没有收口"
-    },
-    "server_mark": "服务端判断",
     "unread_other": "{{count}} 条新",
-    "before": "停之前：{{text}}",
-    "next": "下一棒：{{name}}",
-    "next_none": "下一棒：没人接",
     "next_issue": "等 {{id}}",
-    "from_to_you": "{{name}} → 你",
     "you": "你",
     "running_for": "已跑 {{time}}",
     "children_other": "{{count}} 张子票",
-    "expand": "前因后果",
-    "collapse": "收起",
-    "reply_placeholder": "直接在这里回复，会发到票上并叫醒{{name}}",
-    "reply_placeholder_default": "直接在这里回复，会发到票上",
-    "reply": "回复",
-    "reply_sent": "已回复，执行的智能体会接着干",
-    "reply_failed": "回复没发出去",
     "open_issue": "去任务",
     "seen_other": "已看过的 {{count}} 条",
     "hide_seen": "收起看过的",
@@ -245,33 +188,11 @@
     "filter_bar": "只亮「{{lane}}」这一组的通知",
     "filter_clear": "清除",
     "short": {
-      "waiting": "等你",
-      "stalled": "停了没交代",
       "running": "在跑",
       "blocked": "在等",
       "todo": "待做",
       "fresh": "新动态",
       "done": "做完"
-    },
-    "actions": {
-      "backlog": "以后做",
-      "done": "完成",
-      "cancelled": "不做了",
-      "return_to_do": "交回去做",
-      "return_to_agent": "交回去做（会叫醒 {{name}}）",
-      "more": "更多操作",
-      "select": "选择 {{title}}",
-      "selected": "已选 {{count}} 项",
-      "clear_selection": "清除选择",
-      "undo": "撤销"
-    },
-    "toasts": {
-      "status_changed": "状态已更新",
-      "cancelled": "已标记为不做了，在跑的不会停"
-    },
-    "errors": {
-      "status_failed": "状态更新失败",
-      "undo_failed": "撤销状态失败"
     }
   },
   "fast_access": {

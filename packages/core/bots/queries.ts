@@ -32,7 +32,6 @@ export const botKeys = {
   list: (wsId: string) => [...botKeys.all(wsId), "list"] as const,
   binding: (wsId: string) => [...botKeys.all(wsId), "binding"] as const,
   writes: (wsId: string) => [...botKeys.all(wsId), "writes"] as const,
-  deliveries: (wsId: string) => [...botKeys.all(wsId), "office-deliveries"] as const,
   wake: (wsId: string, botId: string) => [...botKeys.all(wsId), "wake", botId] as const,
   wakeEvents: (wsId: string, botId: string, pending: boolean) =>
     [...botKeys.wake(wsId, botId), pending ? "pending" : "events"] as const,
@@ -81,21 +80,6 @@ export const botWritesOptions = (wsId: string) =>
     initialPageParam: "",
     getNextPageParam: (last) => last.next_cursor || undefined,
     enabled: !!wsId,
-  });
-
-const DELIVERY_PAGE = 10;
-
-// Your Bot's office-event ledger. It moves without you (sends, receipts,
-// retries), so it is re-read while the page is open.
-export const officeDeliveriesOptions = (wsId: string, enabled = true) =>
-  infiniteQueryOptions({
-    queryKey: botKeys.deliveries(wsId),
-    queryFn: ({ pageParam }) =>
-      api.listMyOfficeDeliveries(wsId, { limit: DELIVERY_PAGE, before: pageParam || undefined }),
-    initialPageParam: 0,
-    getNextPageParam: (last) => last.next_cursor || undefined,
-    enabled: !!wsId && enabled,
-    refetchInterval: 15_000,
   });
 
 const WAKE_EVENT_PAGE = 20;
@@ -219,14 +203,5 @@ export function useDeleteBotBinding(wsId: string) {
     mutationFn: () => api.deleteBotBinding(wsId),
     onSuccess: (saved) => qc.setQueryData(botKeys.binding(wsId), saved),
     onSettled: () => qc.invalidateQueries({ queryKey: botKeys.binding(wsId) }),
-  });
-}
-
-// Retry waits for the server, then re-reads the ledger.
-export function useRetryOfficeDeliveries(wsId: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (eventId?: string) => api.retryMyOfficeDeliveries(wsId, eventId),
-    onSettled: () => qc.invalidateQueries({ queryKey: botKeys.deliveries(wsId) }),
   });
 }

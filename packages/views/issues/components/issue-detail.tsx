@@ -89,8 +89,6 @@ import { PropertyIcon } from "../../common/property-icon";
 import type { Attachment, Issue, IssueProperty, IssueStatus, IssueStatusCategory, IssuePriority, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
 import { isBuiltInIssueStatus } from "@multica/core/issue-statuses";
-import { backlogWaitingFor } from "@multica/core/issues/backlog-waiting-for";
-import { reviewSkipReason } from "@multica/core/issues/review-skip";
 import { commentLandingTarget, isDeletedComment } from "@multica/core/issues/comment-deletion";
 import { formatDateOnly, isPastDateOnly } from "@multica/core/issues/date";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
@@ -103,12 +101,8 @@ import { PriorityPicker } from "./pickers/priority-picker";
 import { StagePicker, maxSiblingStage } from "./pickers/stage-picker";
 import { StartDatePicker } from "./pickers/start-date-picker";
 import { DueDatePicker } from "./pickers/due-date-picker";
-import { useAgentScene } from "@multica/core/agents";
-import { AgentSceneProvider } from "../../agents/components/agent-scene-context";
 import { AssigneePicker } from "./pickers/assignee-picker";
 import { MagpieGroupPicker, useIssueMagpieGroups } from "./pickers/magpie-group-picker";
-import { AssigneeSourceNote } from "./assignee-source-note";
-import { ReviewerPicker } from "./pickers/reviewer-picker";
 import { LabelPicker } from "./pickers/label-picker";
 import { CustomPropertyValueEditor, CustomPropertyValueDisplay } from "./pickers/custom-property-picker";
 import { Switch } from "@multica/ui/components/ui/switch";
@@ -193,24 +187,19 @@ import {
   useViewStateWriter,
 } from "../../platform";
 import { cn } from "@multica/ui/lib/utils";
-import { AskPromptList } from "../../common/ask-prompt";
 import { PAGE_GUTTER, PageHeader } from "../../layout/page-header";
 import { ShareScopeDialog, ShareScopeTrigger } from "../../common/share-scope-dialog";
 import { WorkThreadPanel } from "../../common/work-thread-panel";
-import { IssueUndrivenRow, UndrivenRowMark } from "./issue-driver";
 
 import { ProgressRing } from "./progress-ring";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { useT } from "../../i18n";
-import { DomainSelect } from "../../domains/domain-select";
-import { domainListOptions } from "@multica/core/domains";
 import { useIssueDetailScrollRestore } from "../hooks/use-issue-detail-scroll-restore";
 import { useInPageFind } from "../hooks/use-in-page-find";
 import { useStickyComposer } from "../hooks/use-sticky-composer";
 import { ScrollToBottomButton } from "../../common/scroll-to-bottom-button";
 import { useUnseenCount } from "../../common/use-unseen-count";
 import { useScrolledAwayFromBottom } from "../../common/use-scroll-away-from-bottom";
-import { IssuePlanCard } from "../../plans/plan-card";
 import { FindBar } from "./find-bar";
 import {
   AnimatedRightSidebar,
@@ -355,95 +344,6 @@ function statusLabel(
     return t(($) => $.status[status]);
   }
   return status;
-}
-
-const CONSULT_ACTIVITY_ACTIONS = new Set(["consult_answered", "consult_failed"]);
-
-/**
- * A run asked a strong seat for advice (DENE-1721). One line names the
- * advisor and the cost; the chevron opens the question and the answer.
- */
-function ConsultActivityRow({
-  entry,
-  getActorName,
-}: {
-  entry: TimelineEntry;
-  getActorName: (type: string, id: string) => string;
-}) {
-  const { t } = useT("issues");
-  const locale = useLocale();
-  const timeAgo = useTimeAgo();
-  const [open, setOpen] = useState(false);
-  const details = (entry.details ?? {}) as Record<string, unknown>;
-  const text = (key: string) => (typeof details[key] === "string" ? (details[key] as string) : "");
-  const num = (key: string) => (typeof details[key] === "number" ? (details[key] as number) : 0);
-  const failed = entry.action === "consult_failed";
-  const advisor = text("advisor_name") || "?";
-  const tokens = num("tokens_used");
-  const cost = t(($) => $.activity.consult_cost, {
-    tokens: tokens >= 1000 ? `${(tokens / 1000).toFixed(1)}k` : String(tokens),
-    seconds: num("duration_seconds"),
-  });
-  return (
-    <div className="flex flex-col gap-1.5 text-caption text-muted-foreground">
-      <div className="flex items-center">
-        <div className="mr-2 flex w-4 shrink-0 justify-center">
-          <ActorAvatar
-            actorType={entry.actor_type}
-            actorId={entry.actor_id}
-            name={entry.actor_name}
-            avatarUrl={entry.actor_avatar_url}
-            profileRequiresDirectoryEntry
-            size="sm"
-          />
-        </div>
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          aria-expanded={open}
-          className="flex min-w-0 flex-1 items-center gap-1 text-left transition-colors hover:text-foreground"
-        >
-          <span className="min-w-0 font-medium">
-            {entry.actor_name || getActorName(entry.actor_type, entry.actor_id)}
-            <ViaBot name={entry.via_bot_name} />
-          </span>
-          <span className="truncate">
-            {failed
-              ? t(($) => $.activity.consult_failed, { name: advisor })
-              : t(($) => $.activity.consult_answered, { name: advisor })}
-          </span>
-          {!failed && <span className="shrink-0 tabular-nums">· {cost}</span>}
-          {open ? (
-            <ChevronDown className="h-3 w-3 shrink-0" />
-          ) : (
-            <ChevronRight className="h-3 w-3 shrink-0" />
-          )}
-        </button>
-        <Tooltip>
-          <TooltipTrigger
-            render={<span className="ml-2 shrink-0 cursor-default">{timeAgo(entry.created_at)}</span>}
-          />
-          <TooltipContent side="top">{new Date(entry.created_at).toLocaleString(locale)}</TooltipContent>
-        </Tooltip>
-      </div>
-      {open && (
-        <div className="ml-6 flex flex-col gap-2 border-l pl-3">
-          <div>
-            <div className="font-medium">{t(($) => $.activity.consult_question)}</div>
-            <p className="whitespace-pre-wrap break-words text-foreground">{text("question")}</p>
-          </div>
-          <div>
-            <div className="font-medium">
-              {failed ? t(($) => $.activity.consult_reason) : t(($) => $.activity.consult_answer)}
-            </div>
-            <p className="whitespace-pre-wrap break-words text-foreground">
-              {failed ? text("reason") : text("answer")}
-            </p>
-          </div>
-        </div>
-      )}
-    </div>
-  );
 }
 
 function formatActivity(
@@ -833,9 +733,6 @@ function ActivityBlock({
         </button>
       )}
       {visibleEntries.map((entry) => {
-        if (CONSULT_ACTIVITY_ACTIONS.has(entry.action ?? "")) {
-          return <ConsultActivityRow key={entry.id} entry={entry} getActorName={getActorName} />;
-        }
         const details = (entry.details ?? {}) as Record<string, string>;
         // Duplicate rows replace the status rows of the same write, so they
         // carry the status glyph those rows would have had.
@@ -1051,7 +948,6 @@ function SubIssueRow({
             {child.identifier}
           </span>
           <IssueAgentActivityIndicator issueId={child.id} />
-          <UndrivenRowMark driver={child.driver} />
           <span className="flex min-w-0 flex-1 items-center gap-1.5">
             <span
               className={cn(
@@ -1131,7 +1027,6 @@ function SubIssueRow({
             assigneeId={child.assignee_id}
             onUpdate={handleUpdate}
             align="end"
-            sceneProjectIds={[child.project_id]}
             trigger={
               child.assignee_type && child.assignee_id ? (
                 <ActorAvatar
@@ -1817,8 +1712,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     // Duplicate marks name a different issue on every row.
     const NEVER_COALESCE_ACTIONS = new Set([
       "squad_leader_evaluated",
-      "consult_answered",
-      "consult_failed",
       "wakeup_created",
       "wakeup_triggered",
       "wakeup_timed_out",
@@ -2225,14 +2118,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     ...projectDetailOptions(wsId, issueProjectId ?? ""),
     enabled: !!issueProjectId,
   });
-  // An issue picks one of its project's domains, or stays generic (DENE-1451).
   const { t: tCommon } = useT("common");
-  const { data: domains = [] } = useQuery(domainListOptions(wsId));
-  const projectDomainIds = breadcrumbProject?.domain_ids ?? [];
-  const issueDomainOptions = [
-    { id: "", name: tCommon(($) => $.domain.generic) },
-    ...domains.filter((d) => projectDomainIds.includes(d.id)).map((d) => ({ id: d.id, name: d.name })),
-  ];
   const {
     data: childIssues = [],
     isSuccess: childIssuesLoaded,
@@ -2654,8 +2540,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     }
     actions.updateField(...args);
   };
-  // The issue's scene (DENE-1477): @ mentions in its editors rank agents by fit.
-  const agentScene = useAgentScene(wsId, [issue?.project_id], issue?.domain_id);
   const issueUpdate = useUpdateIssue();
   const clearTitleSuggestion = useMutation({
     mutationFn: () => api.deleteIssueMetadata(id, "title_suggestion"),
@@ -2867,10 +2751,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     return <IssueNotFound showBackLink={!onDelete} leading={leadingAction} trailing={trailingActions} />;
   }
 
-  // What a parked ticket waits for (DENE-1638); shown only while it is in backlog.
-  const backlogWaitingForLine = backlogWaitingFor(issue);
-  const reviewSkip = reviewSkipReason(issue);
-
   const persistDescriptionSave = (
     draft: { markdown: string; baseMarkdown: string; attachmentIds: string[] },
   ) => {
@@ -2931,7 +2811,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${propertiesOpen ? "rotate-90" : ""}`} />
         </button>
         {propertiesOpen && <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 pl-2">
-          {/* Core props — always rendered, except the acceptance slot below. */}
+          {/* Core props — always rendered. */}
           <PropRow label={t(($) => $.detail.prop_status)}>
             <StatusPicker
               status={issue.status}
@@ -2943,40 +2823,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               isDuplicate={isDuplicateIssue(issue)}
             />
           </PropRow>
-          {backlogWaitingForLine && (
-            <PropRow label={t(($) => $.detail.prop_waiting_for)} interactive={false}>
-              <span className="min-w-0 whitespace-normal break-words py-1.5" title={backlogWaitingForLine}>{backlogWaitingForLine}</span>
-            </PropRow>
-          )}
           <PropRow label={t(($) => $.detail.prop_assignee)}>
-            <AssigneePicker assigneeType={issue.assignee_type} assigneeId={issue.assignee_id} onUpdate={handleUpdateField} align="start" sceneProjectIds={[issue.project_id]} sceneDomainId={issue.domain_id} />
+            <AssigneePicker assigneeType={issue.assignee_type} assigneeId={issue.assignee_id} onUpdate={handleUpdateField} align="start" />
           </PropRow>
           {magpieGroups && (
             <PropRow label={t(($) => $.detail.prop_magpie_group)}>
               <MagpieGroupPicker issue={issue} groups={magpieGroups} />
-            </PropRow>
-          )}
-          {issue.assignee_source && issue.assignee_id && (
-            <div className="col-span-2">
-              <AssigneeSourceNote issue={issue} />
-            </div>
-          )}
-          {/* 验收席 is parent-scoped: acceptance belongs to the top-level
-              issue, and a sub-issue is execution-only. An empty slot on a
-              sub-issue is therefore not a requirement — offering one would
-              invite a reviewer that routing never hands the ticket to. A
-              value somebody recorded by hand still renders, so existing
-              tickets keep their decision and can clear it. */}
-          {(issue.parent_issue_id == null || issue.reviewer_type != null) && (
-            <PropRow label={t(($) => $.detail.prop_reviewer)}>
-              <ReviewerPicker reviewerType={issue.reviewer_type} reviewerId={issue.reviewer_id} onUpdate={handleUpdateField} align="start" sceneProjectIds={[issue.project_id]} sceneDomainId={issue.domain_id} />
-            </PropRow>
-          )}
-          {/* DENE-1678: merged and already reviewed, so no acceptance seat ran.
-              The server writes the reason; it says which fact counted. */}
-          {reviewSkip && (
-            <PropRow label={t(($) => $.detail.prop_review_skip)} interactive={false}>
-              <span className="min-w-0 whitespace-normal break-words py-1.5" title={reviewSkip}>{reviewSkip}</span>
             </PropRow>
           )}
           <PropRow label={t(($) => $.detail.prop_project)}>
@@ -2986,16 +2838,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               issue={issue}
             />
           </PropRow>
-          {issue.project_id && (
-            <PropRow label={tCommon(($) => $.domain.label)}>
-              <DomainSelect
-                header={tCommon(($) => $.domain.issue_header)}
-                options={issueDomainOptions}
-                selected={issue.domain_id ? [issue.domain_id] : []}
-                onChange={(ids) => handleUpdateField({ domain_id: ids[0] ?? null })}
-              />
-            </PropRow>
-          )}
           <IssueWorkflowPropRow projectId={issue.project_id} status={issue.status} label={t(($) => $.workflows.project.label)} />
 
           {/* Optional props — rendered only when set on the issue OR added
@@ -3761,7 +3603,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             </div>
             )
           )}
-          <IssueUndrivenRow issue={issue} readOnly={isGuest} />
           {titleConflictDraft !== null ? (
             <RevisionConflictCompare
               className="mt-2"
@@ -4077,7 +3918,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                             <div className="bg-muted/40 px-3 py-1 text-micro font-medium uppercase tracking-wider text-muted-foreground">
                               {groupStage == null
                                 ? t(($) => $.stage.none)
-                                : <>{t(($) => $.stage.value, { n: groupStage })} · {groupStage === Math.min(...groups.filter((g) => g.stage != null).map((g) => g.stage!)) ? t(($) => $.stage.blocking) : t(($) => $.stage.queued)}</>}
+                                : t(($) => $.stage.value, { n: groupStage })}
                             </div>
                           )}
                           {items.map((child) => (
@@ -4101,8 +3942,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           })()}
 
           <div className="my-8 border-t" />
-
-          <IssuePlanCard issueId={id} />
 
           {/* Activity / Comments */}
           <div>
@@ -4227,8 +4066,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             </div>
 
             <LocalDirectoryHint projectId={issue?.project_id} />
-
-            <AskPromptList issueId={id} className="mt-4" />
 
             {/* The "agent is working" live signal now lives in the header
                 (IssueAgentHeaderChip) so it stays in one fixed place and
@@ -4427,7 +4264,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       onOpenOverview={openOverviewFromViewer}
     >
       <AttachmentVersionsProvider files={deliverableFiles}>
-        <AgentSceneProvider value={agentScene}>{layout}</AgentSceneProvider>
+        {layout}
       </AttachmentVersionsProvider>
       <DeliverablesOverview
         open={overview.open}

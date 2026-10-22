@@ -41,7 +41,6 @@ vi.mock("@multica/core/chat/mutations", () => ({
   useDeleteChatSession: () => ({ mutate: vi.fn() }),
   useSetChatSessionArchived: () => ({ mutate: vi.fn() }),
   useHandoffChatSession: () => ({ mutate: handoffMutate, isPending: false }),
-  useSetChatTicket: () => ({ mutate: vi.fn(), isPending: false }),
 }));
 
 vi.mock("@multica/core/chat", () => ({

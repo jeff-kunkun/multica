@@ -223,17 +223,8 @@ export function buildCreateAgentRequest(options: {
   /** Creation-source attribution for the `agent_created` analytics event. */
   template?: string;
   duplicateSource?: Agent | null;
-  /**
-   * Base role this agent specialises (DENE-301). Empty/omitted creates an
-   * independent base role. The caller resolves it against the loaded agents
-   * first: an id that is not a live base role must never be sent, since the
-   * server answers 400 for it.
-   */
-  parentAgentId?: string | null;
-  /** Domain of the specialisation (DENE-1451); only sent with a base role. */
-  domainId?: string | null;
 }): CreateAgentRequest {
-  const { runtimeId, runtimeProvider, template, duplicateSource, parentAgentId, domainId } = options;
+  const { runtimeId, runtimeProvider, template, duplicateSource } = options;
   const qoder = runtimeProvider === QODER_PROVIDER;
   // The Qoder bridge refuses skills and execution overrides, and the form
   // hides them (plus conversation starters) once Qoder is chosen.
@@ -273,10 +264,6 @@ export function buildCreateAgentRequest(options: {
     skill_ids: [...draft.skillIds],
     template,
   };
-  if (parentAgentId) {
-    request.parent_agent_id = parentAgentId;
-    if (domainId) request.domain_id = domainId;
-  }
   if (duplicateSource) {
     if (!qoder && duplicateSource.custom_args.length > 0) {
       request.custom_args = duplicateSource.custom_args;

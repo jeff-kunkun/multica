@@ -30,8 +30,6 @@ import { useShortcut } from "@multica/core/shortcuts";
 import { ShortcutKeycaps } from "../../common/shortcut-keycaps";
 import type { MentionItem } from "../../editor/extensions/mention-suggestion";
 import type { Attachment, ChatSendMode, Project } from "@multica/core/types";
-import { agentSceneOf } from "@multica/core/agents";
-import { AgentSceneProvider } from "../../agents/components/agent-scene-context";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { ClearablePillButton } from "../../common/pill-button";
 import { useT } from "../../i18n";
@@ -708,8 +706,6 @@ export function ChatInput({
     const project = projects.find((candidate) => candidate.id === id);
     return project ? [project] : [];
   });
-  // The chat's projects are its scene (DENE-1477): @ lists fitting agents first.
-  const agentScene = agentSceneOf(selectedProjects);
 
   return (
     <div
@@ -808,7 +804,6 @@ export function ChatInput({
           </div>
         )}
         <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2">
-          <AgentSceneProvider value={agentScene}>
           <ContentEditor
             // See the editorKey / draftKey split note above — editor identity
             // intentionally tracks neither the session nor the agent.
@@ -841,7 +836,6 @@ export function ChatInput({
             // undone (MUL-5106).
             showBubbleMenu
           />
-          </AgentSceneProvider>
         </div>
         {(uploadEnabled || projectSelectionEnabled || leftAdornment) && (
           <div className="absolute bottom-1.5 left-1.5 flex items-center gap-1">

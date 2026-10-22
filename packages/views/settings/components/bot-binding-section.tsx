@@ -5,7 +5,6 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { botBindingOptions, botWritesOptions } from "@multica/core/bots";
 import { Button } from "@multica/ui/components/ui/button";
 import { useT } from "../../i18n";
-import { OfficeDeliveriesRow } from "./office-deliveries-row";
 import { SettingsCard, SettingsRow, SettingsSection } from "./settings-layout";
 
 /**
@@ -118,7 +117,6 @@ export function BotBindingSection() {
             ) : null}
           </SettingsRow>
         ) : null}
-        {binding?.bound ? <OfficeDeliveriesRow wsId={wsId} /> : null}
       </SettingsCard>
     </SettingsSection>
   );

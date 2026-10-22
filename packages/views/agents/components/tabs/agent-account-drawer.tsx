@@ -46,7 +46,6 @@ import {
   accountLeverLabel,
   accountSlotNumberOf,
   accountStatus,
-  formatQuotaResetAt,
   parseAccountLever,
 } from "./agent-accounts-model";
 
@@ -147,29 +146,21 @@ export function accountLoginCommand(account: AgentAccount): string {
  */
 export function AccountStatusPill({
   account,
-  nowMs,
   className,
 }: {
   account: AgentAccount;
-  nowMs: number;
   className?: string;
 }) {
   const { t } = useT("agents");
-  const status = accountStatus(account, nowMs);
+  const status = accountStatus(account);
   const tone =
-    status.kind === "quota_exhausted"
-      ? "border-destructive/30 bg-destructive/5 text-destructive"
-      : status.kind === "signed_out"
-        ? "border-border bg-muted text-muted-foreground"
-        : "border-success/30 bg-success/10 text-success";
+    status.kind === "signed_out"
+      ? "border-border bg-muted text-muted-foreground"
+      : "border-success/30 bg-success/10 text-success";
   const label =
     status.kind === "signed_out"
       ? t(($) => $.tab_body.accounts.status_signed_out)
-      : status.kind === "quota_exhausted"
-        ? t(($) => $.tab_body.accounts.status_quota_exhausted, {
-            time: formatQuotaResetAt(status.reset_at_ms),
-          })
-        : t(($) => $.tab_body.accounts.status_signed_in);
+      : t(($) => $.tab_body.accounts.status_signed_in);
   return (
     <span
       className={cn(
@@ -275,7 +266,6 @@ export interface AgentAccountDrawerProps {
   dirty: boolean;
   saving: boolean;
   onSave: () => void;
-  nowMs: number;
   /**
    * Per CLI, the numbered slot "add account" would register. A CLI with no
    * entry cannot take a slot: it owns no slot registry (codex, cursor), its
@@ -302,7 +292,6 @@ export function AgentAccountDrawer({
   dirty,
   saving,
   onSave,
-  nowMs,
   nextSlots,
   removableSlots,
   onAddSlot,
@@ -449,7 +438,7 @@ export function AgentAccountDrawer({
                         {isCurrent ? (
                           <AccountActivePill />
                         ) : (
-                          <AccountStatusPill account={account} nowMs={nowMs} />
+                          <AccountStatusPill account={account} />
                         )}
                         {group.switchable ? (
                           <span

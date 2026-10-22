@@ -59,7 +59,6 @@ import { useViewingTimezone } from "../../common/use-viewing-timezone";
 import { AgentCLIUpdateControls, readAgentCLIUpdate } from "./agent-cli-update";
 import { ProviderLogo } from "./provider-logo";
 import { HealthIcon, useHealthLabel } from "./shared";
-import { PlanLimitsCell } from "./plan-limits";
 import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
 import { DeleteRuntimeProfileDialog } from "./delete-runtime-profile-dialog";
 import { RuntimeProfilesDialog } from "./runtime-profiles-dialog";
@@ -92,7 +91,7 @@ import { DeferredTooltip } from "@multica/ui/components/common/deferred-tooltip"
 // runtime name to a few letters. With both as `fr`, health truncates first.
 const GRID_COLS =
   "grid-cols-[0.75rem_minmax(96px,3fr)_minmax(64px,2fr)_var(--rtc-kebab)_0.75rem] " +
-  "@2xl:grid-cols-[0.75rem_minmax(140px,1fr)_var(--rtc-health)_var(--rtc-owner)_var(--rtc-agents)_var(--rtc-cost)_var(--rtc-limits)_var(--rtc-cli)_var(--rtc-kebab)_0.75rem]";
+  "@2xl:grid-cols-[0.75rem_minmax(140px,1fr)_var(--rtc-health)_var(--rtc-owner)_var(--rtc-agents)_var(--rtc-cost)_var(--rtc-cli)_var(--rtc-kebab)_0.75rem]";
 
 const COLUMN_WIDTHS = {
   // Health folds the workload in as a suffix ("Healthy · 2 running") —
@@ -101,14 +100,13 @@ const COLUMN_WIDTHS = {
   owner: 96,
   agents: 92,
   cost: 96,
-  limits: 96,
   cli: 260,
 } as const;
 
-// Fixed tracks (edges 12+12, name min 140) plus the 9 gap-x-3 gaps
-// between the wide template's 10 tracks (zero-width tracks still carry
+// Fixed tracks (edges 12+12, name min 140) plus the 8 gap-x-3 gaps
+// between the wide template's 9 tracks (zero-width tracks still carry
 // gaps).
-const FIXED_TRACKS_WIDTH = 164 + 9 * 12;
+const FIXED_TRACKS_WIDTH = 164 + 8 * 12;
 
 // The kebab track is conditional like the owner column: on a list where
 // no row carries a delete-permission, EVERY row's only action is hidden,
@@ -124,7 +122,6 @@ function columnTrackVars(
     (showOwner ? COLUMN_WIDTHS.owner : 0) +
     COLUMN_WIDTHS.agents +
     COLUMN_WIDTHS.cost +
-    COLUMN_WIDTHS.limits +
     COLUMN_WIDTHS.cli +
     (showActions ? 28 : 0);
   return {
@@ -132,7 +129,6 @@ function columnTrackVars(
     "--rtc-owner": showOwner ? `${COLUMN_WIDTHS.owner}px` : "0px",
     "--rtc-agents": `${COLUMN_WIDTHS.agents}px`,
     "--rtc-cost": `${COLUMN_WIDTHS.cost}px`,
-    "--rtc-limits": `${COLUMN_WIDTHS.limits}px`,
     "--rtc-cli": `${COLUMN_WIDTHS.cli}px`,
     "--rtc-kebab": showActions ? "1.75rem" : "0px",
     "--rtc-minw": `${minWidth}px`,
@@ -799,9 +795,6 @@ export function RuntimeList({
             {t(($) => $.list.col_cost)}
           </ListGridHeaderCell>
           <ListGridHeaderCell className="hidden @2xl:flex">
-            {t(($) => $.list.col_plan_limits)}
-          </ListGridHeaderCell>
-          <ListGridHeaderCell className="hidden @2xl:flex">
             {t(($) => $.list.col_cli)}
           </ListGridHeaderCell>
           <span aria-hidden="true" />
@@ -858,9 +851,6 @@ export function RuntimeList({
                     enabled={canReadRuntimeUsage(row.runtime, user?.id ?? null)}
                   />
                 )}
-              </ListGridCell>
-              <ListGridCell className="hidden @2xl:flex">
-                <PlanLimitsCell runtime={row.runtime} now={now} />
               </ListGridCell>
               <ListGridCell className="hidden @2xl:flex">
                 <CliCell

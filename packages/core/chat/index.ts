@@ -4,10 +4,6 @@ export { useRecentContextStore, selectRecentContexts } from "./recent-context-st
 export type { RecentContextEntry, RecentContextType } from "./recent-context-store";
 export { chatDirectoryOptions } from "./queries";
 
-/** Sentinel `selectedAgentId` for a new chat whose agent routing picks on the
- *  first send (DENE-1834). Never a real agent id; never sent to the server. */
-export const ROUTED_AGENT_ID = "routed";
-
 import type { createChatStore as CreateChatStoreFn } from "./store";
 
 type ChatStoreInstance = ReturnType<typeof CreateChatStoreFn>;

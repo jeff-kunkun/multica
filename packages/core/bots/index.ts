@@ -5,8 +5,6 @@ export {
   externalBotListOptions,
   botBindingOptions,
   botWritesOptions,
-  officeDeliveriesOptions,
-  useRetryOfficeDeliveries,
   botWakeOptions,
   botWakeEventsOptions,
   botMentionDirectoryOptions,

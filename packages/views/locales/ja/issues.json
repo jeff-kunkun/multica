@@ -150,34 +150,7 @@
   },
   "stage": {
     "none": "ステージなし",
-    "value": "ステージ {{n}}",
-    "blocking": "進行を阻止",
-    "queued": "待機中"
-  },
-  "assignee_source": {
-    "human": "{{name}} が選択",
-    "human_unknown": "人が選択",
-    "quote": "{{name}} の発言どおりに指名",
-    "quote_unknown": "メンバーの発言どおりに指名",
-    "automation": "自動化による指名",
-    "agent": "エージェント自身の指名",
-    "router": "ルーティングが選択",
-    "self_claim": "親チケット担当エージェントが自ら引き受け",
-    "quote_text": "「{{quote}}」"
-  },
-  "driver": {
-    "none": "誰も進めていません",
-    "revived": "{{count}} 回再実行済み",
-    "escalated": "親課題の担当者に報告済み",
-    "rerun": "同じ担当で再実行",
-    "reroute": "担当を選び直す",
-    "split": "サブ課題に分割",
-    "cancel": "課題をキャンセル",
-    "split_placeholder": "サブ課題のタイトル",
-    "cancel_placeholder": "キャンセル理由",
-    "back": "戻る",
-    "done": "対応しました",
-    "failed": "対応できませんでした"
+    "value": "ステージ {{n}}"
   },
   "blocker_summary": {
     "title": "ブロック中 · 根因 {{count}} 件",
@@ -486,10 +459,7 @@
     "prop_status": "ステータス",
     "prop_priority": "優先度",
     "prop_stage": "ステージ",
-    "prop_waiting_for": "待ち",
-    "prop_review_skip": "検収スキップ",
     "prop_assignee": "担当者",
-    "prop_reviewer": "検収担当",
     "prop_start_date": "開始日",
     "prop_due_date": "期限",
     "prop_project": "プロジェクト",
@@ -572,12 +542,6 @@
     "description_updated": "説明を更新しました",
     "task_completed_other": "実行を完了しました（{{count}} 回）",
     "task_failed_other": "実行が失敗しました（{{count}} 回）",
-    "consult_answered": "{{name}} に相談しました",
-    "consult_failed": "{{name}} に相談しましたが、回答はありませんでした",
-    "consult_cost": "{{tokens}} トークン · {{seconds}} 秒",
-    "consult_question": "質問",
-    "consult_answer": "回答",
-    "consult_reason": "回答がなかった理由",
     "squad_leader_evaluated": "スクワッドのトリガーを評価しました",
     "squad_leader_action": "評価してアクションを実行しました",
     "squad_leader_action_reason": "評価してアクションを実行しました: {{reason}}",
@@ -991,14 +955,6 @@
       "agent_runtime_required": "作業を割り当てる前に、このエージェントにランタイムをバインドしてください",
       "squad_runtime_required": "作業を割り当てる前に、このスクワッドのリーダーにランタイムをバインドしてください"
     },
-    "reviewer": {
-      "trigger_undecided": "未指定",
-      "trigger_no_review": "検収不要",
-      "search_placeholder": "検収担当を指定...",
-      "no_review": "検収不要",
-      "members_group": "メンバー",
-      "agents_group": "エージェント"
-    },
     "start_date": {
       "trigger_label": "開始日",
       "none": "開始日なし"
@@ -1383,8 +1339,6 @@
       "blocked_backlog": "バックログ中のため起こしません",
       "blocked_member": "担当者がメンバーのため、受信トレイに通知します",
       "blocked_none": "担当者なし。段階の終了時はプラットフォームが進めます",
-      "assign": "担当者を設定",
-      "assign_error": "担当者を設定できませんでした。",
       "turned_off": "このタスクではオフ",
       "target_title": "起こす対象",
       "target_current": "担当者（現在 {{name}}）",

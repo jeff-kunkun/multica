@@ -17,7 +17,6 @@ import {
   MessagesSquare,
   Plug,
   Search,
-  Route,
   Settings,
   SlidersHorizontal,
   Tags,
@@ -29,7 +28,6 @@ import {
   FolderKanban,
   Link2,
   Bot,
-  Stamp,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
@@ -67,13 +65,11 @@ import { IssueStatusesTab } from "./issue-statuses-tab";
 import { WorkflowsTab } from "../../workflows/workflows-tab";
 import { PropertiesTab } from "./properties-tab";
 import { QuickActionsTab } from "./quick-actions-tab";
-import { RoutingTab } from "./routing-tab";
 import { KeyboardShortcutsTab } from "./keyboard-shortcuts-tab";
 import { PluginsTab } from "./plugins-tab";
 import { BillingTab } from "./billing-tab";
 import { ConfigTransferTab } from "./config-transfer-tab";
 import { ProjectSharingTab } from "./project-sharing-tab";
-import { ApproversTab } from "./approvers-tab";
 import { SETTINGS_ANCHOR_ATTR } from "./settings-layout";
 import { searchSettings } from "./settings-search";
 import { HighlightText } from "../../search/highlight-text";
@@ -177,9 +173,6 @@ export function SettingsPage({ extraDeviceTabs: deviceTabs = [] }: SettingsPageP
       <ConfigTransferTab />,
       { wide: true },
     ),
-    entry("routing", t(($) => $.page.tabs.routing), Route, <RoutingTab />),
-    // Plan approval rights: owners open it by URL or use `multica plan approver`.
-    entry("approvers", t(($) => $.page.tabs.approvers), Stamp, <ApproversTab />),
   ];
 
   const groups: SettingsScopeGroup[] = [

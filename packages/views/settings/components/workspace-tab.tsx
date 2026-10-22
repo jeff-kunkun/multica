@@ -34,7 +34,6 @@ import {
   memberListOptions,
   workspaceKeys,
   workspaceListOptions,
-  workspaceNamingOptions,
 } from "@multica/core/workspace/queries";
 import { issueKeys } from "@multica/core/issues/queries";
 import { api } from "@multica/core/api";
@@ -44,11 +43,10 @@ import {
   useHasOnboarded,
 } from "@multica/core/paths";
 import { setCurrentWorkspace } from "@multica/core/platform";
-import type { Workspace, WorkspaceNamingSource } from "@multica/core/types";
+import type { Workspace } from "@multica/core/types";
 import { AvatarUploadControl } from "../../common/avatar-upload-control";
 import { useNavigation } from "../../navigation";
 import { DeleteWorkspaceDialog } from "./delete-workspace-dialog";
-import { ChatNamingCard } from "./chat-naming-card";
 import { useT } from "../../i18n";
 import {
   SettingsCard,
@@ -91,10 +89,6 @@ export function WorkspaceTab() {
   const wsId = workspace?.id;
   const { data: members = [], isFetched: membersFetched } = useQuery({
     ...memberListOptions(wsId ?? ""),
-    enabled: !!wsId,
-  });
-  const { data: naming } = useQuery({
-    ...workspaceNamingOptions(wsId ?? ""),
     enabled: !!wsId,
   });
   const qc = useQueryClient();
@@ -159,17 +153,6 @@ export function WorkspaceTab() {
     onConfirm: () => Promise<void>;
   } | null>(null);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-
-  const handleNamingChange = async (nextValue: WorkspaceNamingSource) => {
-    if (!workspace || !canManageWorkspace) return;
-    try {
-      const updated = await api.updateWorkspaceNaming(workspace.id, nextValue);
-      qc.setQueryData(workspaceKeys.naming(workspace.id), updated);
-      toast.success(t(($) => $.workspace.naming_source_saved), { id: "settings-auto-save" });
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : t(($) => $.workspace.naming_source_save_failed));
-    }
-  };
 
   const currentMember = members.find((m) => m.user_id === user?.id) ?? null;
   const canManageWorkspace = currentMember?.role === "owner" || currentMember?.role === "admin";
@@ -493,13 +476,6 @@ export function WorkspaceTab() {
             </span>
           </SettingsRow>
         </SettingsCard>
-      </SettingsSection>
-
-      <SettingsSection
-        title={t(($) => $.workspace.naming_title)}
-        description={t(($) => $.workspace.naming_description)}
-      >
-        <ChatNamingCard naming={naming} canManage={canManageWorkspace} onChange={handleNamingChange} />
       </SettingsSection>
 
       {/* Danger Zone — gated on the member query settling so the owner-only

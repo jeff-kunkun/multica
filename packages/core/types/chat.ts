@@ -28,11 +28,7 @@ export type ChatMessageKind =
   | "onboarding_opening"
   | "linked_delivery"
   /** An agent opened a chat from this one; `linked_session_id` points at it. */
-  | "chat_spawn"
-  /** An agent tried to open a chat from this one and the server refused. */
-  | "chat_spawn_refused"
-  /** A ticket this chat opened reports its result (DENE-1672). */
-  | "issue_receipt";
+  | "chat_spawn";
 
 /**
  * A concise follow-up offered by an assistant reply. `label` is rendered in
@@ -113,22 +109,6 @@ export interface AgentChatPage {
   has_more: boolean;
 }
 
-/** How the chat's agent was chosen when the caller named none (DENE-1834).
- *  `source` is the same label the issue router stamps on its comments
- *  (原话 / 人工 / 档位 / 兜底); `routed` false means a person named the agent. */
-export interface ChatRoutingReceipt {
-  source: string;
-  routed: boolean;
-  agent_id?: string;
-  agent?: string;
-  tier?: string;
-  tier_label?: string;
-  reason?: string;
-  availability?: string;
-  offline?: boolean;
-  candidates?: string[];
-}
-
 export interface ChatSession {
   /** The issue that owns execution after this chat was converted. */
   converted_issue_id?: string | null;
@@ -184,8 +164,6 @@ export interface ChatSession {
   origin_session_id?: string | null;
   /** Parent title, only when the viewer can see the parent. Detail-only. */
   origin_title?: string | null;
-  /** Present on the create response only: who routing picked and why. */
-  routing?: ChatRoutingReceipt;
   created_at: string;
   updated_at: string;
 }

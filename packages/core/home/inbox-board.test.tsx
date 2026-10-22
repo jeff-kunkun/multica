@@ -13,8 +13,6 @@ import { useInboxBoard } from "./queries";
 
 function response(over: Partial<InboxBoardResponse> = {}): InboxBoardResponse {
   return {
-    waiting: [],
-    stalled: [],
     running: [],
     todo: [],
     fresh: [
@@ -25,15 +23,11 @@ function response(over: Partial<InboxBoardResponse> = {}): InboxBoardResponse {
         parent_issue_id: null,
         lane: "fresh",
         kind: "fresh",
-        stuck_kind: "",
-        reason: "",
-        before: "",
         from: null,
         from_name: "",
         next: null,
         next_name: "",
         at: "2026-09-26T08:00:00Z",
-        timeline: [],
         unread: 2,
         children: [],
       },

@@ -73,8 +73,6 @@ export type AgentAccount = {
   /** Raw binding lever; `""` means this account cannot be switched from the UI. */
   lever: string;
   signed_in: boolean;
-  /** Unix seconds when an exhausted quota resets; `0` when the account is not exhausted. */
-  quota_reset_at: number;
 };
 
 /** Runtime device shape this model reads: only `metadata` matters. */
@@ -125,8 +123,7 @@ export type AgentAccountGroup = {
 
 export type AgentAccountStatus =
   | { kind: "signed_in" }
-  | { kind: "signed_out" }
-  | { kind: "quota_exhausted"; reset_at: number; reset_at_ms: number };
+  | { kind: "signed_out" };
 
 export type AccountsViewStateKind = "loading" | "error" | "empty" | "ready";
 
@@ -193,12 +190,6 @@ function asKeyRef(value: unknown): string {
   return isKeyRefName(trimmed) ? trimmed : "";
 }
 
-function asUnixSeconds(value: unknown): number {
-  const numeric =
-    typeof value === "number" ? value : typeof value === "string" ? Number(value) : Number.NaN;
-  return Number.isFinite(numeric) && numeric > 0 ? Math.floor(numeric) : 0;
-}
-
 /** Keeps a daemon error readable as the single line the drawer shows. */
 function asErrorText(value: unknown): string {
   if (typeof value !== "string") return "";
@@ -207,8 +198,7 @@ function asErrorText(value: unknown): string {
 
 // Identity fields are strict: an entry that is missing `cli` / `account` /
 // `home` is unusable and is dropped whole. Decorative fields are total on
-// purpose — a drifted `signed_in` or `quota_reset_at` must not cost us a valid
-// account row.
+// purpose — a drifted `signed_in` must not cost us a valid account row.
 const accountEntrySchema = z.object({
   cli: z.string(),
   account: z.string(),
@@ -217,7 +207,6 @@ const accountEntrySchema = z.object({
   key_ref: z.unknown().transform(asKeyRef),
   lever: z.unknown().transform(asString),
   signed_in: z.unknown().transform((value) => value === true),
-  quota_reset_at: z.unknown().transform(asUnixSeconds),
 });
 
 const accountsArraySchema = z.array(z.unknown());
@@ -245,7 +234,6 @@ function normalizeEntry(entry: z.infer<typeof accountEntrySchema>): AgentAccount
     key_ref: entry.key_ref,
     lever: entry.lever,
     signed_in: entry.signed_in,
-    quota_reset_at: entry.quota_reset_at,
   };
 }
 
@@ -428,8 +416,8 @@ function splitFamilyAccounts(
  * Fold the agent's registered slots (`runtime_config[family.runtimeConfigKey]`)
  * into the daemon's account report, family by family.
  *
- * A slot the daemon reported keeps its real directory, sign-in state and quota
- * deadline. A registered slot with no directory on disk yet is synthesized, so
+ * A slot the daemon reported keeps its real directory and sign-in state. A
+ * registered slot with no directory on disk yet is synthesized, so
  * a slot added a moment ago is visible — and bindable — before its directory
  * exists; it reads as "not signed in" because nothing reported it.
  *
@@ -479,7 +467,6 @@ export function withAccountSlots(
         key_ref: "",
         lever: family.lever,
         signed_in: false,
-        quota_reset_at: 0,
       });
     }
   }
@@ -647,59 +634,9 @@ export function resolveCurrentAccount(
   return scoped.find((account) => accountFallsBackToCliDefault(agent, account)) ?? null;
 }
 
-/**
- * Map an account onto the status the row shows.
- *
- * `signed_out` wins over an exhausted quota: without credentials there is
- * nothing to wait for. A reset time that has already passed means the quota is
- * usable again, which reads as a plain signed-in account.
- */
-export function accountStatus(
-  account: AgentAccount,
-  nowMs: number = Date.now(),
-): AgentAccountStatus {
-  if (account.signed_in !== true) return { kind: "signed_out" };
-  const resetAt = account.quota_reset_at;
-  if (Number.isFinite(resetAt) && resetAt > 0 && resetAt * 1000 > nowMs) {
-    return { kind: "quota_exhausted", reset_at: resetAt, reset_at_ms: resetAt * 1000 };
-  }
-  return { kind: "signed_in" };
-}
-
-/**
- * The one rendering of a quota-reset deadline, shared by the summary pill and
- * the accounts tab's warning so the two surfaces cannot disagree about when
- * the account comes back. Locale-formatted, so it is presentation only.
- */
-export function formatQuotaResetAt(resetAtMs: number): string {
-  return new Date(resetAtMs).toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-/**
- * Soonest deadline among the accounts whose quota is still spent at `nowMs`,
- * or null when nothing is waiting on a reset.
- *
- * Surfaced so no caller keeps its own clock: the summary pill and the accounts
- * tab's warning both flip back the moment the quota returns, instead of on the
- * next reload. A signed-out account is skipped — `accountStatus` already says
- * there is nothing to wait for without credentials.
- */
-export function nextQuotaResetMs(
-  accounts: readonly AgentAccount[],
-  nowMs: number = Date.now(),
-): number | null {
-  return accounts.reduce<number | null>((soonest, account) => {
-    const status = accountStatus(account, nowMs);
-    if (status.kind !== "quota_exhausted") return soonest;
-    return soonest === null || status.reset_at_ms < soonest
-      ? status.reset_at_ms
-      : soonest;
-  }, null);
+/** Map an account onto the status the row shows. */
+export function accountStatus(account: AgentAccount): AgentAccountStatus {
+  return account.signed_in === true ? { kind: "signed_in" } : { kind: "signed_out" };
 }
 
 /**
@@ -760,52 +697,4 @@ export function planAccountSwitch(
   if (!isAbsoluteFsPath(home)) return { kind: "unsupported", reason: "invalid_home" };
 
   return { kind: "env", key: lever.key, value: home };
-}
-
-/**
- * The account a one-click switch may move to, or null when the surface must
- * not offer that action at all.
- *
- * The action exists for exactly one situation: the account in effect has spent
- * its quota, and a sibling account of the same CLI can take over right now. So
- * all of the following must hold:
- *
- * - the account in effect is `quota_exhausted` at `nowMs` (a quota that already
- *   came back is not a reason to move);
- * - the group's lever is writable, which drops codex / cursor — the daemon
- *   reports no lever for them, and an empty lever can never be bound;
- * - the candidate is signed in with quota left — "signed out" and "exhausted"
- *   are both dead ends, and picking one would only move the dead end;
- * - the switch really writes: the candidate goes through the same
- *   `planAccountSwitch` gate as "save and switch", so an untrusted view, an
- *   unknown lever shape or a home that is not an absolute path produces no
- *   button instead of a dead one.
- *
- * The first eligible account in the canonical group order wins, so the choice
- * is deterministic and never depends on the order the daemon reported.
- */
-export function quotaSwitchCandidate(input: {
-  binding: AgentAccountBinding | null | undefined;
-  accounts: readonly AgentAccount[];
-  current: AgentAccount | null | undefined;
-  view?: AccountsViewState;
-  nowMs?: number;
-}): AgentAccount | null {
-  const { binding, accounts, current, view } = input;
-  const nowMs = input.nowMs ?? Date.now();
-  if (!current) return null;
-  if (accountStatus(current, nowMs).kind !== "quota_exhausted") return null;
-
-  const group = groupAccountsByCli(accounts).find(
-    (entry) => entry.cli === current.cli,
-  );
-  if (!group || !group.switchable) return null;
-
-  return (
-    group.accounts.find((account) => {
-      if (account.account === current.account) return false;
-      if (accountStatus(account, nowMs).kind !== "signed_in") return false;
-      return planAccountSwitch(binding, account, view).kind !== "unsupported";
-    }) ?? null
-  );
 }

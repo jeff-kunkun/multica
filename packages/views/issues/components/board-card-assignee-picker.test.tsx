@@ -28,7 +28,6 @@ vi.mock("@multica/core/auth", () => ({
 
 vi.mock("@multica/core/agents", () => ({
   isAgentRuntimeBound: () => true,
-  useAgentScene: () => null,
   useAgentPresenceDetail: () => ({ availability: "offline", workload: null }),
 }));
 

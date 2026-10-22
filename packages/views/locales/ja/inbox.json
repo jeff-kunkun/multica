@@ -135,16 +135,6 @@
     "activity_link": "All activity",
     "back_to_board": "One row per issue",
     "lanes": {
-      "waiting": {
-        "title": "Waiting on you",
-        "hint": "あなたの返信や対応を待っているタスクです。返信するとエージェントが再開します。",
-        "empty": "Nothing is waiting on you"
-      },
-      "stalled": {
-        "title": "Stopped · unexplained",
-        "hint": "実行中のエージェントがなく、まだ締めくくられていないタスクです。",
-        "empty": "Nothing stopped without an explanation"
-      },
       "running": {
         "title": "Running",
         "hint": "Just a marker, no noise",
@@ -172,64 +162,17 @@
       }
     },
     "tag": {
-      "needs_human": "Your call",
-      "manual": "Your turn",
-      "mention": "Asked for you",
-      "routing": "Nobody picked up",
-      "patrol": "No reviewer",
-      "unseated": "No executor",
-      "time_limit": "Timed out",
-      "quota_relay": "Out of quota",
-      "waiting_person": "Your call",
-      "waiting_default": "Waiting",
-      "stalled_delivery": "Delivery stuck",
-      "stalled_unclosed": "Done, not closed",
-      "stalled_reply_unclosed": "Replied, not closed",
       "running": "Running",
       "blocked": "待機中",
       "todo": "未着手",
       "fresh": "新着",
       "done": "Done"
     },
-    "stuck": {
-      "branch_refused": "The platform refused to record the delivery branch",
-      "pr_not_linked": "No linked PR, so the move to review was refused",
-      "review_refused": "The move to review was refused",
-      "close_refused": "Closing was refused",
-      "run_failed": "The run ended in failure",
-      "no_wait_record": "Blocked, but nothing says what it waits on",
-      "woken_no_close": "Replied after being woken, but did not close out again",
-      "no_close": "The run ended and the issue was not closed out",
-      "default": "Stopped without an explanation"
-    },
-    "event": {
-      "run_started": "Run started",
-      "run_completed": "Run finished",
-      "run_failed": "Run failed",
-      "run_cancelled": "Run cancelled",
-      "pr_linked": "PR linked",
-      "pr_merged": "PR merged",
-      "rejected": "Refused by the platform",
-      "closed": "Closed out",
-      "after": "No run and no close since"
-    },
-    "server_mark": "Server verdict",
     "unread_other": "新着 {{count}} 件",
-    "before": "Before: {{text}}",
-    "next": "Next: {{name}}",
-    "next_none": "Next: nobody",
     "next_issue": "Waiting on {{id}}",
-    "from_to_you": "{{name}} → you",
     "you": "you",
     "running_for": "running {{time}}",
     "children_other": "{{count}} sub-issues",
-    "expand": "Why",
-    "collapse": "Hide",
-    "reply_placeholder": "Reply here; it posts on the issue and wakes {{name}}",
-    "reply_placeholder_default": "Reply here; it posts on the issue",
-    "reply": "Reply",
-    "reply_sent": "Replied; the agent will pick it up",
-    "reply_failed": "The reply was not sent",
     "open_issue": "Open issue",
     "seen_other": "{{count}} already seen",
     "hide_seen": "Hide seen",
@@ -245,33 +188,11 @@
     "filter_bar": "「{{lane}}」の通知を強調中",
     "filter_clear": "解除",
     "short": {
-      "waiting": "対応待ち",
-      "stalled": "停止",
       "running": "実行中",
       "blocked": "待機中",
       "todo": "未着手",
       "fresh": "新着",
       "done": "完了"
-    },
-    "actions": {
-      "backlog": "後でやる",
-      "done": "完了",
-      "cancelled": "やらない",
-      "return_to_do": "やることに戻す",
-      "return_to_agent": "やることに戻す（{{name}}を起こす）",
-      "more": "その他の操作",
-      "select": "{{title}}を選択",
-      "selected": "{{count}}件を選択中",
-      "clear_selection": "選択を解除",
-      "undo": "元に戻す"
-    },
-    "toasts": {
-      "status_changed": "ステータスを更新しました",
-      "cancelled": "やらないにしました。実行中の作業は停止しません"
-    },
-    "errors": {
-      "status_failed": "ステータスを更新できませんでした",
-      "undo_failed": "ステータス変更を元に戻せませんでした"
     }
   },
   "fast_access": {

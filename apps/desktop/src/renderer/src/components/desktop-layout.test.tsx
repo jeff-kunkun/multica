@@ -69,7 +69,6 @@ vi.mock("@multica/views/layout", () => ({
   AppSidebar: () => null,
   GlobalShortcuts: () => null,
   NavigationProgress: () => null,
-  ProviderStatusBar: () => <div data-testid="provider-status-bar" />,
 }));
 
 vi.mock("@multica/views/modals/registry", () => ({ ModalRegistry: () => null }));

@@ -24,13 +24,12 @@
 //
 // Invariants from the design doc: no credential value is ever read, rendered
 // or logged (only `key_ref` names and `signed_in`); every control with a side
-// effect goes through one write path — the drawer's "save and switch" and the
-// summary bar's one-click switch differ only in their target (DENE-468); and a
-// view that is loading, empty or in error never offers either of them.
+// effect goes through the drawer's "save and switch"; and a view that is
+// loading, empty or in error never offers it.
 
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, FolderTree, Loader2 } from "lucide-react";
+import { AlertTriangle, FolderTree } from "lucide-react";
 import { toast } from "sonner";
 import { isAgentRuntimeBound } from "@multica/core/agents";
 import { api } from "@multica/core/api";
@@ -56,13 +55,11 @@ import {
   parseAccountLever,
   parseAgentAccounts,
   planAccountSwitch,
-  quotaSwitchCandidate,
   removableSlots,
   resolveCurrentAccount,
   slotAccountId,
   withAccountSlots,
 } from "./agent-accounts-model";
-import { useQuotaResetTick } from "./use-quota-reset-tick";
 import {
   ACCOUNT_SLOT_FAMILIES,
   accountSlotFamily,
@@ -124,7 +121,6 @@ function emptyEntryAccount(cli: AgentAccountCli): AgentAccount {
     key_ref: "",
     lever: cliLever(cli),
     signed_in: false,
-    quota_reset_at: 0,
   };
 }
 
@@ -286,20 +282,6 @@ export function AgentAccountsTab({
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  // Moves when the soonest spent quota comes back, so the pill — and the
-  // one-click switch below — stop describing an account that is usable again.
-  const nowMs = useQuotaResetTick(parsed.accounts);
-
-  // The one-click switch is offered only while the account in effect is out of
-  // quota and a sibling of the same CLI can take over. Rules live in the model;
-  // this bar only decides where the button sits.
-  const quickSwitch = quotaSwitchCandidate({
-    binding,
-    accounts: persistedAccounts,
-    current,
-    view: viewState,
-    nowMs,
-  });
 
   // A selection or a slot added inside the drawer is unsaved work until "save
   // and switch" commits it, so the surrounding settings layout can guard a tab
@@ -356,11 +338,7 @@ export function AgentAccountsTab({
     if (selectedKey === slotKey(cli, slot)) setSelectedKey(slotKey(cli, 1));
   };
 
-  /**
-   * The single write path behind every switch: the drawer's "save and switch"
-   * and the summary bar's one-click switch. Only the target and whether the
-   * drawer's pending slot edits ride along differ between the two.
-   */
+  /** The write path behind the drawer's "save and switch". */
   const switchTo = async (
     target: AgentAccount | null,
     { commitSlots }: { commitSlots: boolean },
@@ -514,35 +492,11 @@ export function AgentAccountsTab({
                   </p>
                 </div>
                 <div className="ms-auto flex shrink-0 items-center gap-2">
-                  <AccountStatusPill account={current} nowMs={nowMs} />
-                  {/* The quota is gone: switching accounts is the one thing
-                      worth doing, so it is the primary action here, and
-                      "manage" drops to the escape hatch it now is. */}
-                  {quickSwitch ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      disabled={saving}
-                      onClick={() => {
-                        void switchTo(quickSwitch, { commitSlots: false });
-                      }}
-                    >
-                      {saving ? (
-                        <Loader2
-                          className="size-3.5 animate-spin motion-reduce:animate-none"
-                          aria-hidden="true"
-                        />
-                      ) : null}
-                      {t(($) => $.tab_body.accounts.quick_switch_action, {
-                        account: quickSwitch.account,
-                      })}
-                    </Button>
-                  ) : null}
+                  <AccountStatusPill account={current} />
                   {canManageAccounts(viewState) ? (
                     <Button
                       type="button"
                       size="sm"
-                      variant={quickSwitch ? "outline" : "default"}
                       onClick={openDrawer}
                     >
                       {t(($) => $.tab_body.accounts.manage_action)}
@@ -601,7 +555,6 @@ export function AgentAccountsTab({
             dirty={dirty}
             saving={saving}
             onSave={() => void handleSaveAndSwitch()}
-            nowMs={nowMs}
             nextSlots={nextSlots}
             removableSlots={droppableSlots}
             onAddSlot={handleAddSlot}

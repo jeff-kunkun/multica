@@ -43,31 +43,6 @@ export interface Workspace {
   updated_at: string;
 }
 
-export interface WorkspaceNamingOption {
-  id: "server_llm" | "runtime" | "rules";
-  label: string;
-  available: boolean;
-  recommended?: boolean;
-  reason?: string;
-}
-
-export type WorkspaceNamingSource = "server_llm" | "runtime" | "rules";
-
-export interface WorkspaceNaming {
-  source: WorkspaceNamingSource;
-  options: WorkspaceNamingOption[];
-  /** Last 24 hours of naming events. */
-  stats: { titled: number; server_llm?: number; runtime: number; rules: number; failed: number };
-  /**
-   * Whether the selected source is doing its job: ok, degraded (chats arrived
-   * but it named none, or it cannot run), or idle (no new chats in 24 hours).
-   * Absent on servers that predate the field.
-   */
-  health?: "ok" | "degraded" | "idle";
-  /** Most recent successfully named chat, if any. */
-  last?: { title: string; source: WorkspaceNamingSource; created_at: string } | null;
-}
-
 /**
  * One MCP server in the workspace's library.
  *

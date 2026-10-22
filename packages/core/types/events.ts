@@ -578,19 +578,6 @@ export interface InvitationRevokedPayload {
   invitee_email: string;
 }
 
-// Broadcast when a daemon heartbeat persisted a new credential-free
-// plan_limits snapshot. Routine 15s heartbeats do not reach the browser: the
-// flag is set only when the stored row actually changed.
-//
-// Two shapes travel on this event. A runtime snapshot names `runtime_id`; a
-// per-agent snapshot names `agent_id` instead, because one runtime serves every
-// CLI seat on the machine and the agent is what the seat belongs to (DENE-715).
-export interface DaemonHeartbeatPayload {
-  runtime_id?: string;
-  agent_id?: string;
-  plan_limits_updated?: boolean;
-}
-
 export interface ChatSessionCreatedPayload {
   workspace_id: string;
   chat_session_id: string;
@@ -686,9 +673,9 @@ export interface WSEventPayloadMap {
   "invitation:accepted": InvitationAcceptedPayload;
   "invitation:declined": InvitationDeclinedPayload;
   "invitation:revoked": InvitationRevokedPayload;
-  "daemon:heartbeat": DaemonHeartbeatPayload;
   // No formal payload interfaces yet — server emits domain objects clients
   // currently consume as opaque triggers (refetch on receipt).
+  "daemon:heartbeat": unknown;
   "daemon:register": unknown;
   "skill:created": unknown;
   "skill:updated": unknown;

@@ -19,7 +19,6 @@
  * All link styling is controlled by styles/prose.css (var(--brand) color),
  * not Tailwind HTMLAttributes, to keep a single source of truth.
  */
-import type { AgentScene } from "@multica/core/agents";
 import type { BotMentionSource } from "@multica/core/types";
 import type { RefObject } from "react";
 import StarterKit from "@tiptap/starter-kit";
@@ -174,7 +173,6 @@ export interface EditorExtensionsOptions {
   /** Override @ behavior for chat context suggestions. */
   mentionMode?: "default" | "context";
   getMentionContextItems?: () => MentionItem[];
-  getAgentScene?: () => AgentScene | null;
   /** Issue or chat the text is written into; scopes the bot @ directory. */
   getMentionSource?: () => BotMentionSource;
   /** When true, attach the `/` picker. Default false. */
@@ -287,7 +285,7 @@ export function createEditorExtensions(
       ...(options.disableMentions
         ? { suggestion: { allow: () => false } }
         : options.queryClient
-          ? { suggestion: createMentionSuggestion(options.queryClient, { mode: options.mentionMode, getContextItems: options.getMentionContextItems, getAgentScene: options.getAgentScene, getMentionSource: options.getMentionSource }) }
+          ? { suggestion: createMentionSuggestion(options.queryClient, { mode: options.mentionMode, getContextItems: options.getMentionContextItems, getMentionSource: options.getMentionSource }) }
           : {}),
     }),
     // Linear-style bare identifier → issue mention. Attached only when a

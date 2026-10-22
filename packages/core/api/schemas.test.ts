@@ -2767,64 +2767,6 @@ describe("AgentSchema work_enabled", () => {
   });
 });
 
-describe("AgentSchema routing_tier", () => {
-  const baseAgent = {
-    id: "agent-1",
-    workspace_id: "ws-1",
-    runtime_id: "rt-1",
-    name: "Lambda",
-    description: "",
-    instructions: "",
-    avatar_url: null,
-    runtime_mode: "local",
-    runtime_config: {},
-    custom_args: [],
-    visibility: "private",
-    permission_mode: "private",
-    invocation_targets: [],
-    status: "idle",
-    max_concurrent_tasks: 1,
-    model: "",
-    owner_id: null,
-    skills: [],
-    created_at: "2026-01-01T00:00:00Z",
-    updated_at: "2026-01-01T00:00:00Z",
-    archived_at: null,
-    archived_by: null,
-  };
-
-  it("parses an agent from a backend that predates the field", () => {
-    const parsed = AgentSchema.parse(baseAgent);
-    expect(parsed.id).toBe("agent-1");
-    expect(parsed.routing_tier).toBeUndefined();
-  });
-
-  it("keeps series metadata and tolerates older or malformed responses", () => {
-    const parsed = AgentSchema.parse({ ...baseAgent, series: "破甲系列", series_override: "破甲系列", series_source: "manual", automatic_series: "Codex" });
-    expect(parsed.series).toBe("破甲系列");
-    expect(parsed.series_source).toBe("manual");
-    expect(parsed.automatic_series).toBe("Codex");
-    expect(AgentSchema.parse(baseAgent).series).toBeUndefined();
-    const malformed = AgentSchema.parse({ ...baseAgent, series: 7, series_source: "future", automatic_series: null });
-    expect(malformed.id).toBe(baseAgent.id);
-    expect(malformed.series).toBeUndefined();
-    expect(malformed.series_source).toBeUndefined();
-  });
-
-  it("keeps the rung a newer backend sent", () => {
-    const parsed = AgentSchema.parse({ ...baseAgent, routing_tier: "strong" });
-    expect(parsed.routing_tier).toBe("strong");
-  });
-
-  // A malformed rung must cost the rung, not the agent: dropping the row
-  // would empty the agent list over one bad column.
-  it("degrades a malformed routing_tier without dropping the agent", () => {
-    const parsed = AgentSchema.parse({ ...baseAgent, routing_tier: 3 });
-    expect(parsed.id).toBe("agent-1");
-    expect(parsed.routing_tier).toBeUndefined();
-  });
-});
-
 describe("AgentActivityBucketListSchema duration", () => {
   const bucket = { agent_id: "a", bucket_at: "2026-09-24T00:00:00Z", task_count: 201,
     completed_count: 201, failed_count: 0, cancelled_count: 0 };

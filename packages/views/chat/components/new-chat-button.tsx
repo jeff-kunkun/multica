@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { Plus, Route } from "lucide-react";
+import { Plus } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { IconButton } from "@multica/ui/components/common/icon-button";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
@@ -9,13 +9,11 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { PickerItem, PropertyPicker } from "../../issues/components/pickers/property-picker";
 import { AgentPickerGroups } from "./agent-picker-groups";
 import type { ShortcutChord } from "@multica/core/shortcuts";
-import type { Agent, Project } from "@multica/core/types";
+import type { Agent } from "@multica/core/types";
 import { isAgentRuntimeBound } from "@multica/core/agents";
 import { toast } from "sonner";
 import { ShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { useT } from "../../i18n";
-
-const NO_PROJECTS: readonly Project[] = [];
 
 function NewChatTooltipLabel({ shortcut }: { shortcut?: ShortcutChord | null }) {
   const { t } = useT("chat");
@@ -30,7 +28,7 @@ function NewChatTooltipLabel({ shortcut }: { shortcut?: ShortcutChord | null }) 
 }
 
 /**
- * Agent picker: a searchable, grouped (fits the project / My agents / Others) list of agents in a
+ * Agent picker: a searchable, grouped (My agents / Others) list of agents in a
  * PropertyPicker. The caller supplies the trigger. `currentAgentId` marks one
  * agent with a check — omit it (as "new chat" does) when there is no current
  * selection to highlight.
@@ -38,11 +36,8 @@ function NewChatTooltipLabel({ shortcut }: { shortcut?: ShortcutChord | null }) 
 export function AgentPicker({
   agents,
   userId,
-  projects = NO_PROJECTS,
   currentAgentId,
   onSelect,
-  onSelectRouted,
-  routedCurrent = false,
   trigger,
   triggerRender,
   tooltip,
@@ -51,13 +46,8 @@ export function AgentPicker({
 }: {
   agents: Agent[];
   userId: string | undefined;
-  /** Projects the chat is in; their domains decide which agents list first. */
-  projects?: readonly Project[];
   currentAgentId?: string;
   onSelect: (agent: Agent) => void;
-  /** Lists 「由路由选派」 first when set: no agent, the server picks on the first send (DENE-1834). */
-  onSelectRouted?: () => void;
-  routedCurrent?: boolean;
   trigger: React.ReactNode;
   triggerRender: React.ReactElement;
   tooltip?: React.ReactNode;
@@ -86,19 +76,9 @@ export function AgentPicker({
       trigger={trigger}
       tooltip={tooltip}
     >
-      {onSelectRouted && (
-        <RoutedPickerItem
-          isCurrent={routedCurrent}
-          onSelect={() => {
-            onSelectRouted();
-            setOpen(false);
-          }}
-        />
-      )}
       <AgentPickerGroups
         agents={agents}
         userId={userId}
-        projects={projects}
         query={filter}
         renderAgent={(agent) => (
           <AgentPickerItem
@@ -110,29 +90,6 @@ export function AgentPicker({
         )}
       />
     </PropertyPicker>
-  );
-}
-
-/** The 「由路由选派」 row: same shape as an agent row, a route glyph for the avatar. */
-export function RoutedPickerItem({
-  isCurrent,
-  onSelect,
-}: {
-  isCurrent: boolean;
-  onSelect: () => void;
-}) {
-  const { t } = useT("chat");
-  return (
-    <PickerItem
-      selected={isCurrent}
-      tooltip={t(($) => $.window.routed_pick_hint)}
-      onClick={onSelect}
-    >
-      <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
-        <Route className="size-3" />
-      </span>
-      <span className="truncate flex-1">{t(($) => $.window.routed_pick)}</span>
-    </PickerItem>
   );
 }
 
@@ -184,19 +141,13 @@ export function AgentPickerItem({
 export function NewChatButton({
   agents,
   userId,
-  projects,
   onStart,
-  onStartRouted,
   side = "bottom",
   shortcut = null,
 }: {
   agents: Agent[];
   userId: string | undefined;
-  /** Projects the new chat will start in; see AgentPicker. */
-  projects?: readonly Project[];
   onStart: (agent: Agent | null) => void;
-  /** When set, the picker opens even with one agent and lists 「由路由选派」 first. */
-  onStartRouted?: () => void;
   side?: "top" | "bottom";
   /**
    * Shown on the tooltip only when the click itself starts a chat. With
@@ -207,7 +158,7 @@ export function NewChatButton({
 }) {
   const { t } = useT("chat");
   const label = t(($) => $.window.new_chat_tooltip);
-  const immediate = agents.length <= 1 && !onStartRouted;
+  const immediate = agents.length <= 1;
   const immediateShortcut = immediate ? shortcut : null;
 
   if (immediate) {
@@ -244,9 +195,7 @@ export function NewChatButton({
     <AgentPicker
       agents={agents}
       userId={userId}
-      projects={projects}
       onSelect={(agent) => onStart(agent)}
-      onSelectRouted={onStartRouted}
       side={side}
       align="start"
       triggerRender={
