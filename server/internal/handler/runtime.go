@@ -58,55 +58,10 @@ type AgentRuntimeResponse struct {
 	Visibility string `json:"visibility"`
 	// ProfileID is set when this runtime is an instance of a custom
 	// runtime_profile (MUL-3284); null for built-in runtimes.
-	ProfileID  *string                      `json:"profile_id"`
-	PlanLimits *protocol.PlanLimitsSnapshot `json:"plan_limits,omitempty"`
-	LastSeenAt *string                      `json:"last_seen_at"`
-	CreatedAt  string                       `json:"created_at"`
-	UpdatedAt  string                       `json:"updated_at"`
-}
-
-// windowlessPlanLimitsMaxAge is how long a plan-limits snapshot that carries
-// nothing but a status word stays current.
-//
-// A snapshot with windows describes a rolling limit: each window stays
-// meaningful until its own reset boundary, and clients drop the ones that
-// passed. A snapshot with NO windows has no boundary at all — its whole content
-// is one observation of "exhausted" — so nothing in the payload says when it
-// stops being true. The daemon re-probes every couple of minutes, which replaces
-// it that quickly whenever the provider is readable at all; a window-less
-// snapshot older than an hour therefore means the probe stopped answering, and
-// the honest state is "no current reading" rather than a day-long "额度已用尽"
-// on a runtime that is working (DENE-606).
-//
-// One hour matches agent.DefaultQuotaResetAt's horizon for a deadline nobody
-// reported, for the same reason: a guess that outlives the real reset costs more
-// than one that expires early.
-const windowlessPlanLimitsMaxAge = time.Hour
-
-// planLimitsNow is the clock runtimeToResponse reads. A variable so a test can
-// age a snapshot without sleeping; production always reads the real clock.
-var planLimitsNow = time.Now
-
-// planLimitsForResponse decodes the stored snapshot for the API, dropping a
-// window-less one that has aged out (see windowlessPlanLimitsMaxAge).
-//
-// This is the only place the runtime row's plan_limits becomes wire data, so
-// every client — web, desktop and `multica runtime list`, which is what agents
-// read before choosing where to dispatch work — sees the same currency rule.
-func planLimitsForResponse(raw []byte) *protocol.PlanLimitsSnapshot {
-	if len(raw) == 0 {
-		return nil
-	}
-	var snapshot protocol.PlanLimitsSnapshot
-	if json.Unmarshal(raw, &snapshot) != nil {
-		return nil
-	}
-	if len(snapshot.Windows) == 0 && snapshot.Status == protocol.PlanLimitsStatusExhausted {
-		if age := planLimitsNow().Sub(time.Unix(snapshot.ObservedAt, 0)); age > windowlessPlanLimitsMaxAge {
-			return nil
-		}
-	}
-	return &snapshot
+	ProfileID  *string `json:"profile_id"`
+	LastSeenAt *string `json:"last_seen_at"`
+	CreatedAt  string  `json:"created_at"`
+	UpdatedAt  string  `json:"updated_at"`
 }
 
 func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
@@ -117,7 +72,6 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 	if metadata == nil {
 		metadata = map[string]any{}
 	}
-	planLimits := planLimitsForResponse(rt.PlanLimits)
 
 	return AgentRuntimeResponse{
 		ID:           uuidToString(rt.ID),
@@ -134,7 +88,6 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		OwnerID:      uuidToPtr(rt.OwnerID),
 		Visibility:   rt.Visibility,
 		ProfileID:    uuidToPtr(rt.ProfileID),
-		PlanLimits:   planLimits,
 		LastSeenAt:   timestampToPtr(rt.LastSeenAt),
 		CreatedAt:    timestampToString(rt.CreatedAt),
 		UpdatedAt:    timestampToString(rt.UpdatedAt),

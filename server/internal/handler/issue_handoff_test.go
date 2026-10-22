@@ -9,22 +9,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
-func TestHandoffDuplicateReasonIsStructured(t *testing.T) {
-	for _, tc := range []struct {
-		reason string
-		want   bool
-	}{
-		{"already handed off this round", true},
-		{"active run in progress", true},
-		{"status has no routing behaviour", false},
-		{"", false},
-	} {
-		if got := handoffDuplicateReason(tc.reason); got != tc.want {
-			t.Errorf("handoffDuplicateReason(%q) = %v, want %v", tc.reason, got, tc.want)
-		}
-	}
-}
-
 func TestHandoffNamedAgentDuplicateDoesNotEnqueueAgain(t *testing.T) {
 	agentID := createHandlerTestAgent(t, "handoff-duplicate-agent", []byte("[]"))
 	issueID := dbfx.Issue(t, "handoff duplicate")

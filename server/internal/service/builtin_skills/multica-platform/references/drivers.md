@@ -40,7 +40,7 @@ The parent's owner picks one action with one command:
 
 ```bash
 multica issue dispose <id> --action rerun                       # same seat, run again
-multica issue dispose <id> --action reroute                     # clear the executor, let routing pick again
+multica issue dispose <id> --action reroute                     # clear the executor for someone to fill
 multica issue dispose <id> --action split --into "标题" [--into "标题"]  # create children, block on them
 multica issue dispose <id> --action cancel --reason "..."       # cancel with the reason as a comment
 ```

@@ -283,9 +283,9 @@ func (h *Handler) DisposeIssue(w http.ResponseWriter, r *http.Request) {
 			h.publishWithSource(r.Context(), protocol.EventIssueUpdated, uuidToString(cleared.WorkspaceID), "system", "", RoutingIssueUpdatedPayload(issue, cleared))
 			issue = cleared
 		}
-		// The wake seats through routing first and says so when it cannot.
-		h.wakeIssueOwner(ctx, issue, by+"：交给路由重新选执行人。", false)
-		resp.Note = "executor cleared; routing picks a new one"
+		// With no executor the wake has nobody to call; it says so on the issue.
+		h.wakeIssueOwner(ctx, issue, by+"：执行人已清空，等人重新指派。", false)
+		resp.Note = "executor cleared; assign a new one"
 	case blockwait.DisposeSplit:
 		created, status, body := h.disposeSplit(r, issue, into)
 		if status != 0 {

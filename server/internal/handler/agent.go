@@ -28,14 +28,11 @@ import (
 	"github.com/multica-ai/multica/server/internal/coderesolve"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
-	"github.com/multica-ai/multica/server/internal/quotarelay"
-	"github.com/multica-ai/multica/server/internal/routing"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
-	"github.com/multica-ai/multica/server/pkg/redact"
 	"github.com/multica-ai/multica/server/pkg/remotemcp"
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
@@ -100,10 +97,6 @@ type AgentResponse struct {
 	// a specialisation (DENE-301). The tree is at most two levels deep; the
 	// server enforces that, so a non-empty value here is always a base role.
 	ParentAgentID string `json:"parent_agent_id,omitempty"`
-	// DomainID is the workspace domain a specialisation works in (DENE-1451).
-	// Routing and the per-quote rule put an issue of this domain on it. Empty
-	// for a base role and for a specialisation without a domain.
-	DomainID string `json:"domain_id,omitempty"`
 	// RuntimeInherited marks this specialisation as following its base role's
 	// runtime profile (DENE-505): runtime_id, runtime_mode, runtime_config,
 	// model, thinking_level and service_tier stay equal to the base role's and
@@ -128,18 +121,12 @@ type AgentResponse struct {
 	// base role can have children. Archived specialisations are not counted:
 	// they no longer block archiving the base role. Populated on the agents
 	// list (0 for a specialisation); the detail response leaves it nil.
-	ChildCount    *int    `json:"child_count,omitempty"`
-	AvatarURL     *string `json:"avatar_url"`
-	RuntimeMode   string  `json:"runtime_mode"`
-	RuntimeConfig any     `json:"runtime_config"`
-	// PlanLimits is this agent's own subscription windows, present only when
-	// the daemon reported a snapshot for the CLI account this agent binds
-	// (DENE-715). Absent or null means the client should fall back to the
-	// runtime's plan_limits — the agent has no binding of its own, or the
-	// daemon has not run it yet.
-	PlanLimits *protocol.PlanLimitsSnapshot `json:"plan_limits,omitempty"`
-	CustomArgs []string                     `json:"custom_args"`
-	McpConfig  json.RawMessage              `json:"mcp_config"`
+	ChildCount    *int            `json:"child_count,omitempty"`
+	AvatarURL     *string         `json:"avatar_url"`
+	RuntimeMode   string          `json:"runtime_mode"`
+	RuntimeConfig any             `json:"runtime_config"`
+	CustomArgs    []string        `json:"custom_args"`
+	McpConfig     json.RawMessage `json:"mcp_config"`
 	// custom_env is intentionally NOT serialized on agent resources. The
 	// agent_list/get/create/update/archive/restore responses and WS events
 	// only expose coarse metadata (has_custom_env, custom_env_key_count) so
@@ -168,15 +155,11 @@ type AgentResponse struct {
 	// unaffected.
 	AutoRetryEnabled bool `json:"auto_retry_enabled"`
 	// WorkEnabled is the reversible seat gate (DENE-714). Default true.
-	// When false the seat stays in the list, keeps its routing tag and
-	// specialisations, and does not cancel running tasks — it is simply
-	// not selected for automatic dispatch, not woken by assignment, and
-	// does not claim new runs.
-	WorkEnabled bool `json:"work_enabled"`
-	// WorkPause says why the platform turned the seat off (DENE-870), taken
-	// from its open quota breaker. Absent for a seat a person turned off.
-	WorkPause *AgentWorkPause `json:"work_pause,omitempty"`
-	Model     string          `json:"model"`
+	// When false the seat stays in the list, keeps its specialisations, and
+	// does not cancel running tasks — it is simply not woken by assignment,
+	// and does not claim new runs.
+	WorkEnabled bool   `json:"work_enabled"`
+	Model       string `json:"model"`
 	// ThinkingLevel is the runtime-native reasoning/effort token persisted
 	// for this agent (empty = use runtime default). The picker is per-runtime
 	// per-model; the API never normalizes across providers. See MUL-2339.
@@ -184,30 +167,6 @@ type AgentResponse struct {
 	// ServiceTier is the runtime-native Codex execution tier persisted for
 	// this agent (empty = inherit local Codex configuration).
 	ServiceTier string `json:"service_tier"`
-	// RoutingTier is the seat's strength rung for automatic dispatch
-	// (DENE-633): one of the ladder's tier keys, or empty for a seat that is
-	// not on the ladder. It is tagged by a person rather than derived from
-	// `model`, because the same model at another thinking_level is another
-	// rung.
-	RoutingTier string `json:"routing_tier"`
-	// RoutingUsage is the headroom a person tagged this seat with (DENE-922):
-	// tight / normal / ample. Routing prefers ample inside a rung.
-	RoutingUsage    string `json:"routing_usage"`
-	Series          string `json:"series"`
-	SeriesOverride  string `json:"series_override"`
-	SeriesSource    string `json:"series_source"`
-	AutomaticSeries string `json:"automatic_series"`
-	// DispatchMode is whether automatic dispatch may pick this seat
-	// (DENE-1600, ADR-0008): auto, or mention_only for a seat that takes
-	// work only when named. Independent of RoutingTier and WorkEnabled.
-	DispatchMode string `json:"dispatch_mode"`
-	// DispatchProjects limits automatic dispatch to tickets in these
-	// projects (DENE-1648). Empty serves every project.
-	DispatchProjects []string `json:"dispatch_projects"`
-	// Fit is the agent's group for one issue or project (DENE-1477): match
-	// (对口), generic (通用) or other (其他). Only on a list asked with
-	// for_issue / for_project, which also orders the list by it.
-	Fit string `json:"fit,omitempty"`
 	// ComposioToolkitAllowlist is the subset of Composio toolkit slugs this
 	// agent is allowed to mount as MCP at task dispatch — for ANY run that
 	// passes the agent's invocation permission, using the agent OWNER's
@@ -286,21 +245,6 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		}
 	}
 
-	// plan_limits is the daemon's snapshot for THIS agent's own CLI account,
-	// reported only for agents bound to a numbered account (DENE-715). NULL
-	// means "nothing agent-specific to say", and readers then fall back to the
-	// runtime row exactly as they did before. Like the runtime copy it is
-	// credential-free: percentages, window lengths and reset times only.
-	var planLimits *protocol.PlanLimitsSnapshot
-	if len(a.PlanLimits) > 0 {
-		var snapshot protocol.PlanLimitsSnapshot
-		if err := json.Unmarshal(a.PlanLimits, &snapshot); err != nil {
-			slog.Warn("failed to unmarshal agent plan_limits", "agent_id", uuidToString(a.ID), "error", err)
-		} else {
-			planLimits = &snapshot
-		}
-	}
-
 	// composio_toolkit_allowlist: the column is stored as TEXT[] and arrives
 	// here as a []string (sqlc). NULL and `{}` both serialize as nil through
 	// the postgres driver — both correctly mean "no toolkits", but the API
@@ -310,7 +254,6 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 	// owner-only gate below can decide.
 	composioAllowlist := a.ComposioToolkitAllowlist
 
-	series := service.AgentSeries(context.Background(), h.Queries, a)
 	return AgentResponse{
 		ID:                       uuidToString(a.ID),
 		WorkspaceID:              uuidToString(a.WorkspaceID),
@@ -324,7 +267,6 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		SystemKey:                a.SystemKey.String,
 		SystemInstructions:       systemInstructionsFor(a),
 		ParentAgentID:            uuidToString(a.ParentAgentID),
-		DomainID:                 uuidToString(a.DomainID),
 		RuntimeInherited:         a.RuntimeInherited,
 		AvatarURL:                h.resolveAvatarURLPtr(textToPtr(a.AvatarUrl)),
 		RuntimeMode:              a.RuntimeMode,
@@ -333,7 +275,6 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		McpConfig:                mcpConfig,
 		HasCustomEnv:             envKeyCount > 0,
 		CustomEnvKeyCount:        envKeyCount,
-		PlanLimits:               planLimits,
 		Visibility:               a.Visibility,
 		PermissionMode:           a.PermissionMode,
 		InvocationTargets:        []AgentInvocationTargetDTO{},
@@ -344,14 +285,6 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		Model:                    a.Model.String,
 		ThinkingLevel:            a.ThinkingLevel.String,
 		ServiceTier:              a.ServiceTier.String,
-		RoutingTier:              a.RoutingTier.String,
-		RoutingUsage:             a.RoutingUsage,
-		Series:                   series.Series,
-		SeriesOverride:           a.SeriesOverride,
-		SeriesSource:             series.Source,
-		AutomaticSeries:          series.AutomaticSeries,
-		DispatchMode:             a.DispatchMode,
-		DispatchProjects:         dispatchProjectsOrEmpty(a),
 		ComposioToolkitAllowlist: composioAllowlist,
 		OwnerID:                  uuidToPtr(a.OwnerID),
 		Skills:                   []AgentSkillSummary{},
@@ -543,20 +476,9 @@ func (h *Handler) attachAgentInheritance(ctx context.Context, resp *AgentRespons
 	return nil
 }
 
-// routingFollowError is the refusal a following specialisation gets when a
-// caller tries to set its own routing tier or usage (DENE-1016). The parent
-// name is the one the person sees on the seats table.
-func routingFollowError(parentName string) string {
-	if parentName == "" {
-		parentName = "父角色"
-	}
-	return fmt.Sprintf("跟随 %s，先关掉跟随", parentName)
-}
-
 // syncInheritedAgentRuntimeProfiles copies a base role's runtime profile onto
 // the specialisations that follow it (DENE-505) and returns the rows that
-// actually changed. One statement, so the copy cannot land halfway. Routing
-// tier and usage ride the same copy (DENE-1016).
+// actually changed. One statement, so the copy cannot land halfway.
 //
 // A failure is logged rather than returned: the caller's own write has already
 // committed by the time this runs, so failing the request would tell the user
@@ -794,17 +716,6 @@ type TaskCancellationActor struct {
 	Name string `json:"name,omitempty"`
 }
 
-// TaskRelayData is one failed run's relay record. Outcome is the
-// agent_quota_relay outcome (relayed, waiting, skipped_*); ToAgent* is the
-// seat that took over, empty when none did.
-type TaskRelayData struct {
-	Outcome     string `json:"outcome"`
-	Reason      string `json:"reason,omitempty"`
-	ToAgentID   string `json:"to_agent_id,omitempty"`
-	ToAgentName string `json:"to_agent_name,omitempty"`
-	WaitReason  string `json:"wait_reason,omitempty"`
-}
-
 type AgentTaskResponse struct {
 	QueueReason              *MachineQueueReason    `json:"queue_reason,omitempty"`
 	StartClaimSupported      bool                   `json:"start_claim_supported,omitempty"`
@@ -1014,7 +925,6 @@ type AgentTaskResponse struct {
 	AutopilotSource          string                `json:"autopilot_source,omitempty"`            // manual, schedule, webhook, or api
 	AutopilotTriggerPayload  json.RawMessage       `json:"autopilot_trigger_payload,omitempty"`   // optional trigger payload for webhook/api runs
 	QuickCreatePrompt        string                `json:"quick_create_prompt,omitempty"`         // user's natural-language input for quick-create tasks
-	ConsultPrompt            string                `json:"consult_prompt,omitempty"`              // DENE-1721: the advisor's whole prompt for a consult run
 	QuickCreatePriority      string                `json:"quick_create_priority,omitempty"`       // explicit priority selected in quick-create
 	QuickCreateDueDate       string                `json:"quick_create_due_date,omitempty"`       // explicit calendar due date selected in quick-create
 	QuickCreateAttachmentIDs []string              `json:"quick_create_attachment_ids,omitempty"` // attachment ids uploaded in the quick-create prompt and bound on issue create
@@ -1068,10 +978,6 @@ type AgentTaskResponse struct {
 	// (DENE-1573). Only the issue execution log fills it; empty means none
 	// were detected, or the daemon predates detection.
 	SkillsUsed []string `json:"skills_used,omitempty"`
-	// Relay is what the platform did after this run failed on a broken seat
-	// (DENE-1647): handed to another seat, waiting for one, or skipped. Only
-	// the issue execution log fills it.
-	Relay *TaskRelayData `json:"relay,omitempty"`
 	// AuthToken is the task-scoped `mat_` token the daemon must inject as
 	// MULTICA_TOKEN in the agent process environment. The server binds it to
 	// this (agent_id, task_id) pair at claim time and treats any request
@@ -1711,9 +1617,6 @@ func computeTaskKind(t db.AgentTaskQueue) string {
 	if json.Unmarshal(t.Context, &contextKind) == nil && contextKind.Type == service.QuickCreateContextType {
 		return "quick_create"
 	}
-	if contextKind.Type == service.ConsultContextType && uuidToString(t.IssueID) == "" {
-		return "consult"
-	}
 	// Preserve the historical classification for issue-less rows from before
 	// quick-create stored a typed context.
 	if uuidToString(t.IssueID) == "" {
@@ -1789,11 +1692,6 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 	}
 	userID := requestUserID(r)
 
-	scene, sceneAsked, ok := h.agentListScene(w, r, parseUUID(workspaceID))
-	if !ok {
-		return
-	}
-
 	var agents []db.Agent
 	var err error
 	if r.URL.Query().Get("include_archived") == "true" {
@@ -1856,7 +1754,6 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 	if actorType == "member" {
 		passAgents = h.activePassAgentIDs(r.Context(), workspaceID, actorID)
 	}
-	pauses := h.workPauses(r.Context(), parseUUID(workspaceID))
 	visible := make([]AgentResponse, 0, len(agents))
 	for _, a := range agents {
 		targets := targetsByAgent[uuidToString(a.ID)]
@@ -1866,7 +1763,6 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		resp := h.agentToResponse(a)
-		applyWorkPause(&resp, a, pauses)
 		// The map is keyed by runtime, and active + archived agents may share one.
 		// Keep the archived guard here as well as in the loader so an active sibling
 		// cannot leak its projection onto an archived response.
@@ -1899,15 +1795,7 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		} else if actorType == "agent" || uuidToString(a.OwnerID) != userID {
 			redactComposioToolkitAllowlist(&resp)
 		}
-		if sceneAsked {
-			resp.Fit = string(service.AgentDomainFit(scene.Scene, a, scene.Names))
-		}
 		visible = append(visible, resp)
-	}
-	if sceneAsked {
-		slices.SortStableFunc(visible, func(a, b AgentResponse) int {
-			return routing.Fit(a.Fit).Rank() - routing.Fit(b.Fit).Rank()
-		})
 	}
 
 	// Nested grouping data for the specialisation tree (DENE-301): the base
@@ -1919,41 +1807,6 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeProjectedList(w, r, visible, listshape.Agent)
-}
-
-// agentListScene reads for_issue / for_project off an agent list request:
-// the scene its agents are grouped by (service.LoadDomainScene, the same
-// read dispatch uses). asked is false when neither was sent.
-func (h *Handler) agentListScene(w http.ResponseWriter, r *http.Request, wsUUID pgtype.UUID) (scene service.DomainScene, asked, ok bool) {
-	issueRef := strings.TrimSpace(r.URL.Query().Get("for_issue"))
-	projectRef := strings.TrimSpace(r.URL.Query().Get("for_project"))
-	switch {
-	case issueRef != "" && projectRef != "":
-		writeError(w, http.StatusBadRequest, "for_issue and for_project are exclusive")
-		return scene, false, false
-	case issueRef != "":
-		id, ok := parseUUIDOrBadRequest(w, issueRef, "for_issue")
-		if !ok {
-			return scene, false, false
-		}
-		issue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{ID: id, WorkspaceID: wsUUID})
-		if err != nil {
-			writeError(w, http.StatusNotFound, "issue not found")
-			return scene, false, false
-		}
-		return service.IssueDomainScene(r.Context(), h.Queries, issue), true, true
-	case projectRef != "":
-		id, ok := parseUUIDOrBadRequest(w, projectRef, "for_project")
-		if !ok {
-			return scene, false, false
-		}
-		if _, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{ID: id, WorkspaceID: wsUUID}); err != nil {
-			writeError(w, http.StatusNotFound, "project not found")
-			return scene, false, false
-		}
-		return service.LoadDomainScene(r.Context(), h.Queries, wsUUID, pgtype.UUID{}, id), true, true
-	}
-	return scene, false, true
 }
 
 func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
@@ -1974,9 +1827,6 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := h.agentToResponse(agent)
-	if !agent.WorkEnabled {
-		applyWorkPause(&resp, agent, h.workPauses(r.Context(), agent.WorkspaceID))
-	}
 	// resp is a slice, not a pointer, so the enrichment must write through the
 	// slice element it is handed: taking the address of the local variable here
 	// would fill a copy and serve an empty parent_agent_name.
@@ -2043,7 +1893,6 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 type CreateAgentRequest struct {
-	Series               string                     `json:"series"`
 	Name                 string                     `json:"name"`
 	Description          string                     `json:"description"`
 	Instructions         string                     `json:"instructions"`
@@ -2066,10 +1915,6 @@ type CreateAgentRequest struct {
 	Model              string                     `json:"model"`
 	ThinkingLevel      string                     `json:"thinking_level"`
 	ServiceTier        string                     `json:"service_tier"`
-	// RoutingTier is the seat's rung on the dispatch ladder (DENE-633).
-	// Empty on a specialisation inherits the base role's rung: a direction
-	// seat is the same strength as the seat it specialises.
-	RoutingTier string `json:"routing_tier"`
 	// ComposioToolkitAllowlist seeds the per-task overlay gate (MUL-3869). On
 	// create only the calling user can be the owner, so we accept the field
 	// unconditionally here; the cross-owner permission gate lives on PUT.
@@ -2088,11 +1933,6 @@ type CreateAgentRequest struct {
 	// (DENE-301). Empty creates a base role. The target must be a base role in
 	// the same workspace; a specialisation cannot be specialised in turn.
 	ParentAgentID string `json:"parent_agent_id"`
-	// DomainID (an id or a domain name) makes the new specialisation the base
-	// role's seat for that domain (DENE-1451). It needs parent_agent_id, the
-	// name is generated as base role + domain, and a base role has at most
-	// one specialisation per domain (409 otherwise).
-	DomainID string `json:"domain_id"`
 	// RuntimeInherited makes the new specialisation follow its base role's
 	// runtime profile (DENE-505). Omitted with a parent means "follow": that is
 	// the default for a specialisation, so runtime_id may then be omitted
@@ -2166,12 +2006,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	req.DomainID = strings.TrimSpace(req.DomainID)
-	if req.DomainID != "" && req.ParentAgentID == "" {
-		writeError(w, http.StatusBadRequest, "domain_id needs parent_agent_id: only a specialisation works in a domain")
-		return
-	}
-	if req.Name == "" && req.DomainID == "" {
+	if req.Name == "" {
 		writeError(w, http.StatusBadRequest, "name is required")
 		return
 	}
@@ -2236,28 +2071,6 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 		parentAgent = parent
 		parentAgentUUID = parent.ID
-	}
-
-	// A specialisation's domain (DENE-1451): one seat per base role and domain,
-	// named base role + domain so the roster reads the same everywhere.
-	var domainUUID pgtype.UUID
-	if req.DomainID != "" {
-		idx, err := h.loadDomainIndex(r.Context(), wsUUID)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to load domains")
-			return
-		}
-		d, found := idx.resolve(req.DomainID)
-		if !found {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf("unknown domain %q; known domains: %s", req.DomainID, strings.Join(idx.names(), ", ")))
-			return
-		}
-		if taken, err := h.Queries.GetSpecializationByDomain(r.Context(), db.GetSpecializationByDomainParams{ParentAgentID: parentAgent.ID, DomainID: d.ID}); err == nil {
-			writeError(w, http.StatusConflict, fmt.Sprintf("%s already has a %s specialisation: %s", parentAgent.Name, d.Name, taken.Name))
-			return
-		}
-		domainUUID = d.ID
-		req.Name = parentAgent.Name + d.Name
 	}
 
 	member, ok := h.workspaceMember(w, r, workspaceID)
@@ -2443,36 +2256,6 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	createdModel := pgtype.Text{String: req.Model, Valid: req.Model != ""}
 	createdThinkingLevel := pgtype.Text{String: req.ThinkingLevel, Valid: req.ThinkingLevel != ""}
 	createdServiceTier := pgtype.Text{String: req.ServiceTier, Valid: req.ServiceTier != ""}
-	routingTierKey, tierOK := routing.DefaultLadder.NormalizeTier(req.RoutingTier)
-	if !tierOK {
-		writeError(w, http.StatusBadRequest, fmt.Sprintf(
-			"routing_tier %q is not a known tier; expected one of %s",
-			req.RoutingTier, strings.Join(routing.DefaultLadder.TierKeys(), ", ")))
-		return
-	}
-	createdRoutingTier := pgtype.Text{String: routingTierKey, Valid: routingTierKey != ""}
-	if parentAgent.ID.Valid && (inheritRuntime || routingTierKey == "") {
-		// A following specialisation takes its base role's rung even when the
-		// request names one (DENE-1016): follow means the request is not an
-		// override, same as runtime fields. A specialisation that owns its
-		// runtime still sits on the base role's rung when it names none, so
-		// leaving a direction seat untagged does not take it off the ladder.
-		createdRoutingTier = parentAgent.RoutingTier
-	}
-	// Usage is the account's headroom, and a specialisation runs on its base
-	// role's account, so it starts with the same tag (DENE-922).
-	// Dispatch mode rides with the rung (ADR-0008): a mention_only base
-	// role's specialisation is not auto-dispatched either.
-	seriesOverride, seriesErr := routing.NormalizeSeries(req.Series)
-	if seriesErr != nil {
-		writeError(w, http.StatusBadRequest, seriesErr.Error())
-		return
-	}
-	var createdRoutingUsage, createdDispatchMode pgtype.Text
-	if parentAgent.ID.Valid {
-		createdRoutingUsage = pgtype.Text{String: parentAgent.RoutingUsage, Valid: true}
-		createdDispatchMode = pgtype.Text{String: parentAgent.DispatchMode, Valid: parentAgent.DispatchMode != ""}
-	}
 	if inheritRuntime {
 		createdRuntimeMode = parentAgent.RuntimeMode
 		createdRuntimeID = parentAgent.RuntimeID
@@ -2546,10 +2329,6 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		Model:                    createdModel,
 		ThinkingLevel:            createdThinkingLevel,
 		ServiceTier:              createdServiceTier,
-		RoutingTier:              createdRoutingTier,
-		RoutingUsage:             createdRoutingUsage,
-		SeriesOverride:           pgtype.Text{String: seriesOverride, Valid: true},
-		DispatchMode:             createdDispatchMode,
 		ConversationStarters:     sp,
 		ComposioToolkitAllowlist: allowlist,
 		ParentAgentID:            parentAgentUUID,
@@ -2566,17 +2345,6 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("create agent failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to create agent")
 		return
-	}
-	if domainUUID.Valid {
-		created, err = qtx.SetAgentDomain(r.Context(), db.SetAgentDomainParams{ID: created.ID, WorkspaceID: wsUUID, DomainID: domainUUID})
-		if err != nil {
-			if isUniqueViolation(err) {
-				writeError(w, http.StatusConflict, fmt.Sprintf("%s already has a specialisation for this domain", parentAgent.Name))
-				return
-			}
-			writeError(w, http.StatusInternalServerError, "failed to set agent domain")
-			return
-		}
 	}
 	if err := replaceInvocationTargetsWithQueries(r.Context(), qtx, created.ID, parseUUID(ownerID), perm.targets); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save agent access")
@@ -2653,7 +2421,6 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateAgentRequest struct {
-	Series               *string                     `json:"series"`
 	Name                 *string                     `json:"name"`
 	Description          *string                     `json:"description"`
 	Instructions         *string                     `json:"instructions"`
@@ -2699,22 +2466,6 @@ type UpdateAgentRequest struct {
 	// ServiceTier follows the same tri-state contract as ThinkingLevel:
 	// omitted preserves, empty clears, and non-empty sets a Codex catalog ID.
 	ServiceTier *string `json:"service_tier"`
-	// RoutingTier follows the same tri-state contract: omitted preserves,
-	// empty takes the seat off the routing ladder, and a tier key or its
-	// Chinese label sets the rung (DENE-633).
-	RoutingTier *string `json:"routing_tier"`
-	// RoutingUsage is omitted-preserves / present-sets. There is no clear:
-	// every seat has a usage, and 常规 is the neutral one (DENE-922).
-	RoutingUsage *string `json:"routing_usage"`
-	// DispatchMode is omitted-preserves / present-sets: auto or
-	// mention_only (DENE-1600). It belongs to the routing set, so a
-	// following specialisation takes its base role's value.
-	DispatchMode *string `json:"dispatch_mode"`
-	// DispatchProjects is omitted-preserves / present-sets; an empty list
-	// lifts the limit (DENE-1648). Every id must be a project in the
-	// agent's workspace. It is the seat's own, not part of what a following
-	// specialisation inherits.
-	DispatchProjects *[]string `json:"dispatch_projects"`
 	// ComposioToolkitAllowlist is a tri-state, same pattern as
 	// thinking_level, mcp_config:
 	//   - field omitted → no change (column preserved as-is)
@@ -3468,77 +3219,6 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// routing_tier is workspace configuration rather than a runtime override:
-	// it says how strong this seat is for automatic dispatch. A key or its
-	// label is accepted, only the key is stored, and anything else is refused
-	// rather than written — an unknown rung would silently take the seat off
-	// the ladder with nothing on the agent page to show it.
-	shouldClearRoutingTier := false
-	if req.RoutingTier != nil {
-		value := strings.TrimSpace(*req.RoutingTier)
-		if value == "" {
-			shouldClearRoutingTier = true
-		} else {
-			key, ok := routing.DefaultLadder.NormalizeTier(value)
-			if !ok {
-				writeError(w, http.StatusBadRequest, fmt.Sprintf(
-					"routing_tier %q is not a known tier; expected one of %s",
-					value, strings.Join(routing.DefaultLadder.TierKeys(), ", ")))
-				return
-			}
-			params.RoutingTier = pgtype.Text{String: key, Valid: true}
-		}
-	}
-	if req.Series != nil {
-		value, err := routing.NormalizeSeries(*req.Series)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-		params.SeriesOverride = pgtype.Text{String: value, Valid: true}
-	}
-	if req.RoutingUsage != nil {
-		key, ok := routing.NormalizeUsage(*req.RoutingUsage)
-		if !ok {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf(
-				"routing_usage %q is not a known value; expected one of %s",
-				*req.RoutingUsage, strings.Join(routing.UsageKeys(), ", ")))
-			return
-		}
-		params.RoutingUsage = pgtype.Text{String: key, Valid: true}
-	}
-	if req.DispatchMode != nil {
-		key, ok := routing.NormalizeDispatchMode(*req.DispatchMode)
-		if !ok || strings.TrimSpace(*req.DispatchMode) == "" {
-			writeError(w, http.StatusBadRequest, fmt.Sprintf(
-				"dispatch_mode %q is not a known value; expected one of %s",
-				*req.DispatchMode, strings.Join(routing.DispatchModeKeys(), ", ")))
-			return
-		}
-		params.DispatchMode = pgtype.Text{String: key, Valid: true}
-	}
-	if req.DispatchProjects != nil {
-		ids, msg := h.resolveDispatchProjects(r.Context(), existing.WorkspaceID, *req.DispatchProjects)
-		if msg != "" {
-			writeError(w, http.StatusBadRequest, msg)
-			return
-		}
-		params.DispatchProjects = ids
-	}
-	// A following specialisation does not own its rung or its usage
-	// (DENE-1016). Turning follow off in this same request is the opt-out, so
-	// inheritRuntime is already false there and the write is the child's own.
-	routingTouched := req.RoutingTier != nil || req.RoutingUsage != nil || req.DispatchMode != nil
-	if routingTouched && inheritRuntime && parentAfter.Valid {
-		parent, parentErr := h.Queries.GetAgent(r.Context(), parentAfter)
-		parentName := ""
-		if parentErr == nil {
-			parentName = parent.Name
-		}
-		writeError(w, http.StatusBadRequest, routingFollowError(parentName))
-		return
-	}
-
 	shouldClearServiceTier := false
 	if req.ServiceTier != nil {
 		value := *req.ServiceTier
@@ -3616,16 +3296,13 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// One transaction holds the update together when either of two writes
-	// needs it. A base role's routing edit and the copy onto the
-	// specialisations that follow it commit together (DENE-1016). A runtime
-	// move holds the same runtime lock as revocation until the new binding
-	// commits, because a preflight-only check is stale as soon as a public
-	// runtime becomes private. Anything else stays on the request-scoped
-	// queries, one statement at a time, as before.
+	// A runtime move holds the same runtime lock as revocation until the new
+	// binding commits, because a preflight-only check is stale as soon as a
+	// public runtime becomes private. Anything else stays on the
+	// request-scoped queries, one statement at a time, as before.
 	q := h.Queries
 	var updateTx pgx.Tx
-	if (routingTouched && !parentAfter.Valid) || req.RuntimeID != nil {
+	if req.RuntimeID != nil {
 		var beginErr error
 		updateTx, beginErr = h.TxStarter.Begin(r.Context())
 		if beginErr != nil {
@@ -3701,37 +3378,6 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	// A balance breaker has no timer: a person turning the seat back on after
-	// topping up is its recovery. Tickets it handed to other seats stay there.
-	// Reclaim reads the seat after the update is visible, so the routing
-	// transaction runs it only once that transaction has committed.
-	recoverTurnedOnSeats := func() {
-		if req.WorkEnabled == nil || !*req.WorkEnabled || existing.WorkEnabled {
-			return
-		}
-		for _, seatID := range append([]pgtype.UUID{updated.ID}, agentIDs(toggledSpecialisations)...) {
-			if _, err := h.Queries.CloseManualQuotaBreakers(r.Context(), seatID); err != nil {
-				slog.Warn("close balance breaker failed", append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(seatID))...)
-			}
-		}
-		if h.TaskService == nil {
-			return
-		}
-		if err := h.TaskService.ReclaimDesignatedReviews(r.Context(), updated.ID); err != nil {
-			slog.Warn("reclaim designated reviewer failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
-		}
-		h.TaskService.RequeueStrandedIssues(r.Context(), updated.ID)
-		for _, spec := range toggledSpecialisations {
-			if err := h.TaskService.ReclaimDesignatedReviews(r.Context(), spec.ID); err != nil {
-				slog.Warn("reclaim designated reviewer failed", append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(spec.ID))...)
-			}
-			h.TaskService.RequeueStrandedIssues(r.Context(), spec.ID)
-		}
-	}
-	if updateTx == nil {
-		recoverTurnedOnSeats()
-	}
-
 	// Nullable runtime overrides: null/empty in the request means explicitly
 	// clear the field. COALESCE in UpdateAgent cannot set a column to NULL, so
 	// mcp_config, thinking_level, and service_tier use dedicated clear queries.
@@ -3767,14 +3413,6 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if shouldClearRoutingTier {
-		updated, err = q.ClearAgentRoutingTier(r.Context(), updated.ID)
-		if err != nil {
-			slog.Warn("clear agent routing_tier failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
-			writeError(w, http.StatusInternalServerError, "failed to clear routing_tier: "+err.Error())
-			return
-		}
-	}
 	if shouldClearComposioAllowlist {
 		updated, err = q.ClearAgentComposioToolkitAllowlist(r.Context(), updated.ID)
 		if err != nil {
@@ -3806,12 +3444,9 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	// exclusive by construction, because a row with a parent is not a base role.
 	//
 	// Run after the parent/flag writes so the copy is taken from the row this
-	// request just wrote. Only a touched runtime, execution-config, or routing
-	// field can have moved a base role's profile, so an unrelated edit (a
-	// rename, a prompt) does not walk the children. A base-role routing edit
-	// runs the copy inside the same transaction as the write (DENE-1016);
-	// turning follow on uses the same statement, best-effort, like the runtime
-	// copy it rides with.
+	// request just wrote. Only a touched runtime or execution-config field can
+	// have moved a base role's profile, so an unrelated edit (a rename, a
+	// prompt) does not walk the children.
 	var syncedChildren []db.Agent
 	switch {
 	case updated.RuntimeInherited && updated.ParentAgentID.Valid:
@@ -3824,11 +3459,11 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 				updated = child
 			}
 		}
-	case !updated.ParentAgentID.Valid && (runtimeFieldsTouched || executionConfigTouched || routingTouched):
+	case !updated.ParentAgentID.Valid && (runtimeFieldsTouched || executionConfigTouched):
 		if updateTx != nil {
 			syncedChildren, err = q.SyncInheritedAgentRuntimeProfiles(r.Context(), updated.ID)
 			if err != nil {
-				slog.Warn("sync following agent routing failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+				slog.Warn("sync following agent runtime failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 				writeError(w, http.StatusInternalServerError, "failed to update following specialisations")
 				return
 			}
@@ -3842,7 +3477,14 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "failed to update agent")
 			return
 		}
-		recoverTurnedOnSeats()
+	}
+	// A seat turned back on picks up the tickets left waiting on it. Runs after
+	// the commit so the requeue reads the seat as on.
+	if req.WorkEnabled != nil && *req.WorkEnabled && !existing.WorkEnabled && h.TaskService != nil {
+		h.TaskService.RequeueStrandedIssues(r.Context(), updated.ID)
+		for _, spec := range toggledSpecialisations {
+			h.TaskService.RequeueStrandedIssues(r.Context(), spec.ID)
+		}
 	}
 
 	// Invocation targets (MUL-3963): replace wholesale when the owner touched
@@ -4183,8 +3825,7 @@ func (h *Handler) ArchiveAgent(w http.ResponseWriter, r *http.Request) {
 	// Release every acceptance slot pointing at this agent. The reviewer pair
 	// is a reference with no foreign key behind it, so nothing else would drop
 	// it — and a ticket whose reviewer can no longer be dispatched would sit in
-	// in_review forever. Clearing it puts the slot back to "undecided", which
-	// is what lets routing pick a live seat the next time the ticket moves.
+	// in_review forever. Clearing it puts the slot back to "undecided".
 	// (DENE-633)
 	if _, err := h.Queries.ClearIssueReviewer(r.Context(), db.ClearIssueReviewerParams{
 		WorkspaceID:  archived.WorkspaceID,
@@ -4823,94 +4464,4 @@ func (h *Handler) ListWorkspaceAgentTaskSnapshot(w http.ResponseWriter, r *http.
 	h.hydrateTaskAttributions(r.Context(), attributionsOf(resp))
 
 	writeJSON(w, http.StatusOK, resp)
-}
-
-func agentIDs(agents []db.Agent) []pgtype.UUID {
-	ids := make([]pgtype.UUID, 0, len(agents))
-	for _, agent := range agents {
-		ids = append(ids, agent.ID)
-	}
-	return ids
-}
-
-// AgentWorkPause is the platform's reason a seat is not taking work.
-// RecoverAt is empty when nothing but a person can bring it back — a
-// balance breaker waits for a top-up and a manual re-enable.
-type AgentWorkPause struct {
-	Reason    string `json:"reason"`
-	Detail    string `json:"detail,omitempty"`
-	Condition string `json:"condition,omitempty"`
-	RecoverAt string `json:"recover_at,omitempty"`
-	OpenedAt  string `json:"opened_at"`
-}
-
-// workPauses maps agent id to its newest open breaker. A lookup failure
-// only drops the explanation, never the agent list.
-func (h *Handler) workPauses(ctx context.Context, workspaceID pgtype.UUID) map[string]AgentWorkPause {
-	rows, err := h.Queries.ListOpenQuotaBreakers(ctx, workspaceID)
-	if err != nil {
-		slog.Warn("list open quota breakers failed", "error", err)
-		return nil
-	}
-	out := make(map[string]AgentWorkPause, len(rows))
-	for _, row := range rows {
-		id := uuidToString(row.AgentID)
-		if _, seen := out[id]; seen {
-			continue
-		}
-		pause := AgentWorkPause{
-			Reason:    row.Reason,
-			Detail:    redact.Text(clipRunes(strings.TrimSpace(row.Detail), 300)),
-			Condition: row.RecoverCondition,
-			OpenedAt:  timestampToString(row.OpenedAt),
-		}
-		if !quotarelay.IsManualRecovery(quotarelay.Kind(row.Reason)) {
-			pause.RecoverAt = timestampToString(row.RecoverAt)
-		}
-		out[id] = pause
-	}
-	return out
-}
-
-func applyWorkPause(resp *AgentResponse, agent db.Agent, pauses map[string]AgentWorkPause) {
-	if agent.WorkEnabled {
-		return
-	}
-	if pause, ok := pauses[uuidToString(agent.ID)]; ok {
-		resp.WorkPause = &pause
-	}
-}
-
-// dispatchProjectsOrEmpty is the agent's project limit for the API: always a
-// list, empty when the seat serves every project.
-func dispatchProjectsOrEmpty(a db.Agent) []string {
-	if ids := service.AgentDispatchProjects(a); ids != nil {
-		return ids
-	}
-	return []string{}
-}
-
-// resolveDispatchProjects validates a project limit (DENE-1648): each entry
-// is a project id in this workspace, duplicates collapse, and an empty list
-// lifts the limit. The second return value is the 400 message.
-func (h *Handler) resolveDispatchProjects(ctx context.Context, workspaceID pgtype.UUID, raw []string) ([]pgtype.UUID, string) {
-	out := make([]pgtype.UUID, 0, len(raw))
-	seen := make(map[string]bool, len(raw))
-	for _, value := range raw {
-		value = strings.TrimSpace(value)
-		id, err := util.ParseUUID(value)
-		if err != nil {
-			return nil, fmt.Sprintf("dispatch_projects: %q is not a project id", value)
-		}
-		key := util.UUIDToString(id)
-		if seen[key] {
-			continue
-		}
-		if _, err := h.Queries.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{ID: id, WorkspaceID: workspaceID}); err != nil {
-			return nil, fmt.Sprintf("dispatch_projects: %s is not a project in this workspace", value)
-		}
-		seen[key] = true
-		out = append(out, id)
-	}
-	return out, ""
 }

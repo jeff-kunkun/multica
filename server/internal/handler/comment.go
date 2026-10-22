@@ -28,7 +28,6 @@ import (
 )
 
 type CommentResponse struct {
-	RoutingWarning string  `json:"routing_warning,omitempty"`
 	ViaBotID       *string `json:"via_bot_id,omitempty"`
 	ViaBotName     *string `json:"via_bot_name,omitempty"`
 	ID             string  `json:"id"`
@@ -1600,10 +1599,6 @@ type commentAgentTrigger struct {
 	// need not be a squad member. Completion may replay it only if creation
 	// recorded it as a planned input.
 	NonLeaderAgentReply bool
-	// RelayFromID is set when this run covers an @ whose seat is switched off.
-	RelayFromID   string
-	RelayFromName string
-	RelayToName   string
 }
 
 type commentTriggerComputeOptions struct {
@@ -2070,26 +2065,11 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	comment := created.Comment()
-	// A pass keeps the PR heads it reviewed (DENE-1678). Without them the
-	// pass only stops counting toward a review skip, so a failure is logged.
-	if err := service.RecordReviewPass(r.Context(), h.Queries, comment); err != nil {
-		slog.Warn("record review pass heads failed", append(logger.RequestAttrs(r), "error", err, "comment_id", uuidToString(comment.ID))...)
-	}
-	reviewRoutingWarning := ""
-	if comment.IssueID.Valid && blockwait.Verdict(comment.Content) == "hold" {
-		if err := h.applyReviewRejection(r.Context(), comment); err != nil {
-			reviewRoutingWarning = "验收打回已记录，但未能交棒：" + err.Error()
-			slog.Error("review rejection routing failed", "issue_id", uuidToString(comment.IssueID), "error", err)
-		}
-	}
 
 	// Fetch linked attachments so the response includes them.
 	groupedAtt := h.groupAttachments(r, []pgtype.UUID{comment.ID})
 	resp := commentToResponse(comment, nil, groupedAtt[uuidToString(comment.ID)])
 	resp.IssueRevision = created.IssueRevision
-	if reviewRoutingWarning != "" {
-		resp.RoutingWarning = reviewRoutingWarning
-	}
 	slog.Info("comment created", append(logger.RequestAttrs(r), "comment_id", uuidToString(comment.ID), "issue_id", issueID)...)
 	h.publishWithSource(r.Context(), protocol.EventCommentCreated, uuidToString(issue.WorkspaceID), authorType, authorID, map[string]any{
 		"comment":             resp,
@@ -2106,10 +2086,9 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// must keep the resolved root in sync.
 	h.TaskService.AutoUnresolveThreadOnReply(r.Context(), rootComment, uuidToString(issue.WorkspaceID), authorType, authorID, h.wakeupSourceTaskID(r))
 	if authorType == "member" {
-		// Any human comment is an explicit acknowledgement / release of the
-		// chain guard. Clear both the halt latch and the one-shot notice marker
+		// Any human comment is an explicit release of the halt latch. Clear it
 		// before resolving this comment's own agent triggers.
-		for _, key := range []string{"agent_halted", "agent_chain_budget_notified"} {
+		for _, key := range []string{"agent_halted"} {
 			if _, clearErr := h.Queries.DeleteIssueMetadataKey(r.Context(), db.DeleteIssueMetadataKeyParams{
 				ID: issue.ID, WorkspaceID: issue.WorkspaceID, Key: key,
 			}); clearErr != nil && !errors.Is(clearErr, pgx.ErrNoRows) {
@@ -2202,7 +2181,6 @@ func (h *Handler) triggerTasksForCommentReport(ctx context.Context, issue db.Iss
 		markCommentTriggersFresh(triggers)
 	}
 	h.noteBlockedRuntimeTargets(ctx, issue, targets)
-	h.noteMissedMentionRelays(ctx, issue, comment.ID, targets)
 	resolved := triggers
 	attachments, attachmentErr := h.Queries.ListAttachmentsByComment(ctx, db.ListAttachmentsByCommentParams{CommentID: comment.ID, WorkspaceID: issue.WorkspaceID})
 	if !service.SeparateIssueRun(ctx) && len(steerTaskIDs) == 0 && attachmentErr == nil && len(attachments) == 0 {
@@ -2338,7 +2316,6 @@ func (h *Handler) enqueueCommentAgentTriggers(ctx context.Context, issue db.Issu
 		results[uuidToString(trigger.Agent.ID)] = commentEnqueueResult{status: status, reason: reason, execSquadID: execSquadID}
 	}
 	for _, trigger := range triggers {
-		h.noteMentionRelay(ctx, issue, triggerCommentID, trigger)
 		status, reason := h.resolveCommentTriggerEnqueue(ctx, issue, trigger, triggerCommentID)
 		record(trigger, status, reason)
 	}
@@ -3396,11 +3373,6 @@ type commentMentionTarget struct {
 	// the resolver runs for the composer PREVIEW as well, so it only records
 	// what happened — writing the notice is the trigger path's job.
 	unusable *blockedRuntimeNotice
-	// RelayMissed is an explicit @ whose seat is switched off and has nobody
-	// of another family to cover it. The write path leaves a comment; preview
-	// only records the flag.
-	RelayMissed     bool
-	RelayedFromName string
 }
 
 // blockedRuntimeNotice is a refusal worth leaving on the issue: which agent, and
@@ -3525,23 +3497,7 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 				continue
 			}
 			if !agent.WorkEnabled {
-				if repl, ok := h.coverDisabledMention(ctx, issue, agent, authorType, authorID, opts.OriginatorUserID, wsID); ok {
-					hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issue.ID, repl.ID, opts)
-					if err != nil {
-						blockTarget("squad", m.ID, ReasonInternalError)
-						continue
-					}
-					add(commentAgentTrigger{
-						Agent: repl, Source: commentTriggerSourceMentionAgent, AlreadyPending: hasPending,
-						RelayFromID: uuidToString(agent.ID), RelayFromName: agent.Name, RelayToName: repl.Name,
-					})
-					addTarget(commentMentionTarget{TargetType: "squad", TargetID: m.ID, ExecAgentID: uuidToString(repl.ID)})
-					continue
-				}
-				addTarget(commentMentionTarget{
-					TargetType: "squad", TargetID: m.ID, Status: DispatchBlocked, ReasonCode: ReasonTargetUnavailable,
-					RelayMissed: true, RelayedFromName: agent.Name,
-				})
+				blockTarget("squad", m.ID, ReasonTargetUnavailable)
 				continue
 			}
 			// Same shared verdict as the direct-agent branch below.
@@ -3599,23 +3555,7 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 			continue
 		}
 		if !agent.WorkEnabled {
-			if repl, ok := h.coverDisabledMention(ctx, issue, agent, authorType, authorID, opts.OriginatorUserID, wsID); ok {
-				hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issue.ID, repl.ID, opts)
-				if err != nil {
-					blockTarget("agent", m.ID, ReasonInternalError)
-					continue
-				}
-				add(commentAgentTrigger{
-					Agent: repl, Source: commentTriggerSourceMentionAgent, AlreadyPending: hasPending,
-					RelayFromID: uuidToString(agent.ID), RelayFromName: agent.Name, RelayToName: repl.Name,
-				})
-				addTarget(commentMentionTarget{TargetType: "agent", TargetID: m.ID, ExecAgentID: uuidToString(repl.ID)})
-				continue
-			}
-			addTarget(commentMentionTarget{
-				TargetType: "agent", TargetID: m.ID, Status: DispatchBlocked, ReasonCode: ReasonTargetUnavailable,
-				RelayMissed: true, RelayedFromName: agent.Name,
-			})
+			blockTarget("agent", m.ID, ReasonTargetUnavailable)
 			continue
 		}
 		// One readiness verdict for every admission path (service.AgentReadiness).

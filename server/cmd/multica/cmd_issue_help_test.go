@@ -26,7 +26,7 @@ func TestIssueHelpCarriesMovedBriefRules(t *testing.T) {
 		}},
 		"issue handoff": {issueHandoffCmd.Long, []string{
 			"skips a\ntarget that already has an active run",
-			"refused if a person holds the seat",
+			"if the reviewer is empty or a person",
 			"never a hand-written @mention",
 		}},
 		"issue summon": {issueSummonCmd.Long, []string{

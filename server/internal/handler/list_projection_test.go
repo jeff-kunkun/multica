@@ -65,7 +65,7 @@ func TestListProjection(t *testing.T) {
 func TestCompactFiftyAgentsUnderThirtyKB(t *testing.T) {
 	rows := make([]AgentResponse, 50)
 	for i := range rows {
-		rows[i] = AgentResponse{ID: fmt.Sprintf("00000000-0000-0000-0000-%012d", i), Name: "特兰克斯 · 中档智能体", Status: "idle", RuntimeID: "11111111-1111-1111-1111-111111111111", RuntimeMode: "codex", Series: "codex", SeriesSource: "runtime", WorkEnabled: true, Instructions: strings.Repeat("长提示", 10000)}
+		rows[i] = AgentResponse{ID: fmt.Sprintf("00000000-0000-0000-0000-%012d", i), Name: "特兰克斯 · 中档智能体", Status: "idle", RuntimeID: "11111111-1111-1111-1111-111111111111", RuntimeMode: "codex", WorkEnabled: true, Instructions: strings.Repeat("长提示", 10000)}
 	}
 	w := httptest.NewRecorder()
 	writeProjectedList(w, httptest.NewRequest("GET", "/api/agents?compact=true", nil), rows, listshape.Agent)

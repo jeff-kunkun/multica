@@ -21,7 +21,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/permission"
-	"github.com/multica-ai/multica/server/internal/routing"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -266,10 +265,10 @@ func (h *Handler) workspaceToResponse(w db.Workspace) WorkspaceResponse {
 	if settings == nil {
 		settings = map[string]any{}
 	}
-	// The routing gateway key lives in this column and must never leave the
-	// server. Stripped here, in the one function every workspace response goes
-	// through, rather than at each of its call sites. The log-export git token
-	// sits in the same column under its own key and obeys the same rule.
+	// Secrets in this column must never leave the server: a legacy routing
+	// gateway key and the log-export git token. Stripped here, in the one
+	// function every workspace response goes through, rather than at each of
+	// its call sites.
 	settings = redactRoutingSettings(settings)
 	settings = redactLogExportSettings(settings)
 	var repos any
@@ -475,15 +474,6 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// And the default domain list (DENE-1451), so project and specialisation
-	// pickers are not empty on day one.
-	if err := qtx.SeedWorkspaceDomains(r.Context(), db.SeedWorkspaceDomainsParams{
-		WorkspaceID: ws.ID, Names: routing.DefaultLadder.Directions,
-	}); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to seed domains: "+err.Error())
-		return
-	}
-
 	// NOTE: CreateWorkspace deliberately does NOT mark the user as
 	// onboarded. The `onboarded_at` flag is owned by CompleteOnboarding
 	// (Step 3 of the flow) and by AcceptInvitation (invitee joining an
@@ -683,33 +673,10 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		if incoming, ok := req.Settings.(map[string]any); ok {
-			if block, ok := incoming["routing"].(map[string]any); ok {
-				if limit, exists := block["consult_per_issue"]; exists {
-					n, ok := limit.(float64)
-					if !ok || n < 1 || n > 20 || n != float64(int(n)) {
-						writeError(w, 400, "consult_per_issue must be an integer between 1 and 20")
-						return
-					}
-				}
-				if mode, exists := block["decision_mode"]; exists && mode != "legacy" && mode != "shadow" && mode != "active" {
-					writeError(w, http.StatusBadRequest, "decision_mode must be legacy, shadow or active")
-					return
-				}
-				if block["decision_mode"] == "active" {
-					analysis, _ := block["analysis"].(map[string]any)
-					if analysis["enabled"] != true {
-						writeError(w, http.StatusBadRequest, "active reasoning requires the analysis model")
-						return
-					}
-				}
-			}
-
-		}
-		// The client cannot echo back the routing key or the log-export git
-		// token it was never sent, so the stored ones are carried forward
-		// unless this write explicitly sets or clears them. Without this, any
-		// unrelated settings save wipes them.
+		// The client cannot echo back the log-export git token it was never
+		// sent, so the stored one is carried forward unless this write
+		// explicitly sets or clears it. Without this, any unrelated settings
+		// save wipes it.
 		var stored []byte
 		if existing, err := h.Queries.GetWorkspace(r.Context(), idUUID); err == nil {
 			stored = existing.Settings
@@ -723,16 +690,7 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 			}
 			reconcilePRMergeSettings(storedMap, incoming)
 		}
-		merged, ok := h.applyRoutingSecret(req.Settings, stored)
-		if !ok {
-			writeError(w, http.StatusServiceUnavailable,
-				"this deployment cannot store a routing key (no MULTICA_ROUTING_SECRET_KEY or JWT_SECRET)")
-			return
-		}
-		// Chain the log-export merge onto the already-merged value: the two
-		// blocks coexist in the same column, and running one must not discard
-		// the other's carried-forward secret.
-		merged, ok = h.applyLogExportToken(merged, stored)
+		merged, ok := h.applyLogExportToken(redactRoutingSettings(req.Settings), stored)
 		if !ok {
 			writeError(w, http.StatusServiceUnavailable,
 				"this deployment cannot store a log export git token (no MULTICA_LOG_EXPORT_SECRET_KEY or JWT_SECRET)")

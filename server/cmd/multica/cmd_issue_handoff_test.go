@@ -13,7 +13,7 @@ func TestIssueHandoffCommandRegistration(t *testing.T) {
 	if cmd != issueHandoffCmd {
 		t.Fatalf("found command = %q, want issue handoff", cmd.CommandPath())
 	}
-	for _, anchor := range []string{"--to reviewer", "--to dispatcher", "already has an active run", "issue status <id> in_review"} {
+	for _, anchor := range []string{"--to reviewer", "--to <agent>", "already has an active run", "moves it to in_review"} {
 		if !strings.Contains(cmd.Long, anchor) {
 			t.Errorf("long help should carry the handoff contract (missing %q)", anchor)
 		}

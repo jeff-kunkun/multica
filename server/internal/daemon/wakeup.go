@@ -312,7 +312,6 @@ func (d *Daemon) runWSHeartbeatSender(ctx context.Context, runtimeIDs []string, 
 }
 
 func (d *Daemon) sendWSHeartbeats(ctx context.Context, runtimeIDs []string, writes chan<- *wsOutbound) {
-	d.maybeRefreshPlanQuota()
 	for _, rid := range runtimeIDs {
 		if ctx.Err() != nil {
 			return
@@ -322,8 +321,6 @@ func (d *Daemon) sendWSHeartbeats(ctx context.Context, runtimeIDs []string, writ
 			Payload: marshalRaw(protocol.DaemonHeartbeatRequestPayload{
 				RuntimeID:           rid,
 				SupportsBatchImport: true,
-				PlanLimits:          d.planLimitsForRuntime(rid),
-				AgentPlanLimits:     d.agentPlanLimitsForRuntime(rid),
 			}),
 		})
 		if err != nil {

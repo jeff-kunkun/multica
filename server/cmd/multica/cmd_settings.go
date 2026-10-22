@@ -35,7 +35,6 @@ decide permissions; the server does.
   multica settings set bot_wake_chain_limit --value-json '4'
   multica settings get agent.spawn
   multica settings set agent.spawn --value-json '{"chat_chat":{"enabled":true,"per_chat":5,"per_run":3}}'
-  multica settings set agent.spawn --value-json '{"consult":{"enabled":true,"per_issue":3}}'
 
 Keys, methods, and which page each one belongs to: docs/kun/settings-cli-coverage.md`,
 }

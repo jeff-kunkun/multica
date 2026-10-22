@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -130,32 +129,6 @@ func TestAgentWorkEnabledSyncsDirectSpecialisations(t *testing.T) {
 	if !read(childID) {
 		t.Fatal("base role toggle did not bring its specialisation back in sync")
 	}
-}
-
-func TestRoutingRosterOmitsDisabledSeats(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-
-	ctx := context.Background()
-	runtimeID := createClaudeProviderRuntime(t)
-	liveID := createAgentOnRuntime(t, "work-enabled-live-seat", runtimeID, "")
-	offID := createAgentOnRuntime(t, "work-enabled-off-seat", runtimeID, "")
-	if _, err := testPool.Exec(ctx, `UPDATE agent SET work_enabled = false WHERE id = $1`, offID); err != nil {
-		t.Fatalf("disable seat: %v", err)
-	}
-
-	roster, err := testHandler.RoutingStore().Roster(ctx, testWorkspaceID)
-	if err != nil {
-		t.Fatalf("Roster: %v", err)
-	}
-	if _, ok := roster["work-enabled-live-seat"]; !ok {
-		t.Error("enabled seat missing from routing roster")
-	}
-	if _, ok := roster["work-enabled-off-seat"]; ok {
-		t.Error("disabled seat must not be a routing candidate")
-	}
-	_ = liveID
 }
 
 // DENE-1093 (the DENE-1066 gap): turning a seat back on by hand requeues the

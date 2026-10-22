@@ -377,8 +377,6 @@ func (h *Handler) ApprovePlan(w http.ResponseWriter, r *http.Request) {
 	issueKey := prefix + "-" + strconv.Itoa(int(issue.Number))
 	fill := h.newStatusCategoryFiller(r.Context(), issue.WorkspaceID)
 	if moved != nil {
-		settled := h.settleIssueDomain(r.Context(), *moved, nil)
-		moved = &settled
 		resp := issueToResponse(*moved, prefix)
 		fill(&resp)
 		h.publish(protocol.EventIssueUpdated, workspaceID, "member", approverID, map[string]any{

@@ -32,7 +32,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/permission"
 	"github.com/multica-ai/multica/server/internal/qoderruntime"
-	"github.com/multica-ai/multica/server/internal/routing"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	agentpkg "github.com/multica-ai/multica/server/pkg/agent"
@@ -83,17 +82,6 @@ type IssueResponse struct {
 	AssigneeSource       *string `json:"assignee_source,omitempty"`
 	AssigneeSourceUserID *string `json:"assignee_source_user_id,omitempty"`
 	AssigneeQuote        *string `json:"assignee_quote,omitempty"`
-	// AssigneeIgnored is set on the response of a create or update that
-	// named an executor the server did not apply, so the caller sees it now
-	// instead of finding the slot empty later.
-	AssigneeIgnored bool `json:"assignee_ignored,omitempty"`
-	// AssigneeIgnoredReason explains an unverified per-quote proof (the slot
-	// went to routing), or a refused in-flight reassignment with the commands
-	// to use instead.
-	AssigneeIgnoredReason string `json:"assignee_ignored_reason,omitempty"`
-	// Routing is set on a create that asked for route_sync (DENE-1834): who
-	// holds the executor slot and why, in the 自动选派 source words.
-	Routing *RoutingReceipt `json:"routing,omitempty"`
 	// ReviewerType / ReviewerID are the acceptance slot, shaped exactly like
 	// the assignee pair: a REFERENCE to an agent or a member, not a copy of a
 	// name, so renaming or archiving the target cannot leave stale text behind.
@@ -111,10 +99,6 @@ type IssueResponse struct {
 	// an endpoint that skips the filler emits null rather than a bare pointer.
 	DuplicateOf *IssueRefResponse `json:"duplicate_of"`
 	ProjectID   *string           `json:"project_id"`
-	// DomainID is the one project domain this issue works in (DENE-1451);
-	// "" is generic. Only full issue reads carry it: a list row omits the key,
-	// which reads as "not loaded", never as generic.
-	DomainID *string `json:"domain_id,omitempty"`
 	// Visibility is the issue's sharing scope (DENE-698).
 	Visibility string  `json:"visibility,omitempty"`
 	Position   float64 `json:"position"`
@@ -568,7 +552,6 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		ParentIssueID:      uuidToPtr(i.ParentIssueID),
 		duplicateOfIssueID: duplicateOfPointer(i.Status, i.DuplicateOfIssueID),
 		ProjectID:          uuidToPtr(i.ProjectID),
-		DomainID:           domainIDField(i.DomainID),
 		Visibility:         i.Visibility,
 		Position:           i.Position,
 		OriginType:         textToPtr(i.OriginType),
@@ -3295,22 +3278,15 @@ func (h *Handler) visibleProjectInWorkspace(w http.ResponseWriter, r *http.Reque
 }
 
 type CreateIssueRequest struct {
-	Title        string  `json:"title"`
-	Description  *string `json:"description"`
-	Status       string  `json:"status"`
-	Priority     string  `json:"priority"`
-	AssigneeType *string `json:"assignee_type"`
-	AssigneeID   *string `json:"assignee_id"`
-	// AssigneeQuote is, for an agent naming an executor, the words the person
-	// who started this run said naming that agent (DENE-1033). The server finds
-	// them in the triggering message or does not honour the pick.
-	AssigneeQuote *string `json:"assignee_quote,omitempty"`
-	ParentIssueID *string `json:"parent_issue_id"`
-	ProjectID     *string `json:"project_id"`
-	Stage         *int32  `json:"stage,omitempty"`
-	// DomainID: see UpdateIssueRequest.DomainID. Left out, a project with
-	// exactly one domain gives it to the issue.
-	DomainID      *string  `json:"domain_id,omitempty"`
+	Title         string   `json:"title"`
+	Description   *string  `json:"description"`
+	Status        string   `json:"status"`
+	Priority      string   `json:"priority"`
+	AssigneeType  *string  `json:"assignee_type"`
+	AssigneeID    *string  `json:"assignee_id"`
+	ParentIssueID *string  `json:"parent_issue_id"`
+	ProjectID     *string  `json:"project_id"`
+	Stage         *int32   `json:"stage,omitempty"`
 	StartDate     *string  `json:"start_date"`
 	DueDate       *string  `json:"due_date"`
 	AttachmentIDs []string `json:"attachment_ids,omitempty"`
@@ -3334,19 +3310,6 @@ type CreateIssueRequest struct {
 	// WaitingFor is the one line a backlog ticket waits for (DENE-1638). An
 	// agent creating a backlog ticket without it is refused.
 	WaitingFor *string `json:"waiting_for,omitempty"`
-
-	// RoutingFacts lets the creator — usually an agent that just wrote the
-	// ticket and already knows its shape — supply the facts routing would
-	// otherwise ask the analysis model for (DENE-923). They are cached
-	// against this content, so editing the ticket later invalidates them.
-	RoutingFacts *routing.Facts `json:"routing_facts,omitempty"`
-
-	// RouteSync asks for the routing answer in this response (DENE-1834):
-	// the executor slot is filled inline and `routing` says who and why.
-	// Without it the slot is filled by the detached hook and the caller
-	// reads the 自动选派 comment later. Ignored when the caller's own
-	// executor stands; then `routing` just reports 人工.
-	RouteSync bool `json:"route_sync,omitempty"`
 }
 
 // UnmarshalJSON rejects duplicate object members before Go's ordinary map
@@ -3494,15 +3457,6 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	if req.Title == "" {
 		writeError(w, http.StatusBadRequest, "title is required")
 		return
-	}
-	if req.RoutingFacts != nil {
-		facts := req.RoutingFacts.Normalize()
-		if !facts.Valid() {
-			writeError(w, http.StatusBadRequest,
-				"routing_facts: scope must be small|module|cross_module, clarity clear|vague, risk low|medium|high")
-			return
-		}
-		req.RoutingFacts = &facts
 	}
 
 	workspaceID := h.resolveWorkspaceID(r)
@@ -3739,40 +3693,6 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// The issue's domain (DENE-1451). The service checks it against the
-	// project the issue finally lands in; here it is resolved to an id, and
-	// predicted for the per-quote seat rewrite below.
-	var createDomain pgtype.UUID
-	predictProject := projectID
-	if !predictProject.Valid && !projectPinned && parentIssueID.Valid {
-		if parent, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{ID: parentIssueID, WorkspaceID: wsUUID}); err == nil {
-			predictProject = parent.ProjectID
-		}
-	}
-	domainPinned := req.DomainID != nil
-	if domainPinned {
-		ref := strings.TrimSpace(*req.DomainID)
-		if ref != "" && ref != routing.GenericDirection {
-			idx, err := h.loadDomainIndex(r.Context(), wsUUID)
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "failed to load domains")
-				return
-			}
-			d, found := idx.resolve(ref)
-			if !found {
-				writeError(w, http.StatusBadRequest, fmt.Sprintf("unknown domain %q; known domains: %s", ref, strings.Join(idx.names(), ", ")))
-				return
-			}
-			createDomain = d.ID
-		}
-	} else {
-		createDomain, _ = h.issueDomainFor(r.Context(), wsUUID, predictProject, nil, pgtype.UUID{})
-	}
-	pickedDomain := pgtype.UUID{}
-	if domainPinned {
-		pickedDomain = createDomain
-	}
-
 	// Agent permissions (DENE-1271): an agent run may only create an issue
 	// when the workspace table allows it for this kind of run.
 	spawnSlots, ok := h.gateAgentIssueSpawn(w, r, wsUUID, creatorType, actualCreatorID, 1)
@@ -3780,27 +3700,6 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer spawnSlots.release()
-
-	// Whose pick is the executor (DENE-1033). A person's own hand stands; an
-	// agent's stands only with a quote the server can verify, and on a ticket
-	// routing will judge an unverified one is dropped so routing decides.
-	var ruling assignmentRuling
-	assigneeIgnored := false
-	assigneeIgnoredReason := ""
-	if assigneeType.Valid {
-		ruling = h.rulePick(r, workspaceID, creatorType, actualCreatorID, assigneeType, assigneeID, deref(req.AssigneeQuote), status, nil, sceneRef{Domain: createDomain, Project: predictProject}, parentIssueID)
-		if ruling.Apply && ruling.Seat.Valid {
-			assigneeID = ruling.Seat
-		}
-		if !ruling.Apply {
-			assigneeType, assigneeID = pgtype.Text{}, pgtype.UUID{}
-			assigneeIgnored = true
-			assigneeIgnoredReason = ruling.Reason
-			if ruling.Source == "" {
-				ruling.Source = routing.SourceAgent
-			}
-		}
-	}
 
 	// Prefix is workspace-level; pre-compute once so both the broadcast
 	// payload builder and the HTTP response share the same value.
@@ -3847,8 +3746,6 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		ParentIssueID:       parentIssueID,
 		ProjectID:           projectID,
 		ProjectPinned:       projectPinned,
-		DomainID:            pickedDomain,
-		DomainPinned:        domainPinned,
 		StartDate:           startDate,
 		DueDate:             dueDate,
 		OriginType:          originType,
@@ -3859,10 +3756,6 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		LabelIDs:            labelIDs,
 		Properties:          properties,
 		AllowDuplicate:      req.AllowDuplicate,
-
-		AssigneeSource:       ruling.Source,
-		AssigneeSourceUserID: ruling.SourceUser,
-		AssigneeQuote:        ruling.Quote,
 	}, service.IssueCreateOpts{
 		ActorID:          actualCreatorID,
 		AnalyticsAgentID: analyticsAgentID,
@@ -3905,10 +3798,6 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "project not found in this workspace")
 		return
 	}
-	if errors.Is(err, service.ErrIssueDomainNotInProject) {
-		writeError(w, http.StatusBadRequest, "domain is not one of the issue's project domains; an issue with no project is generic")
-		return
-	}
 	if errors.Is(err, service.ErrIssueLabelNotFound) {
 		writeError(w, http.StatusBadRequest, "one or more labels not found in this workspace")
 		return
@@ -3942,8 +3831,6 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	slog.Info("issue created", append(logger.RequestAttrs(r), "issue_id", uuidToString(issue.ID), "title", issue.Title, "status", issue.Status, "workspace_id", workspaceID)...)
 
 	resp := issueToResponse(issue, prefix)
-	resp.AssigneeIgnored = assigneeIgnored
-	resp.AssigneeIgnoredReason = assigneeIgnoredReason
 	fillCreated(&resp)
 	resp.Attachments = buildAttachmentResponses(res.Attachments)
 	// Echo the authoritative labels attached in the create transaction. Always
@@ -3952,50 +3839,6 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	labelResponses := labelsToResponse(res.Labels)
 	resp.Labels = &labelResponses
 
-	// Routing hook (DENE-633). A new issue is born in some status, which is
-	// the same question every later status change asks, so it goes through the
-	// same entry point. This call and the status change that may follow it
-	// moments later can both be in flight at once; the conditional writes and
-	// the one-comment-per-kind index are what make that safe.
-	if req.RoutingFacts != nil {
-		// Written before the route is queued, so the first route already
-		// finds them and skips the analysis call. Hashed from the stored
-		// row, not the request: the create path may have rewritten the body.
-		if err := h.writeAnalysisRecord(r.Context(), issue.WorkspaceID, issue.ID, routing.AnalysisRecord{
-			Facts:  *req.RoutingFacts,
-			Source: routing.FactsFromCreator,
-			Hash:   routing.ContentHash(issue.Title, issue.Description.String),
-		}); err != nil {
-			slog.Warn("routing facts write failed", append(logger.RequestAttrs(r), "error", err, "issue_id", uuidToString(issue.ID))...)
-		}
-	}
-	if req.RouteSync {
-		// The caller wants the answer now (DENE-1834). Same Route as the
-		// hook, run inline instead of detached; the hook is then skipped so
-		// the pass is not made twice.
-		if assigneeType.Valid {
-			rr := h.receiptForHeldSlot(r.Context(), workspaceID, assigneeType, assigneeID)
-			if ruling.Source == routing.SourceSelfClaim {
-				rr.Source, rr.Reason = string(routing.PickReasonSelfClaim), "做父票的智能体拆出这张子票，自己接着做"
-			}
-			resp.Routing = &rr
-			h.RouteIssueAsync(r, workspaceID, uuidToString(issue.ID))
-		} else {
-			rr := h.routeIssueSync(r.Context(), workspaceID, uuidToString(issue.ID))
-			if assigneeIgnored && assigneeIgnoredReason != "" {
-				rr.Reason = assigneeIgnoredReason + "；" + rr.Reason
-			}
-			resp.Routing = &rr
-			if fresh, err := h.Queries.GetIssue(r.Context(), issue.ID); err == nil {
-				refreshed := issueToResponse(fresh, prefix)
-				resp.AssigneeType, resp.AssigneeID = refreshed.AssigneeType, refreshed.AssigneeID
-				resp.AssigneeSource, resp.AssigneeSourceUserID = refreshed.AssigneeSource, refreshed.AssigneeSourceUserID
-				resp.ReviewerType, resp.ReviewerID = refreshed.ReviewerType, refreshed.ReviewerID
-			}
-		}
-	} else {
-		h.RouteIssueAsync(r, workspaceID, uuidToString(issue.ID))
-	}
 	h.seatStagedParent(r, workspaceID, issue, creatorType, actualCreatorID)
 
 	writeJSON(w, http.StatusCreated, resp)
@@ -4019,8 +3862,6 @@ type UpdateIssueRequest struct {
 	Priority        *string `json:"priority"`
 	AssigneeType    *string `json:"assignee_type"`
 	AssigneeID      *string `json:"assignee_id"`
-	// AssigneeQuote: see CreateIssueRequest.AssigneeQuote.
-	AssigneeQuote *string `json:"assignee_quote,omitempty"`
 	// ReviewerType / ReviewerID set the acceptance slot. Sending the pair as
 	// explicit nulls clears it back to "undecided"; sending reviewer_type
 	// "none" with a null id records "this issue needs no acceptance pass",
@@ -4033,9 +3874,6 @@ type UpdateIssueRequest struct {
 	ParentIssueID *string  `json:"parent_issue_id"`
 	ProjectID     *string  `json:"project_id"`
 	Stage         *int32   `json:"stage"`
-	// DomainID is the issue's domain (DENE-1451): an id or a domain name, one
-	// of the project's domains; null or 通用 makes it generic.
-	DomainID *string `json:"domain_id"`
 	// AttachmentIDs lets the description editor bind newly uploaded files to
 	// this issue so they surface in `GET /api/issues/:id/attachments` and the
 	// editor's preview Eye keeps working past a refresh. Existing bindings
@@ -4615,24 +4453,6 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			params.Visibility = pgtype.Text{String: target.Visibility, Valid: true}
 		}
 	}
-	// The issue's domain must be one of the project it ends up in (DENE-1451).
-	domainRequest := requestedDomain(rawFields, req.DomainID)
-	targetProject := prevIssue.ProjectID
-	if _, ok := rawFields["project_id"]; ok {
-		targetProject = params.ProjectID
-	}
-	targetDomain, domainErr := h.issueDomainFor(r.Context(), prevIssue.WorkspaceID, targetProject, domainRequest, prevIssue.DomainID)
-	if domainErr != nil {
-		writeError(w, http.StatusBadRequest, domainErr.Error())
-		return
-	}
-	if domainRequest != nil {
-		resolved := ""
-		if targetDomain.Valid {
-			resolved = uuidToString(targetDomain)
-		}
-		domainRequest = &resolved
-	}
 	if _, ok := rawFields["stage"]; ok {
 		if req.Stage != nil {
 			if *req.Stage < 1 {
@@ -4677,50 +4497,6 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		statusKeyForGuard = params.Status.String
 	}
 
-	// Whose pick is the executor (DENE-1033): see rulePick. A dropped pick
-	// leaves the slot as it was; the caller is told through assignee_ignored.
-	var (
-		stampRuling          *assignmentRuling
-		assigneeIgnore       bool
-		assigneeIgnoreReason string
-	)
-	// An agent's pick was not applied and the slot is still empty, so this
-	// write hands the ticket to routing (DENE-1613).
-	pickSetAside := false
-	if touchedType || touchedID {
-		if params.AssigneeType.Valid && params.AssigneeID.Valid {
-			actorType, actorID := h.resolveActor(r, userID, workspaceID)
-			resulting := prevIssue.Status
-			if params.Status.Valid {
-				resulting = params.Status.String
-			}
-			ruling := h.rulePick(r, workspaceID, actorType, actorID, params.AssigneeType, params.AssigneeID, deref(req.AssigneeQuote), resulting,
-				&heldExecutor{Type: prevIssue.AssigneeType, ID: prevIssue.AssigneeID}, sceneRef{Domain: targetDomain, Project: targetProject}, pgtype.UUID{})
-			if ruling.Apply {
-				if ruling.Seat.Valid {
-					params.AssigneeID = ruling.Seat
-				}
-				stampRuling = &ruling
-			} else {
-				assigneeIgnore = true
-				assigneeIgnoreReason = ruling.Reason
-				params.AssigneeType, params.AssigneeID = prevIssue.AssigneeType, prevIssue.AssigneeID
-				touchedType, touchedID = false, false
-				if !prevIssue.AssigneeType.Valid {
-					// Nothing holds the slot: remember that an agent tried, so
-					// routing can say so in its one comment.
-					stampRuling = &assignmentRuling{Source: ruling.Source}
-					if stampRuling.Source == "" {
-						stampRuling.Source = routing.SourceAgent
-					}
-					pickSetAside = true
-				}
-			}
-		} else if !params.AssigneeID.Valid {
-			// Cleared: the record of who chose goes with the executor.
-			stampRuling = &assignmentRuling{}
-		}
-	}
 	if touchedType || touchedID || handoff != nil {
 		if status, msg := h.validateAssigneePair(r.Context(), r, workspaceID, params.AssigneeType, params.AssigneeID); status != 0 {
 			writeError(w, status, msg)
@@ -4735,27 +4511,6 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			writeError(w, status, msg)
 			return
 		}
-	}
-	actorIDForGuard := ""
-	if statusActorType != "" {
-		_, actorIDForGuard = h.resolveActor(r, userID, workspaceID)
-	}
-	tr := h.guardSilentStall(r.Context(), prevIssue, params.ProjectID, statusKeyForGuard, statusActorType, actorIDForGuard, params.AssigneeType, params.AssigneeID, params.ReviewerType, params.ReviewerID, touchedReviewerType || touchedReviewerID)
-	if tr.refuse != "" {
-		writeError(w, http.StatusConflict, tr.refuse)
-		return
-	}
-	if tr.status != "" {
-		statusKeyForGuard = tr.status
-		params.Status = pgtype.Text{String: tr.status, Valid: true}
-	}
-	if tr.setReviewer {
-		params.ReviewerType = tr.reviewerType
-		params.ReviewerID = tr.reviewerID
-	}
-	if tr.persistBlock {
-		blockRecord = tr.block
-		persistBlock = true
 	}
 
 	attachmentIDs, ok := parseUUIDSliceOrBadRequest(w, req.AttachmentIDs, "attachment_ids")
@@ -4808,16 +4563,8 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to update issue")
 		return
 	}
-	issue = h.finishStatusTransition(r.Context(), issue, tr)
-	if _, touched := rawFields["parent_issue_id"]; touched || domainRequest != nil || targetProject != prevIssue.ProjectID {
-		issue = h.settleIssueDomain(r.Context(), issue, domainRequest)
-	}
 	if req.Status != nil || req.WaitingFor != nil {
 		issue = h.syncBacklogWaitingFor(r.Context(), issue, req.WaitingFor)
-	}
-	if stampRuling != nil {
-		issue = h.stampAssignee(r.Context(), issue, *stampRuling)
-		h.voidRouterSeatRuns(r, prevIssue, issue, *stampRuling)
 	}
 
 	// Determine actor identity: agent (via X-Agent-ID header) or member.
@@ -4826,8 +4573,6 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 	resp := issueToResponse(issue, prefix)
-	resp.AssigneeIgnored = assigneeIgnore
-	resp.AssigneeIgnoredReason = assigneeIgnoreReason
 	slog.Info("issue updated", append(logger.RequestAttrs(r), "issue_id", id, "workspace_id", workspaceID)...)
 
 	h.fillStatusCategory(r.Context(), issue.WorkspaceID, &resp)
@@ -4961,21 +4706,11 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		h.persistBlockRecord(r.Context(), issue, blockRecord)
 		h.summonNeedsHuman(r.Context(), issue, blockRecord.NeedsHuman, actorType, actorID, "")
 	}
-	// Clearing the executor hands the ticket back to routing (DENE-1665: the
-	// chat ticket card's 改给智能体); the routing table decides per status.
 	executorCleared := prevIssue.AssigneeID.Valid && !issue.AssigneeID.Valid
-	if statusChanged || titleChanged || descriptionChanged || pickSetAside || executorCleared {
-		if statusChanged {
-			h.notifyParentOfChildDone(r.Context(), prevIssue, issue)
-			h.postSourceChatReceipt(r.Context(), prevIssue, issue)
-			h.notifyWaitersOfIssueDone(r.Context(), prevIssue, issue)
-		}
-		// Route after content edits as well as status changes, and after an
-		// agent's pick was set aside: the reply says routing picks, so this
-		// write is what starts it. The detached
-		// pass pre-analyzes the new content, so runtime-backed analysis is warm
-		// before a later dispatch.
-		h.RouteIssueAsync(r, uuidToString(issue.WorkspaceID), uuidToString(issue.ID))
+	if statusChanged {
+		h.notifyParentOfChildDone(r.Context(), prevIssue, issue)
+		h.postSourceChatReceipt(r.Context(), prevIssue, issue)
+		h.notifyWaitersOfIssueDone(r.Context(), prevIssue, issue)
 	}
 	// Sub-issue rules on the parent (the child_done system rule and sub-issue
 	// conditions): the write recorded the change; process it now. A failure
@@ -5566,7 +5301,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	reject := func(issueID, reason string) {
 		rejected = append(rejected, BatchUpdateIssueRejection{IssueID: issueID, Reason: reason})
 	}
-	batchActorType, batchActorID := h.resolveActor(r, userID, workspaceID)
+	batchActorType, _ := h.resolveActor(r, userID, workspaceID)
 	// One Resolver for the whole batch — a per-issue filler would query the
 	// catalog once per custom-status row. (MUL-6243)
 	fillBatch := h.newStatusCategoryFiller(r.Context(), wsUUID)
@@ -5751,24 +5486,6 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		// resolveActor still classifies the caller as an agent (MUL-6691).
 		_, batchTouchedType := rawUpdates["assignee_type"]
 		_, batchTouchedID := rawUpdates["assignee_id"]
-		// The issue's domain must be one of the project it ends up in (DENE-1451).
-		batchDomainRequest := requestedDomain(rawUpdates, req.Updates.DomainID)
-		batchTargetProject := prevIssue.ProjectID
-		if _, ok := rawUpdates["project_id"]; ok {
-			batchTargetProject = params.ProjectID
-		}
-		batchDomain, domainErr := h.issueDomainFor(r.Context(), prevIssue.WorkspaceID, batchTargetProject, batchDomainRequest, prevIssue.DomainID)
-		if domainErr != nil {
-			reject(issueID, domainErr.Error())
-			continue
-		}
-		if batchDomainRequest != nil {
-			resolved := ""
-			if batchDomain.Valid {
-				resolved = uuidToString(batchDomain)
-			}
-			batchDomainRequest = &resolved
-		}
 		// Project workflow (MUL-7420), per issue: an issue whose workflow does
 		// not list the batch status is skipped like the other per-item guards;
 		// entering a handoff step reassigns this issue to the step's handler.
@@ -5782,38 +5499,6 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		issueStatusGuard := batchStatusKey
 		if params.Status.Valid {
 			issueStatusGuard = params.Status.String
-		}
-		// Whose pick is the executor (DENE-1033); same ruling as UpdateIssue.
-		var batchStamp *assignmentRuling
-		batchPickSetAside := false
-		if batchTouchedType || batchTouchedID {
-			if params.AssigneeType.Valid && params.AssigneeID.Valid {
-				pickActorType, pickActorID := h.resolveActor(r, userID, workspaceID)
-				resulting := prevIssue.Status
-				if params.Status.Valid {
-					resulting = params.Status.String
-				}
-				ruling := h.rulePick(r, workspaceID, pickActorType, pickActorID, params.AssigneeType, params.AssigneeID, deref(req.Updates.AssigneeQuote), resulting,
-					&heldExecutor{Type: prevIssue.AssigneeType, ID: prevIssue.AssigneeID}, sceneRef{Domain: batchDomain, Project: batchTargetProject}, pgtype.UUID{})
-				if ruling.Apply {
-					if ruling.Seat.Valid {
-						params.AssigneeID = ruling.Seat
-					}
-					batchStamp = &ruling
-				} else {
-					params.AssigneeType, params.AssigneeID = prevIssue.AssigneeType, prevIssue.AssigneeID
-					batchTouchedType, batchTouchedID = false, false
-					if !prevIssue.AssigneeType.Valid {
-						batchStamp = &assignmentRuling{Source: ruling.Source}
-						if batchStamp.Source == "" {
-							batchStamp.Source = routing.SourceAgent
-						}
-						batchPickSetAside = true
-					}
-				}
-			} else if !params.AssigneeID.Valid {
-				batchStamp = &assignmentRuling{}
-			}
 		}
 		if batchTouchedType || batchTouchedID || handoff != nil {
 			if status, reason := h.validateAssigneePair(r.Context(), r, workspaceID, params.AssigneeType, params.AssigneeID); status != 0 {
@@ -5840,21 +5525,8 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 		}
-		batchTransition := h.guardSilentStall(r.Context(), prevIssue, params.ProjectID, batchStatusKey, batchActorType, batchActorID, params.AssigneeType, params.AssigneeID, params.ReviewerType, params.ReviewerID, false)
-		if batchTransition.refuse != "" {
-			reject(issueID, batchTransition.refuse)
-			continue
-		}
 		// The workflow may have remapped the status of an issue moving projects.
 		statusKeyForWrite := issueStatusGuard
-		if batchTransition.status != "" {
-			params.Status = pgtype.Text{String: batchTransition.status, Valid: true}
-			statusKeyForWrite = batchTransition.status
-		}
-		if batchTransition.setReviewer {
-			params.ReviewerType = batchTransition.reviewerType
-			params.ReviewerID = batchTransition.reviewerID
-		}
 
 		writeCtx := withWakeupHandedTo(r.Context(), h.handedToAgent(r.Context(), prevIssue, params, handoff != nil))
 		var issue db.Issue
@@ -5885,10 +5557,6 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			reject(issueID, "failed to update issue")
 			continue
 		}
-		issue = h.finishStatusTransition(r.Context(), issue, batchTransition)
-		if _, touched := rawUpdates["parent_issue_id"]; touched || batchDomainRequest != nil || batchTargetProject != prevIssue.ProjectID {
-			issue = h.settleIssueDomain(r.Context(), issue, batchDomainRequest)
-		}
 		if batchPersistBlock {
 			h.persistBlockRecord(r.Context(), issue, batchBlock)
 		}
@@ -5897,13 +5565,6 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		}
 		if batchStatusKey != "" || req.Updates.WaitingFor != nil {
 			issue = h.syncBacklogWaitingFor(r.Context(), issue, req.Updates.WaitingFor)
-		}
-		if batchTransition.persistBlock {
-			h.persistBlockRecord(r.Context(), issue, batchTransition.block)
-		}
-		if batchStamp != nil {
-			issue = h.stampAssignee(r.Context(), issue, *batchStamp)
-			h.voidRouterSeatRuns(r, prevIssue, issue, *batchStamp)
 		}
 
 		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
@@ -5984,9 +5645,6 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		// done/cancelled status still enters the stage barrier below. A literal
 		// comparison here left childDoneCompleted empty and silently skipped
 		// notifyParentsOfBatchChildDone entirely. (MUL-6243)
-		if statusChanged || batchPickSetAside {
-			h.RouteIssueAsync(r, uuidToString(issue.WorkspaceID), uuidToString(issue.ID))
-		}
 		if statusChanged {
 			h.postSourceChatReceipt(r.Context(), prevIssue, issue)
 			prevTerminal := isTerminalChildStatus(

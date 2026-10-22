@@ -36,8 +36,8 @@ is refused there; keep using `chat open`.
 most 3 files and 150 lines, no migration, not a server + UI + CLI change.
 Anything bigger that is aligned becomes a ticket (`issue create` or `plan
 apply`) whose description carries `## 目标` and `## 验收`; the server refuses a
-chat ticket without them. Leave the executor empty for agent work (routing
-picks); assign the person when a human must do it. Every ticket links back to
+chat ticket without them. Assign the agent that should do the work, or the
+person when a human must do it. Every ticket links back to
 the chat: the chat shows it as a ticket card with live status, `multica chat
 tickets` lists them, and `multica issue get` names the chat as `source_chat`.
 

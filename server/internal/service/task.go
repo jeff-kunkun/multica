@@ -85,10 +85,6 @@ type TaskService struct {
 	// state for a self-hosted deployment with no MULTICA_LLM_* configuration.
 	// Wired in router.go from the same *llm.Client that backs chat auto-titling.
 	QuickActions ChatQuickActionsLLM
-	// ParkingSummarizer phrases the parking record's one sentence when the
-	// agent left none (DENE-881). Optional: nil keeps the fixed wording.
-	// Wired in router.go to the workspace routing model.
-	ParkingSummarizer ParkingSummarizer
 	// quickActionsInFlight (chat session id -> struct{}{}) and
 	// quickActionsRunning admit suggestion passes: one per session, and a
 	// process-wide ceiling. Both zero values are usable, so a TaskService built
@@ -746,10 +742,10 @@ func ResolveAutopilotTriggerPrincipal(ctx context.Context, q *db.Queries, trigge
 // run never starts.
 var ErrAttributionFailClosed = errors.New("attribution: no precise accountable human and enqueue refused (fail-closed policy, policy read failed, or no agent owner)")
 
-// ErrAgentChainBudgetExceeded is returned when an agent-originated enqueue is
-// refused by the per-issue delegation budget. Human-originated enqueues never
-// return this error.
-var ErrAgentChainBudgetExceeded = errors.New("agent delegation chain budget exceeded")
+// ErrAgentChainBudgetExceeded is returned when an agent-originated enqueue
+// targets an issue a person halted. Human-originated enqueues never return
+// it. The wire reason stays chain_budget_exceeded for existing clients.
+var ErrAgentChainBudgetExceeded = errors.New("agents are halted on this issue")
 
 // ErrDuplicatePendingTask means a fresh enqueue lost the race to a concurrent
 // one: a queued/dispatched task for the same (issue, agent) already exists, so
@@ -762,19 +758,12 @@ var ErrAgentChainBudgetExceeded = errors.New("agent delegation chain budget exce
 // upper-layer log or response can leak the constraint name (#5914, Elon review).
 var ErrDuplicatePendingTask = errors.New("a pending task for this issue and agent already exists")
 
-const (
-	agentHaltedMetadataKey      = "agent_halted"
-	agentChainBudgetNotifiedKey = "agent_chain_budget_notified"
-	// DefaultAgentChainBudget is the per-issue agent-to-agent @-relay cap when
-	// workspace.settings.agent_chain_budget is absent or invalid. Keep in
-	// sync with GetWorkspaceAgentChainBudget's SQL ELSE branch.
-	DefaultAgentChainBudget int32 = 30
-)
+const agentHaltedMetadataKey = "agent_halted"
 
 // admitAgentChain is the single admission gate shared by issue-assignee,
 // mention, thread-parent, and child-done wakeups. It intentionally sits after
 // attribution resolution: a member's own action is always direct_human and is
-// never consumed by the chain budget, while agent/system-triggered work is.
+// never refused by a halt, while agent/system-triggered work is.
 func (s *TaskService) admitAgentChain(ctx context.Context, issue db.Issue, triggerCommentID, actorUserID pgtype.UUID, attr attribution.Result) error {
 	if actorUserID.Valid {
 		return nil
@@ -802,80 +791,7 @@ func (s *TaskService) admitAgentChain(ctx context.Context, issue db.Issue, trigg
 	if halted, ok := metadata[agentHaltedMetadataKey].(bool); ok && halted {
 		return ErrAgentChainBudgetExceeded
 	}
-
-	budget, err := s.Queries.GetWorkspaceAgentChainBudget(ctx, issue.WorkspaceID)
-	if err != nil {
-		budget = DefaultAgentChainBudget
-	}
-	// Zero is the explicit "unlimited" setting. Keep the server-side guard
-	// disabled for this issue while retaining the default for absent/invalid
-	// settings.
-	if budget == 0 {
-		return nil
-	}
-	count, err := s.Queries.CountDelegatedTasksSinceHumanComment(ctx, issue.ID)
-	if err != nil || count < int64(budget) {
-		return nil
-	}
-
-	// Set the notice marker first. The metadata mutation is conditional, so
-	// concurrent agents create at most one explanatory system comment.
-	_, markErr := s.Queries.SetIssueMetadataKey(ctx, db.SetIssueMetadataKeyParams{
-		ID: issue.ID, WorkspaceID: issue.WorkspaceID,
-		Key: agentChainBudgetNotifiedKey, Value: []byte("true"),
-	})
-	if markErr == nil {
-		s.createAgentChainBudgetNotice(ctx, issue, budget, triggerCommentID)
-	}
-	return ErrAgentChainBudgetExceeded
-}
-
-func (s *TaskService) createAgentChainBudgetNotice(ctx context.Context, issue db.Issue, budget int32, triggerCommentID pgtype.UUID) {
-	creator := "the issue creator"
-	mention := ""
-	if issue.CreatorType == "member" && issue.CreatorID.Valid {
-		if user, err := s.Queries.GetUser(ctx, issue.CreatorID); err == nil {
-			creator = user.Name
-			creator = strings.ReplaceAll(strings.ReplaceAll(creator, "[", ""), "]", "")
-			mention = fmt.Sprintf("[@%s](mention://member/%s) ", creator, util.UUIDToString(issue.CreatorID))
-		}
-	}
-	parentID := pgtype.UUID{}
-	var rootComment *db.Comment
-	if triggerCommentID.Valid {
-		if comment, err := s.Queries.GetCommentInWorkspace(ctx, db.GetCommentInWorkspaceParams{
-			ID: triggerCommentID, WorkspaceID: issue.WorkspaceID,
-		}); err == nil && comment.IssueID == issue.ID {
-			parentID = triggerCommentID
-			if root, rootErr := s.Queries.GetThreadRoot(ctx, db.GetThreadRootParams{
-				CommentID: triggerCommentID, WorkspaceID: issue.WorkspaceID,
-			}); rootErr == nil {
-				rootComment = &root
-			} else {
-				rootComment = &comment
-			}
-		}
-	}
-	created, err := s.Queries.CreateComment(ctx, db.CreateCommentParams{
-		ViaBotID:   botsource.FromContext(ctx).ID,
-		ViaBotName: botName(ctx),
-		ID:         dbid.NewV7(), IssueID: issue.ID, WorkspaceID: issue.WorkspaceID,
-		AuthorType: "system", AuthorID: pgtype.UUID{Valid: true},
-		Content: fmt.Sprintf("%sAgent delegation chain reached the limit of %d runs. Add a human comment to reset the budget and continue, or raise the limit in workspace settings.", mention, budget),
-		Type:    "system", ParentID: parentID,
-	})
-	if err != nil {
-		slog.Warn("agent chain budget notice: create system comment failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
-		return
-	}
-	if s.Bus != nil {
-		s.Bus.Publish(events.Event{
-			Type:        protocol.EventCommentCreated,
-			WorkspaceID: util.UUIDToString(issue.WorkspaceID), ActorType: "system",
-			Payload: map[string]any{"comment": created.Comment(), "issue_title": issue.Title, "issue_revision": created.IssueRevision},
-		})
-	}
-	s.AutoUnresolveThreadOnReply(ctx, rootComment, util.UUIDToString(issue.WorkspaceID), "system", "", pgtype.UUID{})
+	return nil
 }
 
 // isDuplicatePendingTaskErr reports whether err is the pending-task unique-index
@@ -1127,8 +1043,6 @@ func (s *TaskService) taskMetricsContext(ctx context.Context, task db.AgentTaskQ
 	default:
 		if _, ok := s.parseQuickCreateContext(task); ok {
 			source = "quick_create"
-		} else if _, ok := ParseConsultContext(task); ok {
-			source = "consult"
 		} else if tc.Source != "" {
 			source = tc.Source
 		}
@@ -1216,10 +1130,6 @@ func (s *TaskService) taskAnalyticsContext(ctx context.Context, task db.AgentTas
 		tc.WorkspaceID = qc.WorkspaceID
 		tc.UserID = qc.RequesterID
 		tc.Source = analytics.SourceManual
-	}
-	if cc, ok := ParseConsultContext(task); ok {
-		tc.WorkspaceID = cc.WorkspaceID
-		tc.UserID = util.UUIDToString(task.OriginatorUserID)
 	}
 	s.storeTaskAnalyticsContext(task, tc)
 	return tc
@@ -5490,12 +5400,6 @@ func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgt
 	if qc, ok := s.parseQuickCreateContext(task); ok {
 		s.notifyQuickCreateCompleted(ctx, task, qc, result)
 	}
-	// Consult runs (DENE-1721): the final output is the advice.
-	if cc, ok := ParseConsultContext(task); ok {
-		var payload protocol.TaskCompletedPayload
-		_ = json.Unmarshal(result, &payload)
-		s.finishConsult(ctx, task, cc, util.UnescapeBackslashEscapes(payload.Output), "")
-	}
 
 	// For chat tasks, broadcast chat:done AFTER commit. The single assistant
 	// outcome row (message or no_response) and the resume pointer were already
@@ -6163,40 +6067,28 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 		}
 	}
 
-	// A quota exhaustion takes the relay path the sweeper already uses. A
-	// hold means the issue was reassigned or blocked on purpose, so the
-	// provider's English sentence is not the last word.
-	capacityHeld := false
-	if retried == nil && task.IssueID.Valid {
-		capacityHeld = s.relayQuotaExhaustion(ctx, task, failureReason, errMsg)
-	}
-	if retried == nil && task.IssueID.Valid && !capacityHeld {
-		capacityHeld = s.relaySafetyRefusal(ctx, task, errMsg)
-	}
-
 	// A platform interrupt (daemon shutdown while the server still considered
 	// the run alive) always leaves a notice, including when a retry was just
 	// queued. Other failures stay quiet on the retry path so a flaky timeout
 	// does not post a comment on every attempt. Delegated failures keep this
 	// existing failed-issue comment in addition to the coordinator recovery
-	// signal. A capacity relay posts its own audit instead of the raw
-	// provider sentence.
+	// signal.
 	if isServerInterruptFailure(failureReason) && task.IssueID.Valid {
 		s.noteServerInterrupt(ctx, task, retried)
 	} else if deterministicEscalated && task.IssueID.Valid {
 		s.noteDeterministicFailure(ctx, task, failureReason)
-	} else if errMsg != "" && task.IssueID.Valid && retried == nil && !capacityHeld {
+	} else if errMsg != "" && task.IssueID.Valid && retried == nil {
 		s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(failureCommentBody(failureReason, errMsg)), "system", task.TriggerCommentID, task.ID)
 	}
 	// Every failure that ends here with no retry queued, delegated or not,
 	// leaves the issue with a driver (DENE-1339). Delegated recovery that
-	// found its coordinator already did both parts; a capacity relay and the
-	// two notices above write their own block. Everything else used to fall
+	// found its coordinator already did both parts; the two notices above
+	// write their own block. Everything else used to fall
 	// between the two paths: a run delegated from a chat has no coordinator
 	// issue to recover to, and the parent note skipped it for being delegated.
 	if retried == nil && task.IssueID.Valid && !delegatedHandled {
 		parked := false
-		if !capacityHeld && !deterministicEscalated && !isServerInterruptFailure(failureReason) {
+		if !deterministicEscalated && !isServerInterruptFailure(failureReason) {
 			parked = s.parkFailedIssue(ctx, task)
 		}
 		s.noteParentOfChildRunFailure(ctx, task, parked)
@@ -6207,13 +6099,6 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 	// without losing their original prompt. Skipped when an auto-retry is
 	// pending — the new attempt will write its own outcome.
 	if retried == nil {
-		if cc, ok := ParseConsultContext(task); ok {
-			reason := strings.TrimSpace(errMsg)
-			if reason == "" {
-				reason = failureReason
-			}
-			s.finishConsult(ctx, task, cc, "", reason)
-		}
 		if qc, ok := s.parseQuickCreateContext(task); ok {
 			attached, attachedErr := s.sourceContextAttachedByTask(ctx, task, qc)
 			switch {
@@ -8056,7 +7941,6 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 	affectedAgents := make(map[string]pgtype.UUID)
 	processedIssues := make(map[string]bool)
 	retriedIssues := make(map[string]bool)
-	quotaHeldIssues := make(map[string]bool)
 	timeLimitHeld := make(map[string]bool)
 	delegatedHandled := make(map[string]bool)
 	retried := 0
@@ -8098,21 +7982,6 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 			}
 		}
 		if !retryPending {
-			// Quota exhaustion is not retried (DENE-675). A capacity miss
-			// reaches this call only because MaybeRetryFailedTask just
-			// declined it. Break the spent seat and hand the unfinished
-			// issue to another seat before the in_progress → todo reset
-			// below looks for an active task.
-			hold, err := s.RelayQuotaFailure(ctx, t)
-			if err != nil {
-				slog.Warn("handle failed tasks: quota relay failed",
-					"task_id", util.UUIDToString(t.ID),
-					"error", err,
-				)
-			}
-			if hold && t.IssueID.Valid {
-				quotaHeldIssues[util.UUIDToString(t.IssueID)] = true
-			}
 			handled, err := s.recoverDelegatedTaskFailure(ctx, t)
 			if err != nil {
 				slog.Warn("handle failed tasks: delegated failure recovery failed",
@@ -8125,9 +7994,9 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 				delegatedHandled[util.UUIDToString(t.IssueID)] = true
 			}
 			// Same terminal-failure comment FailTaskWithTransition posts, so
-			// swept tasks are not silent on their issue. A quota relay and the
-			// time-limit give-up notice already wrote their own.
-			if t.IssueID.Valid && t.Error.String != "" && !hold && failureReason != string(taskfailure.ReasonTaskTimeLimit) {
+			// swept tasks are not silent on their issue. The time-limit
+			// give-up notice already wrote its own.
+			if t.IssueID.Valid && t.Error.String != "" && failureReason != string(taskfailure.ReasonTaskTimeLimit) {
 				s.createAgentComment(ctx, t.IssueID, t.AgentID, redact.Text(failureCommentBody(failureReason, t.Error.String)), "system", t.TriggerCommentID, t.ID)
 			}
 		}
@@ -8155,7 +8024,7 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 				// FailTask leaves (DENE-1339). Only an issue the park declines
 				// — a person's, or nobody's — still goes back to todo.
 				effectiveStatus := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status)
-				if effectiveStatus == "in_progress" && !processedIssues[issueKey] && !retriedIssues[issueKey] && !quotaHeldIssues[issueKey] && !timeLimitHeld[issueKey] {
+				if effectiveStatus == "in_progress" && !processedIssues[issueKey] && !retriedIssues[issueKey] && !timeLimitHeld[issueKey] {
 					processedIssues[issueKey] = true
 					parked := false
 					if !delegatedHandled[issueKey] {
@@ -9630,9 +9499,6 @@ func (s *TaskService) ResolveTaskWorkspaceIDChecked(ctx context.Context, task db
 	// broadcasts, which is why quick-create tasks appeared stuck queued.
 	if qc, ok := s.parseQuickCreateContext(task); ok {
 		return qc.WorkspaceID, nil
-	}
-	if cc, ok := ParseConsultContext(task); ok {
-		return cc.WorkspaceID, nil
 	}
 	if lookupErr != nil {
 		return "", fmt.Errorf("resolve task workspace: %w", lookupErr)

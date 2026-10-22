@@ -28,16 +28,8 @@ var agentCmd = &cobra.Command{
 var agentListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List agents in the workspace",
-	Long: `List agents in the workspace.
-
-With --for-issue or --for-project, each agent carries a "fit" for that work
-and the list is ordered by it, the same judgement dispatch uses:
-  match    对口 — a specialisation for the work's domain (in a generic scene, a base role)
-  generic  通用 — a base role, the fallback
-  other    其他 — a specialisation for another domain, still selectable
-The work's domain is the issue's own domain, else its project's domains,
-else generic.`,
-	RunE: runAgentList,
+	Long:  `List agents in the workspace.`,
+	RunE:  runAgentList,
 }
 
 var agentGetCmd = &cobra.Command{
@@ -219,14 +211,12 @@ func init() {
 	agentListCmd.Example = "  multica agent list --compact --output json\n  multica agent list --fields id,name,status --output json --workspace \"My workspace\""
 	agentListCmd.Flags().String("output", "table", "Output format: table or json")
 	agentListCmd.Flags().Bool("include-archived", false, "Include archived agents")
-	agentListCmd.Flags().String("for-issue", "", "Group agents by fit for this issue (key or UUID); adds a fit field")
-	agentListCmd.Flags().String("for-project", "", "Group agents by fit for this project (UUID or prefix); adds a fit field")
 
 	// agent get
 	agentGetCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// agent create
-	agentCreateCmd.Flags().String("name", "", "Agent name (required unless --domain is given, which names the seat base role + domain)")
+	agentCreateCmd.Flags().String("name", "", "Agent name (required)")
 	agentCreateCmd.Flags().String("description", "", "Agent description")
 	agentCreateCmd.Flags().String("instructions", "", "Agent instructions")
 	agentCreateCmd.Flags().String("conversation-starters", "", "Conversation starters as a JSON array of {\"label\",\"prompt\"} objects (at most 3; label ≤80, prompt ≤4000). Shown above the Chat composer; selecting one fills the composer and does not start a run. Omit to default to none.")
@@ -234,8 +224,6 @@ func init() {
 	agentCreateCmd.Flags().String("runtime-config", "", "Runtime config as JSON string")
 	agentCreateCmd.Flags().String("model", "", "Model identifier (e.g. claude-sonnet-4-6, openai/gpt-4o). Prefer this over passing --model in --custom-args.")
 	agentCreateCmd.Flags().String("thinking-level", "", "Reasoning/effort level for the agent's runtime (e.g. Claude: low|medium|high|xhigh|max; Codex values come from the runtime model catalog). The set is runtime/model-specific; malformed values are rejected server-side and the daemon validates the exact model/level pair. Qwen Code takes only the levels its own settings declare for the model (capabilities.reasoning; `none` turns thinking off) and the server refuses anything else. `multica runtime models <runtime-id>` lists each model's levels. Some runtimes (e.g. hermes) expose no reasoning control and reject every value. Empty = runtime default.")
-	agentCreateCmd.Flags().String("series", "", "Custom series name (up to 64 characters); omit for automatic CLI/model classification")
-	agentCreateCmd.Flags().String("routing-tier", "", "Seat strength for automatic dispatch: strongest|strong|medium|weak (the Chinese labels 最强/强/中/弱 are accepted too). Empty leaves the seat off the routing ladder; a specialisation with no value inherits its base role's tier.")
 	agentCreateCmd.Flags().String("service-tier", "", "Codex execution speed: empty = inherit local Codex configuration; default = explicit Standard when supported by the daemon's installed Codex CLI; a catalog tier such as priority = explicit Fast.")
 	agentCreateCmd.Flags().String("custom-args", "", "Custom CLI arguments as JSON array. For model selection prefer --model; Codex-style -c key=value is rejected on runtimes that reserve -c for session continuation (Claude, CodeBuddy, OpenCode, Pi and others), and session-resume flags are always dropped because the daemon owns which session a run continues.")
 	agentCreateCmd.Flags().String("custom-env", "", "Custom environment variables as JSON object, e.g. '{\"KEY\":\"value\"}'. Treated as secret material — never logged by the CLI, but values passed on the command line are visible to shell history and 'ps'; prefer --custom-env-stdin or --custom-env-file for real secrets. Pass '{}' to set an empty map.")
@@ -251,7 +239,6 @@ func init() {
 	agentCreateCmd.Flags().Int32("max-concurrent-tasks", 6, "Maximum concurrent runs (1-50)")
 	agentCreateCmd.Flags().String("parent-agent-id", "", "Base role to specialise: the new agent inherits that agent's prompt (prepended at run time), skills, and — unless --runtime-inherited=false — its runtime configuration (runtime, model, thinking level). Must be a base role itself — a specialisation cannot be specialised further. Empty = an independent base role.")
 	agentCreateCmd.Flags().String("base-role", "", "Base role to specialise, by name or id (same as --parent-agent-id, which takes an id)")
-	agentCreateCmd.Flags().String("domain", "", "Workspace domain of the new specialisation (needs --base-role). The name becomes base role + domain; a base role has one specialisation per domain. See `multica domain list`")
 	agentCreateCmd.Flags().Bool("runtime-inherited", false, "Specialisation only: follow the base role's runtime configuration (runtime_id, model, thinking_level, service_tier, runtime_config). Default for a specialisation; pass --runtime-inherited=false together with --runtime-id to give it its own. Rejected without --parent-agent-id.")
 	agentCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
@@ -265,11 +252,6 @@ func init() {
 	agentUpdateCmd.Flags().String("runtime-config", "", "New runtime config as JSON string")
 	agentUpdateCmd.Flags().String("model", "", "New model identifier. Pass an empty string to clear and fall back to the runtime default.")
 	agentUpdateCmd.Flags().String("thinking-level", "", "New reasoning/effort level for the agent's runtime (e.g. Claude: low|medium|high|xhigh|max; Codex values come from the runtime model catalog). The set is runtime/model-specific; malformed values are rejected server-side and the daemon validates the exact model/level pair. Qwen Code takes only the levels its own settings declare for the model (capabilities.reasoning; `none` turns thinking off) and the server refuses anything else. `multica runtime models <runtime-id>` lists each model's levels. Some runtimes (e.g. hermes) expose no reasoning control and reject every value. Pass an empty string to clear and fall back to the runtime default. Takes effect from the next run; a run already going keeps the level it started with.")
-	agentUpdateCmd.Flags().String("routing-tier", "", "New seat strength for automatic dispatch: strongest|strong|medium|weak (the Chinese labels 最强/强/中/弱 are accepted too). Pass an empty string to take the seat off the routing ladder. A specialisation that follows its base role cannot set this; change the base role, or pass --runtime-inherited=false first.")
-	agentUpdateCmd.Flags().String("dispatch-mode", "", "Whether automatic dispatch may pick this seat: auto|mention_only. mention_only seats are still reached by @mention, assignment and delegation, but routing, quota relay and seat relay never pick them. Independent of --routing-tier and --work-enabled. A specialisation that follows its base role cannot set this; change the base role, or pass --runtime-inherited=false first.")
-	agentUpdateCmd.Flags().String("dispatch-projects", "", "Limit automatic dispatch to tickets in these projects: comma-separated project ids, id prefixes or exact titles. Routing, quota relay and seat relay pick the seat only for tickets in one of them; @mention, assignment and delegation are not limited. Pass an empty value to serve every project again.")
-	agentUpdateCmd.Flags().String("series", "", "Series preference group (up to 64 characters); empty restores automatic CLI/model classification. JSON responses include series, series_source, automatic_series and series_override.")
-	agentUpdateCmd.Flags().String("routing-usage", "", "New usage tag for automatic dispatch: tight|normal|ample (the Chinese labels 紧张/常规/充足 are accepted too). A specialisation that follows its base role cannot set this; change the base role, or pass --runtime-inherited=false first.")
 	agentUpdateCmd.Flags().String("service-tier", "", "New Codex execution speed: default = explicit Standard when supported by the daemon's installed Codex CLI; a catalog tier such as priority = explicit Fast. Pass an empty string to clear and inherit local Codex configuration.")
 	agentUpdateCmd.Flags().String("custom-args", "", "New custom CLI arguments as JSON array. For model selection prefer --model; Codex-style -c key=value is rejected on runtimes that reserve -c for session continuation (Claude, CodeBuddy, OpenCode, Pi and others), and session-resume flags are always dropped because the daemon owns which session a run continues.")
 	// custom_env is intentionally NOT part of `agent update`. Use
@@ -292,7 +274,7 @@ func init() {
 	agentUpdateCmd.Flags().Int32("max-concurrent-tasks", 0, "New max concurrent runs (1-50)")
 	agentUpdateCmd.Flags().String("parent-agent-id", "", "Attach this existing agent to a base role, or pass an empty string to detach it. Detaching here does NOT keep the inherited prompt — use 'multica agent solidify <id>' for the non-lossy unbind. An agent that already has specialisations cannot be attached (two levels only).")
 	agentUpdateCmd.Flags().Bool("runtime-inherited", false, "Follow the base role's runtime configuration (true), or keep this agent's own (false). Copied immediately in both directions; opting out keeps the values the agent is running with now. Refused on a base role, and refused in the same call as a runtime flag (--runtime-id/--model/--thinking-level/--service-tier/--runtime-config) while following.")
-	agentUpdateCmd.Flags().Bool("work-enabled", true, "Open (true) or close (false) the seat for work, e.g. --work-enabled=false. A closed seat refuses new runs and stays out of dispatch. On a base role every specialisation follows. Turning a seat back on also requeues the todo / in_progress issues it still owns that have no run.")
+	agentUpdateCmd.Flags().Bool("work-enabled", true, "Open (true) or close (false) the seat for work, e.g. --work-enabled=false. A closed seat refuses new runs. On a base role every specialisation follows. Turning a seat back on also requeues the todo / in_progress issues it still owns that have no run.")
 	agentUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// agent archive
@@ -647,26 +629,6 @@ func runAgentList(cmd *cobra.Command, _ []string) error {
 	if v, _ := cmd.Flags().GetBool("include-archived"); v {
 		params.Set("include_archived", "true")
 	}
-	forIssue, _ := cmd.Flags().GetString("for-issue")
-	forProject, _ := cmd.Flags().GetString("for-project")
-	if forIssue != "" && forProject != "" {
-		return fmt.Errorf("--for-issue and --for-project are exclusive")
-	}
-	if forIssue != "" {
-		ref, err := resolveIssueRef(ctx, client, forIssue)
-		if err != nil {
-			return fmt.Errorf("resolve issue: %w", err)
-		}
-		params.Set("for_issue", ref.ID)
-	}
-	if forProject != "" {
-		ref, err := resolveProjectID(ctx, client, forProject)
-		if err != nil {
-			return fmt.Errorf("resolve project: %w", err)
-		}
-		params.Set("for_project", ref.ID)
-	}
-	withFit := forIssue != "" || forProject != ""
 	fields, err := listShapeQuery(cmd, params, listshape.Agent)
 	if err != nil {
 		return err
@@ -685,10 +647,7 @@ func runAgentList(cmd *cobra.Command, _ []string) error {
 		return cli.PrintJSON(os.Stdout, agents)
 	}
 
-	headers := []string{"ID", "NAME", "STATUS", "RUNTIME", "SERIES", "SOURCE", "ARCHIVED"}
-	if withFit {
-		headers = append(headers, "FIT")
-	}
+	headers := []string{"ID", "NAME", "STATUS", "RUNTIME", "ARCHIVED"}
 	rows := make([][]string, 0, len(agents))
 	for _, a := range agents {
 		archived := ""
@@ -700,12 +659,7 @@ func runAgentList(cmd *cobra.Command, _ []string) error {
 			strVal(a, "name"),
 			strVal(a, "status"),
 			strVal(a, "runtime_mode"),
-			strVal(a, "series"),
-			strVal(a, "series_source"),
 			archived,
-		}
-		if withFit {
-			row = append(row, strVal(a, "fit"))
 		}
 		rows = append(rows, row)
 	}
@@ -732,15 +686,13 @@ func runAgentGet(cmd *cobra.Command, args []string) error {
 		return cli.PrintJSON(os.Stdout, agent)
 	}
 
-	headers := []string{"ID", "NAME", "STATUS", "RUNTIME", "FALLBACK_RUNTIME", "SERIES", "SOURCE", "VISIBILITY", "AVATAR_URL", "DESCRIPTION"}
+	headers := []string{"ID", "NAME", "STATUS", "RUNTIME", "FALLBACK_RUNTIME", "VISIBILITY", "AVATAR_URL", "DESCRIPTION"}
 	rows := [][]string{{
 		strVal(agent, "id"),
 		strVal(agent, "name"),
 		strVal(agent, "status"),
 		strVal(agent, "runtime_mode"),
 		strVal(agent, "fallback_runtime_id"),
-		strVal(agent, "series"),
-		strVal(agent, "series_source"),
 		strVal(agent, "visibility"),
 		strVal(agent, "avatar_url"),
 		strVal(agent, "description"),
@@ -788,10 +740,8 @@ func runAgentCreate(cmd *cobra.Command, _ []string) error {
 	}
 
 	name, _ := cmd.Flags().GetString("name")
-	domain, _ := cmd.Flags().GetString("domain")
-	domain = strings.TrimSpace(domain)
-	if name == "" && domain == "" {
-		return fmt.Errorf("--name is required (or --base-role with --domain, which names the seat)")
+	if name == "" {
+		return fmt.Errorf("--name is required")
 	}
 	runtimeID, _ := cmd.Flags().GetString("runtime-id")
 	parentAgentID, _ := cmd.Flags().GetString("parent-agent-id")
@@ -807,9 +757,6 @@ func runAgentCreate(cmd *cobra.Command, _ []string) error {
 			return fmt.Errorf("resolve base role: %w", err)
 		}
 		parentAgentID = id
-	}
-	if domain != "" && parentAgentID == "" {
-		return fmt.Errorf("--domain needs --base-role: only a specialisation works in a domain")
 	}
 
 	// Runtime inheritance (DENE-505). A specialisation follows its base role's
@@ -833,10 +780,6 @@ func runAgentCreate(cmd *cobra.Command, _ []string) error {
 	}
 	if runtimeID != "" {
 		body["runtime_id"] = runtimeID
-	}
-	if cmd.Flags().Changed("series") {
-		v, _ := cmd.Flags().GetString("series")
-		body["series"] = v
 	}
 	if cmd.Flags().Changed("runtime-inherited") {
 		body["runtime_inherited"] = inheritRuntime
@@ -892,10 +835,6 @@ func runAgentCreate(cmd *cobra.Command, _ []string) error {
 		v, _ := cmd.Flags().GetString("service-tier")
 		body["service_tier"] = v
 	}
-	if cmd.Flags().Changed("routing-tier") {
-		v, _ := cmd.Flags().GetString("routing-tier")
-		body["routing_tier"] = v
-	}
 	if cmd.Flags().Changed("visibility") {
 		v, _ := cmd.Flags().GetString("visibility")
 		body["visibility"] = v
@@ -913,9 +852,6 @@ func runAgentCreate(cmd *cobra.Command, _ []string) error {
 	// only sent when it carries an id.
 	if parentAgentID != "" {
 		body["parent_agent_id"] = parentAgentID
-	}
-	if domain != "" {
-		body["domain_id"] = domain
 	}
 
 	ctx, cancel := cli.APIContext(context.Background())
@@ -999,30 +935,6 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetString("service-tier")
 		body["service_tier"] = v
 	}
-	if cmd.Flags().Changed("routing-tier") {
-		v, _ := cmd.Flags().GetString("routing-tier")
-		body["routing_tier"] = v
-	}
-	if cmd.Flags().Changed("dispatch-mode") {
-		v, _ := cmd.Flags().GetString("dispatch-mode")
-		body["dispatch_mode"] = v
-	}
-	if cmd.Flags().Changed("series") {
-		v, _ := cmd.Flags().GetString("series")
-		body["series"] = v
-	}
-	if cmd.Flags().Changed("routing-usage") {
-		v, _ := cmd.Flags().GetString("routing-usage")
-		body["routing_usage"] = v
-	}
-	if cmd.Flags().Changed("dispatch-projects") {
-		v, _ := cmd.Flags().GetString("dispatch-projects")
-		ids, err := resolveDispatchProjects(client, v)
-		if err != nil {
-			return err
-		}
-		body["dispatch_projects"] = ids
-	}
 	if cmd.Flags().Changed("visibility") {
 		v, _ := cmd.Flags().GetString("visibility")
 		body["visibility"] = v
@@ -1069,7 +981,7 @@ func runAgentUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --conversation-starters, --runtime-id, --fallback-runtime, --runtime-config, --model, --thinking-level, --service-tier, --routing-tier, --routing-usage, --series, --dispatch-mode, --dispatch-projects, --custom-args, --mcp-config, --visibility, --status, --max-concurrent-tasks, --parent-agent-id, --runtime-inherited, or --work-enabled (env vars now live behind `multica agent env set <id>`)")
+		return fmt.Errorf("no fields to update; use --name, --description, --instructions, --conversation-starters, --runtime-id, --fallback-runtime, --runtime-config, --model, --thinking-level, --service-tier, --custom-args, --mcp-config, --visibility, --status, --max-concurrent-tasks, --parent-agent-id, --runtime-inherited, or --work-enabled (env vars now live behind `multica agent env set <id>`)")
 	}
 
 	ctx, cancel := cli.APIContext(context.Background())
@@ -1915,42 +1827,4 @@ func strVal(m map[string]any, key string) string {
 		return ""
 	}
 	return fmt.Sprintf("%v", v)
-}
-
-// resolveDispatchProjects turns --dispatch-projects into project ids. An empty
-// value is an empty list, which lifts the limit. An entry matching a project
-// title exactly wins over id-prefix matching.
-func resolveDispatchProjects(client *cli.APIClient, raw string) ([]string, error) {
-	ids := []string{}
-	if strings.TrimSpace(raw) == "" {
-		return ids, nil
-	}
-	ctx, cancel := cli.APIContext(context.Background())
-	defer cancel()
-	projects, err := fetchProjectCandidates(ctx, client)
-	if err != nil {
-		return nil, fmt.Errorf("list projects: %w", err)
-	}
-	for _, entry := range strings.Split(raw, ",") {
-		entry = strings.TrimSpace(entry)
-		if entry == "" {
-			continue
-		}
-		id := ""
-		for _, p := range projects {
-			if p.Display == entry {
-				id = p.ID
-				break
-			}
-		}
-		if id == "" {
-			resolved, err := resolveProjectID(ctx, client, entry)
-			if err != nil {
-				return nil, fmt.Errorf("--dispatch-projects %q: %w", entry, err)
-			}
-			id = resolved.ID
-		}
-		ids = append(ids, id)
-	}
-	return ids, nil
 }

@@ -291,22 +291,14 @@ func issueCreateLong() string {
 		"is for one short line (the shell rewrites quotes, backticks and $() first).\n" +
 		"The title already serves as the H1, so start the body with prose or ##\n" +
 		"subheadings; add a # H1 only when the user asks for one.\n\n" +
-		"Status: leave it out (todo) for work that should start now; routing never\n" +
-		"picks up backlog. Use --status backlog only for work that waits on\n" +
+		"Status: leave it out (todo) for work that should start now; backlog does\n" +
+		"not start. Use --status backlog only for work that waits on\n" +
 		"something, and say what with --waiting-for \"<one line>\" (agents are\n" +
 		"refused without it; staged sub-issues are exempt).\n\n" +
 		"Sub-issues: --parent <issue>; --status todo starts an agent-assigned child\n" +
 		"at once, --status backlog --stage <N> parks a later stage until the stage\n" +
 		"before it finishes.\n\n" +
-		"Executor: leave --assignee out and routing picks the agent (tier by scope\n" +
-		"and risk, the project's direction, who is online). Outside an agent run the\n" +
-		"answer is waited for and printed as \"routing\": source (原话 / 人工 / 档位 /\n" +
-		"兜底), agent, tier, reason, candidates; --routing-wait=false returns at once\n" +
-		"and routing fills the slot in the background (read the 自动选派 comment).\n" +
-		"Name --assignee to choose yourself: a person's pick stands (人工), and so\n" +
-		"does a bot key's — it acts for the member who holds it; an agent's pick\n" +
-		"needs --per-quote on a todo ticket, otherwise routing decides and the\n" +
-		"response says assignee_ignored.\n\n" +
+		"Executor: --assignee names who does it; the pick stands as written.\n\n" +
 		"Properties: --property \"Name=Value\" sets a custom property atomically\n" +
 		"with creation (repeatable, one distinct property per flag). For multi_text /\n" +
 		"multi_url, use a JSON array of strings when entries contain commas or the\n" +
@@ -345,8 +337,8 @@ var issueStatusCmd = &cobra.Command{
 		"prints a warning: the platform cannot tell when to wake the issue. An agent must\n" +
 		"also pass --block-kind and --block-action (what the parent's blocker card shows);\n" +
 		"the server refuses the move without them.\n" +
-		"A blocked issue with no executor is seated by routing (parked, no run starts);\n" +
-		"the command reports whether that happened and, if not, why.",
+		"A blocked issue with no executor gets a warning: when the wait ends nobody\n" +
+		"can be woken, so assign one.",
 	Args: exactArgs(2),
 	RunE: runIssueStatus,
 }
@@ -400,7 +392,7 @@ var issueDisposeCmd = &cobra.Command{
 		"The patrol reruns such an issue on its own seat, then asks the parent's\n" +
 		"executor to pick one of:\n\n" +
 		"  --action rerun                     run it again on the same seat\n" +
-		"  --action reroute                   empty the executor seat; routing picks anew\n" +
+		"  --action reroute                   empty the executor seat for someone to fill\n" +
 		"  --action split --into \"title\"      create sub-issues (repeat --into, up to 10)\n" +
 		"                                     and block this issue on them\n" +
 		"  --action cancel --reason \"...\"     cancel it, with the reason on the issue\n\n" +
@@ -417,12 +409,11 @@ var issueHandoffCmd = &cobra.Command{
 	Long: "One command for handing an issue on. The server resolves the target, skips a\n" +
 		"target that already has an active run on this issue, and replies with what\n" +
 		"actually landed — never a hand-written @mention.\n\n" +
-		"  --to reviewer     the acceptance seat; refused if a person holds the seat\n" +
-		"  --to dispatcher   let routing pick the next owner\n" +
+		"  --to reviewer     the issue's agent reviewer; moves it to in_review, refused\n" +
+		"                    if the reviewer is empty or a person\n" +
 		"  --to <agent>      a named agent (name or id)\n\n" +
-		"Setting in_review already hands over: `multica issue status <id> in_review`\n" +
-		"routes the acceptance seat itself. The response reports target_name,\n" +
-		"run_created and duplicate — quote them, do not restate them from memory.",
+		"The response reports target_name, run_created and duplicate — quote them,\n" +
+		"do not restate them from memory.",
 	Args: exactArgs(1),
 	RunE: runIssueHandoff,
 }
@@ -828,18 +819,14 @@ func init() {
 	issueCreateCmd.Flags().String("status", "", "Issue status")
 	issueCreateCmd.Flags().String("priority", "", "Issue priority")
 	issueCreateCmd.Flags().String("assignee", "", "Assignee name (member, agent, or squad; fuzzy match)")
-	issueCreateCmd.Flags().String("per-quote", "", "Only when you are an agent: the person's exact words naming this assignee; naming the base role (e.g. 孙悟空) is enough, you pick the direction by project. The server checks earlier messages in the direct chat or issue thread; a quote that does not check out is set aside and routing picks the executor")
 	issueCreateCmd.Flags().String("assignee-id", "", "Assignee UUID — member, agent, or squad (mutually exclusive with --assignee)")
 	issueCreateCmd.Flags().String("parent", "", "Parent issue ID")
 	issueCreateCmd.Flags().Int("stage", 0, "Stage ordinal (>=1) grouping this sub-issue into an ordered barrier group under its parent; omit for unstaged. The parent assignee is woken only when every sub-issue in a stage finishes.")
 	issueCreateCmd.Flags().String("project", "", "Project UUID, prefix or exact name (case-insensitive)")
-	issueCreateCmd.Flags().String("domain", "", "Issue domain: one of the project's domains, or 通用 for generic (default: the project's only domain). Routing and --per-quote pick the specialisation by it")
 	issueCreateCmd.Flags().String("start-date", "", "Start date (calendar day, YYYY-MM-DD)")
 	issueCreateCmd.Flags().String("due-date", "", "Due date (calendar day, YYYY-MM-DD)")
 	issueCreateCmd.Flags().String("waiting-for", "", "What this backlog issue is waiting for, one line (80 chars max). Required when an agent puts an issue in backlog; nothing to wait for means use todo")
 	issueCreateCmd.Flags().Bool("allow-duplicate", false, "Allow creating an issue even when an active duplicate exists")
-	issueCreateCmd.Flags().String("routing-facts", "", `Routing facts as JSON, so routing skips the analysis call: {"scope":"small|module|cross_module","clarity":"clear|vague","risk":"low|medium|high","needs_human":false,"summary":"..."}`)
-	issueCreateCmd.Flags().Bool("routing-wait", true, "Wait for routing to pick the executor and print it as \"routing\" (who, why, tier). Default on for people and bot keys, off inside an agent run; =false returns at once and routing fills the slot in the background")
 	issueCreateCmd.Flags().String("output", "json", "Output format: table or json")
 	issueCreateCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times). Each file is uploaded and its markdown reference is appended to the description, which is what makes it render on the issue page")
 	issueCreateCmd.Flags().StringSlice("attachment-id", nil, "Existing attachment UUID(s) to bind to the created issue (can be specified multiple times)")
@@ -855,11 +842,9 @@ func init() {
 	issueUpdateCmd.Flags().String("status", "", "New status")
 	issueUpdateCmd.Flags().String("priority", "", "New priority")
 	issueUpdateCmd.Flags().String("assignee", "", "New assignee name (member, agent, or squad; fuzzy match)")
-	issueUpdateCmd.Flags().String("per-quote", "", "Only when you are an agent: the person's exact words naming this assignee; naming the base role (e.g. 孙悟空) is enough, you pick the direction by project. The server checks earlier messages in the direct chat or issue thread; a quote that does not check out is set aside and routing picks the executor")
 	issueUpdateCmd.Flags().String("assignee-id", "", "New assignee UUID — member, agent, or squad (mutually exclusive with --assignee)")
 	issueUpdateCmd.Flags().String("reviewer", "", "验收席 — who accepts this issue: a member or agent name, \"none\" for no acceptance pass, or \"\" to clear the slot")
 	issueUpdateCmd.Flags().String("project", "", "Project UUID, prefix or exact name (case-insensitive)")
-	issueUpdateCmd.Flags().String("domain", "", "Issue domain: one of the project's domains, or 通用 / \"\" for generic")
 	issueUpdateCmd.Flags().String("start-date", "", "New start date (calendar day, YYYY-MM-DD; pass empty string to clear)")
 	issueUpdateCmd.Flags().String("due-date", "", "New due date (calendar day, YYYY-MM-DD)")
 	issueUpdateCmd.Flags().String("parent", "", "Parent issue ID (use --parent \"\" to clear)")
@@ -897,7 +882,6 @@ func init() {
 	issueAssignCmd.Flags().String("to", "", "Assignee name (member, agent, or squad; fuzzy match)")
 	issueAssignCmd.Flags().String("to-id", "", "Assignee UUID — member, agent, or squad (mutually exclusive with --to)")
 	issueAssignCmd.Flags().Bool("unassign", false, "Remove current assignee")
-	issueAssignCmd.Flags().String("per-quote", "", "Only when you are an agent: the person's exact words naming this assignee; naming the base role (e.g. 孙悟空) is enough, you pick the direction by project. The server checks earlier messages in the direct chat or issue thread; a quote that does not check out is set aside and routing picks the executor")
 	issueAssignCmd.Flags().Bool("no-start", false, "Assign ownership without starting an agent run")
 	issueAssignCmd.Flags().String("output", "json", "Output format: table or json")
 
@@ -1816,10 +1800,6 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 			body["project_id"] = project.ID
 		}
 	}
-	if cmd.Flags().Changed("domain") {
-		v, _ := cmd.Flags().GetString("domain")
-		body["domain_id"] = strings.TrimSpace(v)
-	}
 	if cmd.Flags().Changed("stage") {
 		stage, _ := cmd.Flags().GetInt("stage")
 		if stage < 1 {
@@ -1836,14 +1816,6 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	if v, _ := cmd.Flags().GetBool("allow-duplicate"); v {
 		body["allow_duplicate"] = true
 	}
-	if v, _ := cmd.Flags().GetString("routing-facts"); strings.TrimSpace(v) != "" {
-		var facts map[string]any
-		if err := json.Unmarshal([]byte(v), &facts); err != nil {
-			return fmt.Errorf("--routing-facts must be a JSON object: %w", err)
-		}
-		// The server validates the values; the CLI only checks the shape.
-		body["routing_facts"] = facts
-	}
 	aType, aID, hasAssignee, resolveErr := pickAssigneeFromFlags(ctx, client, cmd, "assignee", "assignee-id", issueAssigneeKinds)
 	if resolveErr != nil {
 		return fmt.Errorf("resolve assignee: %w", resolveErr)
@@ -1851,13 +1823,6 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	if hasAssignee {
 		body["assignee_type"] = aType
 		body["assignee_id"] = aID
-		addPerQuote(cmd, body)
-	}
-	if issueCreateRoutingWait(cmd) {
-		// Ask for the routing answer in the response (DENE-1834). Inside an
-		// agent run the default is off: the run should not sit on a model
-		// call it does not need, and the 自动选派 comment reaches it anyway.
-		body["route_sync"] = true
 	}
 
 	// Quick-create stamp: when the daemon sets MULTICA_QUICK_CREATE_TASK_ID
@@ -1927,8 +1892,6 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("issue %s was created, but the server did not confirm its custom properties; review it before retrying: %w", issueDisplayKey(result), err)
 	}
 
-	noteIgnoredAssignee(result)
-
 	output, _ := cmd.Flags().GetString("output")
 	if output == "table" {
 		headers := []string{"KEY", "TITLE", "STATUS", "PRIORITY"}
@@ -1939,24 +1902,10 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 			strVal(result, "priority"),
 		}}
 		cli.PrintTable(os.Stdout, headers, rows)
-		if routing, ok := result["routing"].(map[string]any); ok {
-			fmt.Println(routingReceiptLine(routing))
-		}
 		return nil
 	}
 
 	return cli.PrintJSON(os.Stdout, result)
-}
-
-// issueCreateRoutingWait decides whether this create asks the server for the
-// routing answer inline: the flag when set, otherwise on for people and bot
-// keys and off inside an agent run.
-func issueCreateRoutingWait(cmd *cobra.Command) bool {
-	if cmd.Flags().Changed("routing-wait") {
-		v, _ := cmd.Flags().GetBool("routing-wait")
-		return v
-	}
-	return !inAgentExecutionContext()
 }
 
 func verifyIssueCreateProperties(expected map[string]json.RawMessage, issue map[string]any) error {
@@ -2084,14 +2033,6 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 			body["project_id"] = project.ID
 		}
 	}
-	if cmd.Flags().Changed("domain") {
-		v, _ := cmd.Flags().GetString("domain")
-		if strings.TrimSpace(v) == "" {
-			body["domain_id"] = nil
-		} else {
-			body["domain_id"] = strings.TrimSpace(v)
-		}
-	}
 	if cmd.Flags().Changed("start-date") {
 		v, _ := cmd.Flags().GetString("start-date")
 		body["start_date"] = v
@@ -2108,15 +2049,14 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		if hasAssignee {
 			body["assignee_type"] = aType
 			body["assignee_id"] = aID
-			addPerQuote(cmd, body)
 		}
 	}
 	if cmd.Flags().Changed("reviewer") {
 		v, _ := cmd.Flags().GetString("reviewer")
 		switch strings.TrimSpace(v) {
 		case "":
-			// Empty clears the slot back to undecided, so routing may fill it
-			// again. "none" is the opposite: it closes the question.
+			// Empty clears the slot back to undecided. "none" is the
+			// opposite: it closes the question.
 			body["reviewer_type"] = nil
 			body["reviewer_id"] = nil
 		case "none":
@@ -2218,8 +2158,6 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	noteIgnoredAssignee(result)
-
 	output, _ := cmd.Flags().GetString("output")
 	if output == "table" {
 		headers := []string{"KEY", "TITLE", "STATUS", "PRIORITY"}
@@ -2278,7 +2216,6 @@ func runIssueAssign(cmd *cobra.Command, args []string) error {
 		}
 		body["assignee_type"] = aType
 		body["assignee_id"] = aID
-		addPerQuote(cmd, body)
 		if displayTarget == "" {
 			displayTarget = loadActorDisplayLookup(ctx, client).actor(aType, aID)
 		}
@@ -2295,8 +2232,6 @@ func runIssueAssign(cmd *cobra.Command, args []string) error {
 	switch {
 	case unassign:
 		fmt.Fprintf(os.Stderr, "Issue %s unassigned.\n", issueDisplayKey(result))
-	case noteIgnoredAssignee(result):
-		// The hint says what happened; there is no "assigned to" to claim.
 	default:
 		fmt.Fprintf(os.Stderr, "Issue %s assigned to %s.\n", issueDisplayKey(result), displayTarget)
 	}
@@ -2386,13 +2321,7 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 		display := issueDisplayKey(result)
 		warnUnregisteredBlock(cmd, os.Stderr, display)
 		if assignee, _ := result["assignee_id"].(string); assignee == "" {
-			// Its own budget: the poll plus a synchronous route call must not
-			// eat the time the status write already used.
-			seatCtx, seatCancel := cli.APIContext(context.Background())
-			seat := reportBlockedSeat(seatCtx, client, issueRef.ID)
-			seatCancel()
-			printBlockedSeat(os.Stderr, display, seat)
-			result["routing_seat"] = seat
+			warnEmptyExecutor(os.Stderr, display)
 		}
 	}
 
@@ -2468,7 +2397,7 @@ func runIssueStatusBatch(cmd *cobra.Command, args []string) error {
 
 // registerIssueHandoffFlags wires `issue handoff`; shared with its tests.
 func registerIssueHandoffFlags(cmd *cobra.Command) {
-	cmd.Flags().String("to", "", "reviewer, dispatcher, or an agent name/id (required)")
+	cmd.Flags().String("to", "", "reviewer, or an agent name/id (required)")
 	cmd.Flags().String("output", "table", "Output format: table or json")
 }
 
@@ -3111,7 +3040,9 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 	}
 
 	body := map[string]any{"content": content}
-	addPerQuote(cmd, body)
+	if v, _ := cmd.Flags().GetString("per-quote"); v != "" {
+		body["per_quote"] = v
+	}
 	if parentID, _ := cmd.Flags().GetString("parent"); parentID != "" {
 		body["parent_id"] = parentID
 	}
@@ -3179,7 +3110,7 @@ func printCommentWake(w io.Writer, issueDisplay string, raw any) {
 	}
 	if none, _ := wake["none_woken"].(bool); none {
 		fmt.Fprintf(w, "Woke no one: this comment started no run and nothing is running on %s.\n"+
-			"A comment is not a dispatch. To get someone working: multica issue handoff %s --to <reviewer|dispatcher|agent>, or @ them in a comment.\n",
+			"A comment is not a dispatch. To get someone working: multica issue handoff %s --to <reviewer|agent>, or @ them in a comment.\n",
 			issueDisplay, issueDisplay)
 	}
 }
@@ -4208,36 +4139,6 @@ func compactComments(comments []map[string]any) {
 			}
 		}
 	}
-}
-
-// addPerQuote adds --per-quote to a request that names an assignee. The server
-// decides whether it counts; the CLI only carries it.
-func addPerQuote(cmd *cobra.Command, body map[string]any) {
-	if v, _ := cmd.Flags().GetString("per-quote"); v != "" {
-		body["assignee_quote"] = v
-	}
-}
-
-// noteIgnoredAssignee tells an agent, on stderr, that the server did not apply
-// the executor it named, and reports whether that happened. Silence here would
-// leave the caller finding an empty slot later with no idea why.
-func noteIgnoredAssignee(result map[string]any) bool {
-	if ignored, _ := result["assignee_ignored"].(bool); !ignored {
-		return false
-	}
-	reason, _ := result["assignee_ignored_reason"].(string)
-	if reason == "" {
-		reason = "no quote from the person naming it"
-	}
-	// An in-flight ticket keeps the executor it had (DENE-1201); only an empty
-	// slot is left for routing, which fills it (DENE-1613).
-	kept := "routing will pick the executor"
-	if strVal(result, "assignee_id") != "" {
-		kept = "the issue keeps its current assignee"
-	}
-	fmt.Fprintf(os.Stderr, "Issue %s: the assignee you named was NOT applied; %s. %s.\n",
-		issueDisplayKey(result), kept, strings.TrimSuffix(reason, "."))
-	return true
 }
 
 // runSessionLabel is the SESSION column of `issue runs` (DENE-1345): "new

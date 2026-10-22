@@ -24,17 +24,11 @@ var chatNewCmd = &cobra.Command{
 	Long: `Start a new chat, as if you opened one in the app and typed the first
 message. With --wait, block until the agent's reply arrives and print it.
 
-Who answers: leave --agent out and the workspace's routing picks the agent
-from your message and project, the same judge that fills a ticket's executor
-(tier by scope and risk, the project's direction, who is online). The result
-is printed as "routing": source (原话 / 人工 / 档位 / 兜底), agent, tier,
-reason and the candidates it weighed. Name --agent to choose yourself; the
-receipt then says 人工. With routing off the server asks you to name one.
-Nobody online means a refusal naming who is offline; --agent still queues
-for that agent.
+Who answers: --agent names the agent (required). An offline agent still
+queues the message for when it comes back.
 
 A Bot wake blocked by bot_wake_chain_limit keeps the new chat and saved
-message, prints their receipt (routing included), and exits nonzero before
+message, prints their receipt, and exits nonzero before
 waiting. Do not resend the saved message; see chat send --help for recovery.
 
 For people and external bots logged in with a personal key. An agent run
@@ -49,7 +43,7 @@ is refused here: use "multica chat open" from a chat run instead.
 
 func init() {
 	chatCmd.AddCommand(chatNewCmd)
-	chatNewCmd.Flags().String("agent", "", "Agent to talk to: name or id. Leave out and routing picks one from the message (printed as \"routing\")")
+	chatNewCmd.Flags().String("agent", "", "Agent to talk to: name or id (required)")
 	chatNewCmd.Flags().String("content-file", "", "Read the first message from this file instead of the argument")
 	chatNewCmd.Flags().String("title", "", "Chat title (optional; the server names it otherwise)")
 	chatNewCmd.Flags().String("project", "", "Project id or prefix to give the chat as context")
@@ -66,6 +60,9 @@ func runChatNew(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("chat new: an agent run cannot start a chat this way; use \"multica chat open\" from a chat run")
 	}
 	agentRef, _ := cmd.Flags().GetString("agent")
+	if strings.TrimSpace(agentRef) == "" {
+		return fmt.Errorf("chat new: --agent is required")
+	}
 	content, err := readChatContent(cmd, args, "chat new")
 	if err != nil {
 		return err
@@ -76,18 +73,11 @@ func runChatNew(cmd *cobra.Command, args []string) error {
 	}
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
-	body := map[string]any{}
-	if strings.TrimSpace(agentRef) != "" {
-		agentID, err := resolveAgent(ctx, client, agentRef)
-		if err != nil {
-			return fmt.Errorf("chat new: %w", err)
-		}
-		body["agent_id"] = agentID
-	} else {
-		// No agent named: the server routes from the brief (DENE-1834). The
-		// brief is judged, not stored; the message is still sent below.
-		body["brief"] = content
+	agentID, err := resolveAgent(ctx, client, agentRef)
+	if err != nil {
+		return fmt.Errorf("chat new: %w", err)
 	}
+	body := map[string]any{"agent_id": agentID}
 	if title, _ := cmd.Flags().GetString("title"); strings.TrimSpace(title) != "" {
 		body["title"] = strings.TrimSpace(title)
 	}
@@ -113,9 +103,6 @@ func runChatNew(cmd *cobra.Command, args []string) error {
 		"agent_id":   strVal(session, "agent_id"),
 		"message_id": strVal(sent, "message_id"),
 		"task_id":    strVal(sent, "task_id"),
-	}
-	if routing, ok := session["routing"].(map[string]any); ok {
-		out["routing"] = routing
 	}
 	for _, key := range []string{"mode", "warning", "reason_code", "runtime"} {
 		if value, present := sent[key]; present {
@@ -179,9 +166,6 @@ func finishChatSend(cmd *cobra.Command, client *cli.APIClient, sessionID string,
 		return cli.PrintJSON(os.Stdout, out)
 	}
 	fmt.Printf("Chat: %s (%s)\n", strVal(out, "title"), sessionID)
-	if routing, ok := out["routing"].(map[string]any); ok {
-		fmt.Println(routingReceiptLine(routing))
-	}
 	if reply, ok := out["reply"].(map[string]any); ok {
 		fmt.Println()
 		fmt.Println(strVal(reply, "content"))
@@ -228,42 +212,6 @@ func waitChatReply(client *cli.APIClient, sessionID, taskID string, timeout time
 		}
 		time.Sleep(chatReplyPollInterval)
 	}
-}
-
-// routingReceiptLine renders a server routing receipt (who, why, tier) as
-// the one line table output prints under a chat or ticket.
-func routingReceiptLine(rr map[string]any) string {
-	who := strVal(rr, "agent")
-	if who == "" {
-		who = "nobody"
-	}
-	line := "Agent: " + who + " [" + strVal(rr, "source")
-	if tier := strVal(rr, "tier_label"); tier != "" {
-		line += " · " + tier
-	} else if tier := strVal(rr, "tier"); tier != "" {
-		line += " · " + tier
-	}
-	if series := strVal(rr, "series"); series != "" {
-		line += " · " + series + " 系列"
-	}
-	line += "]"
-	if category := strVal(rr, "category"); category != "" {
-		line += " 类别 " + category
-		if rule := strVal(rr, "rule"); rule != "" {
-			line += "「" + rule + "」"
-		}
-		if fb := strVal(rr, "series_fallback"); fb != "" {
-			line += " " + fb
-		}
-		line += "；"
-	}
-	if reason := strVal(rr, "reason"); reason != "" {
-		line += " " + reason
-	}
-	if offline, _ := rr["offline"].(bool); offline {
-		line += " (offline)"
-	}
-	return line
 }
 
 func printChatRuntimeWarning(cmd *cobra.Command, out map[string]any) {

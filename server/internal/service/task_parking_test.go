@@ -11,7 +11,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/parking"
 	"github.com/multica-ai/multica/server/internal/progress"
-	"github.com/multica-ai/multica/server/internal/routing"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -89,21 +88,6 @@ func parkingInboxCount(t *testing.T, fx *testutil.Fixture, issueID string) int {
 	return n
 }
 
-type fakeSummarizer struct {
-	calls int
-	facts routing.SummaryFacts
-	err   error
-}
-
-func (f *fakeSummarizer) Summarize(_ context.Context, _ string, facts routing.SummaryFacts) (string, error) {
-	f.calls++
-	f.facts = facts
-	if f.err != nil {
-		return "", f.err
-	}
-	return "运行失败，分支没记上，送审被拒。", nil
-}
-
 // DENE-707: run finished, PR merged, ticket still in progress, no close.
 // The record says so, and the owner hears about it once — not once per run.
 func TestParkingDoneButNotClosed(t *testing.T) {
@@ -112,8 +96,6 @@ func TestParkingDoneButNotClosed(t *testing.T) {
 	issueID := fx.Issue(t, "Merged but open", testutil.Cols{
 		"status": "in_progress", "assignee_type": "agent", "assignee_id": agentID,
 	})
-	sum := &fakeSummarizer{err: routing.ErrJudgeUnavailable}
-	svc.ParkingSummarizer = sum
 
 	task := completedTaskFor(t, fx, agentID, runtimeID, issueID)
 	svc.HandleCompletedTasks(ctx, []db.AgentTaskQueue{task})
@@ -126,10 +108,7 @@ func TestParkingDoneButNotClosed(t *testing.T) {
 		t.Errorf("next owner = %s/%s", r.ownerType, r.ownerID)
 	}
 	if r.source != "template" || r.summary == "" {
-		t.Errorf("summary = %q (%s), want the fixed wording when the model is off", r.summary, r.source)
-	}
-	if sum.calls != 1 {
-		t.Errorf("summarizer calls = %d, want 1 (no agent words)", sum.calls)
+		t.Errorf("summary = %q (%s), want the fixed wording", r.summary, r.source)
 	}
 	if got := parkingInboxCount(t, fx, issueID); got != 1 {
 		t.Fatalf("inbox items = %d, want 1", got)
@@ -144,7 +123,7 @@ func TestParkingDoneButNotClosed(t *testing.T) {
 }
 
 // DENE-872 / 871 / 811: the run failed at the hand-off and the review move
-// was refused. The agent's only words are the error, so the model phrases it.
+// was refused. The agent's only words are the error, so the fixed wording is used.
 func TestParkingDeliveryStuck(t *testing.T) {
 	ctx := context.Background()
 	fx, svc, bus, agentID, runtimeID := newParkingFixture(t)
@@ -167,9 +146,6 @@ func TestParkingDeliveryStuck(t *testing.T) {
 	fx.Exec(t, `INSERT INTO issue_rejection (id, workspace_id, issue_id, actor_type, action, kind, reason)
 		VALUES (gen_random_uuid(), $1, $2, 'agent', 'status:in_review', 'pr_not_linked', '进不了待验收：没有关联的 PR')`,
 		fx.WorkspaceID, issueID)
-	sum := &fakeSummarizer{}
-	svc.ParkingSummarizer = sum
-
 	task, err := svc.Queries.GetAgentTask(ctx, parkingTestUUID(t, taskID))
 	if err != nil {
 		t.Fatal(err)
@@ -181,8 +157,8 @@ func TestParkingDeliveryStuck(t *testing.T) {
 	if r.category != parking.CategoryStalledDelivery || r.stuckKind != parking.StuckBranchRefused || !r.unexplained {
 		t.Fatalf("record = %+v", r)
 	}
-	if r.source != "model" || sum.facts.Category != parking.CategoryStalledDelivery {
-		t.Errorf("summary source = %s facts = %+v", r.source, sum.facts)
+	if r.source != "template" {
+		t.Errorf("summary source = %s, want the fixed wording", r.source)
 	}
 	var kinds []string
 	for _, e := range r.timeline {
@@ -221,7 +197,6 @@ func TestParkingReplyWithoutCloseOnBlocked(t *testing.T) {
 	fx.Exec(t, `INSERT INTO comment (id, workspace_id, issue_id, author_type, author_id, content, source_task_id)
 		VALUES (gen_random_uuid(), $1, $2, 'agent', $3, '已完成：四个问题都改好了，PR #171', $4)`,
 		fx.WorkspaceID, issueID, agentID, task.ID)
-	svc.ParkingSummarizer = &fakeSummarizer{}
 
 	svc.HandleCompletedTasks(ctx, []db.AgentTaskQueue{task})
 	r := readParking(t, fx, issueID)
@@ -251,8 +226,6 @@ func TestParkingIntentionalWaitIsNotUnexplained(t *testing.T) {
 	issueID := fx.Issue(t, "Waiting on Kun", testutil.Cols{
 		"status": "blocked", "assignee_type": "agent", "assignee_id": agentID, "metadata": string(meta),
 	})
-	sum := &fakeSummarizer{}
-	svc.ParkingSummarizer = sum
 	task := completedTaskFor(t, fx, agentID, runtimeID, issueID)
 	svc.HandleCompletedTasks(ctx, []db.AgentTaskQueue{task})
 
