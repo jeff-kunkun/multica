@@ -1,27 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { ApiError } from "../api/client";
 import {
-  inferNewProjectExecutionMode,
   provisionedDirectoryShouldBeRemoved,
   sanitizeProjectDirectoryName,
 } from "./directory-plan";
-
-describe("inferNewProjectExecutionMode", () => {
-  it("gives a freshly initialised repository its own worktree", () => {
-    expect(inferNewProjectExecutionMode({ gitInit: true, container: false })).toBe(
-      "worktree",
-    );
-  });
-
-  it("shares a container or a folder that is not a repository", () => {
-    expect(inferNewProjectExecutionMode({ gitInit: false, container: false })).toBe(
-      "shared",
-    );
-    expect(inferNewProjectExecutionMode({ gitInit: true, container: true })).toBe(
-      "shared",
-    );
-  });
-});
 
 describe("sanitizeProjectDirectoryName", () => {
   it("keeps a Chinese title as one path segment", () => {

@@ -1,21 +1,5 @@
 import { ApiError, errorCode } from "../api/client";
 
-/**
- * How a new project's directory is shared, before anyone overrides it.
- *
- * A directory this flow creates and `git init`s is one repository, so each
- * task gets its own worktree. A container of repositories — or a folder that
- * was deliberately left without git — is shared: tasks run in the folder
- * itself, side by side. `in_place` is never inferred; someone has to pick it.
- */
-export function inferNewProjectExecutionMode(input: {
-  gitInit: boolean;
-  container: boolean;
-}): "worktree" | "shared" {
-  if (input.container || !input.gitInit) return "shared";
-  return "worktree";
-}
-
 /** A directory name taken from a project title: one path segment, nothing else. */
 export function sanitizeProjectDirectoryName(name: string): string {
   const cleaned = name

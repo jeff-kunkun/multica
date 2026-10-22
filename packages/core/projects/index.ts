@@ -32,13 +32,10 @@ export {
   repoNameFromLocalPath,
   githubRef,
   localDirectoryRef,
-  executionModeOfResource,
-  findDuplicateSources,
   resolveTaskCodeSource,
 } from "./source-rule";
-export type { DuplicateSourceGroup, TaskCodeSource } from "./source-rule";
+export type { TaskCodeSource } from "./source-rule";
 export {
-  inferNewProjectExecutionMode,
   provisionedDirectoryShouldBeRemoved,
   sanitizeProjectDirectoryName,
 } from "./directory-plan";

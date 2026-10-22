@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useRef } from "react";
-import { CalendarClock, CalendarDays, ChevronRight, FolderOpen, Folders, GitBranch, Maximize2, Minimize2, MoreHorizontal, Pencil, Search, X as XIcon, UserMinus } from "lucide-react";
+import { useState } from "react";
+import { CalendarClock, CalendarDays, ChevronRight, FolderOpen, GitBranch, Maximize2, Minimize2, MoreHorizontal, Search, X as XIcon, UserMinus } from "lucide-react";
 
 /**
  * GitHub mark — lucide-react v1 dropped brand icons, so we inline the
@@ -52,7 +52,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/
 import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { Button } from "@multica/ui/components/ui/button";
 import { EmojiPicker } from "@multica/ui/components/common/emoji-picker";
-import { ContentEditor, type ContentEditorRef, TitleEditor } from "../editor";
+import { TitleEditor } from "../editor";
 import { PriorityIcon } from "../issues/components/priority-icon";
 import { ActorAvatar } from "../common/actor-avatar";
 import { useNavigation } from "../navigation";
@@ -73,41 +73,24 @@ import {
   githubRefHasError,
 } from "../projects/components/github-ref-field";
 import {
-  canSetLocalDirectorySharedOverride,
   initLocalGit,
   isDesktopShell,
   pickDirectory,
-  setLocalDirectorySharedOverride,
   validateLocalDirectory,
 } from "../platform/local-directory";
 import { useLocalDaemonStatus } from "../platform/use-local-daemon-status";
-import { useConfigStore } from "@multica/core/config";
-import type { LocalDirectoryExecutionMode } from "@multica/core/types";
-import { LocalDirectoryModeOptions } from "../projects/components/local-directory-mode-dialog";
 import { PlainFolderGitOffer } from "../projects/components/plain-folder-git-offer";
 import { isPlainFolder } from "../projects/components/code-decision-view";
-import {
-  apiExecutionMode,
-  coerceLocalDirectoryMode,
-  isSharedModeRejectedByServer,
-  needsLocalSharedOverride,
-  sharedModeUnavailable,
-} from "../projects/components/local-directory-mode";
 
 /**
  * Builds the resource_ref for a local directory attached during project
- * creation.
- *
- * Exported so the execution-mode contract can be asserted directly: this is the
- * payload the server stores and the daemon later reads to decide whether tasks
- * edit the user's folder or hand back a branch, and getting `execution_mode`
- * wrong here is invisible until a task runs.
+ * creation. Tasks always run directly in this folder, so no execution mode
+ * is sent.
  */
 export function buildLocalDirectoryResourceRef({
   localPath,
   daemonId,
   label,
-  mode,
   realPath,
   repoKey,
   isGitRepo,
@@ -115,7 +98,6 @@ export function buildLocalDirectoryResourceRef({
   localPath: string;
   daemonId: string;
   label: string | null;
-  mode: LocalDirectoryExecutionMode;
   realPath?: string;
   repoKey?: string;
   isGitRepo?: boolean;
@@ -124,7 +106,6 @@ export function buildLocalDirectoryResourceRef({
     local_path: localPath,
     daemon_id: daemonId,
     ...(label ? { label } : {}),
-    execution_mode: mode,
     ...(realPath ? { real_path: realPath } : {}),
     ...(repoKey ? { repo_key: repoKey } : {}),
     ...(isGitRepo === undefined ? {} : { is_git_repo: isGitRepo }),
@@ -164,8 +145,7 @@ function RepoUrlText({
 
 export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const { t } = useT("modals");
-  // The execution-mode copy lives in the projects namespace alongside the
-  // resource panel's, so both entry points describe the choice identically.
+  // The plain-folder Git copy lives in the projects namespace.
   const { t: tProjects } = useT("projects");
   const router = useNavigation();
   const workspace = useCurrentWorkspace();
@@ -183,7 +163,6 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const clearDraft = useProjectDraftStore((s) => s.clearDraft);
 
   const [title, setTitle] = useState(draft.title);
-  const descEditorRef = useRef<ContentEditorRef>(null);
   const [status, setStatus] = useState<ProjectStatus>(draft.status);
   const [priority, setPriority] = useState<ProjectPriority>(draft.priority);
   const [leadType, setLeadType] = useState<"member" | "agent" | undefined>(draft.leadType);
@@ -230,14 +209,6 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const [selectedLocalLabel, setSelectedLocalLabel] = useState<string | null>(null);
   const [localPickError, setLocalPickError] = useState<string | null>(null);
   const [localPicking, setLocalPicking] = useState(false);
-  // Execution mode is chosen here rather than after creation: it decides
-  // whether tasks edit this folder or hand back a branch, which is part of
-  // what the user is setting up, not a setting to discover later.
-  //
-  // null means "the user has not picked one" — distinct from an explicit
-  // in_place. Only then does the folder-derived preselection apply, so an
-  // explicit choice is never overridden by a later folder change.
-  const [localMode, setLocalMode] = useState<LocalDirectoryExecutionMode | null>(null);
   // undefined = could not check (older desktop build); the daemon re-checks
   // authoritatively, so unknown stays permissive.
   const [localIsGitRepo, setLocalIsGitRepo] = useState<boolean | undefined>(undefined);
@@ -246,54 +217,6 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const [localRepoKey, setLocalRepoKey] = useState<string | undefined>(undefined);
   const [gitInitPending, setGitInitPending] = useState(false);
   const [gitInitError, setGitInitError] = useState<string | null>(null);
-  const [localModeOpen, setLocalModeOpen] = useState(false);
-
-  // The daemon's worktree capability is no longer read here. It only ever fed
-  // the preselection, and a new directory now always starts on direct
-  // (DENE-617), so "could this machine run parallel mode" no longer decides
-  // anything before the user has chosen. Whether it MAY is still the server's
-  // call: it gates the save, including on this bundled create path, and
-  // rejects with a message the modal surfaces.
-  //
-  // One declared boolean from the live server. Servers older than the worktree
-  // save gate drop execution_mode and answer 201, so "the backend will check"
-  // is only true once the backend says it checks (#7113).
-  const serverValidatesWorktree = useConfigStore((state) => state.localWorktreeSupported);
-  const serverAcceptsShared = useConfigStore((state) => state.localSharedSupported);
-  const worktreeUnavailableReason =
-    localIsGitRepo === false
-      ? ("not_git" as const)
-      : !serverValidatesWorktree
-        ? ("server_outdated" as const)
-        : undefined;
-  const canSetLocalOverride = canSetLocalDirectorySharedOverride();
-  const sharedUnavailable = sharedModeUnavailable({
-    serverAcceptsShared,
-    canSetLocalOverride,
-  });
-  const sharedUsesLocalOverride = !serverAcceptsShared && canSetLocalOverride;
-  // Always direct (DENE-617 invariant 3). A new directory runs tasks IN the
-  // folder the user just picked — what "I added my project folder" plainly
-  // means, and it costs no disk.
-  //
-  // This used to preselect parallel for any git repository the machine could
-  // isolate. The reasoning was that parallel is the better fit; the cost was
-  // that agreeing to it also agreed to a full working copy per task, on the
-  // user's own drive, which nothing in the flow said out loud. Whether a
-  // machine CAN run parallel mode is not a reason to start the user there —
-  // it is still one click away, now with its cost stated next to it.
-  const preselectedLocalMode: LocalDirectoryExecutionMode = "in_place";
-  // Never submit a mode the picker would have blocked — the folder can change
-  // after a mode was chosen (pick a git repo, choose worktree, then pick a
-  // plain folder), and the stale worktree choice would fail at task time.
-  // Shared stays selected on a non-git folder: that is a valid setup.
-  const effectiveLocalMode: LocalDirectoryExecutionMode = coerceLocalDirectoryMode(
-    localMode ?? preselectedLocalMode,
-    {
-      worktreeUnavailable: worktreeUnavailableReason,
-      sharedUnavailable,
-    },
-  );
 
   const handleSourceModeChange = (mode: "repos" | "local") => {
     setSourceMode(mode);
@@ -342,7 +265,6 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
     setLocalRealPath(undefined);
     setLocalRepoKey(undefined);
     setGitInitError(null);
-    setLocalMode(null);
   };
 
   const handleInitLocalGit = async () => {
@@ -452,7 +374,6 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
             localPath: selectedLocalPath,
             daemonId: daemonStatus.daemonId,
             label: selectedLocalLabel,
-            mode: apiExecutionMode(effectiveLocalMode, serverAcceptsShared),
             realPath: localRealPath,
             repoKey: localRepoKey,
             isGitRepo: localIsGitRepo,
@@ -464,7 +385,6 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
     try {
       const project = await createProject.mutateAsync({
         title: title.trim(),
-        description: descEditorRef.current?.getMarkdown()?.trim() || undefined,
         icon,
         status,
         priority,
@@ -489,39 +409,15 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
           await queryClient.invalidateQueries({ queryKey: workspaceKeys.list() });
         }
       }
-      if (
-        sourceMode === "local" &&
-        selectedLocalPath &&
-        daemonStatus.daemonId &&
-        needsLocalSharedOverride(effectiveLocalMode, serverAcceptsShared)
-      ) {
-        const override = await setLocalDirectorySharedOverride({
-          daemonId: daemonStatus.daemonId,
-          localPath: selectedLocalPath,
-          enabled: true,
-        });
-        if (!override.ok) {
-          toast.error(
-            override.error ?? tProjects(($) => $.resources.toast_local_mode_update_failed),
-          );
-        } else {
-          toast.success(tProjects(($) => $.resources.toast_local_shared_via_daemon));
-        }
-      } else {
-        toast.success(t(($) => $.create_project.toast_created));
-      }
+      toast.success(t(($) => $.create_project.toast_created));
       clearDraft();
       onClose();
       router.push(wsPaths.projectDetail(project.id));
     } catch (err) {
-      const raw =
+      toast.error(
         err instanceof Error && err.message
           ? err.message
-          : t(($) => $.create_project.toast_failed);
-      toast.error(
-        isSharedModeRejectedByServer(raw)
-          ? tProjects(($) => $.resources.mode_shared_rejected_by_server)
-          : raw,
+          : t(($) => $.create_project.toast_failed),
       );
     } finally {
       setSubmitting(false);
@@ -670,18 +566,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
           />
         </div>
 
-        <div className="flex-1 min-h-0 overflow-y-auto px-5">
-          <ContentEditor
-            ref={descEditorRef}
-            defaultValue={draft.description}
-            placeholder={t(($) => $.create_project.description_placeholder)}
-            onUpdate={(md) => setDraft({ description: md })}
-            debounceMs={500}
-          />
-          <p className="mt-1 text-caption text-muted-foreground">
-            {t(($) => $.create_project.description_hint)}
-          </p>
-        </div>
+        <div className="flex-1 min-h-0" />
 
         {/* Property toolbar — mirrors the create-issue footer: a wrapping pill
             row whose low-frequency fields (start/due date) collapse into a ⋯
@@ -1118,51 +1003,6 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                         />
                       )}
                       <div className="flex items-center gap-1.5">
-                        <Popover open={localModeOpen} onOpenChange={setLocalModeOpen}>
-                          <PopoverTrigger
-                            render={
-                              <Button
-                                type="button"
-                                size="sm"
-                                variant="ghost"
-                                // Sized to its (short) label so the wider
-                                // "Change directory…" beside it fits whole.
-                                className="h-6 shrink-0 text-caption"
-                              >
-                                {effectiveLocalMode === "worktree" ? (
-                                  <GitBranch className="size-3 shrink-0" />
-                                ) : effectiveLocalMode === "shared" ? (
-                                  <Folders className="size-3 shrink-0" />
-                                ) : (
-                                  <Pencil className="size-3 shrink-0" />
-                                )}
-                                {/* Short labels: the panel is ~380px wide and
-                                    two buttons share it, so the full option
-                                    titles truncate to uselessness. The picker
-                                    below carries the full wording. */}
-                                <span className="truncate">
-                                  {effectiveLocalMode === "worktree"
-                                    ? tProjects(($) => $.resources.mode_badge_worktree)
-                                    : effectiveLocalMode === "shared"
-                                      ? tProjects(($) => $.resources.mode_badge_shared)
-                                      : tProjects(($) => $.resources.mode_badge_in_place)}
-                                </span>
-                              </Button>
-                            }
-                          />
-                          <PopoverContent align="start" className="w-80 p-2">
-                            <LocalDirectoryModeOptions
-                              value={effectiveLocalMode}
-                              onChange={(mode) => {
-                                setLocalMode(mode);
-                                setLocalModeOpen(false);
-                              }}
-                              unavailableReason={worktreeUnavailableReason}
-                              sharedUnavailable={sharedUnavailable}
-                              sharedUsesLocalOverride={sharedUsesLocalOverride}
-                            />
-                          </PopoverContent>
-                        </Popover>
                         <Button
                           type="button"
                           size="sm"

@@ -1,9 +1,5 @@
-import type { LocalDirectoryExecutionMode } from "@multica/core/types";
 import { defaultStorage } from "@multica/core/platform";
-import {
-  inferNewProjectExecutionMode,
-  sanitizeProjectDirectoryName,
-} from "@multica/core/projects";
+import { sanitizeProjectDirectoryName } from "@multica/core/projects";
 import {
   provisionProjectDirectory,
   removeProvisionedDirectory,
@@ -42,9 +38,6 @@ export interface NewProjectDirectoryDraft {
   gitInit: boolean;
   /** Bind the root itself, as a folder that holds several repositories. */
   container: boolean;
-  mode: LocalDirectoryExecutionMode;
-  /** The person picked a mode. Inference stops overriding it. */
-  modeTouched: boolean;
 }
 
 export function initialDirectoryDraft(input: {
@@ -59,8 +52,6 @@ export function initialDirectoryDraft(input: {
     dirName: input.dirName,
     gitInit: true,
     container: false,
-    mode: "worktree",
-    modeTouched: false,
   };
 }
 
@@ -70,12 +61,6 @@ export function patchDirectoryDraft(
 ): NewProjectDirectoryDraft {
   const next: NewProjectDirectoryDraft = { ...current, ...patch };
   if (next.container) next.gitInit = false;
-  if (!next.modeTouched) {
-    next.mode = inferNewProjectExecutionMode({
-      gitInit: next.gitInit,
-      container: next.container,
-    });
-  }
   return next;
 }
 
@@ -83,7 +68,6 @@ export function localDirectoryResourceRef(input: {
   localPath: string;
   daemonId: string;
   label: string | null;
-  mode: LocalDirectoryExecutionMode;
   realPath?: string;
   repoKey?: string;
   isGitRepo?: boolean;
@@ -92,7 +76,6 @@ export function localDirectoryResourceRef(input: {
     local_path: input.localPath,
     daemon_id: input.daemonId,
     ...(input.label ? { label: input.label } : {}),
-    execution_mode: input.mode,
     ...(input.realPath ? { real_path: input.realPath } : {}),
     ...(input.repoKey ? { repo_key: input.repoKey } : {}),
     ...(input.isGitRepo === undefined ? {} : { is_git_repo: input.isGitRepo }),
@@ -139,7 +122,6 @@ export async function prepareNewProjectDirectory(input: {
         localPath: draft.root,
         daemonId: input.daemonId,
         label: input.title,
-        mode: draft.mode,
         realPath: checked.real_path,
         repoKey: checked.repo_key,
         isGitRepo: checked.is_git_repo === true,
@@ -170,7 +152,6 @@ export async function prepareNewProjectDirectory(input: {
       localPath: created.path,
       daemonId: input.daemonId,
       label: input.title,
-      mode: draft.mode,
       realPath: checked.real_path ?? created.path,
       repoKey: checked.repo_key,
       isGitRepo: draft.gitInit ? true : checked.is_git_repo === true,

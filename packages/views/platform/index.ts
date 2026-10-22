@@ -6,18 +6,10 @@ export {
   isDesktopShell,
   pickDirectory,
   validateLocalDirectory,
-  validateWritablePath,
   initLocalGit,
-  canSetLocalDirectorySharedOverride,
-  listLocalDirectorySharedOverrides,
-  setLocalDirectorySharedOverride,
-  localDirectoryOverrideKey,
-  normalizeLocalDirectoryOverridePath,
   type PickDirectoryResult,
   type ValidateLocalDirectoryResult,
   type InitLocalGitResult,
-  type LocalDirectorySharedOverride,
-  type SetLocalDirectorySharedOverrideResult,
 } from "./local-directory";
 export {
   pickTransferExportPath,
@@ -59,7 +51,6 @@ export {
   useLocalDaemonStatus,
   type LocalDaemonStatus,
 } from "./use-local-daemon-status";
-export { useLocalDirectorySharedOverrides } from "./use-local-directory-shared-overrides";
 export {
   useFullDiskAccess,
   type FullDiskAccess,

@@ -26,7 +26,7 @@ import { PROJECT_STATUS_ORDER, PROJECT_STATUS_CONFIG } from "@multica/core/proje
 import { getProjectIssueMetrics } from "./project-issue-metrics";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { currentPath, useNavigation } from "../../navigation";
-import { TitleEditor, ContentEditor, ReadonlyContent, type ContentEditorRef } from "../../editor";
+import { TitleEditor } from "../../editor";
 import { ProjectCodeSection } from "./project-code-section";
 import { ProjectMembersSection } from "./project-members-section";
 import { ProjectWorkflowControl } from "../../workflows/project-workflow-row";
@@ -163,7 +163,6 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   }, [members, userId]);
   const createPin = useCreatePin();
   const deletePinMut = useDeletePin();
-  const descEditorRef = useRef<ContentEditorRef>(null);
   // Below `lg` the properties panel is a drawer, like the app nav: a 320px
   // panel beside the board leaves a portrait tablet about one column.
   const isCompact = useIsCompact();
@@ -171,7 +170,6 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const [iconPickerOpen, setIconPickerOpen] = useState(false);
   const [propertiesOpen, setPropertiesOpen] = useState(true);
   const [progressOpen, setProgressOpen] = useState(true);
-  const [descriptionOpen, setDescriptionOpen] = useState(true);
   const [shareScopeOpen, setShareScopeOpen] = useState(false);
   const [shareAudienceSize, setShareAudienceSize] = useState<number | undefined>();
 
@@ -454,37 +452,6 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
           </div>
         );
       })()}
-
-      {/* Description */}
-      <div>
-        <button
-          type="button"
-          className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-caption font-medium transition-colors mb-2 hover:bg-accent/70 ${descriptionOpen ? "" : "text-muted-foreground hover:text-foreground"}`}
-          onClick={() => setDescriptionOpen(!descriptionOpen)}
-        >
-          {t(($) => $.detail.section_description)}
-          <ChevronRight className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${descriptionOpen ? "rotate-90" : ""}`} />
-        </button>
-        {descriptionOpen && <div className="pl-2">
-          {isGuest ? (
-            <WriteAction className="block w-full">
-              <ReadonlyContent content={project.description || ""} />
-            </WriteAction>
-          ) : (
-          <ContentEditor
-            ref={descEditorRef}
-            key={projectId}
-            value={project.description || ""}
-            placeholder={t(($) => $.detail.description_placeholder)}
-            onUpdate={(md) => handleUpdateField({ description: md || null })}
-            debounceMs={1500}
-          />
-          )}
-          <p className="mt-1 px-2 text-caption text-muted-foreground">
-            {t(($) => $.detail.description_hint)}
-          </p>
-        </div>}
-      </div>
 
       {/* Resources */}
       <ProjectCodeSection projectId={projectId} />

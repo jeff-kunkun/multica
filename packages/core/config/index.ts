@@ -32,17 +32,13 @@ interface ConfigState {
   // self-hosted operators can confirm what's deployed. Empty for dev builds
   // or servers older than this feature.
   serverVersion: string;
-  // Whether the connected server validates local_directory worktree
-  // execution_mode. Defaults to false, and stays false for any server that
-  // does not declare it: the dangerous ones accept an unknown mode, drop the
-  // field, and run the task in the user's working copy with a lock anyway
-  // (#7113). Worktree only — official cloud advertises this while still
-  // rejecting `execution_mode=shared`.
+  // Whether the connected server validates local_directory execution_mode.
+  // Defaults to false, and stays false for any server that does not declare it:
+  // the dangerous ones accept worktree mode, drop the field, and run the task
+  // in the user's working copy anyway (#7113). Servers that validate but
+  // predate this signal are caught by the same net — indistinguishable from
+  // here, and only one of the two answers is safe to guess.
   localWorktreeSupported: boolean;
-  // Whether the connected server accepts and persists
-  // `execution_mode=shared`. Official cloud omits this. Absent must stay
-  // false so the client stores in_place and records a local daemon override.
-  localSharedSupported: boolean;
   // Whether this server persists conversation_starters on agent create/update.
   // Older handlers accepted the unknown field and returned success while
   // dropping it, so absent must fail closed.
@@ -71,7 +67,6 @@ interface ConfigState {
   setFeatureFlags: (flags?: Record<string, boolean>) => void;
   setServerVersion: (version?: string) => void;
   setLocalWorktreeSupported: (supported?: boolean) => void;
-  setLocalSharedSupported: (supported?: boolean) => void;
   setAgentConversationStartersSupported: (supported?: boolean) => void;
   setIssueCreatePropertiesSupported: (supported?: boolean) => void;
   setCommentDeleteKeepRepliesSupported: (supported?: boolean) => void;
@@ -92,7 +87,6 @@ export const configStore = createStore<ConfigState>((set) => ({
   featureFlags: {},
   serverVersion: "",
   localWorktreeSupported: false,
-  localSharedSupported: false,
   agentConversationStartersSupported: false,
   issueCreatePropertiesSupported: false,
   commentDeleteKeepRepliesSupported: false,
@@ -112,8 +106,6 @@ export const configStore = createStore<ConfigState>((set) => ({
   setServerVersion: (version = "") => set({ serverVersion: version }),
   setLocalWorktreeSupported: (supported = false) =>
     set({ localWorktreeSupported: supported === true }),
-  setLocalSharedSupported: (supported = false) =>
-    set({ localSharedSupported: supported === true }),
   setAgentConversationStartersSupported: (supported = false) =>
     set({ agentConversationStartersSupported: supported === true }),
   setIssueCreatePropertiesSupported: (supported = false) =>

@@ -10,7 +10,7 @@ import { useT } from "../../i18n";
 
 /**
  * "Where did this run's code come from?" — source type, the directory on the
- * machine, the execution mode, and which resource decided it.
+ * machine, and which resource decided it.
  *
  * Before this, a run showed a work dir and nothing that explained it, so a
  * project configured with both a remote repo and a local directory gave no
@@ -18,7 +18,7 @@ import { useT } from "../../i18n";
  * wrong one (DENE-595).
  *
  * Rendered as rows inside the existing run-info popover rather than as a chip:
- * the answer is four facts, and three of them only mean something together.
+ * the answer is three facts that only mean something together.
  */
 export interface TaskSourceRowsProps {
   wsId: string;
@@ -62,13 +62,6 @@ export function TaskSourceRows({ wsId, daemonId, task, renderRow }: TaskSourceRo
     })}</>;
   }
 
-  const modeLabel =
-    source.executionMode === "worktree"
-      ? t(($) => $.transcript.source_mode_worktree)
-      : source.executionMode === "shared"
-        ? t(($) => $.transcript.source_mode_shared)
-        : t(($) => $.transcript.source_mode_in_place);
-
   // Before the daemon reports a work dir there is nothing to confirm, so the
   // path is labelled as what WILL be used rather than what was.
   const pathLabel = source.predicted
@@ -89,7 +82,6 @@ export function TaskSourceRows({ wsId, daemonId, task, renderRow }: TaskSourceRo
       })}
       {source.localPath &&
         renderRow({ label: pathLabel, value: source.localPath, mono: true })}
-      {renderRow({ label: t(($) => $.transcript.details_source_mode), value: modeLabel })}
       {resourceName &&
         renderRow({ label: t(($) => $.transcript.details_source_resource), value: resourceName })}
     </>
