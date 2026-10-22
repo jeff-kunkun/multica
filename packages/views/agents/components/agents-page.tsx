@@ -4,12 +4,10 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import {
   AlertCircle,
   Bot,
-  ChevronRight,
   Lock,
   Plus,
-  Users,
 } from "lucide-react";
-import { useQueries, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import type {
   Agent,
@@ -31,7 +29,6 @@ import {
   type AgentListFilters,
   useAgentsViewStore,
   AGENT_DEFAULT_HIDDEN_COLUMNS,
-  AGENT_GROUPINGS,
   AGENT_SCOPES,
   type AgentColumnKey,
   type AgentsScope,
@@ -43,8 +40,6 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import {
   agentListOptions,
   memberListOptions,
-  squadListOptions,
-  squadMembersOptions,
 } from "@multica/core/workspace/queries";
 import { runtimeDisplayLabel, runtimeListOptions } from "@multica/core/runtimes";
 import { Button } from "@multica/ui/components/ui/button";
@@ -65,7 +60,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
-import { AppLink, useNavigation, useRowLink } from "../../navigation";
+import { useNavigation, useRowLink } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { docsLocalePrefix } from "../../common/docs-locale";
 import { ProviderLogo } from "../../runtimes/components/provider-logo";
@@ -78,26 +73,11 @@ import { availabilityConfig } from "../presence";
 import { AgentRowActions } from "./agent-row-actions";
 import { providerSeatModelDisplay } from "./provider-seat-model";
 import {
-  flattenSpecializationItems,
-  SPECIALIZATION_DERIVE_ROW_HEIGHT,
-} from "./agents-page-specializations";
-import { isSpecialization, runtimeInheritanceState } from "../specialization";
-import {
   AgentListToolbar,
   countActiveFilterDimensions,
 } from "./agent-list-toolbar";
 import { useLocale, useT } from "../../i18n";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
-import {
-  buildAgentSquadsMap,
-  flattenAgentListItems,
-  GROUP_HEADER_HEIGHT,
-  needsSquadMembersFetch,
-  resolveSquadRosters,
-  rowMatchesSquadFilter,
-  type AgentSquadGroup,
-  type FetchedSquadMembers,
-} from "./agents-page-squads";
 
 // Column template — single source of truth for header, rows, and skeletons.
 // Same conventions as the skills/autopilots lists (see list-grid.tsx):
@@ -172,14 +152,6 @@ export interface AgentListRow {
   owner: MemberWithUser | null;
   isOwnedByMe: boolean;
   canManage: boolean;
-  /** Active squad ids this agent belongs to. Empty = no squad. */
-  squadIds: string[];
-  /**
-   * False while an active squad roster is still unknown and this row is
-   * not already placed in a known squad. Empty `squadIds` then must not
-   * be treated as "no squad".
-   */
-  squadMembershipKnown?: boolean;
 }
 
 // Most recent activity bucket with runs, as "days ago" (0 = today).
@@ -249,15 +221,6 @@ export function rowMatchesFilters(
         row.agent.permission_mode,
         row.agent.invocation_targets,
       ),
-    )
-  ) {
-    return false;
-  }
-  if (
-    !rowMatchesSquadFilter(
-      row.squadIds,
-      filters.squads,
-      row.squadMembershipKnown !== false,
     )
   ) {
     return false;
@@ -366,93 +329,6 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
   );
 }
 
-function SquadGroupHeader({
-  group,
-  href,
-}: {
-  group: AgentSquadGroup<AgentListRow>;
-  href: string | null;
-}) {
-  const { t } = useT("agents");
-  const name = group.seriesName !== undefined
-    ? group.seriesName || t(($) => $.inspector.series_unknown)
-    : group.squad?.name ?? t(($) => $.toolbar.no_squad);
-  const count = group.rows.length;
-  return (
-    <div
-      role="row"
-      data-testid="agent-squad-group"
-      data-squad-id={group.id}
-      className="sticky top-9 z-[9] col-span-full flex h-9 items-center gap-2 bg-background px-3"
-    >
-      {group.squad ? (
-        <ActorAvatar
-          actorType="squad"
-          actorId={group.squad.id}
-          size="sm"
-          className="shrink-0"
-        />
-      ) : (
-        <Users
-          aria-hidden="true"
-          className="size-4 shrink-0 text-muted-foreground"
-        />
-      )}
-      {href ? (
-        <AppLink
-          href={href}
-          newTabTitle={name}
-          className="min-w-0 truncate text-caption font-medium text-foreground hover:underline"
-        >
-          {name}
-        </AppLink>
-      ) : (
-        <span className="min-w-0 truncate text-caption font-medium">
-          {name}
-        </span>
-      )}
-      <span className="ml-0.5 tabular-nums text-caption text-muted-foreground">
-        {count}
-      </span>
-    </div>
-  );
-}
-
-// The entry point that makes a base role able to have specialisations at all:
-// creating one is otherwise a blank-slate form with a base-role dropdown, and
-// the intent "add a variant of THIS agent" would have to be re-stated there.
-// Navigating (rather than opening the dialog in place) keeps one create flow
-// with one submit path; the base role travels as a query param the form seeds
-// from, exactly like `?duplicate=`.
-function DeriveSpecializationRow({
-  baseName,
-  onDerive,
-}: {
-  baseName: string;
-  onDerive: () => void;
-}) {
-  const { t } = useT("agents");
-  return (
-    <div role="row" className="col-span-full px-3">
-      <button
-        type="button"
-        data-testid="agents-derive-specialization"
-        onClick={(event) => {
-          event.stopPropagation();
-          onDerive();
-        }}
-        style={{ height: SPECIALIZATION_DERIVE_ROW_HEIGHT - 4 }}
-        className="flex w-full items-center gap-1.5 rounded-md pl-8 pr-2 text-left text-caption text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-      >
-        <Plus aria-hidden="true" className="size-3 shrink-0" />
-        <span className="min-w-0 truncate">
-          {t(($) => $.specialization.derive_entry, { name: baseName })}
-        </span>
-      </button>
-    </div>
-  );
-}
-
 // Cells
 
 function CheckboxCell({
@@ -489,76 +365,14 @@ function CheckboxCell({
 // documented exception to the single-line rule — agents are few and
 // identity-rich, so this is the "team roster" form (GitHub org members,
 // Slack member list).
-//
-// In the nested view (DENE-304) the same cell carries the relationship: a
-// base role gets the fold control and its `N 个特化` count, a specialisation is
-// indented behind a connector and labelled. The fold control lives here rather
-// than in its own grid track so the column template — and every other cell —
-// stays exactly what it is in the flat view.
-function NameCell({
-  row,
-  nesting,
-  nested = false,
-}: {
-  row: AgentListRow;
-  nesting?: {
-    childCount: number;
-    expanded: boolean;
-    onToggle: () => void;
-  } | null;
-  /**
-   * True only when this row is actually rendered UNDER its base role. The
-   * indent and its connector describe a position in the list, so they must
-   * follow the layout, not the agent: a specialisation shown in the flat list
-   * — or one whose base role a filter hid — would otherwise draw an elbow
-   * pointing at a row that is not above it. The tag and the "from X" line are
-   * facts about the agent and stay either way.
-   */
-  nested?: boolean;
-}) {
+function NameCell({ row }: { row: AgentListRow }) {
   const { t } = useT("agents");
   const { agent, isOwnedByMe } = row;
   const isArchived = !!agent.archived_at;
   const isDisabled = !isAgentWorkEnabled(agent);
   const isPrivate = agent.visibility === "private";
-  const isChild = isSpecialization(agent);
   return (
-    <ListGridCell
-      className={`gap-3 ${nested ? "relative pl-8" : ""}`}
-      data-specialization={isChild ? "true" : undefined}
-    >
-      {nested && (
-        // Indent guide: a short elbow from the base role's avatar column down
-        // into the child's name. Decorative — the "特化" chip is what carries
-        // the relationship for screen readers.
-        <span
-          aria-hidden="true"
-          data-testid="agents-specialization-indent"
-          className="absolute left-3 top-0 h-1/2 w-3 rounded-bl-sm border-b border-l border-border"
-        />
-      )}
-      {nesting && (
-        <button
-          type="button"
-          aria-expanded={nesting.expanded}
-          aria-label={
-            nesting.expanded
-              ? t(($) => $.specialization.collapse, { count: nesting.childCount })
-              : t(($) => $.specialization.expand, { count: nesting.childCount })
-          }
-          data-testid="agents-specialization-toggle"
-          onClick={(event) => {
-            event.stopPropagation();
-            nesting.onToggle();
-          }}
-          className="-m-1 flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-        >
-          <ChevronRight
-            aria-hidden="true"
-            className={`size-3.5 transition-transform ${nesting.expanded ? "rotate-90" : ""}`}
-          />
-        </button>
-      )}
+    <ListGridCell className="gap-3">
       <ActorAvatar
         actorType="agent"
         actorId={agent.id}
@@ -575,22 +389,6 @@ function NameCell({
           >
             {agent.name}
           </span>
-          {isChild && (
-            <span
-              data-testid="agents-specialization-chip"
-              className="shrink-0 rounded-xs border border-border px-1 text-micro text-muted-foreground"
-            >
-              {t(($) => $.specialization.tag)}
-            </span>
-          )}
-          {nesting && nesting.childCount > 0 && (
-            <span
-              data-testid="agents-specialization-count"
-              className="shrink-0 rounded-xs bg-muted px-1 text-micro tabular-nums text-muted-foreground"
-            >
-              {t(($) => $.specialization.count, { count: nesting.childCount })}
-            </span>
-          )}
           {isPrivate && !isArchived && (
             <Tooltip>
               <TooltipTrigger
@@ -607,20 +405,11 @@ function NameCell({
             </span>
           )}
         </div>
-        <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
-          {isChild && agent.parent_agent_name ? (
-            <span className="shrink-0 text-caption text-muted-foreground">
-              {t(($) => $.specialization.derived_from, {
-                name: agent.parent_agent_name,
-              })}
-            </span>
-          ) : null}
-          {agent.description ? (
-            <span className="min-w-0 truncate text-caption text-muted-foreground">
-              {agent.description}
-            </span>
-          ) : null}
-        </div>
+        {agent.description ? (
+          <div className="mt-0.5 truncate text-caption text-muted-foreground">
+            {agent.description}
+          </div>
+        ) : null}
       </div>
     </ListGridCell>
   );
@@ -738,53 +527,23 @@ function RuntimeCell({ row }: { row: AgentListRow }) {
     );
   }
   const runtime = row.runtime;
-  // DENE-506: which runtime a row shows is only half the answer for a
-  // specialisation — the other half is whether that value is its own choice or
-  // the base role's, which is what tells the reader a later change there will
-  // move this row too. The tag is omitted entirely when the backend does not
-  // serve `runtime_inherited` (`unknown`), never guessed.
-  const inheritance = runtimeInheritanceState(row.agent);
-  const inheritanceTag =
-    inheritance === "inherited"
-      ? {
-          label: t(($) => $.specialization.runtime_inherited_tag),
-          hint: t(($) => $.specialization.runtime_inherited_tag_hint),
-        }
-      : inheritance === "independent"
-        ? {
-            label: t(($) => $.specialization.runtime_independent_tag),
-            hint: t(($) => $.specialization.runtime_independent_tag_hint),
-          }
-        : null;
   return (
     <ListGridCell className="hidden @2xl:flex">
-      <span className="inline-flex min-w-0 items-center gap-1.5">
-        {runtime ? (
-          // Provider mark before the label: scanning this column for "which of
-          // these run on Codex" is a shape match, not a read.
-          <>
-            <ProviderLogo
-              provider={runtime.provider}
-              className="h-3.5 w-3.5 shrink-0"
-            />
-            <span className="min-w-0 truncate text-caption text-muted-foreground">
-              {runtimeDisplayLabel(runtime)}
-            </span>
-          </>
-        ) : (
-          <span className="text-caption text-faint-foreground">—</span>
-        )}
-        {inheritanceTag ? (
-          <span
-            data-testid="agents-runtime-inheritance"
-            data-inheritance={inheritance}
-            title={inheritanceTag.hint}
-            className="shrink-0 rounded-xs border border-border px-1 text-micro text-muted-foreground"
-          >
-            {inheritanceTag.label}
+      {runtime ? (
+        // Provider mark before the label: scanning this column for "which of
+        // these run on Codex" is a shape match, not a read.
+        <span className="inline-flex min-w-0 items-center gap-1.5">
+          <ProviderLogo
+            provider={runtime.provider}
+            className="h-3.5 w-3.5 shrink-0"
+          />
+          <span className="min-w-0 truncate text-caption text-muted-foreground">
+            {runtimeDisplayLabel(runtime)}
           </span>
-        ) : null}
-      </span>
+        </span>
+      ) : (
+        <span className="text-caption text-faint-foreground">—</span>
+      )}
     </ListGridCell>
   );
 }
@@ -1032,40 +791,6 @@ function LegacyAgentsPage(_props: AgentsPageProps = {}) {
     runtimeListOptions(wsId),
   );
   const { data: members = [] } = useQuery(memberListOptions(wsId));
-  const { data: squads = [], isPending: squadsPending } = useQuery(
-    squadListOptions(wsId),
-  );
-  const squadsNeedingRoster = useMemo(
-    () => squads.filter(needsSquadMembersFetch),
-    [squads],
-  );
-  const rosterQueryResults = useQueries({
-    queries: squadsNeedingRoster.map((squad) =>
-      squadMembersOptions(wsId, squad.id),
-    ),
-  });
-  const fetchedMembers = useMemo(() => {
-    const map = new Map<string, FetchedSquadMembers>();
-    for (let i = 0; i < squadsNeedingRoster.length; i++) {
-      const squad = squadsNeedingRoster[i];
-      const result = rosterQueryResults[i];
-      if (!squad) continue;
-      map.set(squad.id, {
-        status: result?.isError
-          ? "error"
-          : result?.isSuccess
-            ? "success"
-            : "pending",
-        members: result?.data,
-      });
-    }
-    return map;
-  }, [squadsNeedingRoster, rosterQueryResults]);
-  const squadRosters = useMemo(
-    () => resolveSquadRosters(squads, fetchedMembers),
-    [squads, fetchedMembers],
-  );
-  const rosterPending = rosterQueryResults.some((query) => query.isPending);
   const { data: runCountsRaw = [], isPending: runCountsPending } = useQuery(
     agentRunCounts30dOptions(wsId),
   );
@@ -1078,20 +803,6 @@ function LegacyAgentsPage(_props: AgentsPageProps = {}) {
     new Set(),
   );
   const [search, setSearch] = useState("");
-  // Which base-role groups are folded in the nested view. Session-scoped like
-  // row selection: folding is a momentary "hide this for now", not a view
-  // preference worth persisting (the grouping mode itself is persisted).
-  const [collapsedGroups, setCollapsedGroups] = useState<ReadonlySet<string>>(
-    new Set(),
-  );
-  const toggleGroupExpanded = useCallback((groupId: string) => {
-    setCollapsedGroups((prev) => {
-      const next = new Set(prev);
-      if (next.has(groupId)) next.delete(groupId);
-      else next.add(groupId);
-      return next;
-    });
-  }, []);
 
   const rawScope = useAgentsViewStore((s) => s.scope);
   const scope = AGENT_SCOPES.includes(rawScope) ? rawScope : "mine";
@@ -1100,11 +811,6 @@ function LegacyAgentsPage(_props: AgentsPageProps = {}) {
   const sortDirection = useAgentsViewStore((s) => s.sortDirection);
   const hiddenColumns = useAgentsViewStore((s) => s.hiddenColumns);
   const filters = useAgentsViewStore((s) => s.filters);
-  const rawGrouping = useAgentsViewStore((s) => s.grouping);
-  // A persisted value can predate (or postdate) this build's modes; fall back
-  // to the flat list rather than rendering a grouping nothing implements.
-  const grouping = AGENT_GROUPINGS.includes(rawGrouping) ? rawGrouping : "none";
-  const setGrouping = useAgentsViewStore((s) => s.setGrouping);
   const handleSort = useAgentsViewStore((s) => s.toggleSort);
   const handleSortFieldSelect = useAgentsViewStore((s) => s.setSortField);
   const setSortDirection = useAgentsViewStore((s) => s.setSortDirection);
@@ -1140,32 +846,6 @@ function LegacyAgentsPage(_props: AgentsPageProps = {}) {
     for (const mem of members) m.set(mem.user_id, mem);
     return m;
   }, [members]);
-
-  const agentSquadsMap = useMemo(
-    () => buildAgentSquadsMap(squads, squadRosters),
-    [squads, squadRosters],
-  );
-  // Active specialisations per base role, straight off the list payload (every
-  // row carries parent_agent_id). Feeds the archive guard's "solidify &
-  // unbind" action, which needs the child ids the 409 body does not carry.
-  const childAgentsByParentId = useMemo(() => {
-    const map = new Map<string, Agent[]>();
-    for (const agent of agents) {
-      const parentId = agent.parent_agent_id ?? "";
-      if (!parentId || agent.archived_at) continue;
-      const existing = map.get(parentId);
-      if (existing) existing.push(agent);
-      else map.set(parentId, [agent]);
-    }
-    return map;
-  }, [agents]);
-  const allActiveRostersKnown = useMemo(() => {
-    for (const squad of squads) {
-      if (squad.archived_at != null) continue;
-      if (squadRosters.get(squad.id)?.kind !== "known") return false;
-    }
-    return true;
-  }, [squads, squadRosters]);
 
   const isWorkspaceAdmin = useMemo(() => {
     if (!currentUser) return false;
@@ -1215,10 +895,6 @@ function LegacyAgentsPage(_props: AgentsPageProps = {}) {
         owner: agent.owner_id ? membersById.get(agent.owner_id) ?? null : null,
         isOwnedByMe: isOwner,
         canManage: isWorkspaceAdmin || isOwner,
-        squadIds: (agentSquadsMap.get(agent.id) ?? []).map((s) => s.id),
-        squadMembershipKnown:
-          (agentSquadsMap.get(agent.id)?.length ?? 0) > 0 ||
-          allActiveRostersKnown,
       };
     });
   }, [
@@ -1231,8 +907,6 @@ function LegacyAgentsPage(_props: AgentsPageProps = {}) {
     activityMap,
     runCountsById,
     isWorkspaceAdmin,
-    agentSquadsMap,
-    allActiveRostersKnown,
   ]);
 
   // Visible rows: local search + filters, then sort.
@@ -1268,15 +942,6 @@ function LegacyAgentsPage(_props: AgentsPageProps = {}) {
     return filtered;
   }, [scopeRows, search, filters, sortField, sortDirection]);
 
-  const listItems = useMemo(() => {
-    if (grouping === "specialization") {
-      return flattenSpecializationItems(rows, collapsedGroups);
-    }
-    return flattenAgentListItems(rows, squads, grouping, squadRosters);
-  }, [rows, squads, grouping, squadRosters, collapsedGroups]);
-  const listItemsRef = useRef(listItems);
-  listItemsRef.current = listItems;
-
   const noMatchText = useMemo(() => {
     const query = search.trim();
     if (query) {
@@ -1305,18 +970,9 @@ function LegacyAgentsPage(_props: AgentsPageProps = {}) {
   // scrollbar spans the full pane height (Linear's structure).
   const listScrollRef = useRef<HTMLDivElement | null>(null);
   const rowVirtualizer = useVirtualizer({
-    count: listItems.length,
+    count: rows.length,
     getScrollElement: () => listScrollRef.current,
-    estimateSize: (index) => {
-      const item = listItemsRef.current[index];
-      if (item?.kind === "header" || item?.kind === "derive") {
-        return item.kind === "derive"
-          ? SPECIALIZATION_DERIVE_ROW_HEIGHT
-          : GROUP_HEADER_HEIGHT;
-      }
-      return ROW_HEIGHT;
-    },
-    getItemKey: (index) => listItemsRef.current[index]?.key ?? index,
+    estimateSize: () => ROW_HEIGHT,
     overscan: 10,
   });
 
@@ -1376,12 +1032,10 @@ function LegacyAgentsPage(_props: AgentsPageProps = {}) {
   const needsRunCounts = sortField === "lastActive" || sortField === "runs";
   const needsActivity = sortField === "lastActive";
   const needsPresence = filters.availability.length > 0;
-  const needsSquads = grouping === "squad" || filters.squads.length > 0;
   const listReady =
     (!needsActivity || !activityLoading) &&
     (!needsRunCounts || !runCountsPending) &&
-    (!needsPresence || !presenceLoading) &&
-    (!needsSquads || (!squadsPending && !rosterPending));
+    (!needsPresence || !presenceLoading);
 
   return (
     // relative: positioning anchor for the batch toolbar (page-centered,
@@ -1411,8 +1065,6 @@ function LegacyAgentsPage(_props: AgentsPageProps = {}) {
             filters={filters}
             onToggleFilter={toggleFilter}
             onClearFilters={clearFilters}
-            grouping={grouping}
-            onGroupingChange={setGrouping}
             sortField={sortField}
             sortDirection={sortDirection}
             onSortFieldChange={handleSortFieldSelect}
@@ -1421,8 +1073,6 @@ function LegacyAgentsPage(_props: AgentsPageProps = {}) {
             onToggleColumn={toggleColumn}
             allRows={scopeRows}
             members={members}
-            squads={squads}
-            squadRosters={squadRosters}
             visibleCount={rows.length}
           />
           <div
@@ -1455,43 +1105,12 @@ function LegacyAgentsPage(_props: AgentsPageProps = {}) {
                   </div>
                 )}
                 {virtualItems.map((vi) => {
-                  const item = listItems[vi.index];
-                  if (!item) return null;
-                  if (item.kind === "header") {
-                    return (
-                      <SquadGroupHeader
-                        key={item.key}
-                        group={item.group}
-                        href={
-                          item.group.squad
-                            ? paths.squadDetail(item.group.squad.id)
-                            : null
-                        }
-                      />
-                    );
-                  }
-                  if (item.kind === "derive") {
-                    return (
-                      <DeriveSpecializationRow
-                        key={item.key}
-                        baseName={item.base.agent.name}
-                        onDerive={() =>
-                          navigation.push(
-                            `${paths.newAgentManual()}?parent=${encodeURIComponent(
-                              item.base.agent.id,
-                            )}`,
-                          )
-                        }
-                      />
-                    );
-                  }
-                  const row = item.row;
-                  const isChild = item.kind === "specialization";
+                  const row = rows[vi.index];
+                  if (!row) return null;
                   const isSelected = selectedIds.has(row.agent.id);
                   return (
                     <ListGridRow
-                      key={item.key}
-                      data-specialization-row={isChild ? "true" : undefined}
+                      key={row.agent.id}
                       // The row's own hover (`hover:bg-accent/40` on
                       // ListGridRow) used to overwrite the selection tint and
                       // leave a selected row looking exactly like any hovered
@@ -1511,27 +1130,7 @@ function LegacyAgentsPage(_props: AgentsPageProps = {}) {
                         checked={isSelected}
                         onToggle={() => toggleSelected(row.agent.id)}
                       />
-                      <NameCell
-                        row={row}
-                        nested={isChild}
-                        nesting={
-                          // A specialisation whose base role was filtered away
-                          // is emitted as its own group head, but it can never
-                          // hold children — giving it the fold control would
-                          // render a chevron that toggles nothing. The same
-                          // goes for a base role with zero specialisations
-                          // (DENE-384): nothing to fold, so nothing to show.
-                          item.kind === "base" &&
-                          !isSpecialization(row.agent) &&
-                          item.hasChildren
-                            ? {
-                                childCount: item.childCount,
-                                expanded: item.expanded,
-                                onToggle: () => toggleGroupExpanded(item.groupId),
-                              }
-                            : null
-                        }
-                      />
+                      <NameCell row={row} />
                       {isColVisible("status") ? (
                         <StatusCell row={row} />
                       ) : (
@@ -1594,7 +1193,6 @@ function LegacyAgentsPage(_props: AgentsPageProps = {}) {
                             presence={row.presence}
                             canManage={row.canManage}
                             duplicateHref={duplicateHref(row.agent)}
-                            childAgents={childAgentsByParentId.get(row.agent.id)}
                           />
                         </span>
                       </ListGridCell>

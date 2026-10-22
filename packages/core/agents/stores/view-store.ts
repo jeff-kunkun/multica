@@ -23,21 +23,6 @@ export type AgentsScope = "mine" | "all" | "archived";
 
 export const AGENT_SCOPES: AgentsScope[] = ["mine", "all", "archived"];
 
-/**
- * Row grouping for the agents list. "specialization" nests each specialisation
- * under its base role (DENE-304) — one grouping at a time, because two levels
- * of headers in one list cost more to read than they explain. Persisted with
- * the rest of the view state; nothing about it belongs in the Query cache.
- */
-export type AgentGrouping = "none" | "squad" | "specialization" | "series";
-
-export const AGENT_GROUPINGS: AgentGrouping[] = [
-  "none",
-  "squad",
-  "specialization",
-  "series",
-];
-
 export type AgentSortField = "lastActive" | "name" | "runs" | "created";
 
 export type AgentSortDirection = "asc" | "desc";
@@ -69,8 +54,6 @@ export interface AgentListFilters {
   models: string[];
   /** Effective access-scope values (MUL-3963): workspace | specific-people | owner-only. */
   access: AccessScope[];
-  /** Squad ids, plus the "__none__" sentinel for agents in no squad. */
-  squads: string[];
 }
 
 export const EMPTY_AGENT_FILTERS: AgentListFilters = {
@@ -79,7 +62,6 @@ export const EMPTY_AGENT_FILTERS: AgentListFilters = {
   owners: [],
   models: [],
   access: [],
-  squads: [],
 };
 
 // User-hideable columns. Name and the structural columns (checkbox, kebab)
@@ -103,13 +85,11 @@ export const AGENT_DEFAULT_HIDDEN_COLUMNS: AgentColumnKey[] = [
 
 export interface AgentsViewState {
   scope: AgentsScope;
-  grouping: AgentGrouping;
   sortField: AgentSortField;
   sortDirection: AgentSortDirection;
   hiddenColumns: AgentColumnKey[];
   filters: AgentListFilters;
   setScope: (scope: AgentsScope) => void;
-  setGrouping: (grouping: AgentGrouping) => void;
   /** Header click: toggles direction on the active field, otherwise switches
    *  to the field with its default direction. */
   toggleSort: (field: AgentSortField) => void;
@@ -125,7 +105,6 @@ const DEFAULTS = {
   // "mine" is the historical default — most members care about their own
   // agents first; admins flip to "all".
   scope: "mine" as AgentsScope,
-  grouping: "none" as AgentGrouping,
   sortField: "lastActive" as AgentSortField,
   sortDirection: AGENT_SORT_DEFAULT_DIRECTION.lastActive,
   hiddenColumns: AGENT_DEFAULT_HIDDEN_COLUMNS,
@@ -141,7 +120,6 @@ export const useAgentsViewStore = create<AgentsViewState>()(
       // filters intact (you can carry "owner = Bob" between them).
       setScope: (scope) =>
         set(scope === "mine" ? { scope, filters: EMPTY_AGENT_FILTERS } : { scope }),
-      setGrouping: (grouping) => set({ grouping }),
       toggleSort: (field) =>
         set((state) =>
           state.sortField === field
@@ -190,7 +168,6 @@ export const useAgentsViewStore = create<AgentsViewState>()(
       ),
       partialize: (state) => ({
         scope: state.scope,
-        grouping: state.grouping,
         sortField: state.sortField,
         sortDirection: state.sortDirection,
         hiddenColumns: state.hiddenColumns,
@@ -209,7 +186,6 @@ export const useAgentsViewStore = create<AgentsViewState>()(
         return {
           ...current,
           ...p,
-          grouping: p.grouping ?? DEFAULTS.grouping,
           filters: { ...EMPTY_AGENT_FILTERS, ...(p.filters ?? {}) },
         };
       },

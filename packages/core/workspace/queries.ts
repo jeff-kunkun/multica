@@ -30,24 +30,13 @@ export const workspaceKeys = {
   skills: (wsId: string) => ["workspaces", wsId, "skills"] as const,
   assigneeFrequency: (wsId: string) => ["workspaces", wsId, "assignee-frequency"] as const,
   mcpServers: (wsId: string) => ["workspaces", wsId, "mcp-servers"] as const,
-  routingHealth: (wsId: string) => ["workspaces", wsId, "routing-health"] as const,
-  routingDispatch: (wsId: string) => ["workspaces", wsId, "routing-dispatch"] as const,
   modules: (wsId: string) => ["workspaces", wsId, "modules"] as const,
-  naming: (wsId: string) => ["workspaces", wsId, "naming"] as const,
 };
 
 export function workspaceListOptions() {
   return queryOptions({
     queryKey: workspaceKeys.list(),
     queryFn: () => api.listWorkspaces(),
-  });
-}
-
-export function workspaceNamingOptions(wsId: string) {
-  return queryOptions({
-    queryKey: workspaceKeys.naming(wsId),
-    queryFn: () => api.getWorkspaceNaming(wsId),
-    enabled: !!wsId,
   });
 }
 
@@ -59,38 +48,11 @@ export function workspaceBySlugOptions(slug: string) {
   });
 }
 
-/**
- * Whether routing is actually working for this workspace right now.
- *
- * The routing design keeps failures off tickets, so the settings section is
- * the only place a person can learn that the routing model is rejected or
- * cooling down (DENE-633). The read is cheap — the server reports breaker
- * state and never dials the model — but it is still refetched on an interval
- * rather than continuously, because a cooldown ends on a clock and the chip
- * should stop lying without the person reloading.
- */
 export function moduleVisibilityOptions(wsId: string) {
   return queryOptions<ModuleVisibility[]>({
     queryKey: workspaceKeys.modules(wsId),
     queryFn: () => api.listModuleVisibility(),
     enabled: !!wsId,
-  });
-}
-
-export function routingHealthOptions(wsId: string) {
-  return queryOptions({
-    queryKey: workspaceKeys.routingHealth(wsId),
-    queryFn: () => api.getRoutingHealth(wsId),
-    staleTime: 30_000,
-    refetchInterval: 60_000,
-  });
-}
-
-export function routingDispatchOptions(wsId: string) {
-  return queryOptions({
-    queryKey: workspaceKeys.routingDispatch(wsId),
-    queryFn: () => api.getRoutingDispatch(wsId),
-    staleTime: 30_000,
   });
 }
 

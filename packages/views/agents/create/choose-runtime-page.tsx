@@ -59,7 +59,6 @@ export function ChooseRuntimePage({
   const backOrReplace = useBackOrReplace();
   const squadId = navigation.searchParams.get("squad");
   const runtimeParam = navigation.searchParams.get("runtime");
-  const parentParam = navigation.searchParams.get("parent");
   const currentUserId = useAuthStore((state) => state.user?.id ?? null);
 
   const { data: runtimes = [], isLoading: runtimesLoading } = useQuery(
@@ -177,7 +176,6 @@ export function ChooseRuntimePage({
       createPathWithParams(paths.newAgentManual(), {
         squad: squadId,
         runtime: runtimeId,
-        parent: parentParam,
       }),
     );
 
