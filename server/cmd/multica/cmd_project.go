@@ -41,17 +41,8 @@ var projectCreateCmd = &cobra.Command{
 var projectUpdateCmd = &cobra.Command{
 	Use:   "update <id>",
 	Short: "Update a project",
-	Long: `Update a project.
-
---executor sets the project's executor allowlist (owner/admin only): automatic
-dispatch — new tickets, new chats, continuation, escalation, quota and seat
-relay, reviewer and advisor picks — chooses only these agents for work in the
-project, and declines when none of them can take it instead of reaching
-outside the list. Repeat the flag per agent (name or id); --executor ""
-lifts the limit. @mention and manual assignment are not limited. Read it
-back from executor_agent_ids in "multica project get <id> --output json".`,
-	Args: exactArgs(1),
-	RunE: runProjectUpdate,
+	Args:  exactArgs(1),
+	RunE:  runProjectUpdate,
 }
 
 var projectDeleteCmd = &cobra.Command{
@@ -168,7 +159,6 @@ func init() {
 	projectCreateCmd.Flags().String("start-date", "", "Start date (calendar day, YYYY-MM-DD)")
 	projectCreateCmd.Flags().String("due-date", "", "Due date (calendar day, YYYY-MM-DD)")
 	projectCreateCmd.Flags().StringArray("repo", nil, "Attach a github_repo resource by URL (may be repeated)")
-	projectCreateCmd.Flags().StringArray("domain", nil, "Workspace domain the project works in (repeatable; none = generic). See `multica domain list`")
 	projectCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// project resource list
@@ -216,8 +206,6 @@ func init() {
 	projectUpdateCmd.Flags().String("lead", "", "New lead name (member or agent)")
 	projectUpdateCmd.Flags().String("start-date", "", "New start date (calendar day, YYYY-MM-DD; pass empty string to clear)")
 	projectUpdateCmd.Flags().String("due-date", "", "New due date (calendar day, YYYY-MM-DD; pass empty string to clear)")
-	projectUpdateCmd.Flags().StringArray("executor", nil, "Replace the executor allowlist: only these agents (name or id, repeatable) are picked automatically for this project; --executor \"\" lifts it")
-	projectUpdateCmd.Flags().StringArray("domain", nil, "Replace the project's domains (repeatable; --domain \"\" or --domain 通用 clears to generic). See `multica domain list`")
 	projectUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// project delete
@@ -377,9 +365,6 @@ func runProjectCreate(cmd *cobra.Command, _ []string) error {
 	if v, _ := cmd.Flags().GetString("due-date"); v != "" {
 		body["due_date"] = v
 	}
-	if v, _ := cmd.Flags().GetStringArray("domain"); len(v) > 0 {
-		body["domain_ids"] = v
-	}
 
 	// Bundle resources into the create payload so the server attaches them in
 	// the same transaction; this avoids leaving a half-attached project on
@@ -475,37 +460,8 @@ func runProjectUpdate(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetString("due-date")
 		body["due_date"] = v
 	}
-	if cmd.Flags().Changed("domain") {
-		v, _ := cmd.Flags().GetStringArray("domain")
-		// --domain "" clears every domain: the project turns generic.
-		ids := []string{}
-		for _, d := range v {
-			if d = strings.TrimSpace(d); d != "" {
-				ids = append(ids, d)
-			}
-		}
-		body["domain_ids"] = ids
-	}
-
-	if cmd.Flags().Changed("executor") {
-		v, _ := cmd.Flags().GetStringArray("executor")
-		// --executor "" lifts the allowlist: every seat may be picked again.
-		ids := []string{}
-		for _, ref := range v {
-			if ref = strings.TrimSpace(ref); ref == "" {
-				continue
-			}
-			id, err := resolveAgent(ctx, client, ref)
-			if err != nil {
-				return fmt.Errorf("--executor %q: %w", ref, err)
-			}
-			ids = append(ids, id)
-		}
-		body["executor_agent_ids"] = ids
-	}
-
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use flags like --title, --status, --description, --icon, --lead, --start-date, --due-date, --domain, --executor")
+		return fmt.Errorf("no fields to update; use flags like --title, --status, --description, --icon, --lead, --start-date, --due-date")
 	}
 
 	var result map[string]any

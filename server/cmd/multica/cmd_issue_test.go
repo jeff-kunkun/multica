@@ -5846,22 +5846,14 @@ func TestResolveIssueRef_Link(t *testing.T) {
 }
 
 // DENE-1255: blocked with no wait flag warns but still writes; an empty
-// executor slot is reported with routing's reason.
-func TestRunIssueStatusBlockedWarnsAndReportsSeat(t *testing.T) {
-	seatPollWindow, seatPollInterval = 0, 0
-	t.Cleanup(func() { seatPollWindow, seatPollInterval = 10*time.Second, time.Second })
-	routed := false
+// executor slot is warned about.
+func TestRunIssueStatusBlockedWarnsAboutWaitAndExecutor(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/MUL-1":
 			json.NewEncoder(w).Encode(map[string]any{"id": "issue-1", "identifier": "MUL-1", "status": "backlog"})
 		case r.Method == http.MethodPut && r.URL.Path == "/api/issues/issue-1":
 			json.NewEncoder(w).Encode(map[string]any{"id": "issue-1", "identifier": "MUL-1", "status": "blocked"})
-		case r.Method == http.MethodGet && r.URL.Path == "/api/issues/issue-1":
-			json.NewEncoder(w).Encode(map[string]any{"id": "issue-1", "identifier": "MUL-1", "status": "blocked"})
-		case r.Method == http.MethodPost && r.URL.Path == "/api/issues/issue-1/route":
-			routed = true
-			json.NewEncoder(w).Encode(map[string]any{"state": "blocked", "action": "skipped", "reason": "routing not enabled"})
 		default:
 			http.NotFound(w, r)
 		}
@@ -5892,21 +5884,16 @@ func TestRunIssueStatusBlockedWarnsAndReportsSeat(t *testing.T) {
 	if err := runIssueStatus(newIssueStatusTestCmd(), []string{"MUL-1", "blocked"}); err != nil {
 		t.Fatalf("runIssueStatus: %v", err)
 	}
-	if !routed {
-		t.Fatal("an empty executor slot was not routed")
-	}
 	var out bytes.Buffer
-	printBlockedSeat(&out, "MUL-1", seatReport{Reason: "routing not enabled"})
-	if !strings.Contains(out.String(), "routing not enabled") || !strings.Contains(out.String(), "multica issue assign MUL-1") {
-		t.Fatalf("seat report = %s", out.String())
+	warnEmptyExecutor(&out, "MUL-1")
+	if !strings.Contains(out.String(), "multica issue assign MUL-1") {
+		t.Fatalf("empty executor warning = %s", out.String())
 	}
 }
 
 // DENE-1301: an agent's `issue status blocked` carries the kind and the one
 // next step the parent's blocker card shows.
 func TestRunIssueStatusBlockedSendsKindAndAction(t *testing.T) {
-	seatPollWindow, seatPollInterval = 0, 0
-	t.Cleanup(func() { seatPollWindow, seatPollInterval = 10*time.Second, time.Second })
 	var body map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
