@@ -161,6 +161,8 @@ export const DESCRIBE_ARGS = [
 // invocation against a throwaway repo, not just normalizeGitVersion in
 // isolation — the gap that let the Windows quoting regression through CI.
 export function deriveVersion(cwd) {
+  // DENE-2386 test client: the version is pinned for this local build only.
+  if (process.env.MULTICA_DESKTOP_VERSION) return process.env.MULTICA_DESKTOP_VERSION;
   return normalizeGitVersion(git(DESCRIBE_ARGS, cwd));
 }
 

@@ -1,6 +1,6 @@
 {
   "name": "@multica/desktop",
-  "productName": "Multica",
+  "productName": "Multica Test",
   "version": "0.6.5",
   "private": true,
   "description": "Multica Desktop — native desktop client for the Multica platform.",

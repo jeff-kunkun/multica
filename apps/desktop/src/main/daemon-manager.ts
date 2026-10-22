@@ -10,10 +10,14 @@ import {
 } from "fs/promises";
 import {
   existsSync,
+  mkdirSync,
+  readFileSync,
   watchFile,
   unwatchFile,
+  writeFileSync,
   type StatsListener,
 } from "fs";
+import { randomUUID } from "crypto";
 import { join } from "path";
 import { homedir, hostname } from "os";
 import type {
@@ -57,7 +61,7 @@ import {
 } from "./daemon-auth-probe";
 
 const POLL_INTERVAL_MS = 5_000;
-const PREFS_PATH = join(homedir(), ".multica", "desktop_prefs.json");
+const PREFS_PATH = join(homedir(), ".multica", "test-desktop_prefs.json");
 const LOG_TAIL_RETRY_MS = 2_000;
 const LOG_TAIL_MAX_RETRIES = 5;
 // How long a start may sit in "starting" (with no /health) before we probe the
@@ -1009,7 +1013,32 @@ async function probeLocalRuntimes(): Promise<LocalRuntimeProbe> {
 // applied by fix-path in main/index.ts — as a top-level const it would
 // snapshot process.env at import time, before that block runs.
 function desktopSpawnEnv(): NodeJS.ProcessEnv {
-  return { ...process.env, MULTICA_LAUNCHED_BY: "desktop" };
+  return {
+    ...process.env,
+    MULTICA_LAUNCHED_BY: "desktop",
+    MULTICA_DAEMON_ID: testDaemonId(),
+  };
+}
+
+// Test client: its own daemon identity, kept in test-daemon.id, so the test
+// server never sees this Mac's real daemon id (~/.multica/daemon.id).
+let cachedTestDaemonId: string | null = null;
+function testDaemonId(): string {
+  if (cachedTestDaemonId) return cachedTestDaemonId;
+  const path = join(homedir(), ".multica", "test-daemon.id");
+  let id = "";
+  try {
+    id = readFileSync(path, "utf-8").trim();
+  } catch {
+    // first launch
+  }
+  if (!/^[0-9a-f-]{36}$/i.test(id)) {
+    id = randomUUID();
+    mkdirSync(join(homedir(), ".multica"), { recursive: true });
+    writeFileSync(path, `${id}\n`, "utf-8");
+  }
+  cachedTestDaemonId = id;
+  return id;
 }
 
 export async function resolveDesktopCliBinary(): Promise<string | null> {

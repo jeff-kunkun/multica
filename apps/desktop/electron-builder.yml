@@ -1,5 +1,7 @@
-appId: ai.multica.desktop
-productName: Multica
+# DENE-2386 test client only: its own app id, name and URL scheme, so it
+# installs beside the real Multica / Multica Office apps without replacing them.
+appId: ai.multica.test10
+productName: Multica Test
 directories:
   buildResources: build
 files:
@@ -30,9 +32,9 @@ extraResources:
   - from: ../../NOTICE
     to: NOTICE
 protocols:
-  - name: Multica
+  - name: Multica Test
     schemes:
-      - multica
+      - multica-test
 asarUnpack:
   - resources/**
 # Publishes `minimumSystemVersion` (Darwin kernel floor) into latest-mac.yml /

@@ -126,7 +126,7 @@ if (process.platform !== "win32") {
   process.env.PATH = applyFallbackPathDirs(process.env.PATH, homedir());
 }
 
-const PROTOCOL = "multica";
+const PROTOCOL = "multica-test";
 const devLog = is.dev ? createBestEffortDevLog() : undefined;
 
 // Where the main process parks a freeze/crash breadcrumb until the next
@@ -576,7 +576,7 @@ if (is.dev) {
   // to "Multica", but anchoring it here makes WM_CLASS ↔ StartupWMClass
   // (declared in electron-builder.yml) survive a regression in
   // productName / the build pipeline. Must run before requestSingleInstanceLock().
-  app.setName("Multica");
+  app.setName("Multica Test");
 }
 
 // --- Protocol registration -----------------------------------------------
@@ -643,7 +643,7 @@ if (!gotTheLock) {
     });
 
     electronApp.setAppUserModelId(
-      is.dev ? "ai.multica.desktop.dev" : "ai.multica.desktop",
+      is.dev ? "ai.multica.test10.dev" : "ai.multica.test10",
     );
 
     // macOS: replace the default Electron dock icon with the bundled logo

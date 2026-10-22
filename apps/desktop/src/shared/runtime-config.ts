@@ -25,7 +25,8 @@ export const DEFAULT_RUNTIME_CONFIG: RuntimeConfig = Object.freeze({
 });
 
 /** Built-in self-hosted preset shown in the desktop server switcher. */
-export const SELF_HOSTED_PRESET_URL = "https://ai.ferryway.cc";
+// DENE-2386 test client: the throwaway test instance, reached by SSH tunnel.
+export const SELF_HOSTED_PRESET_URL = "http://localhost:13386";
 
 /**
  * Server this fork's desktop build connects to on entry, used whenever

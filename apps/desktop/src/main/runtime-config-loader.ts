@@ -48,7 +48,8 @@ export async function loadRuntimeConfig(options: {
 }
 
 export function desktopConfigPath(): string {
-  return join(app.getPath("home"), ".multica", "desktop.json");
+  // Test client: never reads the real app's desktop.json.
+  return join(app.getPath("home"), ".multica", "test-desktop.json");
 }
 
 export async function switchRuntimeConfig(options: {
