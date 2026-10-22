@@ -787,6 +787,7 @@ export function AgentTranscriptDialog({
         );
       }
       case "queued":
+      case "waiting_local_directory":
         return (
           <span className={cn(base, "bg-muted text-muted-foreground")}>
             {t(($) => $.transcript.status_queued)}
@@ -796,12 +797,6 @@ export function AgentTranscriptDialog({
         return (
           <span className={cn(base, "bg-info/15 text-info")}>
             {t(($) => $.transcript.status_dispatched)}
-          </span>
-        );
-      case "waiting_local_directory":
-        return (
-          <span className={cn(base, "bg-muted text-muted-foreground")}>
-            {t(($) => $.transcript.status_waiting)}
           </span>
         );
       case "deferred":

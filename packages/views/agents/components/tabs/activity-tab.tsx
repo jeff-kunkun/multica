@@ -1041,11 +1041,10 @@ type TimeAgoFn = (dateStr: string) => string;
 function taskStatusLabel(status: AgentTask["status"], t: AgentsT): string {
   switch (status) {
     case "queued":
+    case "waiting_local_directory":
       return t(($) => $.tab_body.activity.status.queued);
     case "dispatched":
       return t(($) => $.tab_body.activity.status.dispatched);
-    case "waiting_local_directory":
-      return t(($) => $.tab_body.activity.status.waiting_local_directory);
     case "deferred":
       return t(($) => $.tab_body.activity.status.deferred);
     case "running":

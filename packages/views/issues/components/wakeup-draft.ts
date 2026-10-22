@@ -1,12 +1,11 @@
 import type { IssueWakeupInput, WakeupCondition as PlatformCondition } from "@multica/core/types";
 
-/** The 25 issue-scoped events, in catalog order. */
+/** The 24 issue-scoped events, in catalog order. */
 export const WAKEUP_EVENT_TYPES = [
   "task.queued",
   "task.dispatched",
   "task.started",
   "task.deferred",
-  "task.waiting_local_directory",
   "task.completed",
   "task.failed",
   "task.cancelled",
