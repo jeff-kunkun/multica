@@ -28,11 +28,10 @@ func TestBriefTellsTheAgentNotToCloneACoveredRepo(t *testing.T) {
 		IssueID: "i1",
 		Repos:   []RepoContextForEnv{{URL: "https://github.com/jeff-kunkun/multica"}},
 		CodeSource: CodeSourceForEnv{
-			Kind:          "local_directory",
-			LocalPath:     "/Users/kunkun/.agents/multica",
-			ExecutionMode: "worktree",
-			DisplayName:   "multica",
-			CoveredRepos:  []CodeSourceRepoForEnv{{URL: "https://github.com/jeff-kunkun/multica"}},
+			Kind:         "local_directory",
+			LocalPath:    "/Users/kunkun/.agents/multica",
+			DisplayName:  "multica",
+			CoveredRepos: []CodeSourceRepoForEnv{{URL: "https://github.com/jeff-kunkun/multica"}},
 		},
 	})
 	if !strings.Contains(brief, "## Code Source") {
@@ -44,8 +43,8 @@ func TestBriefTellsTheAgentNotToCloneACoveredRepo(t *testing.T) {
 	if !strings.Contains(brief, "do NOT run `multica repo checkout` for these") {
 		t.Error("a covered repo must carry an explicit do-not-clone instruction")
 	}
-	if !strings.Contains(brief, "your edits do NOT touch the user's working copy") {
-		t.Error("worktree mode must be explained, not just named")
+	if !strings.Contains(brief, "don't switch branches, reset, or discard changes you didn't make") {
+		t.Error("a bound folder must carry the shared-folder risk sentence")
 	}
 	// The generic "fetch it with repo checkout" line is what produced the
 	// duplicate clone; it must not still be sitting above the new section.
@@ -61,7 +60,6 @@ func TestBriefReportsAnUnverifiedDirectoryInsteadOfHidingIt(t *testing.T) {
 		CodeSource: CodeSourceForEnv{
 			Kind:          "local_directory",
 			LocalPath:     "/Users/kunkun/code",
-			ExecutionMode: "in_place",
 			UnprovenRepos: []CodeSourceRepoForEnv{{URL: "https://github.com/kun/ai100", Detail: "no git remote there matches it"}},
 		},
 	})
@@ -85,5 +83,69 @@ func TestBriefKeepsRemoteOnlyReposCheckoutable(t *testing.T) {
 	})
 	if !strings.Contains(brief, "Not in that directory — check these out normally") {
 		t.Error("pinning one directory must not strand a project's other repositories")
+	}
+}
+
+func TestBriefNamesTheBranchAndTheOtherTasksInTheFolder(t *testing.T) {
+	brief := briefWithCodeSource(t, TaskContextForEnv{
+		IssueID: "i1",
+		CodeSource: CodeSourceForEnv{
+			Kind:      "local_directory",
+			LocalPath: "/Users/kunkun/code/app",
+			Branch:    "main",
+			CoRunners: []CodeSourceCoRunnerForEnv{
+				{Identifier: "DENE-7", Title: "Fix login", Branch: "fix-login"},
+				{Title: "Chat about the build"},
+			},
+		},
+	})
+	for _, want := range []string{
+		"- Folder: `/Users/kunkun/code/app`",
+		"- Current branch: `main`",
+		"- DENE-7 Fix login (branch `fix-login`)",
+		"- Chat about the build\n",
+		"create a git worktree inside or beside the project folder",
+	} {
+		if !strings.Contains(brief, want) {
+			t.Errorf("brief missing %q", want)
+		}
+	}
+}
+
+func TestBriefOmitsTheCoRunnerListWhenAloneInTheFolder(t *testing.T) {
+	brief := briefWithCodeSource(t, TaskContextForEnv{
+		IssueID:    "i1",
+		CodeSource: CodeSourceForEnv{Kind: "local_directory", LocalPath: "/Users/kunkun/code/app"},
+	})
+	if strings.Contains(brief, "Other tasks running in this folder") {
+		t.Error("no co-runner list without other tasks")
+	}
+	if strings.Contains(brief, "Current branch") {
+		t.Error("no branch line when the branch is unknown")
+	}
+	if !strings.Contains(brief, "Other agents may be working in this folder at the same time") {
+		t.Error("the risk sentence applies even when the folder is free right now")
+	}
+}
+
+// Without a bound folder the checkout sits in the task's own workdir, which
+// GC removes later, so committed work has to reach the remote. In a bound
+// folder the work stays on the user's disk and the sentence would mislead.
+func TestBriefAsksToPushOnlyWithoutABoundFolder(t *testing.T) {
+	const push = "push your branch to the remote before you finish"
+	remote := briefWithCodeSource(t, TaskContextForEnv{
+		IssueID: "i1",
+		Repos:   []RepoContextForEnv{{URL: "https://github.com/o/r"}},
+	})
+	if !strings.Contains(remote, push) {
+		t.Error("a run in its own workdir is not told to push its branch")
+	}
+	local := briefWithCodeSource(t, TaskContextForEnv{
+		IssueID:    "i1",
+		Repos:      []RepoContextForEnv{{URL: "https://github.com/o/r"}},
+		CodeSource: CodeSourceForEnv{Kind: "local_directory", LocalPath: "/Users/kunkun/code/app"},
+	})
+	if strings.Contains(local, push) {
+		t.Error("a run in the bound folder was told its workdir is cleaned up")
 	}
 }
