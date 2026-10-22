@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   setKey: vi.fn(),
   deleteKey: vi.fn(),
   invalidate: vi.fn(),
+  magpie: true,
 }));
 
 vi.mock("@tanstack/react-query", () => ({
@@ -30,6 +31,9 @@ vi.mock("@multica/core/runtimes", async (importOriginal) => ({
   runtimeListOptions: () => ({ queryKey: ["runtimes"] }),
 }));
 vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
+vi.mock("../../../workspace/use-magpie-mode", () => ({
+  useWorkspaceMagpieEnabled: () => mocks.magpie,
+}));
 
 import { MagpieGroupPicker, useIssueMagpieGroups } from "./magpie-group-picker";
 
@@ -41,6 +45,7 @@ function issue(metadata: Record<string, unknown>): Issue {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.magpie = true;
   mocks.setKey.mockResolvedValue(undefined);
   mocks.deleteKey.mockResolvedValue(undefined);
   mocks.runtimes = [{ id: "rt-1", provider: "opencode" }];
@@ -61,6 +66,16 @@ describe("useIssueMagpieGroups", () => {
     mocks.agents = [{ id: "agent-1", runtime_id: "rt-1", runtime_config: { magpie_groups: GROUPS } }];
     mocks.runtimes = [{ id: "rt-1", provider: "claude" }];
     expect(groups({ assignee_type: "agent", assignee_id: "agent-1" })).toBeNull();
+  });
+});
+
+describe("useIssueMagpieGroups with the magpie switch off", () => {
+  it("offers no choice", () => {
+    mocks.magpie = false;
+    const { result } = renderHook(() =>
+      useIssueMagpieGroups({ assignee_type: "agent", assignee_id: "agent-1" }),
+    );
+    expect(result.current).toBeNull();
   });
 });
 

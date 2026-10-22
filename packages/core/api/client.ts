@@ -190,6 +190,9 @@ import {
   EMPTY_USER,
   AppConfigSchema,
   type AppConfigResponse,
+  WorkspaceMagpieSchema,
+  EMPTY_WORKSPACE_MAGPIE,
+  type WorkspaceMagpie,
   type RefreshSessionResponse,
   RefreshSessionResponseSchema,
   EMPTY_REFRESH_SESSION_RESPONSE,
@@ -2141,6 +2144,23 @@ export class ApiClient {
     return this.fetch(`/api/workspaces/${id}`, {
       method: "PATCH",
       body: JSON.stringify(data),
+    });
+  }
+
+  async getWorkspaceMagpie(workspaceId: string): Promise<WorkspaceMagpie> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/magpie`);
+    return parseWithFallback(raw, WorkspaceMagpieSchema, EMPTY_WORKSPACE_MAGPIE, {
+      endpoint: "GET /api/workspaces/{id}/magpie",
+    });
+  }
+
+  async updateWorkspaceMagpie(workspaceId: string, enabled: boolean): Promise<WorkspaceMagpie> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/magpie`, {
+      method: "PUT",
+      body: JSON.stringify({ enabled }),
+    });
+    return parseWithFallback(raw, WorkspaceMagpieSchema, { enabled }, {
+      endpoint: "PUT /api/workspaces/{id}/magpie",
     });
   }
 

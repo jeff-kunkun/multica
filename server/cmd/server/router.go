@@ -597,12 +597,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// The payload is names and transports only; the stored
 					// entries are write-only.
 					r.Get("/mcp-servers", h.ListWorkspaceMcpServers)
+					r.Get("/magpie", h.GetWorkspaceMagpie)
 				})
 				// Owner-only access
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner"))
 					r.Put("/", h.UpdateWorkspace)
 					r.Patch("/", h.UpdateWorkspace)
+					r.Put("/magpie", h.UpdateWorkspaceMagpie)
 					r.Post("/members", h.CreateInvitation)
 					r.Delete("/members/{memberId}", h.DeleteMember)
 					r.Delete("/invitations/{invitationId}", h.RevokeInvitation)

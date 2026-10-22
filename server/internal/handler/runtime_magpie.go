@@ -72,7 +72,7 @@ func validMagpieModels(models []magpieModel) bool {
 
 // ReportRuntimeMagpie stores the magpie route a daemon read for one of its
 // runtimes; a null route removes it. Clients are notified only when the
-// stored route changed.
+// stored route changed. Only workspaces with the magpie switch on keep routes.
 func (h *Handler) ReportRuntimeMagpie(w http.ResponseWriter, r *http.Request) {
 	rt, ok := h.requireDaemonRuntimeAccess(w, r, chi.URLParam(r, "runtimeId"))
 	if !ok {
@@ -87,11 +87,15 @@ func (h *Handler) ReportRuntimeMagpie(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Switch off: the route is not stored, and one left from when it was on is
+	// dropped, so the runtime reads as it does on official Multica.
+	enabled := h.workspaceMagpieEnabledByID(r.Context(), rt.WorkspaceID)
+
 	var (
 		changed int64
 		err     error
 	)
-	if req.Magpie == nil {
+	if req.Magpie == nil || !enabled {
 		changed, err = h.Queries.ClearAgentRuntimeMagpie(r.Context(), rt.ID)
 	} else {
 		if req.Magpie.Models == nil {

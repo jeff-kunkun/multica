@@ -2233,19 +2233,22 @@ func TestClaimResponseAgentIdentityMatches(t *testing.T) {
 }
 
 type claimRuntimeGuardTask struct {
-	PriorSessionID                string          `json:"prior_session_id"`
-	PriorWorkDir                  string          `json:"prior_work_dir"`
-	PriorSessionResumeUnavailable bool            `json:"prior_session_resume_unavailable"`
-	ChatMessage                   string          `json:"chat_message"`
-	ThreadName                    string          `json:"thread_name"`
-	MagpieGroup                   string          `json:"magpie_group"`
-	QuickCreateAttachmentIDs      []string        `json:"quick_create_attachment_ids"`
-	QuickCreatePriority           string          `json:"quick_create_priority"`
-	QuickCreateDueDate            string          `json:"quick_create_due_date"`
-	ProjectID                     string          `json:"project_id"`
-	ProjectDescription            string          `json:"project_description"`
-	ParentIssueID                 string          `json:"parent_issue_id"`
-	QuickCreateSourceContext      json.RawMessage `json:"quick_create_source_context"`
+	PriorSessionID                string `json:"prior_session_id"`
+	PriorWorkDir                  string `json:"prior_work_dir"`
+	PriorSessionResumeUnavailable bool   `json:"prior_session_resume_unavailable"`
+	ChatMessage                   string `json:"chat_message"`
+	ThreadName                    string `json:"thread_name"`
+	MagpieGroup                   string `json:"magpie_group"`
+	Agent                         *struct {
+		RuntimeConfig json.RawMessage `json:"runtime_config"`
+	} `json:"agent"`
+	QuickCreateAttachmentIDs []string        `json:"quick_create_attachment_ids"`
+	QuickCreatePriority      string          `json:"quick_create_priority"`
+	QuickCreateDueDate       string          `json:"quick_create_due_date"`
+	ProjectID                string          `json:"project_id"`
+	ProjectDescription       string          `json:"project_description"`
+	ParentIssueID            string          `json:"parent_issue_id"`
+	QuickCreateSourceContext json.RawMessage `json:"quick_create_source_context"`
 }
 
 func claimTaskForRuntimeGuard(t *testing.T, runtimeID, daemonID string) *claimRuntimeGuardTask {
@@ -2448,6 +2451,7 @@ func TestClaimTask_CarriesIssueMagpieGroup(t *testing.T) {
 		t.Skip("database not available")
 	}
 	ctx := context.Background()
+	setTestWorkspaceMagpie(t, true)
 	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
 	issueID := dbfx.Issue(t, "magpie group fixture", testutil.Cols{
 		"status":   "in_progress",
@@ -2462,6 +2466,44 @@ func TestClaimTask_CarriesIssueMagpieGroup(t *testing.T) {
 	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
 	if task.MagpieGroup != "office-pojia" {
 		t.Fatalf("claimed magpie_group = %q, want office-pojia", task.MagpieGroup)
+	}
+	dbfx.Exec(t, `
+		UPDATE agent_task_queue
+		SET status = 'completed', completed_at = now()
+		WHERE issue_id = $1 AND status IN ('dispatched', 'running')
+	`, issueID)
+}
+
+// With the workspace's magpie switch off, the claim carries neither the
+// issue's group nor the agent's magpie_groups, so any daemon version runs it
+// as official Multica.
+func TestClaimTask_MagpieSwitchOff(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	setTestWorkspaceMagpie(t, false)
+	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
+	dbfx.Exec(t, `UPDATE agent SET runtime_config = '{"magpie_groups":["office-pojia"]}'::jsonb WHERE id = $1`, agentID)
+	issueID := dbfx.Issue(t, "magpie switch off fixture", testutil.Cols{
+		"status":   "in_progress",
+		"number":   81298,
+		"metadata": `{"magpie_group":"office-pojia"}`,
+	})
+	dbfx.Exec(t, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
+		VALUES ($1, $2, $3, 'queued', 0)
+	`, agentID, runtimeID, issueID)
+
+	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	if task.MagpieGroup != "" {
+		t.Fatalf("claimed magpie_group = %q with the switch off", task.MagpieGroup)
+	}
+	if task.Agent == nil {
+		t.Fatal("claim response has no agent")
+	}
+	if strings.Contains(string(task.Agent.RuntimeConfig), "magpie_groups") {
+		t.Fatalf("claimed runtime_config keeps magpie_groups with the switch off: %s", task.Agent.RuntimeConfig)
 	}
 	dbfx.Exec(t, `
 		UPDATE agent_task_queue

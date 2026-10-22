@@ -266,6 +266,13 @@ SET metadata = metadata - 'magpie'
 WHERE id = $1
   AND metadata->'magpie' IS NOT NULL;
 
+-- name: ClearWorkspaceRuntimeMagpie :execrows
+-- Drops every stored magpie route in a workspace whose magpie switch went off.
+UPDATE agent_runtime
+SET metadata = metadata - 'magpie'
+WHERE workspace_id = $1
+  AND metadata->'magpie' IS NOT NULL;
+
 -- name: SelectStaleOnlineRuntimes :many
 -- Lists online runtimes whose last_seen_at exceeds the stale window. The
 -- sweeper uses this as a candidate set, then optionally filters via the

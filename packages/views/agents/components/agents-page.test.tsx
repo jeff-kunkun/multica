@@ -11,6 +11,11 @@ const mocks = vi.hoisted(() => ({
   presence: new Map<string, unknown>(),
   tasks: [] as { agent_id: string; issue_id: string; status: string }[],
   push: vi.fn(),
+  magpie: true,
+}));
+
+vi.mock("../../workspace/use-magpie-mode", () => ({
+  useWorkspaceMagpieEnabled: () => mocks.magpie,
 }));
 
 vi.mock("@tanstack/react-query", () => ({
@@ -122,6 +127,7 @@ function row(name: string): HTMLElement {
 }
 
 beforeEach(() => {
+  mocks.magpie = true;
   mocks.agents = [];
   mocks.runtimes = [
     {
@@ -178,6 +184,18 @@ describe("AgentsPage", () => {
     const plain = row("Plain");
     expect(within(plain).queryByText("Not on magpie")).not.toBeInTheDocument();
     expect(within(plain).queryByText("CLI's own models")).not.toBeInTheDocument();
+  });
+
+  it("shows no magpie route when the workspace's magpie switch is off", () => {
+    mocks.magpie = false;
+    mocks.agents = [
+      makeAgent({ id: "a-routed", name: "Routed" }),
+      makeAgent({ id: "a-unrouted", name: "Unrouted", runtime_id: "runtime-unrouted" }),
+    ];
+    renderPage();
+
+    expect(within(row("Routed")).queryByText("office-claude")).not.toBeInTheDocument();
+    expect(within(row("Unrouted")).queryByText("Not on magpie")).not.toBeInTheDocument();
   });
 
   // DENE-2078: an OpenCode agent pinned to office-pojia showed its CLI's group.

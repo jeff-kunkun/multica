@@ -29,6 +29,7 @@ func TestReportRuntimeMagpie(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
+	setTestWorkspaceMagpie(t, true)
 	runtimeID := createOnlineTestRuntime(t, testUserID)
 
 	h := *testHandler
@@ -140,6 +141,25 @@ func TestReportRuntimeMagpie(t *testing.T) {
 	}
 	if refreshes != 4 {
 		t.Fatalf("refreshes = %d, want 4", refreshes)
+	}
+}
+
+// With the workspace's magpie switch off, a reported route is not stored and
+// one left from when it was on is dropped.
+func TestReportRuntimeMagpie_SwitchOff(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	setTestWorkspaceMagpie(t, false)
+	runtimeID := createOnlineTestRuntime(t, testUserID)
+	dbfx.Exec(t, `UPDATE agent_runtime SET metadata = metadata || '{"magpie":{"group":"old","models":[]}}'::jsonb WHERE id = $1`, runtimeID)
+
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/magpie", map[string]any{"magpie": map[string]any{
+		"group": "office-claude", "models": []map[string]string{{"id": "claude/claude-opus-5-5"}},
+	}}, testWorkspaceID, "test-report-magpie-off")
+	testutil.Call(t, testHandler.ReportRuntimeMagpie, withURLParam(req, "runtimeId", runtimeID)).Want(http.StatusOK)
+	if got := readRuntimeMagpie(t, runtimeID); got != "" {
+		t.Fatalf("route stored with the switch off: %s", got)
 	}
 }
 

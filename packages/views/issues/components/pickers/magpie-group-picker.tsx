@@ -15,6 +15,7 @@ import {
 } from "@multica/core/runtimes";
 import { agentListOptions } from "@multica/core/workspace/queries";
 import { useT } from "../../../i18n";
+import { useWorkspaceMagpieEnabled } from "../../../workspace/use-magpie-mode";
 import { PropertyPicker, PickerItem } from "./property-picker";
 
 /**
@@ -25,7 +26,8 @@ export function useIssueMagpieGroups(issue: Pick<Issue, "assignee_type" | "assig
   const wsId = useWorkspaceId();
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
-  if (issue.assignee_type !== "agent" || !issue.assignee_id) return null;
+  const magpie = useWorkspaceMagpieEnabled();
+  if (!magpie || issue.assignee_type !== "agent" || !issue.assignee_id) return null;
   const agent = agents.find((a) => a.id === issue.assignee_id);
   const runtime = agent ? runtimes.find((r) => r.id === agent.runtime_id) : undefined;
   if (!agent || !canPinMagpieGroup(runtime?.provider)) return null;

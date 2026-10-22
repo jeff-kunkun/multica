@@ -2174,3 +2174,13 @@ export const EMPTY_PLAN_APPROVER: PlanApprover = {
   granted_by: "",
   created_at: "",
 };
+
+// `GET/PUT /api/workspaces/{id}/magpie`: the workspace's Magpie switch.
+// Anything but an explicit `enabled: true` reads as off, official behaviour.
+export const WorkspaceMagpieSchema = z
+  .object({ enabled: z.boolean().catch(false).default(false) })
+  .loose();
+
+export type WorkspaceMagpie = z.infer<typeof WorkspaceMagpieSchema>;
+
+export const EMPTY_WORKSPACE_MAGPIE: WorkspaceMagpie = { enabled: false };

@@ -45,6 +45,7 @@ import type { Workspace } from "@multica/core/types";
 import { AvatarUploadControl } from "../../common/avatar-upload-control";
 import { useNavigation } from "../../navigation";
 import { DeleteWorkspaceDialog } from "./delete-workspace-dialog";
+import { MagpieSection } from "./magpie-section";
 import { useT } from "../../i18n";
 import {
   SettingsCard,
@@ -469,6 +470,8 @@ export function WorkspaceTab() {
           </SettingsRow>
         </SettingsCard>
       </SettingsSection>
+
+      {membersFetched && <MagpieSection workspace={workspace} canManage={canManageWorkspace} />}
 
       {/* Danger Zone — gated on the member query settling so the owner-only
           Delete button and the member-only Leave button don't flash in

@@ -143,6 +143,22 @@ func (q *Queries) ClearAgentRuntimeMagpie(ctx context.Context, id pgtype.UUID) (
 	return result.RowsAffected(), nil
 }
 
+const clearWorkspaceRuntimeMagpie = `-- name: ClearWorkspaceRuntimeMagpie :execrows
+UPDATE agent_runtime
+SET metadata = metadata - 'magpie'
+WHERE workspace_id = $1
+  AND metadata->'magpie' IS NOT NULL
+`
+
+// Drops every stored magpie route in a workspace whose magpie switch went off.
+func (q *Queries) ClearWorkspaceRuntimeMagpie(ctx context.Context, workspaceID pgtype.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, clearWorkspaceRuntimeMagpie, workspaceID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const countActiveAgentsByRuntime = `-- name: CountActiveAgentsByRuntime :one
 SELECT count(*) FROM agent WHERE runtime_id = $1 AND archived_at IS NULL
 `

@@ -2195,6 +2195,13 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	if rc := bytes.TrimSpace(agent.RuntimeConfig); len(rc) > 0 && !bytes.Equal(rc, []byte("{}")) && !bytes.Equal(rc, []byte("null")) {
 		runtimeConfig = json.RawMessage(agent.RuntimeConfig)
 	}
+	// With the workspace's magpie switch off the run gets no magpie group:
+	// dropping the groups here, not in the daemon, holds for every daemon
+	// version, which pins only from runtime_config.magpie_groups.
+	magpieOn := h.workspaceMagpieEnabledByID(r.Context(), agent.WorkspaceID)
+	if !magpieOn {
+		runtimeConfig = withoutMagpieGroups(runtimeConfig)
+	}
 	resp.Agent = &TaskAgentData{
 		ID:            uuidToString(agent.ID),
 		Name:          agent.Name,
@@ -2251,7 +2258,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			return resp, deliveredCommentIDs, issueSnapshot, failure
 		}
 		resp.ThreadName = issue.Title
-		resp.MagpieGroup = issueMagpieGroup(issue.Metadata)
+		if magpieOn {
+			resp.MagpieGroup = issueMagpieGroup(issue.Metadata)
+		}
 		issueNumber = issue.Number
 
 		// Issue-state delta (MUL-7344). Every field below already sits on the

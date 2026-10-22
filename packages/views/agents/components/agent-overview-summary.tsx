@@ -13,6 +13,7 @@ import { useT } from "../../i18n";
 import { VisibilityBadge } from "./visibility-badge";
 import { AgentPerformanceSummary } from "./tabs/activity-tab";
 import { MagpieGroupPicker } from "./magpie-group-picker";
+import { useWorkspaceMagpieEnabled } from "../../workspace/use-magpie-mode";
 
 interface AgentOverviewSummaryProps {
   agent: Agent;
@@ -31,7 +32,8 @@ export function AgentOverviewSummary({
 }: AgentOverviewSummaryProps) {
   const { t } = useT("agents");
   const runtimeOnline = runtime?.status === "online";
-  const magpieRoute = readRuntimeMagpieRoute(runtime?.metadata);
+  const magpie = useWorkspaceMagpieEnabled();
+  const magpieRoute = magpie ? readRuntimeMagpieRoute(runtime?.metadata) : null;
 
   return (
     <aside className="self-start rounded-xl border border-surface-border bg-surface p-5 shadow-[var(--surface-shadow)] xl:sticky xl:top-6">

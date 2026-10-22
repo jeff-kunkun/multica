@@ -37,6 +37,7 @@ import {
 } from "../../layout/collection-page";
 import { availabilityConfig } from "../presence";
 import { MagpieRouteLine } from "./magpie-route-line";
+import { useWorkspaceMagpieEnabled } from "../../workspace/use-magpie-mode";
 import { useT } from "../../i18n";
 
 // Most recent activity bucket with runs, as "days ago" (0 = today), from the
@@ -164,12 +165,11 @@ function AgentRow({
   const { t } = useT("agents");
   const paths = useWorkspacePaths();
   const rowLink = useRowLink();
+  const magpie = useWorkspaceMagpieEnabled();
 
-  const routes = agentMagpieRoutes(
-    readRuntimeMagpieRoute(runtime?.metadata),
-    runtime?.provider,
-    agent,
-  );
+  const routes = magpie
+    ? agentMagpieRoutes(readRuntimeMagpieRoute(runtime?.metadata), runtime?.provider, agent)
+    : [];
   const detailHref = paths.agentDetail(agent.id);
   const hasStatus = !isAgentRuntimeBound(agent) || presence !== null;
 

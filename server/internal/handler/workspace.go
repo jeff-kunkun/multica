@@ -400,15 +400,20 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.Settings != nil {
 		if incoming, ok := req.Settings.(map[string]any); ok {
+			existing, err := h.Queries.GetWorkspace(r.Context(), idUUID)
+			if err != nil {
+				writeError(w, http.StatusNotFound, "workspace not found")
+				return
+			}
 			// Only an old client's flip of the retired PR switch needs the
 			// stored value; see reconcilePRMergeSettings.
 			var stored map[string]any
 			if _, sent := incoming[prAutoCompleteLegacyKey]; sent {
-				if existing, err := h.Queries.GetWorkspace(r.Context(), idUUID); err == nil {
-					_ = json.Unmarshal(existing.Settings, &stored)
-				}
+				_ = json.Unmarshal(existing.Settings, &stored)
 			}
 			reconcilePRMergeSettings(stored, incoming)
+			// The magpie switch is written only through its own endpoint.
+			keepStoredMagpie(incoming, existing.Settings)
 		}
 		s, _ := json.Marshal(req.Settings)
 		params.Settings = s
