@@ -604,8 +604,8 @@ func activityTime(issue db.Issue) time.Time {
 
 // wakeIssueOwner starts the assignee (or the reviewer, while in review) and
 // leaves a sentence. A disabled seat is named and not replaced here — that
-// handoff belongs to the disabled-seat path. A ticket nobody holds is seated
-// by routing first; when routing cannot, a person is told exactly that.
+// handoff belongs to the disabled-seat path. A ticket nobody holds is re-read
+// first; when it is still empty, a person is told exactly that.
 func (h *Handler) wakeIssueOwner(ctx context.Context, issue db.Issue, reason string, commentOnly bool) {
 	if !commentOnly && issue.Status != "in_review" && !issue.AssigneeID.Valid &&
 		blockwait.MetaString(parseIssueMetadata(issue.Metadata), blockwait.KeyNeedsHuman) == "" {

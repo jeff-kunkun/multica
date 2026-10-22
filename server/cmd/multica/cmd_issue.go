@@ -412,8 +412,8 @@ var issueHandoffCmd = &cobra.Command{
 		"  --to reviewer     the issue's agent reviewer; moves it to in_review, refused\n" +
 		"                    if the reviewer is empty or a person\n" +
 		"  --to <agent>      a named agent (name or id)\n\n" +
-		"The response reports target_name,\n" +
-		"run_created and duplicate — quote them, do not restate them from memory.",
+		"The response reports target_name, run_created and duplicate — quote them,\n" +
+		"do not restate them from memory.",
 	Args: exactArgs(1),
 	RunE: runIssueHandoff,
 }
