@@ -215,39 +215,6 @@ func (h *Handler) ListWaitingSummons(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// summonNeedsHuman is the close/status side of --needs-human: the ticket
-// already records who it waits on, and the entry makes that person actually
-// hear it — inbox, subscription, a visible @ — instead of a metadata key
-// nobody reads.
-func (h *Handler) summonNeedsHuman(ctx context.Context, issue db.Issue, human, actorType, actorID, why string) {
-	human = strings.TrimSpace(human)
-	if human == "" {
-		return
-	}
-	recipient, err := util.ParseUUID(human)
-	if err != nil {
-		return
-	}
-	reason := strings.TrimSpace(why)
-	if reason == "" {
-		reason = "这张票在等你拍板，执行智能体停下来了。"
-	}
-	callerID := pgtype.UUID{}
-	if actorType == "member" || actorType == "agent" {
-		callerID = parseUUID(actorID)
-	} else {
-		actorType = "system"
-	}
-	_, _ = h.summonPerson(ctx, service.SummonInput{
-		Issue:      issue,
-		Recipient:  recipient,
-		CallerType: actorType,
-		CallerID:   callerID,
-		Source:     service.SummonSourceNeedsHuman,
-		Reason:     reason,
-	})
-}
-
 // recordMentionSummons turns a member @ in a person's or agent's comment into
 // an open call, so the mentioned person's reply wakes the executor (DENE-880
 // item 6: before this, a person @-ing another and getting an answer woke

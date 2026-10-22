@@ -9,14 +9,8 @@ Product contracts the runtime brief does not fully encode.
 - [Charts and files in a comment](#charts-and-files-in-a-comment)
 - [Incorrect to correct](#incorrect-to-correct)
 Finishing a turn is one result comment plus a true status (`multica issue status <id> in_review|in_progress|blocked`); what each status makes the server do is in `references/status-effects.md`.
-Who drives an open issue, and the `issue dispose` command for one nobody drives, are in `references/drivers.md`; stopping every run on an issue and the run limits are in `references/run-control.md`.
-`multica issue wait <id> --output json` is the read-only status view for a
-blocked issue's wait. It reports the wait condition, optional `wait_probe`,
-deadline, last probe status (`ready`, `pending`, or `failed`), check timestamp,
-and bounded output. A probe uses exit code `0` for ready, `10` (or GitHub CLI's
-`gh pr checks` code `8`) for pending, and
-any other code for failed. Stage barriers are described in
-`references/sub-issues.md`.
+Stopping every run on an issue and the run limits are in `references/run-control.md`.
+Stage barriers are described in `references/sub-issues.md`.
 To move several issues to one lifecycle status at once, use the same batch
 endpoint as the web and desktop inbox actions:
 ```bash
@@ -406,12 +400,10 @@ MUL-123: fix login redirect        # correct — links the PR
 
 Sub-issues, stages and their incorrect-to-correct examples live in
 `sub-issues.md`.
-When blocking on a one-line external check, pass it as `--wait-probe` together with `--wait-timeout`. Exit code `0` means ready, `10` means pending, and `gh pr checks` exit code `8` is also pending; any other exit code is failed.
-For GitLab, `glab ci status` can be used directly when it returns non-zero while the pipeline is pending, or wrap its pending code as `10`.
 
 ### Report progress
 
-`multica issue progress <issue-id> "<progress>" [--tone working|waiting|stuck|done] --output json` sets the line under the issue's title; `--history` reads earlier lines. Who wins between your line and the parking summary: `references/progress.md`.
+`multica issue progress <issue-id> "<progress>" [--tone working|waiting|stuck|done] --output json` sets the line under the issue's title; `--history` reads earlier lines. Who wins between your line and other writers: `references/progress.md`.
 
 `multica issue title <issue-id> --suggest "<title>" --output json` stores a pending title suggestion for a human-created issue. It does not rename the issue; the issue page's adopt action is the only writer that applies it.
 

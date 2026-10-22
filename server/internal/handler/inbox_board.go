@@ -23,9 +23,8 @@ const inboxBoardErrNoPerson = "inbox_board_no_person"
 // Caps on what the board reads. The web page read the same amounts through
 // the old per-lane endpoints.
 const (
-	inboxBoardParkingLimit = 500
-	inboxBoardDoneLimit    = 100
-	inboxBoardTodoLimit    = 100
+	inboxBoardDoneLimit = 100
+	inboxBoardTodoLimit = 100
 )
 
 // InboxBoardResponse is the inbox in its seven lanes (DENE-975).
@@ -223,13 +222,6 @@ func (h *Handler) gatherInboxBoard(
 		})
 	}
 
-	parking, err := h.Queries.ListWorkspaceParkingRecords(ctx, db.ListWorkspaceParkingRecordsParams{
-		WorkspaceID: wsUUID, RowLimit: inboxBoardParkingLimit,
-	})
-	if err != nil {
-		return in, 0, fmt.Errorf("failed to list parking records")
-	}
-
 	snapshot, err := h.Queries.ListWorkspaceAgentTaskSnapshot(ctx, wsUUID)
 	if err != nil {
 		return in, 0, fmt.Errorf("failed to list agent tasks")
@@ -258,15 +250,9 @@ func (h *Handler) gatherInboxBoard(
 		}
 	}
 
-	// One visibility lookup covers the running issues and the parked ones:
-	// a parking record is only on the board if its issue is visible.
-	lookup := append([]pgtype.UUID(nil), runningIDs...)
-	for _, p := range parking {
-		lookup = append(lookup, p.IssueID)
-	}
 	visible := map[string]db.ListInboxBoardIssuesByIDsRow{}
-	if len(lookup) > 0 {
-		rows, err := h.Queries.ListInboxBoardIssuesByIDs(ctx, db.ListInboxBoardIssuesByIDsParams{WorkspaceID: wsUUID, Ids: lookup})
+	if len(runningIDs) > 0 {
+		rows, err := h.Queries.ListInboxBoardIssuesByIDs(ctx, db.ListInboxBoardIssuesByIDsParams{WorkspaceID: wsUUID, Ids: runningIDs})
 		if err != nil {
 			return in, 0, fmt.Errorf("failed to list issues")
 		}
@@ -276,27 +262,6 @@ func (h *Handler) gatherInboxBoard(
 				visible[uuidToString(row.ID)] = row
 			}
 		}
-	}
-	for _, p := range parking {
-		if _, ok := visible[uuidToString(p.IssueID)]; !ok {
-			continue
-		}
-		in.Parking = append(in.Parking, inboxboard.Parking{
-			IssueID:        uuidToString(p.IssueID),
-			Identifier:     issueIdentifier(prefix, p.Number),
-			Title:          p.Title,
-			ParentIssueID:  uuidToString(p.ParentIssueID),
-			CurrentStatus:  p.CurrentStatus,
-			RecordedStatus: p.RecordedStatus,
-			Category:       p.Category,
-			StuckKind:      p.StuckKind,
-			Unexplained:    p.Unexplained,
-			Summary:        p.Summary,
-			SummarySource:  p.SummarySource,
-			NextOwner:      inboxboard.Owner{Type: p.NextOwnerType, ID: p.NextOwnerID},
-			Timeline:       p.Timeline,
-			EvaluatedAt:    p.EvaluatedAt.Time,
-		})
 	}
 	for _, id := range runningIDs {
 		row, ok := visible[uuidToString(id)]

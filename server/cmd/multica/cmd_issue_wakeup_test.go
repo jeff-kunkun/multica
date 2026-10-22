@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"strings"
 	"testing"
 )
 
@@ -228,42 +227,5 @@ func TestIssueWakeupCLIConditionsAndManagement(t *testing.T) {
 	}
 	if err := run("checkin", issue, "w1"); err == nil {
 		t.Error("check-in without a note accepted")
-	}
-}
-
-// DENE-1777: list shows the platform's child_done rule, so an agent sees why
-// a stage close would wake nobody without opening the panel.
-func TestIssueWakeupListShowsSystemRule(t *testing.T) {
-	t.Chdir(t.TempDir())
-	const issue = "a57c0511-1ebc-471d-a314-438ca16cc75d"
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/api/issues/" + issue + "/wakeups":
-			_ = json.NewEncoder(w).Encode([]map[string]any{})
-		case "/api/issues/" + issue + "/system-wakeups":
-			_ = json.NewEncoder(w).Encode([]map[string]any{{"id": "rule", "rule": "child_done", "enabled": true, "on_met": "advance", "blocked": "no_assignee", "target": nil}})
-		default:
-			_ = json.NewEncoder(w).Encode(map[string]any{"id": issue})
-		}
-	}))
-	defer srv.Close()
-	t.Setenv("MULTICA_SERVER_URL", srv.URL)
-	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
-	t.Setenv("MULTICA_TOKEN", "test-token")
-	for _, tc := range []struct{ output, want string }{
-		{"json", `"on_met": "advance"`},
-		{"table", "advance"},
-	} {
-		out, err := captureStdout(t, func() error {
-			cmd := newIssueWakeupCommand()
-			cmd.SetArgs([]string{"list", issue, "--output", tc.output})
-			return cmd.Execute()
-		})
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !strings.Contains(out, tc.want) || !strings.Contains(out, "system") || (tc.output == "table" && !strings.Contains(out, "no_assignee")) {
-			t.Fatalf("%s output missing the system rule:\n%s", tc.output, out)
-		}
 	}
 }

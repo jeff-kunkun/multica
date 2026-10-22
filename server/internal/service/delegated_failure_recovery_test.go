@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -12,7 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/attribution"
-	"github.com/multica-ai/multica/server/internal/blockwait"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	dbfx "github.com/multica-ai/multica/server/internal/testutil"
@@ -1343,54 +1341,5 @@ func TestPendingDelegatedFailureSweepSkipsTriageSourceIssue(t *testing.T) {
 	}
 	if n := recoveryTasks(); n != 1 {
 		t.Fatalf("recovery tasks after accept = %d, want 1", n)
-	}
-}
-
-func TestCrossIssueFailureBlocksChildWithinQuietWindow(t *testing.T) {
-	f, svc := seedDelegatedFailureFixture(t)
-	ctx := context.Background()
-	if _, err := f.pool.Exec(ctx, `UPDATE issue SET status = 'in_progress' WHERE id = $1`, f.workerIssue); err != nil {
-		t.Fatalf("mark child in progress: %v", err)
-	}
-	failedID := f.insertChildTask(t, "running", "comment", 1, 2)
-	if _, err := svc.FailTask(ctx, failedID, "child exploded", "", "", "", "agent_error.process_failure", false, "", ""); err != nil {
-		t.Fatalf("FailTask: %v", err)
-	}
-
-	var status string
-	var raw []byte
-	if err := f.pool.QueryRow(ctx, `SELECT status, metadata FROM issue WHERE id = $1`, f.workerIssue).Scan(&status, &raw); err != nil {
-		t.Fatalf("read child: %v", err)
-	}
-	if status != "blocked" {
-		t.Fatalf("child status = %q, want blocked", status)
-	}
-	var meta map[string]any
-	if err := json.Unmarshal(raw, &meta); err != nil {
-		t.Fatalf("metadata: %v", err)
-	}
-	rec := blockwait.ParseMetadata(meta)
-	if !rec.HasWakeAt || rec.WakeAt.After(time.Now().Add(blockwait.QuietAfter)) {
-		t.Fatalf("wake_at = %s, want a clock inside 30 minutes", rec.WakeAt)
-	}
-	if blockwait.MetaString(meta, blockwait.KeyWatched) != blockwait.WatchedYes {
-		t.Fatal("child was not marked for the patrol")
-	}
-	decision := blockwait.DecidePatrol(blockwait.PatrolInput{
-		Status: status,
-		Record: rec,
-		Now:    time.Now().Add(time.Minute),
-	})
-	if decision.Action != blockwait.ActionWake {
-		t.Fatalf("patrol decision = %#v, want a wake inside 30 minutes", decision)
-	}
-	var recovery int
-	if err := f.pool.QueryRow(ctx, `
-		SELECT count(*) FROM agent_task_queue
-		WHERE trigger_evidence_kind = 'delegated_failure' AND trigger_evidence_ref_id = $1`, failedID).Scan(&recovery); err != nil {
-		t.Fatalf("count recovery tasks: %v", err)
-	}
-	if recovery != 0 {
-		t.Fatalf("upstream recovery tasks = %d, want 0", recovery)
 	}
 }

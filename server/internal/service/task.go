@@ -19,7 +19,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/attribution"
-	"github.com/multica-ai/multica/server/internal/blockwait"
 	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/chattitle"
 	"github.com/multica-ai/multica/server/internal/entitlement"
@@ -1179,7 +1178,7 @@ func taskErrorType(reason string) string {
 	switch reason {
 	case "runtime_offline", "runtime_recovery":
 		return "runtime"
-	case "timeout", "codex_semantic_inactivity", "task_time_limit":
+	case "timeout", "codex_semantic_inactivity":
 		return "timeout"
 	case "iteration_limit", "agent_fallback_message":
 		return "agent_output"
@@ -6054,10 +6053,8 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 	// platform-authored comment on the source task's issue, routed explicitly to
 	// that task's agent; recoverDelegatedTaskFailure coalesces it with an
 	// existing coordinator run and deduplicates by the failed task id.
-	delegatedHandled := false
 	if retried == nil {
-		handled, recoveryErr := s.recoverDelegatedTaskFailure(ctx, task)
-		delegatedHandled = handled
+		_, recoveryErr := s.recoverDelegatedTaskFailure(ctx, task)
 		if recoveryErr != nil {
 			slog.Warn("delegated task failure recovery failed",
 				"task_id", util.UUIDToString(task.ID),
@@ -6079,19 +6076,6 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 		s.noteDeterministicFailure(ctx, task, failureReason)
 	} else if errMsg != "" && task.IssueID.Valid && retried == nil {
 		s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(failureCommentBody(failureReason, errMsg)), "system", task.TriggerCommentID, task.ID)
-	}
-	// Every failure that ends here with no retry queued, delegated or not,
-	// leaves the issue with a driver (DENE-1339). Delegated recovery that
-	// found its coordinator already did both parts; the two notices above
-	// write their own block. Everything else used to fall
-	// between the two paths: a run delegated from a chat has no coordinator
-	// issue to recover to, and the parent note skipped it for being delegated.
-	if retried == nil && task.IssueID.Valid && !delegatedHandled {
-		parked := false
-		if !deterministicEscalated && !isServerInterruptFailure(failureReason) {
-			parked = s.parkFailedIssue(ctx, task)
-		}
-		s.noteParentOfChildRunFailure(ctx, task, parked)
 	}
 
 	// Quick-create tasks: push a failure inbox notification to the
@@ -6149,7 +6133,6 @@ func (s *TaskService) noteDeterministicFailure(ctx context.Context, task db.Agen
 	if err != nil {
 		return
 	}
-	condition := fmt.Sprintf("同一输入连续撞上同样的确定性失败（%s），等人修好环境后重跑", reason)
 	switch issue.Status {
 	case issuestatus.Done, issuestatus.Cancelled, issuestatus.InReview:
 	default:
@@ -6165,42 +6148,11 @@ func (s *TaskService) noteDeterministicFailure(ctx context.Context, task db.Agen
 				break
 			}
 			s.broadcastIssueUpdated(ctx, updated, issue.Status)
-			issue = updated
 		}
-		// A blocked issue must say what it waits on (DENE-850). Without
-		// needs_human the patrol would wake the same executor into the same
-		// wall after QuietAfter, which is the loop this exit exists to end.
-		pairs := map[string]string{
-			blockwait.KeyWaitCondition: condition,
-			blockwait.KeyWatched:       blockwait.WatchedYes,
-		}
-		if human := s.deterministicFailureHuman(ctx, task, issue); human != "" {
-			pairs[blockwait.KeyNeedsHuman] = human
-		}
-		s.writeBlockMeta(ctx, issue, pairs)
 	}
 	s.createAgentComment(ctx, task.IssueID, task.AgentID,
 		fmt.Sprintf("自动重试已停止：同一输入连续出现相同的确定性失败（%s，fingerprint %s）。这张票已转为 blocked 等人处理：请检查权限、磁盘或 replay 冲突并修复环境，再重新运行这张票；平台不会再自动重排同一个执行人。", reason, task.FailureFingerprint.String),
 		"system", task.TriggerCommentID, task.ID)
-}
-
-// deterministicFailureHuman picks the person a deterministic failure waits
-// on: whoever the run was accountable to, else the issue's human creator,
-// else the owner of the seat that failed.
-func (s *TaskService) deterministicFailureHuman(ctx context.Context, task db.AgentTaskQueue, issue db.Issue) string {
-	if task.AccountableUserID.Valid {
-		return util.UUIDToString(task.AccountableUserID)
-	}
-	if task.OriginatorUserID.Valid {
-		return util.UUIDToString(task.OriginatorUserID)
-	}
-	if issue.CreatorType == "member" && issue.CreatorID.Valid {
-		return util.UUIDToString(issue.CreatorID)
-	}
-	if agent, err := s.Queries.GetAgent(ctx, task.AgentID); err == nil && agent.OwnerID.Valid {
-		return util.UUIDToString(agent.OwnerID)
-	}
-	return ""
 }
 
 // retryableReasons enumerates failure reasons that the auto-retry path is
@@ -6243,16 +6195,10 @@ func (s *TaskService) deterministicFailureHuman(ctx context.Context, task db.Age
 // this row was still running (DENE-813). A person invoking cancel-task or halt
 // never writes this reason: those paths set status=cancelled and leave
 // failure_reason empty, so they stay off this map.
-//
-// task_time_limit is the workspace wall clock stopping a healthy run (DENE-857).
-// The session is still good, so the retry continues it and tells the agent to
-// close out finished work and split what remains. The budget is the task's
-// ordinary max_attempts; spending it blocks the issue.
 var retryableReasons = map[string]bool{
 	string(taskfailure.ReasonRuntimeOffline):                   true,
 	string(taskfailure.ReasonRuntimeRecovery):                  true,
 	string(taskfailure.ReasonTimeout):                          true,
-	string(taskfailure.ReasonTaskTimeLimit):                    true,
 	"codex_semantic_inactivity":                                true,
 	string(taskfailure.ReasonAgentProviderNetwork):             true,
 	string(taskfailure.ReasonAgentProviderCapacityOrRateLimit): true,
@@ -6357,195 +6303,12 @@ func (s *TaskService) blockIssueAfterServerInterrupt(ctx context.Context, issue 
 		return false
 	}
 	s.broadcastIssueUpdated(ctx, updated, issue.Status)
-	s.stampBlockWake(ctx, updated, "平台中断后的自动续跑已经用完，到点重新叫醒执行人")
 	return true
-}
-
-// blockFailedChild turns a failed child into a structured block with a clock
-// that is already due. The patrol only looks at blocked and in_review, so a
-// wake_at left on an in_progress issue is never seen. in_review and terminal
-// statuses stay where a person put them. It reports whether the clock landed.
-func (s *TaskService) blockFailedChild(ctx context.Context, issueID pgtype.UUID, condition string) bool {
-	if !issueID.Valid {
-		return false
-	}
-	issue, err := s.Queries.GetIssue(ctx, issueID)
-	if err != nil {
-		slog.Warn("block failed child: load issue failed", "issue_id", util.UUIDToString(issueID), "error", err)
-		return false
-	}
-	switch issue.Status {
-	case issuestatus.Done, issuestatus.Cancelled, issuestatus.InReview:
-		return false
-	case issuestatus.Blocked:
-	default:
-		updated, err := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
-			ActorType: pgtype.Text{String: botsource.ActorFromContext(ctx).Type, Valid: botsource.ActorFromContext(ctx).Type != ""}, ActorID: botsource.ActorFromContext(ctx).ID,
-			ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid},
-			ID:          issue.ID,
-			Status:      issuestatus.Blocked,
-			WorkspaceID: issue.WorkspaceID,
-		})
-		if err != nil {
-			slog.Warn("block failed child: status update failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
-			return false
-		}
-		s.broadcastIssueUpdated(ctx, updated, issue.Status)
-		issue = updated
-	}
-	failures, err := s.Queries.CountIssueFailuresSinceSuccess(ctx, issue.ID)
-	if err != nil {
-		slog.Warn("block failed child: count failures failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
-		failures = 1
-	}
-	rec := blockwait.FailureWake(time.Now(), condition, int(failures))
-	pairs := rec.Pairs()
-	pairs[blockwait.KeyWatched] = blockwait.WatchedYes
-	s.writeBlockMeta(ctx, issue, pairs)
-	return true
-}
-
-// parkFailedIssue gives an issue whose run just failed for good a recorded
-// wait: blocked with a failure clock the patrol will act on. It stays out of
-// the way of anything else that is already driving the issue: another run,
-// a person who owns it, a wait somebody already recorded, or a status a
-// person put it in.
-// It reports whether it wrote the clock.
-func (s *TaskService) parkFailedIssue(ctx context.Context, task db.AgentTaskQueue) bool {
-	issue, err := s.Queries.GetIssue(ctx, task.IssueID)
-	if err != nil {
-		slog.Warn("park failed issue: load issue failed", "issue_id", util.UUIDToString(task.IssueID), "error", err)
-		return false
-	}
-	if !parkableAfterFailure(issue, issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status), time.Now()) {
-		return false
-	}
-	hasActive, err := s.Queries.HasActiveTaskForIssue(ctx, issue.ID)
-	if err != nil || hasActive {
-		return false
-	}
-	return s.blockFailedChild(ctx, issue.ID, "运行失败且没有排上重试，到点重新叫醒执行人")
-}
-
-// parkableAfterFailure is parkFailedIssue's decision on the issue row alone.
-// Only an agent-owned issue is parked: the patrol wakes the assignee, so a
-// person-owned issue already has its driver and an unassigned one belongs to
-// routing. A blocked issue keeps a wait that still holds (a blocker, a
-// person, a clock not yet due); a spent clock is replaced.
-func parkableAfterFailure(issue db.Issue, effective string, now time.Time) bool {
-	if !issue.AssigneeType.Valid || issue.AssigneeType.String != "agent" || !issue.AssigneeID.Valid {
-		return false
-	}
-	switch effective {
-	case issuestatus.Todo, issuestatus.InProgress:
-		return true
-	case issuestatus.Blocked:
-		rec := blockwait.ParseMetadata(issueMetaMap(issue.Metadata))
-		return len(rec.BlockedBy) == 0 && !rec.StillWaiting(now).Structured()
-	default:
-		return false
-	}
-}
-
-// stampBlockWake records a clock QuietAfter from now and marks the issue
-// watched, so the patrol can see a block this process just created.
-func (s *TaskService) stampBlockWake(ctx context.Context, issue db.Issue, condition string) {
-	if !issue.ID.Valid {
-		return
-	}
-	if !issue.WorkspaceID.Valid {
-		loaded, err := s.Queries.GetIssue(ctx, issue.ID)
-		if err != nil {
-			slog.Warn("block wake: load issue failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
-			return
-		}
-		issue = loaded
-	}
-	when := time.Now().Add(blockwait.QuietAfter).UTC().Format(time.RFC3339)
-	s.writeBlockMeta(ctx, issue, map[string]string{
-		blockwait.KeyWakeAt:        when,
-		blockwait.KeyWaitCondition: condition,
-		blockwait.KeyWatched:       blockwait.WatchedYes,
-	})
-}
-
-func (s *TaskService) writeBlockMeta(ctx context.Context, issue db.Issue, pairs map[string]string) {
-	for key, value := range pairs {
-		raw, err := json.Marshal(value)
-		if err != nil {
-			continue
-		}
-		if _, err := s.Queries.SetIssueMetadataKey(ctx, db.SetIssueMetadataKeyParams{
-			ID: issue.ID, WorkspaceID: issue.WorkspaceID, Key: key, Value: raw,
-		}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			slog.Warn("block wake: metadata write failed", "issue_id", util.UUIDToString(issue.ID), "key", key, "error", err)
-		}
-	}
-}
-
-// noteParentOfChildRunFailure tells the parent what happened without asking
-// its assignee to re-dispatch. The caller skips it when delegated recovery
-// already left that sentence on the recovery comment. parked says whether the
-// child now carries a failure clock; the notice only promises a wake when it
-// does.
-func (s *TaskService) noteParentOfChildRunFailure(ctx context.Context, task db.AgentTaskQueue, parked bool) {
-	if !task.IssueID.Valid {
-		return
-	}
-	issue, err := s.Queries.GetIssue(ctx, task.IssueID)
-	if err != nil || !issue.ParentIssueID.Valid {
-		return
-	}
-	parent, err := s.Queries.GetIssue(ctx, issue.ParentIssueID)
-	if err != nil || parent.WorkspaceID != issue.WorkspaceID {
-		return
-	}
-	childID := util.UUIDToString(issue.ID)
-	if s.failureAlreadyNoted(parent, childID) {
-		return
-	}
-	s.createSystemNotice(ctx, parent, blockwait.DownstreamFailureNotice(
-		IssueIdentifier(s.getIssuePrefix(issue.WorkspaceID), issue.Number),
-		childID,
-		"运行失败",
-		parked,
-	))
-	s.rememberFailureNotice(ctx, parent, childID)
-}
-
-func issueMetaMap(raw []byte) map[string]any {
-	meta := map[string]any{}
-	if len(raw) == 0 {
-		return meta
-	}
-	_ = json.Unmarshal(raw, &meta)
-	if meta == nil {
-		return map[string]any{}
-	}
-	return meta
-}
-
-func (s *TaskService) failureAlreadyNoted(issue db.Issue, childID string) bool {
-	return blockwait.AlreadyWoken(blockwait.MetaString(issueMetaMap(issue.Metadata), blockwait.KeyFailNoted), childID)
-}
-
-func (s *TaskService) rememberFailureNotice(ctx context.Context, issue db.Issue, childID string) {
-	fresh, err := s.Queries.GetIssue(ctx, issue.ID)
-	if err != nil {
-		fresh = issue
-	}
-	existing := blockwait.MetaString(issueMetaMap(fresh.Metadata), blockwait.KeyFailNoted)
-	if blockwait.AlreadyWoken(existing, childID) {
-		return
-	}
-	s.writeBlockMeta(ctx, fresh, map[string]string{
-		blockwait.KeyFailNoted: blockwait.MarkWoken(existing, childID),
-	})
 }
 
 // serverInterruptHandoffMention names the person who should pick the issue up
 // once automatic retries are spent: the human who started the run, then the
-// issue creator, then the same owner fallback the time-limit notice uses.
+// issue creator, then the issue owner (issueOwnerMention).
 // The executing agent is named in prose and not mentioned — mentioning an
 // agent would start another run.
 func (s *TaskService) serverInterruptHandoffMention(ctx context.Context, issue db.Issue, task db.AgentTaskQueue) string {
@@ -6558,7 +6321,7 @@ func (s *TaskService) serverInterruptHandoffMention(ctx context.Context, issue d
 			return mention
 		}
 	}
-	_, mention := s.taskTimeLimitMention(ctx, issue)
+	_, mention := s.issueOwnerMention(ctx, issue)
 	return mention
 }
 
@@ -7675,141 +7438,10 @@ func (s *TaskService) FailStaleTasks(ctx context.Context, arg db.FailStaleTasksP
 	})
 }
 
-// FailTasksOverWorkspaceTimeLimit stops running issue tasks that outlived
-// their workspace's configured wall-clock limit.
-func (s *TaskService) FailTasksOverWorkspaceTimeLimit(ctx context.Context) ([]db.AgentTaskQueue, error) {
-	return s.terminateTasksInTx(ctx, func(qtx *db.Queries) ([]db.AgentTaskQueue, error) {
-		return qtx.FailTasksOverWorkspaceTimeLimit(ctx)
-	})
-}
-
-// noteTaskTimeLimit records a workspace time-limit stop. A retry child means
-// the same session continues; a nil child means the attempt budget is spent
-// and the issue must leave todo / in_progress.
-func (s *TaskService) noteTaskTimeLimit(ctx context.Context, task db.AgentTaskQueue, retried *db.AgentTaskQueue) {
-	if !task.IssueID.Valid {
-		return
-	}
-	issue, err := s.Queries.GetIssue(ctx, task.IssueID)
-	if err != nil {
-		slog.Warn("task time limit notice: load issue failed", "task_id", util.UUIDToString(task.ID), "error", err)
-		return
-	}
-	ran := "一段时间"
-	if task.StartedAt.Valid {
-		end := time.Now()
-		if task.CompletedAt.Valid {
-			end = task.CompletedAt.Time
-		}
-		if d := end.Sub(task.StartedAt.Time); d > 0 {
-			ran = d.Round(time.Minute).String()
-		}
-	}
-	blocked := false
-	if retried != nil {
-		if issue.Status == issuestatus.Todo {
-			if updated, err := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
-				ActorType: pgtype.Text{String: botsource.ActorFromContext(ctx).Type, Valid: botsource.ActorFromContext(ctx).Type != ""}, ActorID: botsource.ActorFromContext(ctx).ID,
-				ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid},
-				ID: issue.ID, Status: issuestatus.InProgress, WorkspaceID: issue.WorkspaceID,
-			}); err != nil {
-				slog.Warn("task time limit notice: keep issue in progress failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
-			} else {
-				s.broadcastIssueUpdated(ctx, updated, issue.Status)
-				issue = updated
-			}
-		}
-	} else {
-		blocked = s.blockIssueAfterTimeLimit(ctx, issue)
-	}
-	mention := ""
-	ownerID := pgtype.UUID{}
-	if retried == nil {
-		ownerID, mention = s.taskTimeLimitMention(ctx, issue)
-	}
-	summary := taskTimeLimitNotice(ran, task, retried, blocked, mention)
-	notice := s.createSystemNoticeComment(ctx, issue, summary)
-	if retried == nil && ownerID.Valid && notice != nil {
-		// The notice carries the @; the summon entry is what puts it in the
-		// person's inbox — a system comment's @ never gets there on its own.
-		if _, err := s.summoner().Summon(ctx, SummonInput{
-			Issue:      issue,
-			Recipient:  ownerID,
-			CallerType: "system",
-			Source:     SummonSourceTimeLimit,
-			Reason:     summary,
-			CommentID:  notice.ID,
-			Details: map[string]any{
-				"task_id":        util.UUIDToString(task.ID),
-				"agent_id":       util.UUIDToString(task.AgentID),
-				"failure_reason": string(taskfailure.ReasonTaskTimeLimit),
-			},
-		}); err != nil {
-			slog.Warn("task time limit notice: summon failed", "task_id", util.UUIDToString(task.ID), "error", err)
-		}
-	}
-	if !issue.ParentIssueID.Valid {
-		return
-	}
-	parent, err := s.Queries.GetIssue(ctx, issue.ParentIssueID)
-	if err != nil || parent.WorkspaceID != issue.WorkspaceID {
-		return
-	}
-	child := IssueIdentifier(s.getIssuePrefix(issue.WorkspaceID), issue.Number)
-	parentNote := fmt.Sprintf("子票 %s 跑满了工作区时限（%s）。", child, ran)
-	if retried != nil {
-		parentNote += fmt.Sprintf("已安排续跑：第 %d 次，共 %d 次，沿用原来的会话。", retried.Attempt, retried.MaxAttempts)
-	} else if blocked {
-		parentNote += "自动续跑用完了，子票已改为 blocked。"
-	} else {
-		parentNote += "没有再安排续跑。"
-	}
-	s.createSystemNotice(ctx, parent, parentNote)
-}
-
-func (s *TaskService) blockIssueAfterTimeLimit(ctx context.Context, issue db.Issue) bool {
-	effective := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status)
-	if effective != issuestatus.InProgress && effective != issuestatus.Todo {
-		return false
-	}
-	updated, err := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
-		ActorType: pgtype.Text{String: botsource.ActorFromContext(ctx).Type, Valid: botsource.ActorFromContext(ctx).Type != ""}, ActorID: botsource.ActorFromContext(ctx).ID,
-		ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid},
-		ID: issue.ID, Status: issuestatus.Blocked, WorkspaceID: issue.WorkspaceID,
-	})
-	if err != nil {
-		slog.Warn("task time limit notice: block issue failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
-		return false
-	}
-	s.broadcastIssueUpdated(ctx, updated, issue.Status)
-	s.stampBlockWake(ctx, updated, "工作区时限内的自动续跑已经用完，到点重新叫醒执行人")
-	return true
-}
-
-func taskTimeLimitNotice(ran string, task db.AgentTaskQueue, retried *db.AgentTaskQueue, blocked bool, mention string) string {
-	if retried != nil {
-		return fmt.Sprintf(
-			"这轮跑了 %s，到了工作区的时限，不是这张票做错了。已自动安排续跑：第 %d 次，共 %d 次，沿用原来的会话和工作目录。续跑会先把已经做完的进度收口，再把剩下的工作拆小。",
-			ran, retried.Attempt, retried.MaxAttempts,
-		)
-	}
-	var b strings.Builder
-	fmt.Fprintf(&b, "这轮跑了 %s，到了工作区的时限。自动续跑没有再排（第 %d 次，共 %d 次）。", ran, task.Attempt, task.MaxAttempts)
-	if blocked {
-		b.WriteString("这张票已改为 blocked，不再停在待办或进行中没人管。到点后平台会重新叫醒执行人。")
-	}
-	if mention != "" {
-		b.WriteString(mention)
-		b.WriteString("这是知会，请决定是加长时限，还是把剩下的工作拆开。")
-	}
-	return b.String()
-}
-
-// taskTimeLimitMention picks who to wake for a time-limit stop: the project
+// issueOwnerMention picks the person responsible for an issue: the project
 // lead when the issue belongs to a project led by a member, else the issue's
-// own creator, else the workspace owner. Returns "" when none resolves; the
-// notice is still posted for followers.
-func (s *TaskService) taskTimeLimitMention(ctx context.Context, issue db.Issue) (pgtype.UUID, string) {
+// own creator, else the workspace owner. Returns "" when none resolves.
+func (s *TaskService) issueOwnerMention(ctx context.Context, issue db.Issue) (pgtype.UUID, string) {
 	var userID pgtype.UUID
 	if issue.ProjectID.Valid {
 		if project, err := s.Queries.GetProjectInWorkspace(ctx, db.GetProjectInWorkspaceParams{
@@ -7927,8 +7559,8 @@ func (s *TaskService) terminateTasksInTx(ctx context.Context, fail func(*db.Quer
 // HandleFailedTasks runs the post-failure side effects for a batch of
 // freshly-failed tasks: optional auto-retry, task:failed event broadcast,
 // agent status reconciliation, and (when an issue has no remaining active
-// task and isn't being retried) parking an agent-owned issue blocked with a
-// failure clock, or resetting any other issue back to todo.
+// task and isn't being retried) resetting the issue back to todo so the
+// daemon can pick it up again.
 //
 // The bulk failure paths — sweepers and recover-orphans — funnel through
 // here so the same UI-consistency guarantees apply on each of them.
@@ -7941,17 +7573,13 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 	affectedAgents := make(map[string]pgtype.UUID)
 	processedIssues := make(map[string]bool)
 	retriedIssues := make(map[string]bool)
-	timeLimitHeld := make(map[string]bool)
-	delegatedHandled := make(map[string]bool)
 	retried := 0
 
 	for _, t := range tasks {
 		// Auto-retry first so the issue stays in_progress rather than
 		// flapping todo → in_progress within a tick.
 		retryPending := false
-		var continued *db.AgentTaskQueue
 		if child, retryErr := s.MaybeRetryFailedTask(ctx, t); child != nil {
-			continued = child
 			retryPending = true
 			retried++
 			if t.IssueID.Valid {
@@ -7966,37 +7594,17 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 		if t.FailureReason.Valid && t.FailureReason.String != "" {
 			failureReason = t.FailureReason.String
 		}
-		if failureReason == string(taskfailure.ReasonTaskTimeLimit) && t.IssueID.Valid {
-			issueKey := util.UUIDToString(t.IssueID)
-			if continued == nil {
-				if has, err := s.Queries.HasRetryTaskForParent(ctx, t.ID); err == nil && has {
-					// An earlier pass already continued this run. Do not
-					// read the missing child as an exhausted budget.
-					retriedIssues[issueKey] = true
-				} else {
-					s.noteTaskTimeLimit(ctx, t, nil)
-					timeLimitHeld[issueKey] = true
-				}
-			} else {
-				s.noteTaskTimeLimit(ctx, t, continued)
-			}
-		}
 		if !retryPending {
-			handled, err := s.recoverDelegatedTaskFailure(ctx, t)
-			if err != nil {
+			if _, err := s.recoverDelegatedTaskFailure(ctx, t); err != nil {
 				slog.Warn("handle failed tasks: delegated failure recovery failed",
 					"task_id", util.UUIDToString(t.ID),
 					"delegated_from_task_id", util.UUIDToString(t.DelegatedFromTaskID),
 					"error", err,
 				)
 			}
-			if handled && t.IssueID.Valid {
-				delegatedHandled[util.UUIDToString(t.IssueID)] = true
-			}
 			// Same terminal-failure comment FailTaskWithTransition posts, so
-			// swept tasks are not silent on their issue. The time-limit
-			// give-up notice already wrote its own.
-			if t.IssueID.Valid && t.Error.String != "" && failureReason != string(taskfailure.ReasonTaskTimeLimit) {
+			// swept tasks are not silent on their issue.
+			if t.IssueID.Valid && t.Error.String != "" {
 				s.createAgentComment(ctx, t.IssueID, t.AgentID, redact.Text(failureCommentBody(failureReason, t.Error.String)), "system", t.TriggerCommentID, t.ID)
 			}
 		}
@@ -8018,26 +7626,16 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 				// the active-status recovery rule. Effective() no longer
 				// projects a nonterminal custom key onto a built-in, so this is
 				// a key comparison on purpose. (MUL-6243, MUL-7240)
-				//
-				// An agent-owned issue is parked instead (DENE-1342): blocked
-				// with a failure clock the patrol acts on, the same driver
-				// FailTask leaves (DENE-1339). Only an issue the park declines
-				// — a person's, or nobody's — still goes back to todo.
 				effectiveStatus := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status)
-				if effectiveStatus == "in_progress" && !processedIssues[issueKey] && !retriedIssues[issueKey] && !timeLimitHeld[issueKey] {
+				if effectiveStatus == "in_progress" && !processedIssues[issueKey] && !retriedIssues[issueKey] {
 					processedIssues[issueKey] = true
-					parked := false
-					if !delegatedHandled[issueKey] {
-						parked = s.parkFailedIssue(ctx, t)
-						s.noteParentOfChildRunFailure(ctx, t, parked)
-					}
 					hasActive, checkErr := s.Queries.HasActiveTaskForIssue(ctx, t.IssueID)
 					if checkErr != nil {
 						slog.Warn("handle failed tasks: active check failed",
 							"issue_id", issueKey,
 							"error", checkErr,
 						)
-					} else if !hasActive && !parked {
+					} else if !hasActive {
 						updatedIssue, updateErr := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
 							ActorType: pgtype.Text{String: botsource.ActorFromContext(ctx).Type, Valid: botsource.ActorFromContext(ctx).Type != ""}, ActorID: botsource.ActorFromContext(ctx).ID,
 							ViaBotID: botsource.FromContext(ctx).ID, ViaBotName: pgtype.Text{String: botsource.FromContext(ctx).Name, Valid: botsource.FromContext(ctx).ID.Valid},
@@ -8074,16 +7672,6 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 
 	for _, agentID := range affectedAgents {
 		s.ReconcileAgentStatus(ctx, agentID)
-	}
-	// Parking record last, after the retry and reset decisions above: a
-	// queued retry reads as still running, a reset reads as a stuck delivery.
-	parked := make(map[string]bool)
-	for _, t := range tasks {
-		if !t.IssueID.Valid || parked[util.UUIDToString(t.IssueID)] {
-			continue
-		}
-		parked[util.UUIDToString(t.IssueID)] = true
-		s.RecordParking(ctx, t.IssueID, t)
 	}
 	s.notifyTasksFinished(tasks)
 	return retried
@@ -8318,18 +7906,6 @@ func (s *TaskService) ensureDelegatedFailureRecoveryComment(ctx context.Context,
 			return fmt.Errorf("find recovery comment: %w", err)
 		}
 		content := delegatedFailureRecoveryContent(target.failed, target.source)
-		if failed.IssueID.Valid && failed.IssueID != target.issue.ID {
-			if child, loadErr := qtx.GetIssue(ctx, failed.IssueID); loadErr == nil {
-				content = blockwait.DownstreamFailureNotice(
-					IssueIdentifier(s.getIssuePrefix(child.WorkspaceID), child.Number),
-					util.UUIDToString(child.ID),
-					"运行失败",
-					// dispatchDelegatedFailureRecovery parks the child right
-					// after this comment commits.
-					true,
-				)
-			}
-		}
 		createdComment, err := qtx.CreateComment(ctx, db.CreateCommentParams{
 			ViaBotID:     botsource.FromContext(ctx).ID,
 			ViaBotName:   botName(ctx),
@@ -8557,18 +8133,6 @@ func (s *TaskService) exhaustDelegatedFailureRecovery(ctx context.Context, targe
 // reconciliation schedule the follow-up. The three-pass loop closes state
 // changes around those writes.
 func (s *TaskService) dispatchDelegatedFailureRecovery(ctx context.Context, target *delegatedFailureRecoveryTarget, excludeTaskID pgtype.UUID) (delegatedFailureRecoveryDispatchOutcome, error) {
-	// A failed run on a different issue used to wake the upstream coordinator
-	// and ask them to re-dispatch. That person is not the repair seat. Leave
-	// the informational comment, record a wake on the failed issue, and do
-	// not start the upstream run (DENE-850). Same-issue delegation still
-	// returns to its coordinator.
-	if target.failed.IssueID.Valid && target.failed.IssueID != target.issue.ID {
-		if _, err := s.Queries.SettleDelegatedFailureRecoveryComment(ctx, target.comment.ID); err != nil {
-			return delegatedFailureRecoveryCovered, fmt.Errorf("settle downstream failure notice: %w", err)
-		}
-		s.blockFailedChild(ctx, target.failed.IssueID, "下游运行失败，到点重新叫醒执行人")
-		return delegatedFailureRecoveryCovered, nil
-	}
 	// Signal creation has committed before reaching this shared dispatch path.
 	// Refresh the issue because its status may have changed since creation or
 	// sweep selection; a paused/unreadable lifecycle never settles the signal.

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -94,87 +93,6 @@ func postMemberComment(t *testing.T, userID, issueID, content string) CommentRes
 		t.Fatalf("decode comment: %v", err)
 	}
 	return resp
-}
-
-// A --needs-human block lands in that person's inbox, subscribes them, leaves
-// a visible @, and their reply wakes the executor — even a reply the ordinary
-// comment rules would route to nobody.
-func TestBlockedNeedsHumanSummonsAndReplyWakesExecutor(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-	ctx := context.Background()
-	issue := createIssueHTTP(t, "summon needs human", "in_progress")
-	agentID := handlerTestAgentID(t)
-	setIssueAssigneeDirect(t, issue.ID, "agent", agentID)
-	taskID := insertIssueTaskWithStatus(t, agentID, issue.ID, "running")
-	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM inbox_item WHERE issue_id = $1`, issue.ID)
-		testPool.Exec(context.Background(), `DELETE FROM issue_summon WHERE issue_id = $1`, issue.ID)
-	})
-
-	w := agentUpdateIssueHTTP(t, issue.ID, agentID, taskID, map[string]any{
-		"status":       "blocked",
-		"needs_human":  testUserID,
-		"block_kind":   "decision",
-		"block_action": "要人拍板：A 还是 B",
-	})
-	if w.Code != http.StatusOK {
-		t.Fatalf("block: %d %s", w.Code, w.Body.String())
-	}
-	if got := summonCount(t, `SELECT count(*) FROM inbox_item WHERE issue_id = $1 AND recipient_id = $2 AND type = 'needs_you' AND severity = 'action_required'`, issue.ID, testUserID); got != 1 {
-		t.Fatalf("needs_you inbox rows = %d, want 1", got)
-	}
-	if got := summonCount(t, `SELECT count(*) FROM issue_subscriber WHERE issue_id = $1 AND user_type = 'member' AND user_id = $2`, issue.ID, testUserID); got != 1 {
-		t.Fatalf("subscriber rows = %d, want 1", got)
-	}
-	if got := summonCount(t, `SELECT count(*) FROM comment WHERE issue_id = $1 AND content LIKE '%' || $2 || '%'`, issue.ID, "mention://member/"+testUserID); got < 1 {
-		t.Fatal("no visible @ of the person on the ticket")
-	}
-	waiting := waitingSummons(t, testUserID)
-	found := false
-	for _, row := range waiting {
-		if row.IssueID == issue.ID {
-			found = true
-			if row.Source != "needs_human" || row.CallerType != "agent" || !strings.Contains(row.Reason, "等你拍板") {
-				t.Fatalf("waiting row = %+v", row)
-			}
-		}
-	}
-	if !found {
-		t.Fatalf("waiting list misses the call: %+v", waiting)
-	}
-
-	// The run that blocked is over. The person answers with a comment that
-	// @-mentions someone else — the ordinary rules route that to nobody.
-	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status = 'completed', completed_at = now() WHERE id = $1`, taskID); err != nil {
-		t.Fatalf("finish task: %v", err)
-	}
-	peer := summonSecondMember(t)
-	reply := postMemberComment(t, testUserID, issue.ID, fmt.Sprintf("选 A。[@Peer](mention://member/%s) 知会一下", peer))
-
-	if got := summonCount(t, `SELECT count(*) FROM issue_summon WHERE issue_id = $1 AND recipient_id = $2 AND answered_at IS NOT NULL AND answer_comment_id = $3`, issue.ID, testUserID, reply.ID); got != 1 {
-		t.Fatalf("answered summons = %d, want 1", got)
-	}
-	if got := summonCount(t, `SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued','dispatched','running') AND trigger_comment_id = $3`, issue.ID, agentID, reply.ID); got != 1 {
-		t.Fatalf("executor runs woken by the reply = %d, want 1", got)
-	}
-	// The receipt names the executor the answer woke (DENE-1774).
-	if reply.Wake == nil || reply.Wake.NoneWoken || len(reply.Wake.Woken) != 1 {
-		t.Fatalf("reply wake = %+v, want the executor alone", reply.Wake)
-	}
-	var agentName string
-	if err := testPool.QueryRow(ctx, `SELECT name FROM agent WHERE id = $1`, agentID).Scan(&agentName); err != nil {
-		t.Fatalf("agent name: %v", err)
-	}
-	if got := reply.Wake.Woken[0]; got.AgentID != agentID || got.AgentName != agentName || got.Source != commentWokenSourceSummonAnswer || got.Status != DispatchQueued {
-		t.Fatalf("woken = %+v, want %s/%s summon_answer queued", got, agentID, agentName)
-	}
-	for _, row := range waitingSummons(t, testUserID) {
-		if row.IssueID == issue.ID {
-			t.Fatalf("answered call still waiting: %+v", row)
-		}
-	}
 }
 
 // Calling the same person twice before they reply writes one inbox row, one

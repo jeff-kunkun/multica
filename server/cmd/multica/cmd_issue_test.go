@@ -5863,24 +5863,6 @@ func TestRunIssueStatusBlockedWarnsAboutWaitAndExecutor(t *testing.T) {
 	t.Setenv("MULTICA_TASK_CONFIG_ROOT", t.TempDir())
 	t.Setenv("MULTICA_TOKEN", "mat_test-token")
 
-	var warn bytes.Buffer
-	warnUnregisteredBlock(newIssueStatusTestCmd(), &warn, "MUL-1")
-	if !strings.Contains(warn.String(), "issue status MUL-1 blocked --blocked-by") {
-		t.Fatalf("warning does not point at issue status: %s", warn.String())
-	}
-	flagged := newIssueStatusTestCmd()
-	for _, flag := range blockedWaitFlags {
-		flagged.Flags().String(flag, "", "")
-	}
-	if err := flagged.Flags().Set("blocked-by", "MUL-2"); err != nil {
-		t.Fatal(err)
-	}
-	warn.Reset()
-	warnUnregisteredBlock(flagged, &warn, "MUL-1")
-	if warn.Len() != 0 {
-		t.Fatalf("warned although --blocked-by was given: %s", warn.String())
-	}
-
 	if err := runIssueStatus(newIssueStatusTestCmd(), []string{"MUL-1", "blocked"}); err != nil {
 		t.Fatalf("runIssueStatus: %v", err)
 	}
@@ -5912,16 +5894,15 @@ func TestRunIssueStatusBlockedSendsKindAndAction(t *testing.T) {
 	t.Setenv("MULTICA_TOKEN", "mat_test-token")
 
 	cmd := newIssueStatusTestCmd()
-	for _, flag := range []string{"blocked-by", "block-kind", "block-action"} {
+	for _, flag := range []string{"block-kind", "block-action"} {
 		cmd.Flags().String(flag, "", "")
 	}
-	_ = cmd.Flags().Set("blocked-by", "MUL-2")
 	_ = cmd.Flags().Set("block-kind", "dependency")
 	_ = cmd.Flags().Set("block-action", "等 MUL-2 合入")
 	if err := runIssueStatus(cmd, []string{"MUL-1", "blocked"}); err != nil {
 		t.Fatalf("runIssueStatus: %v", err)
 	}
-	if body["block_kind"] != "dependency" || body["block_action"] != "等 MUL-2 合入" || body["blocked_by"] != "MUL-2" {
+	if body["block_kind"] != "dependency" || body["block_action"] != "等 MUL-2 合入" {
 		t.Fatalf("body = %#v", body)
 	}
 }

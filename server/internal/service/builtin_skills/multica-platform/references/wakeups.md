@@ -33,7 +33,7 @@ multica issue wakeup create <issue> --until-issue <other-issue-id> --until-issue
 - `wakeup disable <issue> <id>` stops future triggers and withdraws unclaimed work. Users can also turn it off in the issue sidebar. Closing/cancelling/completing the issue disables its wakeups; reopening does not restore them.
 - `--parent <comment-id>` keeps result delivery in the original thread.
 - Give waits an end: `--expires-in 72h` (restarts if the rule is re-enabled) or `--expires-at <RFC3339>`. With `--on-timeout wake`, an event rule runs the target once with a `wakeup.timeout` fact when the deadline passes first; the default `end` stops quietly. Recurring checks should carry an end date.
-- Members create the same rules from the issue sidebar. `wakeup list` also shows the platform's `child_done` rule as `kind: system`; its `on_met` says what a closed stage does now: `wake`, `notify` (member assignee), `advance` (nobody holds the parent: clear sub-issues are promoted, a person is asked for the rest), `hold` (parent in backlog), `off` or `paused`, with `blocked` and `target` saying why. The stage barrier itself is described in `references/sub-issues.md`.
+- Members create the same rules from the issue sidebar, which also shows the platform's `child_done` rule (the sub-issue wakeup) and lets a person turn it off for one issue. The stage barrier itself is described in `references/sub-issues.md`.
 
 Read current state with issue get, comment list, and run inspection before
 judging business completion. Wait for a linked pull request with `--until-pr`

@@ -47,25 +47,21 @@ var childDoneCondition = json.RawMessage(`{"type":"children_done","each_stage":t
 // ChildDoneDefaultInstruction is what the woken assignee is asked to do when
 // neither the issue nor the workspace sets an instruction. The trigger facts
 // say which stage closed, which one is next and how many were cancelled.
-const ChildDoneDefaultInstruction = "子任务已结束，触发信息里写了哪个阶段结束、下一个是哪个。" +
-	"还有后续阶段就推进它开工；全部结束就汇总结果，推进本任务。"
+const ChildDoneDefaultInstruction = "Sub-issues of this issue have closed; the trigger facts list each stage and which one is next. " +
+	"If a later stage is waiting, check that its dependencies are met, then move its sub-issues out of backlog so they start. " +
+	"If a sub-issue in the closed stages was cancelled rather than finished, decide whether its work is still needed before advancing. " +
+	"When every sub-issue is closed, bring their results together on this issue and move it forward, or mark it ready for review when nothing remains."
 
 // SystemWakeupDefault is the rule's workspace default: whether it is on and
 // the instruction set for the workspace ("" when none).
-//
-// Off unless the workspace turned it on. In this fork the handler's
-// child-done path (notifyParentOfChildDone) already wakes the parent's
-// assignee with stage-aware instructions; running both would wake it twice,
-// so the rule is opt-in and the handler path steps aside wherever the rule
-// is enabled (DENE-1184).
 func SystemWakeupDefault(settings []byte) (bool, string) {
 	var values map[string]json.RawMessage
 	if json.Unmarshal(settings, &values) != nil {
-		return false, ""
+		return true, ""
 	}
 	var instruction string
 	_ = json.Unmarshal(values[WorkspaceSettingChildDoneInstruction], &instruction)
-	return string(values[WorkspaceSettingChildDone]) == "true", strings.TrimSpace(instruction)
+	return string(values[WorkspaceSettingChildDone]) != "false", strings.TrimSpace(instruction)
 }
 
 // ChildDoneInstruction is the instruction the rule's runs receive.
@@ -353,18 +349,6 @@ func resolveWakeTarget(ctx context.Context, q *db.Queries, issue db.Issue) (wake
 		return target, nil
 	}
 	return wakeTarget{Type: "none"}, nil
-}
-
-// SystemRuleReaches reports whether the child_done rule has someone to reach
-// on this parent: a member to notify or an agent that can run. A rule that
-// reaches nobody leaves the stage advance to the handler path (DENE-1777).
-// A failed read keeps the rule in charge, as before.
-func SystemRuleReaches(ctx context.Context, q *db.Queries, issue db.Issue) bool {
-	target, err := resolveWakeTarget(ctx, q, issue)
-	if err != nil {
-		return true
-	}
-	return target.Type == "member" || target.Agent.ID.Valid
 }
 
 // childDoneFacts summarizes the newest observation for the timeline entry and

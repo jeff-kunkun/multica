@@ -2274,7 +2274,6 @@ func (d *Daemon) run(ctx context.Context, healthLn net.Listener) error {
 	taskWakeups := make(chan taskWakeup, 256)
 	go d.taskWakeupLoop(ctx, taskWakeups)
 	go d.heartbeatLoop(ctx)
-	go d.blockWaitProbeLoop(ctx)
 	go d.gcLoop(ctx)
 	// Independent of gcLoop and of GCEnabled: the storage screen's cleanup
 	// switch is this pass's only gate (DENE-648).
@@ -8713,7 +8712,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		AutopilotTriggerPayload:          strings.TrimSpace(string(task.AutopilotTriggerPayload)),
 		QuickCreatePrompt:                task.QuickCreatePrompt,
 		IsSquadLeader:                    taskIsSquadLeader(task),
-		PlanFlow:                         task.PlanFlow,
 		RequestingUserName:               task.RequestingUserName,
 		RequestingUserProfileDescription: task.RequestingUserProfileDescription,
 		InitiatorType:                    task.InitiatorType,

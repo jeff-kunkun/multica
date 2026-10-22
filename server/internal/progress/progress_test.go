@@ -3,8 +3,6 @@ package progress
 import (
 	"strings"
 	"testing"
-
-	"github.com/multica-ai/multica/server/internal/parking"
 )
 
 func TestNormalizeTone(t *testing.T) {
@@ -25,24 +23,6 @@ func TestForStatus(t *testing.T) {
 	} {
 		if got := ForStatus(status); got != want {
 			t.Errorf("ForStatus(%q) = %q, want %q", status, got, want)
-		}
-	}
-}
-
-// An unexplained stall must read red, the same as an explicit block.
-func TestForParking(t *testing.T) {
-	for category, want := range map[string]string{
-		parking.CategoryDone:                 ToneDone,
-		parking.CategoryAwaitReview:          ToneWaiting,
-		parking.CategoryWaitingPerson:        ToneWaiting,
-		parking.CategoryBlocked:              ToneStuck,
-		parking.CategoryStalledDelivery:      ToneStuck,
-		parking.CategoryStalledUnclosed:      ToneStuck,
-		parking.CategoryStalledReplyUnclosed: ToneStuck,
-		parking.CategoryRunning:              ToneWorking,
-	} {
-		if got := ForParking(category); got != want {
-			t.Errorf("ForParking(%q) = %q, want %q", category, got, want)
 		}
 	}
 }

@@ -18,8 +18,8 @@ chat line is `working`.
 
 Who writes the line, and who wins:
 
-- **Issue:** your report wins. The parking summary fills the line only
-  while no report exists, and is red when the stop is unexplained.
+- **Issue:** your report wins; between your report and a close summary the
+  latest wins.
 - **Chat:** your report for the current turn wins. Otherwise the platform
   writes one after each reply — a model summary, or the reply's first line
   when the deployment has no model configured.

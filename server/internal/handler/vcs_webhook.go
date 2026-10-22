@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/integrations/vcs"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -185,9 +186,6 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 		slog.Warn("vcs: pull_request missing repo identity", "provider", conn.Provider)
 		return
 	}
-	// The close check, the child-done barrier and the waiting_on wake all resolve
-	// raw statuses below; share one catalog per workspace across the delivery.
-	ctx = withStatusResolverCache(ctx)
 
 	// The stored state before this event, so a merge completes issues once —
 	// when it happens — and not again on a later event of a merged PR.
@@ -278,7 +276,7 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 				touched[id] = struct{}{}
 			}
 		}
-		resolver := h.statusResolver(ctx, conn.WorkspaceID)
+		resolver := issuestatus.NewResolver(conn.WorkspaceID)
 		for issueID := range touched {
 			h.maybeAutoCompleteIssue(ctx, conn.WorkspaceID, issueID, resolver)
 		}
