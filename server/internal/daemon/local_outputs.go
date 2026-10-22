@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"path/filepath"
@@ -82,4 +83,10 @@ func localOutputResponse(e localoutputs.Entry) map[string]any {
 		"size_bytes":    e.SizeBytes,
 		"path":          e.Path,
 	}
+}
+
+func writeDaemonJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(v)
 }

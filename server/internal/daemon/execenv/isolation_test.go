@@ -40,16 +40,10 @@ const preparationHelperTestMode = "execenv-preparation-helper"
 // it once here makes the package resolve profile dirs the same way everywhere,
 // and keeps working for parallel tests, which cannot call t.Setenv. A test
 // that wants the task-local branch sets the variable itself.
-//
-// It also removes the template repository newTestRepo copies from.
 func TestMain(m *testing.M) {
 	os.Setenv("GORACE", strings.TrimSpace(os.Getenv("GORACE")+" atexit_sleep_ms=0"))
 	os.Unsetenv(cli.TaskConfigRootEnv)
-	code := m.Run()
-	if testRepoTemplate.dir != "" {
-		os.RemoveAll(testRepoTemplate.dir)
-	}
-	os.Exit(code)
+	os.Exit(m.Run())
 }
 
 // preparationHelperTestCommand re-execs this test binary as the preparation

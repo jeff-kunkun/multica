@@ -134,7 +134,7 @@ func TestReadOnlyDirectoriesReachTheCodeSource(t *testing.T) {
 	if err != nil {
 		t.Fatalf("localDirectoryPlanForTask: %v", err)
 	}
-	src := resolveTaskCodeSource(chosen, readOnly, "", nil, func(string) []string { return nil })
+	src := resolveTaskCodeSource(chosen, readOnly, nil, func(string) []string { return nil })
 	if src.LocalPath != writable {
 		t.Fatalf("code source local path = %q, want %q", src.LocalPath, writable)
 	}

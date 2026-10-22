@@ -89,8 +89,8 @@ func readGitRemotes(dir string) []string {
 // assignment, nearest first.
 //
 // The directory itself is always a candidate. One level down is too, because
-// shared mode exists precisely for an umbrella directory holding several
-// repositories side by side — there the repo lives at <dir>/<name>, and a rule
+// a bound folder may be an umbrella directory holding several repositories
+// side by side — there the repo lives at <dir>/<name>, and a rule
 // that only looked at <dir> would clone every one of them.
 func localRepoCandidates(absPath, repoURL string) []string {
 	candidates := []string{absPath}
@@ -159,10 +159,13 @@ type taskCodeSource struct {
 	// Kind is "local_directory" when the project pinned a directory on this
 	// machine, "remote_checkout" otherwise.
 	Kind string
-	// LocalPath, ExecutionMode, DisplayName describe the pinned directory.
-	LocalPath     string
-	ExecutionMode string
-	DisplayName   string
+	// LocalPath and DisplayName describe the pinned directory; Branch is the
+	// folder's branch at task start.
+	LocalPath   string
+	DisplayName string
+	Branch      string
+	// CoRunners are the other tasks this daemon is running in the folder.
+	CoRunners []folderRun
 	// CoveredRepos are project repo URLs proven to already live in the
 	// directory. The agent must not check these out.
 	CoveredRepos []string
@@ -195,20 +198,14 @@ const (
 
 // resolveTaskCodeSource classifies every repo attached to the task against the
 // local directory the project pinned on this machine.
-func resolveTaskCodeSource(assignment *localDirectoryAssignment, readOnly []*localDirectoryAssignment, workDir string, repoURLs []string, remotesOf gitRemotesFunc) taskCodeSource {
+func resolveTaskCodeSource(assignment *localDirectoryAssignment, readOnly []*localDirectoryAssignment, repoURLs []string, remotesOf gitRemotesFunc) taskCodeSource {
 	if assignment == nil {
 		return taskCodeSource{Kind: codeSourceKindRemoteCheckout, RemoteRepos: append([]string(nil), repoURLs...)}
 	}
-	mode := assignment.mode()
 	src := taskCodeSource{
-		Kind: codeSourceKindLocalDirectory,
-		// The directory the AGENT is in, which is the user's own path in
-		// in_place and shared and the task's private worktree in worktree
-		// mode. Naming assignment.AbsPath here would contradict the execution
-		// mode line rendered directly below it in the brief.
-		LocalPath:     taskLocalRoot(assignment, workDir),
-		ExecutionMode: mode,
-		DisplayName:   assignment.DisplayName(),
+		Kind:        codeSourceKindLocalDirectory,
+		LocalPath:   assignment.AbsPath,
+		DisplayName: assignment.DisplayName(),
 	}
 	for _, dir := range readOnly {
 		if dir == nil {
@@ -220,13 +217,6 @@ func resolveTaskCodeSource(assignment *localDirectoryAssignment, readOnly []*loc
 		res := resolveLocalRepo(assignment, url, remotesOf)
 		switch {
 		case res.Covered:
-			if _, ok := taskDirFor(assignment, workDir, res.Path, url, remotesOf); !ok {
-				src.UnprovenRepos = append(src.UnprovenRepos, codeSourceWarning{
-					URL:    url,
-					Reason: worktreeUnreachableReason(assignment, res.Path, url),
-				})
-				continue
-			}
 			src.CoveredRepos = append(src.CoveredRepos, url)
 		case res.Suspected:
 			src.UnprovenRepos = append(src.UnprovenRepos, codeSourceWarning{URL: url, Reason: res.Reason})
@@ -235,62 +225,6 @@ func resolveTaskCodeSource(assignment *localDirectoryAssignment, readOnly []*loc
 		}
 	}
 	return src
-}
-
-// taskLocalRoot is the directory this task actually runs in. It differs from
-// the pinned path only in worktree mode, where execenv gives the task its own
-// checkout under the env root (execenv.PrepareLocalWorktree).
-func taskLocalRoot(assignment *localDirectoryAssignment, workDir string) string {
-	if assignment.UsesWorktree() && strings.TrimSpace(workDir) != "" {
-		return workDir
-	}
-	return assignment.AbsPath
-}
-
-// taskDirFor maps a directory proven to hold repoURL inside the user's pinned
-// directory onto the directory THIS task may write in.
-//
-// in_place and shared run in the user's own directory, so the two are the same
-// and the mapping is the identity. worktree does not: the agent's cwd is a
-// private worktree of the repository, and handing back the user's path there
-// would have the agent commit into the working copy the mode exists to keep it
-// out of — the DENE-595 accident pointed the other way.
-//
-// ok=false means the proven directory has no counterpart the task may write
-// in. That happens when the match was a nested repository under the pinned
-// path (the umbrella layout shared mode exists for), which worktree mode does
-// not replay: the caller must refuse rather than offer the user's copy.
-func taskDirFor(assignment *localDirectoryAssignment, workDir, resolved, repoURL string, remotesOf gitRemotesFunc) (string, bool) {
-	if !assignment.UsesWorktree() {
-		return resolved, true
-	}
-	if strings.TrimSpace(workDir) == "" {
-		return "", false
-	}
-	rel, err := filepath.Rel(assignment.AbsPath, resolved)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", false
-	}
-	candidate := filepath.Join(workDir, rel)
-	if remotesOf == nil {
-		remotesOf = readGitRemotes
-	}
-	// Prove the counterpart the same way the original match was proven. A
-	// submodule replayed into the worktree passes; a sibling repository that
-	// only ever lived beside the pinned path does not.
-	if !repoident.MatchesRemotes(repoURL, remotesOf(candidate)) {
-		return "", false
-	}
-	return candidate, true
-}
-
-// worktreeUnreachableReason explains a repository that is on this machine but
-// not inside the task's worktree.
-func worktreeUnreachableReason(assignment *localDirectoryAssignment, resolved, repoURL string) string {
-	return fmt.Sprintf(
-		"%q holds %s, but this task runs in its own git worktree of %q and that directory has no counterpart there, "+
-			"so it cannot be reached without writing into the user's working copy",
-		resolved, repoURL, assignment.AbsPath)
 }
 
 // localCheckoutOutcome is what serveLocalDirectoryCheckout decided, split out
@@ -304,10 +238,6 @@ type localCheckoutOutcome struct {
 	// but the claim could not be verified. NEVER falls back to cloning: that
 	// silent fallback is the bug (DENE-595).
 	Refusal string
-	// ExecutionMode is the pinned resource's mode, carried onto the response so
-	// the CLI can describe the path: "the user's own checkout" is true in
-	// in_place and shared and false in worktree.
-	ExecutionMode string
 }
 
 // decideLocalCheckout applies the source rule to one `multica repo checkout`
@@ -322,36 +252,18 @@ type localCheckoutOutcome struct {
 //	unproven claim    → a refusal naming what to fix. The directory is named
 //	                    after this repository but nothing there proves it, so
 //	                    neither answer is safe to give silently.
-func decideLocalCheckout(assignment *localDirectoryAssignment, workDir, repoURL string, remotesOf gitRemotesFunc) localCheckoutOutcome {
+func decideLocalCheckout(assignment *localDirectoryAssignment, repoURL string, remotesOf gitRemotesFunc) localCheckoutOutcome {
 	res := resolveLocalRepo(assignment, repoURL, remotesOf)
-	mode := ""
-	if assignment != nil {
-		mode = assignment.mode()
-	}
 	switch {
 	case res.Covered:
-		// Worktree mode must hand back the task's own checkout, never the
-		// user's. When no counterpart exists the answer is a refusal, for the
-		// same reason an unproven claim is: the alternatives left are a second
-		// clone and someone else's working copy, and neither may be picked
-		// silently.
-		dir, ok := taskDirFor(assignment, workDir, res.Path, repoURL, remotesOf)
-		if !ok {
-			return localCheckoutOutcome{ExecutionMode: mode, Refusal: fmt.Sprintf(
-				"This project is pinned to the local directory %q and runs this task in its own git worktree, "+
-					"so %s must not be checked out into the user's copy. %s. "+
-					"Switch the resource's execution mode to in_place or shared if the task needs that directory directly, "+
-					"or configure this repository as its own local directory resource.",
-				assignment.AbsPath, repoURL, worktreeUnreachableReason(assignment, res.Path, repoURL))}
-		}
-		return localCheckoutOutcome{Path: dir, ExecutionMode: mode}
+		return localCheckoutOutcome{Path: res.Path}
 	case res.Suspected:
 		return localCheckoutOutcome{Refusal: fmt.Sprintf(
 			"This project is configured to use the local directory %q on this machine, so %s is not cloned. "+
 				"%s. Fix the directory (check out the repository there, or add the matching git remote), "+
 				"or remove the local directory resource from the project if this repository really is a separate checkout. "+
 				"Refusing to clone a second copy instead, which is what pinning a local directory asks to prevent.",
-			assignment.AbsPath, repoURL, res.Reason), ExecutionMode: mode}
+			assignment.AbsPath, repoURL, res.Reason)}
 	default:
 		return localCheckoutOutcome{}
 	}
@@ -389,10 +301,13 @@ func repoURLsOf(repos []RepoData) []string {
 // codeSourceForEnv converts the daemon's verdict into the brief's shape.
 func codeSourceForEnv(src taskCodeSource) execenv.CodeSourceForEnv {
 	out := execenv.CodeSourceForEnv{
-		Kind:          src.Kind,
-		LocalPath:     src.LocalPath,
-		ExecutionMode: src.ExecutionMode,
-		DisplayName:   src.DisplayName,
+		Kind:        src.Kind,
+		LocalPath:   src.LocalPath,
+		DisplayName: src.DisplayName,
+		Branch:      src.Branch,
+	}
+	for _, run := range src.CoRunners {
+		out.CoRunners = append(out.CoRunners, execenv.CodeSourceCoRunnerForEnv{Identifier: run.Identifier, Title: run.Title, Branch: run.Branch})
 	}
 	for _, url := range src.CoveredRepos {
 		// Re-resolving would hit the filesystem a second time; the covered

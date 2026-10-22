@@ -66,14 +66,6 @@ func backendResumeContinuityNotice(task Task) string {
 // Returns "" when none of the blocks apply.
 func perTurnContextBlocks(task Task, opts promptOpts) string {
 	var b strings.Builder
-	b.WriteString(buildLocalRunCopyBlock(opts.localRunCopy, opts.localRunCopyOrig))
-	b.WriteString(buildSharedLocalDirectoryBlock(opts.sharedLocalDirectory))
-	b.WriteString(buildSharedWorkspaceBlock(opts.sharedWorkspace))
-	b.WriteString(buildWorktreeReplayConflictBlock(opts.worktreeReplayConflicts))
-	b.WriteString(buildReplaySkippedBlock(opts.replaySkippedNotice))
-	b.WriteString(buildInterruptedWorkBlock(opts.interruptedWorkNotice))
-	b.WriteString(buildStaleLocalBaselineBlock(opts.staleLocalBaselineNotice))
-	b.WriteString(buildDeliveryBranchBlock(opts.deliveryBranch, opts.deliveryUpstream))
 	b.WriteString(buildDependencyInstallBlock(opts.dependencyInstallCommand))
 	b.WriteString(buildSparseCheckoutBlock(task.CheckoutPaths))
 	if task.PriorSessionResumeUnavailable {
@@ -114,82 +106,11 @@ func buildJoinedWakeupsBlock(notes string) string {
 // daemon's own execution context can answer. Kept behind PromptOption so the
 // common BuildPrompt(task, provider) call sites stay unchanged.
 type promptOpts struct {
-	sharedLocalDirectory     bool
-	localRunCopy             string
-	localRunCopyOrig         string
-	sharedWorkspace          bool
-	worktreeReplayConflicts  []string
-	replaySkippedNotice      string
-	interruptedWorkNotice    string
-	staleLocalBaselineNotice string
-	deliveryBranch           string
-	deliveryUpstream         string
 	dependencyInstallCommand string
 }
 
 // PromptOption tunes per-turn prompt copy with run-scoped context.
 type PromptOption func(*promptOpts)
-
-// WithSharedLocalDirectory marks a turn that runs inside the user's own
-// directory WITHOUT holding its path mutex — today, a chat turn on an in_place
-// local_directory resource (see localDirectoryLockExempt). Such a turn may
-// overlap a coding task writing to the same tree, and unlike every other task
-// it got there by design rather than by winning the lock, so it is the one that
-// has to be told (issue #7344).
-func WithSharedLocalDirectory() PromptOption {
-	return func(o *promptOpts) { o.sharedLocalDirectory = true }
-}
-
-// WithLocalRunCopy marks an in-place local_directory turn that works in a
-// private clone of the user's folder, merged back when the run ends
-// (DENE-2159).
-func WithLocalRunCopy(workDir, orig string) PromptOption {
-	return func(o *promptOpts) { o.localRunCopy, o.localRunCopyOrig = workDir, orig }
-}
-
-func buildLocalRunCopyBlock(workDir, orig string) string {
-	if workDir == "" {
-		return ""
-	}
-	var b strings.Builder
-	b.WriteString("## Private copy of the user's folder\n\n")
-	fmt.Fprintf(&b, "Your working directory `%s` is a private copy of the user's folder `%s`, made for this run. Edit files here directly; do not create git worktrees inside it. When the run ends, your changes are merged back into the original folder automatically and this copy is removed.\n\n", workDir, orig)
-	b.WriteString("Other tasks, or the user, may change the original folder while you work. Changes to different lines are merged automatically. If the original's copy of a file you changed was also changed in a way that does not merge, the original keeps its version, yours is saved next to it as `<file>.multica-conflict-<task>`, and this task stops for a person to reconcile them. So before finishing, compare the files you changed with the original folder and merge in their changes yourself. Refer to files by their path in the original folder.\n\n")
-	b.WriteString("If it is a git repository: commits on a new branch are carried back to the original repository, and you can push them from here. Commits on the checked-out branch arrive in the original folder as uncommitted changes.\n\n")
-	return b.String()
-}
-
-// WithSharedWorkspace marks a task running against a local_directory in
-// shared mode: every task on the directory runs unserialised, by the user's
-// decision, and isolation is a matter of the workspace's own conventions.
-// Distinct from WithSharedLocalDirectory, whose notice is about one exempt
-// turn skipping a lock that other tasks still hold.
-func WithSharedWorkspace() PromptOption {
-	return func(o *promptOpts) { o.sharedWorkspace = true }
-}
-
-// WithWorktreeReplayConflicts names the files whose merge this turn has to
-// finish. Worktree mode continues one branch per conversation, and when the
-// user edits the same lines in their own directory between two turns, git
-// cannot decide which version wins — so the turn starts on a conflicted tree
-// and the agent, which is the only party that knows what the change was FOR,
-// resolves it (MUL-6881).
-func WithWorktreeReplayConflicts(files []string) PromptOption {
-	return func(o *promptOpts) { o.worktreeReplayConflicts = files }
-}
-
-// WithReplaySkipped tells the turn that a local-directory replay was not
-// applied because the same conflict already happened once. The notice is the
-// text execenv built, including which snapshot and which files.
-func WithReplaySkipped(notice string) PromptOption {
-	return func(o *promptOpts) { o.replaySkippedNotice = strings.TrimSpace(notice) }
-}
-
-// WithStaleLocalBaseline explains that a local_directory worktree could not
-// safely advance its source checkout to the remote tracking tip.
-func WithStaleLocalBaseline(notice string) PromptOption {
-	return func(o *promptOpts) { o.staleLocalBaselineNotice = strings.TrimSpace(notice) }
-}
 
 // WithDependencyInstallCommand adds the deterministic install command for a
 // checkout whose lockfile is present. The daemon points pnpm at its warm
@@ -197,84 +118,6 @@ func WithStaleLocalBaseline(notice string) PromptOption {
 // setup step rather than a fresh network download for every task.
 func WithDependencyInstallCommand(command string) PromptOption {
 	return func(o *promptOpts) { o.dependencyInstallCommand = strings.TrimSpace(command) }
-}
-
-// buildSharedLocalDirectoryBlock warns an unlocked turn that its working
-// directory is shared live. Deliberately guidance and not a prohibition: the
-// mutex never covered the user's own editor either, so refusing writes here
-// would buy a restriction the surrounding system does not actually enforce.
-// What the turn cannot infer on its own is that a sibling task may be mid-edit
-// in the same tree — so state that, and let it size its writes accordingly.
-func buildSharedLocalDirectoryBlock(shared bool) string {
-	if !shared {
-		return ""
-	}
-	var b strings.Builder
-	b.WriteString("## Shared working directory\n\n")
-	b.WriteString("Your working directory is the user's own checkout, and another task on this machine may be editing it while you run. This turn deliberately neither holds nor waits for the directory lock — that is what keeps a conversation from queueing behind a long build.\n\n")
-	b.WriteString("Read freely. Treat writing the way the user treats saving a file in their own editor: reasonable for a small change they just asked for, wrong for a broad refactor, a dependency install, or a build that rewrites many files. Work that size belongs in an issue task, which is serialised against the other writers. If you do write, say so in your reply — a sibling task may be looking at the same file.\n\n")
-	return b.String()
-}
-
-func buildSharedWorkspaceBlock(shared bool) string {
-	if !shared {
-		return ""
-	}
-	var b strings.Builder
-	b.WriteString("## Shared workspace\n\n")
-	b.WriteString("Your working directory is a shared workspace: the project owner set it to run tasks concurrently, so other tasks on this machine may be working in it right now and no task holds a lock on it. Multica keeps its own runtime files out of this directory; nothing here was written for you except by the workspace itself.\n\n")
-	b.WriteString("Follow the workspace's own conventions for isolation — typically a task-specific branch or worktree inside the sub-repository you are changing. Do not edit a shared checkout's mainline (main/dev) in place, do not run commands that rewrite files across the whole directory, and when you must change a file other tasks may also touch, say so in your reply.\n\n")
-	return b.String()
-}
-
-// WithInterruptedWork tells a retry that the copy its interrupted run left
-// was reclaimed, and where that run's uncommitted changes were saved.
-func WithInterruptedWork(notice string) PromptOption {
-	return func(o *promptOpts) { o.interruptedWorkNotice = strings.TrimSpace(notice) }
-}
-
-func buildInterruptedWorkBlock(notice string) string {
-	if strings.TrimSpace(notice) == "" {
-		return ""
-	}
-	return "## Uncommitted work from the interrupted run\n\n" + strings.TrimSpace(notice) + "\n\n"
-}
-
-func buildReplaySkippedBlock(notice string) string {
-	if strings.TrimSpace(notice) == "" {
-		return ""
-	}
-	return "## Local edits were not replayed\n\n" + strings.TrimSpace(notice) + "\n\n"
-}
-
-// WithDeliveryBranch names the task branch of a local_directory worktree run
-// and the one legal way to pick up newer code on it. Finalize delivers any end
-// state it can prove (DENE-874); this keeps runs from needing that.
-func WithDeliveryBranch(branch, upstream string) PromptOption {
-	return func(o *promptOpts) {
-		o.deliveryBranch = strings.TrimSpace(branch)
-		o.deliveryUpstream = strings.TrimSpace(upstream)
-	}
-}
-
-func buildDeliveryBranchBlock(branch, upstream string) string {
-	if branch == "" {
-		return ""
-	}
-	target := "origin/<main branch>"
-	if upstream != "" {
-		target = upstream
-	}
-	return "## Your delivery branch\n\n" +
-		"You are on `" + branch + "`: this run delivers whatever is committed on it when you finish. " +
-		"To work on newer code, run `git merge " + target + "` on this branch — do not create or switch to another branch.\n\n"
-}
-
-func buildStaleLocalBaselineBlock(notice string) string {
-	if strings.TrimSpace(notice) == "" {
-		return ""
-	}
-	return "## Local baseline may be stale\n\n" + strings.TrimSpace(notice) + " Treat the files in this worktree as the authoritative snapshot for this turn, and mention the stale baseline if it affects your conclusion.\n\n"
 }
 
 // buildSparseCheckoutBlock tells the agent what a declared checkout scope
@@ -321,16 +164,6 @@ func dependencyInstallCommand(workDir string) string {
 		}
 	}
 }
-
-// maxConflictListBytes bounds the RENDERED file list, in bytes of the escaped
-// output rather than in entries: a git path can be as long as the filesystem
-// allows, so a per-entry count bounds nothing. 4 KiB is roughly a thousand
-// tokens — small next to any provider's context, large enough for the tens of
-// paths a real merge conflict spans, and the remainder is one `git status` away
-// inside the worktree. It is the whole block's share of the turn: this text is
-// re-sent every turn the merge stays open, and a pathological repository must
-// not be able to spend that turn on filenames.
-const maxConflictListBytes = 4 << 10
 
 const maxIssueContextBytes = 12 << 10
 
@@ -429,49 +262,6 @@ func writeCoordinatorRole(b *strings.Builder, subs []SubIssueRef) {
 		}
 		fmt.Fprintf(b, "- %s %q (%s%s, %s)\n", name, s.Title, s.Status, stage, holder)
 	}
-}
-
-// buildWorktreeReplayConflictBlock tells the turn that its own working tree
-// starts out mid-merge, and that finishing that merge comes before the task.
-//
-// Nothing else can say it: `git status` shows the conflict but not where it
-// came from, and the two sides are "what you wrote last turn" and "what the
-// user changed since" — neither of which is visible from inside the worktree.
-// Silence here is what the earlier version of this feature got wrong: it
-// resolved the conflict by discarding the user's edit, which lost that edit
-// from every later turn as well.
-//
-// The names are QUOTED, not wrapped in a code span. They come from the user's
-// repository, and a git path may contain newlines, backticks and quotes — a
-// raw one could close the list item and continue as its own instruction line in
-// the prompt. %q keeps every path on one line with its own delimiters, so a
-// crafted filename can only ever read as a filename.
-func buildWorktreeReplayConflictBlock(files []string) string {
-	if len(files) == 0 {
-		return ""
-	}
-	var b strings.Builder
-	b.WriteString("## Unresolved merge in your working tree\n\n")
-	b.WriteString("This branch carries your previous turn's work. Since then the user edited the same lines in their own directory, and git could not merge the two (paths are quoted Go string literals — a filename may itself contain quotes or newlines):\n\n")
-	listed, used := 0, 0
-	for _, file := range files {
-		entry := fmt.Sprintf("- %q\n", file)
-		// Budget checked before writing, so a single very long path cannot
-		// overrun it either — in that case the list is empty and the line below
-		// carries the whole count.
-		if used+len(entry) > maxConflictListBytes {
-			break
-		}
-		b.WriteString(entry)
-		used += len(entry)
-		listed++
-	}
-	if listed < len(files) {
-		fmt.Fprintf(&b, "- …and %d more; `git status` in this worktree lists them all\n", len(files)-listed)
-	}
-	b.WriteString("\nResolve it before anything else, with ordinary git commands — `git status` lists the unmerged paths, `git diff` shows both sides, `git add <file>` marks each one done. The \"ours\" side is what you wrote last turn; \"theirs\" is the user's newer edit, and it is the side you have not seen before, so read it before choosing. Keep both intentions where they are compatible; where they are not, prefer the user's and say so in your reply.\n\n")
-	b.WriteString("This run cannot deliver its branch while any file is still unmerged — the task fails and the worktree is kept for a human instead. Do not commit conflict markers. The same conflict is offered once; if this run leaves it unresolved, the next run skips the replay and continues the branch without those edits.\n\n")
-	return b.String()
 }
 
 // BuildPrompt constructs the task prompt for an agent CLI.
