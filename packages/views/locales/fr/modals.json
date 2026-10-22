@@ -112,8 +112,6 @@
     "title_breadcrumb": "Nouveau projet",
     "icon_tooltip": "Choisir une icône",
     "title_placeholder": "Titre du projet",
-    "description_placeholder": "Ajouter une description...",
-    "description_hint": "Partagé avec les agents comme contexte à chaque exécution dans ce projet.",
     "lead": "Responsable",
     "no_lead": "Aucun responsable",
     "set_start_date": "Définir la date de début...",

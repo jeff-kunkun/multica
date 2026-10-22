@@ -953,7 +953,6 @@
       "status": {
         "queued": "排队中",
         "dispatched": "已派发",
-        "waiting_local_directory": "等待目录",
         "deferred": "重试中",
         "running": "进行中",
         "completed": "成功",
@@ -1139,7 +1138,6 @@
     "status_queued": "排队中",
     "status_dispatched": "已派发",
     "status_cancelled": "已取消",
-    "status_waiting": "等待中",
     "status_deferred": "重试中",
     "trigger_initial": "初次运行",
     "trigger_text": "触发内容",
@@ -1205,13 +1203,9 @@
     "details_source": "代码来源",
     "details_source_path": "目录",
     "details_source_path_planned": "将使用",
-    "details_source_mode": "执行模式",
     "details_source_resource": "命中的来源配置",
     "source_local_directory": "本机本地目录",
     "source_remote_checkout": "远端拉取",
-    "source_mode_in_place": "一次一个任务，在你的工作副本中修改",
-    "source_mode_worktree": "每个任务独立 git worktree",
-    "source_mode_shared": "共享目录，任务并发运行",
     "kind_skill": "skill"
   },
   "task_failure": {
