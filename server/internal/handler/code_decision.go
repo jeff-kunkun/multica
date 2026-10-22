@@ -26,24 +26,18 @@ import (
 // request it is claiming with.
 //
 // Declarations, never version numbers: a git-describe dev build is exempted
-// from the version floor so `make daemon` stays unblocked, and that exemption
-// let a daemon with no worktree implementation straight through the gate
-// (MUL-5707). A daemon that implements something says so.
+// from the version floor so `make daemon` stays unblocked. A daemon that
+// implements something says so.
 func daemonForRequest(r *http.Request, daemonID string) coderesolve.Daemon {
 	multi := requestHasClientCapability(r, protocol.DaemonCapabilityLocalDirectoryMultiV1)
+	// Already-shipped daemons declare the worktree user-root capability and
+	// handle several directories, because both landed together; the multi
+	// capability was split out afterwards. Reading either as "can take more
+	// than one directory" keeps those daemons working as they do today.
 	userRoot := requestHasClientCapability(r, protocol.DaemonCapabilityLocalWorktreeUserRootV1)
 	return coderesolve.Daemon{
-		ID: daemonID,
-		// Already-shipped daemons declare the user-root capability and handle
-		// several directories, because both landed together; the multi
-		// capability was split out afterwards to name the two promises
-		// separately. Reading either as "can take more than one directory"
-		// keeps those daemons working exactly as they do today, instead of
-		// narrowing them to one directory the moment this server deploys.
+		ID:                  daemonID,
 		MultiLocalDirectory: multi || userRoot,
-		WorktreeUserRoot:    userRoot,
-		LocalWorktree:       requestHasClientCapability(r, protocol.DaemonCapabilityLocalWorktreeV1),
-		LocalShared:         requestHasClientCapability(r, protocol.DaemonCapabilityLocalSharedV1),
 	}
 }
 

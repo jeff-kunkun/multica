@@ -20,23 +20,14 @@ func TestSharedModeBriefDelivery(t *testing.T) {
 	if got := sharedModeBriefDelivery("codex"); got != sharedBriefViaCodexHome {
 		t.Errorf("codex = %v, want sharedBriefViaCodexHome (CODEX_HOME/AGENTS.md)", got)
 	}
-	if err := sharedModeProviderSupported("codex"); err != nil {
-		t.Errorf("sharedModeProviderSupported(codex) = %v, want nil", err)
-	}
 	if got := sharedModeBriefDelivery("opencode"); got != sharedBriefViaOpencodeConfigDir {
 		t.Errorf("opencode = %v, want sharedBriefViaOpencodeConfigDir (OPENCODE_CONFIG_DIR)", got)
-	}
-	if err := sharedModeProviderSupported("opencode"); err != nil {
-		t.Errorf("sharedModeProviderSupported(opencode) = %v, want nil", err)
 	}
 	// DSH (and grok) load AGENTS.md from cwd in the non-shared path, so they
 	// are not in providerNeedsInlineSystemPrompt. Shared mode still has to
 	// prepend SystemPrompt because the brief file sits under the sidecar.
 	if got := sharedModeBriefDelivery("dsh"); got != sharedBriefInline {
 		t.Errorf("dsh = %v, want sharedBriefInline (execute prompt prepend)", got)
-	}
-	if err := sharedModeProviderSupported("dsh"); err != nil {
-		t.Errorf("sharedModeProviderSupported(dsh) = %v, want nil", err)
 	}
 	if got := sharedModeBriefDelivery("grok"); got != sharedBriefInline {
 		t.Errorf("grok = %v, want sharedBriefInline", got)
@@ -53,20 +44,11 @@ func TestSharedModeBriefDelivery(t *testing.T) {
 	if got := sharedModeBriefDelivery("qwen"); got != sharedBriefInline {
 		t.Errorf("qwen = %v, want sharedBriefInline (stdin prompt prepend)", got)
 	}
-	if err := sharedModeProviderSupported("qwen"); err != nil {
-		t.Errorf("sharedModeProviderSupported(qwen) = %v, want nil", err)
-	}
 	if got := sharedModeBriefDelivery("cursor"); got != sharedBriefViaCursorAddDir {
 		t.Errorf("cursor = %v, want sharedBriefViaCursorAddDir (--add-dir skills + stdin brief)", got)
 	}
-	if err := sharedModeProviderSupported("cursor"); err != nil {
-		t.Errorf("sharedModeProviderSupported(cursor) = %v, want nil", err)
-	}
 	if got := sharedModeBriefDelivery("antigravity"); got != sharedBriefViaAntigravityAddDir {
 		t.Errorf("antigravity = %v, want sharedBriefViaAntigravityAddDir (--add-dir AGENTS.md + skills)", got)
-	}
-	if err := sharedModeProviderSupported("antigravity"); err != nil {
-		t.Errorf("sharedModeProviderSupported(antigravity) = %v, want nil", err)
 	}
 	// Every provider that already runs on the inline brief in production must
 	// keep working in shared mode, since inline delivery needs no cwd file.
@@ -77,24 +59,13 @@ func TestSharedModeBriefDelivery(t *testing.T) {
 		if got := sharedModeBriefDelivery(p); got != sharedBriefInline {
 			t.Errorf("%s = %v, want sharedBriefInline", p, got)
 		}
-		if err := sharedModeProviderSupported(p); err != nil {
-			t.Errorf("sharedModeProviderSupported(%s) = %v, want nil", p, err)
-		}
 	}
-	// Disk-only readers stay refused until their own route is verified.
-	// mcode ignores ExecOptions.SystemPrompt and only reads cwd AGENTS.md,
-	// so it must not pass the shared-mode gate (DENE-125).
+	// Disk-only readers have no sidecar-free route: they keep the brief in the
+	// folder itself, so a git folder needs its exclude list instead. mcode
+	// ignores ExecOptions.SystemPrompt and only reads cwd AGENTS.md (DENE-125).
 	for _, p := range []string{"hermes", "copilot", "mcode", "reasonix", "deveco", "", "made-up"} {
 		if got := sharedModeBriefDelivery(p); got != sharedBriefUnsupported {
 			t.Errorf("%q = %v, want sharedBriefUnsupported", p, got)
-		}
-		err := sharedModeProviderSupported(p)
-		if err == nil {
-			t.Errorf("sharedModeProviderSupported(%q) = nil, want a refusal", p)
-			continue
-		}
-		if !strings.Contains(err.Error(), "shared") || !strings.Contains(err.Error(), "in_place") {
-			t.Errorf("refusal for %q should name the mode and an alternative, got %q", p, err)
 		}
 	}
 }

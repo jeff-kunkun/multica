@@ -191,7 +191,7 @@ Check in this order:
 3. Is the agent archived or bound to a runtime the actor cannot use?
 4. Is the runtime online? `multica runtime list --output json`.
 5. Did the daemon heartbeat recently? Runtime `last_seen_at` is the visible clue.
-6. Did the task get claimed or is it stuck pending/running/waiting for local directory?
+6. Did the task get claimed or is it stuck pending/running?
 7. If repo checkout failed, classify it after checking whether repo context was
    present in the task/project context.
 
@@ -208,14 +208,9 @@ Workspace repos and project resources are not the same thing:
   future tasks; optional `resource_ref.ref` pins the default checkout ref for
   tasks in that project;
 - `local_directory` resources point at a path owned by a daemon and carry
-  local-machine assumptions. `execution_mode` is `in_place` (default: one
-  task at a time, path mutex), `worktree` (isolated git worktree per task),
-  or `shared` (cwd is the user's directory, no path mutex; sidecar files
-  live under the task env root). Use `shared` for an umbrella directory of
-  several repositories whose tasks already isolate themselves via per-repo
-  worktrees — see `references/projects.md`. An old daemon that does not
-  advertise `local-shared-v1` must not run a shared resource: it would take
-  the mutex and silently re-serialise the directory.
+  local-machine assumptions. A run on that machine works directly in the
+  directory, alongside any other task running there — see
+  `references/projects.md`.
 
 Do not add a project resource just because `repo checkout` failed. First
 determine whether the user asked for durable project context or just a task
@@ -228,7 +223,7 @@ workspaces (`daemon_id` scoped to the runtime owner, so another account cannot
 reuse a daemon name to change its capacity; an ownerless runtime or one without
 a daemon id has its own capacity).
 The default is **12**, alongside each agent's existing `max_concurrent_tasks`.
-Dispatched, running and directory-waiting tasks reserve slots. Overflow stays
+Dispatched and running tasks reserve slots. Overflow stays
 queued; reclaiming an existing dispatch consumes no extra slot.
 
 ```bash

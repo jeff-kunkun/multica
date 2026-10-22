@@ -52,27 +52,6 @@ const MinQuickCreateCLIVersion = "0.2.21"
 // older floor above; only requests using these optional fields need this gate.
 const MinQuickCreateFieldsCLIVersion = "0.4.3"
 
-// MinLocalWorktreeCLIVersion is the release that first shipped
-// execution_mode=worktree for local_directory resources (MUL-5707).
-//
-// NOTHING GATES ON THIS. It is a display value: the number shown in the 422
-// payload and the UI hint so a user knows roughly which release to update to.
-// The gates themselves read protocol.DaemonCapabilityLocalWorktreeV1, which
-// the daemon advertises only when it actually implements the mode.
-//
-// It stopped being a gate because it could not be one. A daemon without the
-// implementation does not lose a field — it runs the task IN PLACE, editing the
-// working copy the user asked to isolate. Version strings cannot answer that:
-// CheckMinCLIVersionFor exempts git-describe dev builds so `make daemon` stays
-// unblocked, and a v0.4.23-era daemon reporting "v0.4.21-24-gcd3c0bb89" sailed
-// through the floor and ran two tasks in the user's own directory.
-const MinLocalWorktreeCLIVersion = "0.4.24"
-
-// MinLocalSharedCLIVersion is the release that first ships execution_mode=shared
-// for local_directory resources. Display-only, like MinLocalWorktreeCLIVersion:
-// the gates read protocol.DaemonCapabilityLocalSharedV1.
-const MinLocalSharedCLIVersion = "0.4.46"
-
 // Errors returned by CheckMinCLIVersion. Callers branch on these to surface
 // "needs upgrade" vs "version not reported" with the right user message.
 var (

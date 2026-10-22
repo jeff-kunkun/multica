@@ -29,13 +29,16 @@ func localDirsOf(resources []Resource) []Resource {
 }
 
 // mixedSet is one project as the database returns it, in position order: three
-// directories for THIS machine, one for another, and a repository.
+// directories for THIS machine, one for another, and a repository. The first
+// still carries the folder-mode keys an older release wrote.
 func mixedSet() []Resource {
 	return []Resource{
-		localDir("res-first", "/Users/u/first", func(r *LocalDirRef) {
-			r.ExecutionMode = ModeWorktree
-			r.WorktreeRoot = "/Volumes/scratch/copies"
-		}),
+		{
+			ID:           "res-first",
+			ResourceType: ResourceTypeLocalDirectory,
+			Ref: json.RawMessage(`{"local_path":"/Users/u/first","daemon_id":"` + thisDaemon +
+				`","execution_mode":"worktree","worktree_root":"/Volumes/scratch/copies"}`),
+		},
 		localDir("res-second", "/Users/u/second"),
 		repoRes("res-repo", "https://github.com/example/app"),
 		localDir("res-third", "/Users/u/third"),
@@ -43,44 +46,27 @@ func mixedSet() []Resource {
 	}
 }
 
-// Every combination of the two capabilities, which is what the ticket asks for
-// and what a table proves in one place.
 func TestFilterForCapabilities_EveryCombination(t *testing.T) {
 	cases := []struct {
-		name string
-		// inputs
-		multi, userRoot bool
-		// expectations
-		wantLocalIDs     []string
-		wantWorktreeRoot string // "" means the field must be absent
+		name         string
+		multi        bool
+		wantLocalIDs []string
 	}{
 		{
-			name: "neither capability: one directory per machine, no worktree_root",
-			// The oldest daemon still in the field. It must see exactly what it
-			// saw before multiple directories and user-owned roots existed.
-			multi: false, userRoot: false,
-			wantLocalIDs: []string{"res-first", "res-elsewhere"}, wantWorktreeRoot: "",
+			name:         "single directory daemon: one directory per machine",
+			multi:        false,
+			wantLocalIDs: []string{"res-first", "res-elsewhere"},
 		},
 		{
-			name:  "user root only: one directory per machine, root preserved",
-			multi: false, userRoot: true,
-			wantLocalIDs: []string{"res-first", "res-elsewhere"}, wantWorktreeRoot: "/Volumes/scratch/copies",
-		},
-		{
-			name:  "multi only: every directory, no worktree_root",
-			multi: true, userRoot: false,
-			wantLocalIDs: []string{"res-first", "res-second", "res-third", "res-elsewhere"}, wantWorktreeRoot: "",
-		},
-		{
-			name:  "both: the set the project configured, untouched",
-			multi: true, userRoot: true,
-			wantLocalIDs: []string{"res-first", "res-second", "res-third", "res-elsewhere"}, wantWorktreeRoot: "/Volumes/scratch/copies",
+			name:         "multi: the set the project configured, untouched",
+			multi:        true,
+			wantLocalIDs: []string{"res-first", "res-second", "res-third", "res-elsewhere"},
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := FilterForCapabilities(mixedSet(), Daemon{ID: thisDaemon, MultiLocalDirectory: tc.multi, WorktreeUserRoot: tc.userRoot})
+			got := FilterForCapabilities(mixedSet(), Daemon{ID: thisDaemon, MultiLocalDirectory: tc.multi})
 
 			var ids []string
 			for _, r := range localDirsOf(got) {
@@ -95,26 +81,13 @@ func TestFilterForCapabilities_EveryCombination(t *testing.T) {
 				}
 			}
 
-			// The kept row is the FIRST in position order — the same row a
-			// current daemon would choose to write. Narrowing must not change
-			// which directory the run lands in.
+			// The kept row is the FIRST in position order, byte for byte.
 			first := localDirsOf(got)[0]
 			fields := refFields(t, first.Ref)
-			if got, want := fields["worktree_root"], tc.wantWorktreeRoot; tc.wantWorktreeRoot == "" {
-				if _, present := fields["worktree_root"]; present {
-					t.Errorf("worktree_root = %v, want the field absent for this daemon", got)
-				}
-			} else if got != want {
-				t.Errorf("worktree_root = %v, want %q", got, want)
-			}
-
-			// Whatever else the row said is still what the project configured.
-			if fields["local_path"] != "/Users/u/first" || fields["daemon_id"] != thisDaemon || fields["execution_mode"] != ModeWorktree {
+			if fields["local_path"] != "/Users/u/first" || fields["daemon_id"] != thisDaemon {
 				t.Errorf("filtering rewrote the binding: %v", fields)
 			}
 
-			// Repositories are not a local-directory concern and are never
-			// narrowed; a project with a directory may still reference others.
 			var repos int
 			for _, r := range got {
 				if r.ResourceType == ResourceTypeGitHubRepo {
@@ -165,53 +138,20 @@ func TestFilterForCapabilities_KeepsAnUnreadableRef(t *testing.T) {
 	}
 }
 
-// Stripping one key must not disturb the others — including keys a newer
-// server wrote that this binary has no field for.
-func TestFilterForCapabilities_StrippingPreservesUnknownKeys(t *testing.T) {
-	resources := []Resource{{
-		ID:           "res-1",
-		ResourceType: ResourceTypeLocalDirectory,
-		Ref: json.RawMessage(`{"local_path":"/Users/u/app","daemon_id":"` + thisDaemon +
-			`","worktree_root":"/Volumes/copies","future_field":{"nested":true}}`),
-	}}
-
-	got := FilterForCapabilities(resources, Daemon{ID: thisDaemon, MultiLocalDirectory: true})
-
-	fields := refFields(t, got[0].Ref)
-	if _, present := fields["worktree_root"]; present {
-		t.Error("worktree_root survived a daemon that cannot honour it")
-	}
-	nested, ok := fields["future_field"].(map[string]any)
-	if !ok || nested["nested"] != true {
-		t.Errorf("future_field = %v, want it preserved for the server that wrote it", fields["future_field"])
-	}
-}
-
 // The narrowed set is what Resolve must run on, or the server would promise a
 // directory the daemon never received.
 func TestFilterForCapabilities_NarrowedSetStillResolvesToTheSameDirectory(t *testing.T) {
 	for _, daemonCaps := range []Daemon{
-		{ID: thisDaemon, LocalWorktree: true},
-		{ID: thisDaemon, LocalWorktree: true, MultiLocalDirectory: true},
-		{ID: thisDaemon, LocalWorktree: true, WorktreeUserRoot: true},
-		{ID: thisDaemon, LocalWorktree: true, MultiLocalDirectory: true, WorktreeUserRoot: true},
+		{ID: thisDaemon},
+		{ID: thisDaemon, MultiLocalDirectory: true},
 	} {
 		narrowed := FilterForCapabilities(mixedSet(), daemonCaps)
 		d := Resolve(baseTask(), []Project{{ID: "project-1", Resources: narrowed}}, daemonCaps)
 
-		requireKind(t, d, KindLocalWorktree)
+		requireKind(t, d, KindLocalInPlace)
 		target, _ := d.Local()
-		if target.ResourceID != "res-first" {
-			t.Fatalf("caps %+v wrote %q, want res-first on every capability set", daemonCaps, target.ResourceID)
-		}
-		wantRoot := "/Volumes/scratch/copies"
-		if !daemonCaps.WorktreeUserRoot {
-			// Without the capability the root never reached the daemon, so the
-			// decision must state the default it will actually use.
-			wantRoot = "/Users/u/first.multica-worktrees"
-		}
-		if target.WorktreeRoot != wantRoot {
-			t.Errorf("caps %+v: worktree_root = %q, want %q", daemonCaps, target.WorktreeRoot, wantRoot)
+		if target.ResourceID != "res-first" || target.Path != "/Users/u/first" {
+			t.Fatalf("caps %+v wrote %+v, want res-first in its own folder on every capability set", daemonCaps, target)
 		}
 		// A daemon that cannot take multiple directories must not be told
 		// about read-only extras it has no way to use.

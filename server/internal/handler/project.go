@@ -424,15 +424,6 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 				}
 				localRepoSeen[repoKey] = i
 			}
-			// Same worktree gate the standalone POST/PUT paths run. This
-			// bundled-create surface skipped it, so a project created with a
-			// worktree local_directory could store a mode the machine cannot
-			// run — caught only later, by the claim gate cancelling the task.
-			// It writes its own 422; it runs before the transaction, so a
-			// rejection leaves nothing behind.
-			if !h.requireModeCapableDaemon(w, r, wsUUID, res.ResourceType, ref) {
-				return
-			}
 		}
 	}
 

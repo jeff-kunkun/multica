@@ -68,7 +68,6 @@ func TestSubIssueCreationSectionPresentForIssueRuns(t *testing.T) {
 				// internal/service (TestPlatformSkillCoversPlatformContracts).
 				"`--status todo` starts an agent-assigned child immediately",
 				"`--status backlog` parks it",
-				"`--stage <N>` groups children into ordered stages",
 				"read `references/issues.md` in the `multica-platform` skill",
 			} {
 				if !strings.Contains(out, want) {
@@ -207,8 +206,6 @@ func TestStatusRuleIsFactJudgmentAtBothMoments(t *testing.T) {
 		"4. Post one result comment with `multica issue comment add`, under the `--parent` the per-turn message gave",
 		"5. Leave the status true with `multica issue status`: `in_review` when delivered",
 		"A refused write names what is missing; fix it and call again",
-		// Acceptance: pass and hold both go through the verdict (DENE-850).
-		"Acceptance seat: pass with `issue comment add <id> --verdict pass`; send it back with `--verdict hold`",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("status rule missing %q\n---\n%s", want, out)
@@ -2282,7 +2279,6 @@ func TestBriefIssuePointerFollowsTheInstalledSkill(t *testing.T) {
 			// with or without a skill to point at.
 			for _, always := range []string{
 				"`--status todo` starts an agent-assigned child immediately",
-				"`--stage <N>` groups children into ordered stages",
 			} {
 				if !strings.Contains(out, always) {
 					t.Errorf("brief lost unconditional content %q", always)
@@ -2436,18 +2432,22 @@ func TestEveryBriefThatTeachesJSONOutputAlsoWarnsAgainstMergingStderr(t *testing
 }
 
 // TestAvailableCommandsListIssueHandoff pins the `issue handoff` verb
-// (DENE-863): it sits right after the status verb. Its routing facts (skips an
-// active run, never seats a person) live in `--help`.
+// (DENE-863): it sits right after the status verb, and the brief names no
+// command that no longer exists.
 func TestAvailableCommandsListIssueHandoff(t *testing.T) {
 	t.Parallel()
 	out := buildMetaSkillContent("claude", TaskContextForEnv{IssueID: "issue-1"})
-	if !strings.Contains(out, "- `issue handoff --to <seat|agent>` — wake the next owner") {
+	if !strings.Contains(out, "- `issue handoff --to <agent>` — wake the next owner") {
 		t.Errorf("command map missing the handoff verb\n---\n%s", out)
 	}
 	statusIdx := strings.Index(out, "- `issue status <id> <status>`")
 	handoffIdx := strings.Index(out, "- `issue handoff")
-	wakeupIdx := strings.Index(out, "- `issue wakeup")
-	if !(statusIdx >= 0 && statusIdx < handoffIdx && handoffIdx < wakeupIdx) {
-		t.Errorf("issue handoff should sit right after the status verb (status=%d handoff=%d wakeup=%d)", statusIdx, handoffIdx, wakeupIdx)
+	if !(statusIdx >= 0 && statusIdx < handoffIdx) {
+		t.Errorf("issue handoff should sit right after the status verb (status=%d handoff=%d)", statusIdx, handoffIdx)
+	}
+	for _, gone := range []string{"issue summon", "issue wakeup", "--verdict", "--wake-at", "--wait-condition", "--stage"} {
+		if strings.Contains(out, gone) {
+			t.Errorf("brief still names the removed %q", gone)
+		}
 	}
 }

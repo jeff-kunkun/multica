@@ -47,7 +47,7 @@ func oneProject(resources ...Resource) []Project {
 // fullDaemon advertises everything: the decision then reflects the project's
 // configuration rather than the machine's limits.
 func fullDaemon() Daemon {
-	return Daemon{ID: thisDaemon, MultiLocalDirectory: true, WorktreeUserRoot: true, LocalWorktree: true, LocalShared: true}
+	return Daemon{ID: thisDaemon, MultiLocalDirectory: true}
 }
 
 func baseTask() Task {
@@ -78,7 +78,7 @@ func requireCode(t *testing.T, d Decision, want Code) {
 	}
 }
 
-// --- the six Decision values -------------------------------------------------
+// --- the Decision values -------------------------------------------------
 
 func TestResolve_LocalInPlace_IsTheDefaultForABoundDirectory(t *testing.T) {
 	d := Resolve(baseTask(), oneProject(localDir("res-1", "/Users/u/app")), fullDaemon())
@@ -88,9 +88,6 @@ func TestResolve_LocalInPlace_IsTheDefaultForABoundDirectory(t *testing.T) {
 	if target.Path != "/Users/u/app" {
 		t.Errorf("path = %q, want the bound directory itself", target.Path)
 	}
-	if target.LockKey != "/Users/u/app" {
-		t.Errorf("lock_key = %q, want the bound path when the machine reported no real_path", target.LockKey)
-	}
 	if target.ResourceID != "res-1" {
 		t.Errorf("resource_id = %q, want the row the user can edit", target.ResourceID)
 	}
@@ -99,92 +96,31 @@ func TestResolve_LocalInPlace_IsTheDefaultForABoundDirectory(t *testing.T) {
 	}
 }
 
-// real_path is the directory's IDENTITY, so it — not the path the user typed —
-// is what the per-path mutex serialises on. Without this, one directory reached
-// through a symlink and through its real path takes two different locks and two
-// heavyweight runs interleave edits into one working tree.
-func TestResolve_LocalInPlace_LocksOnRealPathWhenTheMachineReportedOne(t *testing.T) {
+// real_path is identity, not where to run: the run goes to the path the user
+// bound.
+func TestResolve_LocalInPlace_RunsInTheBoundPathNotTheRealPath(t *testing.T) {
 	d := Resolve(baseTask(), oneProject(localDir("res-1", "/Users/u/link", func(r *LocalDirRef) {
 		r.RealPath = "/Users/u/real/app"
 	})), fullDaemon())
 
 	target, _ := d.Local()
-	if target.LockKey != "/Users/u/real/app" {
-		t.Errorf("lock_key = %q, want the recorded real_path", target.LockKey)
-	}
 	if target.Path != "/Users/u/link" {
 		t.Errorf("path = %q, want the path the user bound; real_path is identity, not where to run", target.Path)
 	}
 }
 
-func TestResolve_LocalShared_TakesNoLock(t *testing.T) {
-	d := Resolve(baseTask(), oneProject(localDir("res-1", "/Users/u/code", func(r *LocalDirRef) {
-		r.ExecutionMode = ModeShared
-	})), fullDaemon())
+// A row an older release wrote with a folder mode still sends the run into the
+// bound folder: the modes are gone, and the field is ignored.
+func TestResolve_AnOldExecutionModeStillRunsInTheBoundFolder(t *testing.T) {
+	for _, mode := range []string{"worktree", "shared", "quantum"} {
+		res := Resource{ID: "res-1", ResourceType: ResourceTypeLocalDirectory, Ref: json.RawMessage(
+			`{"local_path":"/Users/u/app","daemon_id":"` + thisDaemon + `","execution_mode":"` + mode + `","worktree_root":"/Volumes/copies"}`)}
+		d := Resolve(baseTask(), oneProject(res), fullDaemon())
 
-	requireKind(t, d, KindLocalShared)
-	target, _ := d.Local()
-	if target.Path != "/Users/u/code" {
-		t.Errorf("path = %q, want the user's own directory", target.Path)
-	}
-	// Not taking the mutex IS the mode. An empty key is how the decision says
-	// so; a populated one invites a reader to take it and re-serialise the
-	// directory the user asked to share.
-	if target.LockKey != "" {
-		t.Errorf("lock_key = %q, want empty: shared mode is defined by not taking the lock", target.LockKey)
-	}
-}
-
-func TestResolve_LocalWorktree_DefaultsToTheRepositorySibling(t *testing.T) {
-	d := Resolve(baseTask(), oneProject(localDir("res-1", "/Users/u/app", func(r *LocalDirRef) {
-		r.ExecutionMode = ModeWorktree
-	})), fullDaemon())
-
-	requireKind(t, d, KindLocalWorktree)
-	target, _ := d.Local()
-	if target.RepoPath != "/Users/u/app" {
-		t.Errorf("repo_path = %q, want the repository the copy branches from", target.RepoPath)
-	}
-	if target.WorktreeRoot != "/Users/u/app.multica-worktrees" {
-		t.Errorf("worktree_root = %q, want the repository's sibling", target.WorktreeRoot)
-	}
-	if want := "/Users/u/app.multica-worktrees/dene-619-" + taskSuffix; target.Path != want {
-		t.Errorf("path = %q, want %q", target.Path, want)
-	}
-	if target.LockKey != "" {
-		t.Errorf("lock_key = %q, want empty: each parallel run has its own copy", target.LockKey)
-	}
-}
-
-func TestResolve_LocalWorktree_HonoursAConfiguredRoot(t *testing.T) {
-	d := Resolve(baseTask(), oneProject(localDir("res-1", "/Users/u/app", func(r *LocalDirRef) {
-		r.ExecutionMode = ModeWorktree
-		r.WorktreeRoot = "/Volumes/scratch/copies"
-	})), fullDaemon())
-
-	target, _ := d.Local()
-	if target.WorktreeRoot != "/Volumes/scratch/copies" {
-		t.Errorf("worktree_root = %q, want the location the user chose", target.WorktreeRoot)
-	}
-	if want := "/Volumes/scratch/copies/dene-619-" + taskSuffix; target.Path != want {
-		t.Errorf("path = %q, want %q", target.Path, want)
-	}
-}
-
-// A Windows daemon's paths reach a Linux server as strings. path/filepath would
-// read `C:\...` as relative and rewrite its separators; this package must not.
-func TestResolve_LocalWorktree_KeepsWindowsPathsIntact(t *testing.T) {
-	d := Resolve(baseTask(), oneProject(localDir("res-1", `C:\Users\u\app`, func(r *LocalDirRef) {
-		r.ExecutionMode = ModeWorktree
-	})), fullDaemon())
-
-	requireKind(t, d, KindLocalWorktree)
-	target, _ := d.Local()
-	if target.WorktreeRoot != `C:\Users\u\app.multica-worktrees` {
-		t.Errorf("worktree_root = %q, want the Windows sibling with backslashes preserved", target.WorktreeRoot)
-	}
-	if want := `C:\Users\u\app.multica-worktrees\dene-619-` + taskSuffix; target.Path != want {
-		t.Errorf("path = %q, want %q", target.Path, want)
+		requireKind(t, d, KindLocalInPlace)
+		if target, _ := d.Local(); target.Path != "/Users/u/app" {
+			t.Errorf("mode %q: path = %q, want the bound folder", mode, target.Path)
+		}
 	}
 }
 
@@ -237,23 +173,6 @@ func TestResolve_SharedScratch_WhenTheRunHasNoCodeAtAll(t *testing.T) {
 	scratch, _ := d.Scratch()
 	if scratch.SessionID != "chat-session-7" {
 		t.Errorf("session_id = %q, want the conversation's id", scratch.SessionID)
-	}
-	if scratch.Path != "sessions/chat-session-7" {
-		t.Errorf("path = %q, want a path relative to the daemon's own scratch root", scratch.Path)
-	}
-}
-
-// Twenty questions in one conversation must land in ONE folder. The session id
-// is what guarantees that; two tasks of the same session must agree on it.
-func TestResolve_SharedScratch_IsPerSessionNotPerTask(t *testing.T) {
-	first := baseTask()
-	first.SessionID = "chat-session-7"
-	second := Task{ID: "01a0b898-0000-7a4d-aa1b-000000000001", SessionID: "chat-session-7"}
-
-	a, _ := Resolve(first, nil, fullDaemon()).Scratch()
-	b, _ := Resolve(second, nil, fullDaemon()).Scratch()
-	if a.Path != b.Path {
-		t.Errorf("two tasks of one session resolved to %q and %q; a session gets one folder", a.Path, b.Path)
 	}
 }
 
@@ -315,35 +234,6 @@ func TestResolve_Unresolvable_WhenThePinnedResourceIsNotAttached(t *testing.T) {
 	d := Resolve(task, oneProject(localDir("res-here", "/Users/u/app")), fullDaemon())
 
 	requireCode(t, d, CodePinnedResourceNotFound)
-}
-
-func TestResolve_Unresolvable_OnAnExecutionModeThisServerDoesNotKnow(t *testing.T) {
-	d := Resolve(baseTask(), oneProject(localDir("res-1", "/Users/u/app", func(r *LocalDirRef) {
-		r.ExecutionMode = "quantum"
-	})), fullDaemon())
-
-	requireCode(t, d, CodeUnknownExecutionMode)
-}
-
-func TestResolve_Unresolvable_WhenTheDaemonCannotRunTheMode(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		mode string
-		caps Daemon
-	}{
-		{"worktree without the capability", ModeWorktree, Daemon{ID: thisDaemon, MultiLocalDirectory: true, WorktreeUserRoot: true, LocalShared: true}},
-		{"shared without the capability", ModeShared, Daemon{ID: thisDaemon, MultiLocalDirectory: true, WorktreeUserRoot: true, LocalWorktree: true}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			d := Resolve(baseTask(), oneProject(localDir("res-1", "/Users/u/app", func(r *LocalDirRef) {
-				r.ExecutionMode = tc.mode
-			})), tc.caps)
-
-			// Never KindLocalInPlace: degrading to in-place would write into a
-			// directory the mode may exist to keep the agent out of.
-			requireCode(t, d, CodeDaemonCannotRunMode)
-		})
-	}
 }
 
 // --- the selection rule ------------------------------------------------------

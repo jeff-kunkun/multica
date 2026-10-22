@@ -508,61 +508,24 @@ func TestGetConfigExposesEnabledPluginsV1Flag(t *testing.T) {
 	}
 }
 
-// Clients fail closed on this flag: absent covers every server that predates
-// the signal, including the ones that accept a worktree resource, silently drop
-// execution_mode and run the task in the user's working copy (#7113). A build
-// that HAS the save gate therefore has to say so,
-// unconditionally — not behind a deployment check, an env var or a feature
-// flag, all of which would disable worktree mode for the users who can run it.
-func TestGetConfigDeclaresLocalWorktreeSupport(t *testing.T) {
+// Every run goes into the bound folder; there is no execution mode to choose.
+// Older clients read an absent declaration as "unsupported" and hide the mode
+// selector, so these keys must stay out of the body.
+func TestGetConfigDoesNotDeclareLocalExecutionModes(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
 	w := httptest.NewRecorder()
 	testHandler.GetConfig(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("GetConfig: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
-	var cfg AppConfig
-	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
-		t.Fatalf("decode config: %v", err)
-	}
-	if !cfg.LocalWorktreeSupported {
-		t.Fatal("this build runs the worktree save gate but does not advertise it; clients will hide the mode")
-	}
-	// Serialised as a real key, not omitted when false-by-accident: the client
-	// distinguishes "absent" (old server) from an explicit answer.
 	var raw map[string]any
 	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
 		t.Fatalf("decode raw config: %v", err)
 	}
-	if _, ok := raw["local_worktree_supported"]; !ok {
-		t.Fatal("local_worktree_supported missing from the JSON body")
-	}
-}
-
-// Shared is a separate declaration from worktree. Official cloud already
-// advertises worktree while rejecting execution_mode=shared; clients that
-// conflated the two POSTed shared and got 400. This build accepts shared,
-// so it has to say so independently — absent still means "do not send it".
-func TestGetConfigDeclaresLocalSharedSupport(t *testing.T) {
-	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
-	w := httptest.NewRecorder()
-	testHandler.GetConfig(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("GetConfig: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-	var cfg AppConfig
-	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
-		t.Fatalf("decode config: %v", err)
-	}
-	if !cfg.LocalSharedSupported {
-		t.Fatal("this build accepts execution_mode=shared but does not advertise it; clients will never send it")
-	}
-	var raw map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
-		t.Fatalf("decode raw config: %v", err)
-	}
-	if _, ok := raw["local_shared_supported"]; !ok {
-		t.Fatal("local_shared_supported missing from the JSON body")
+	for _, key := range []string{"local_worktree_supported", "local_shared_supported"} {
+		if _, ok := raw[key]; ok {
+			t.Errorf("%s is still declared; old clients would offer a mode that no longer exists", key)
+		}
 	}
 }
 

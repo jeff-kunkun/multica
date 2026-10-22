@@ -2114,68 +2114,6 @@ func TestGateResumeToReachableSession(t *testing.T) {
 	}
 }
 
-func TestGateCodexResumeAcrossLocalWorktrees(t *testing.T) {
-	priorDir, workDir, codexHome := t.TempDir(), t.TempDir(), t.TempDir()
-	rollout := filepath.Join(codexHome, "sessions", "2026", "10", "13", "rollout-2026-10-13T00-00-00-session-1.jsonl")
-	if err := os.MkdirAll(filepath.Dir(rollout), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(rollout, []byte("{}"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	for _, tt := range []struct {
-		name           string
-		provider       string
-		localWorktree  *execenv.LocalWorktree
-		localDirectory bool
-		stableStore    bool
-		codexHome      bool
-		sameWorkdir    bool
-		rolloutPresent bool
-		wantResume     bool
-	}{
-		{name: "continued branch and rollout", provider: "codex", localWorktree: &execenv.LocalWorktree{Continued: true}, stableStore: true, codexHome: true, rolloutPresent: true, wantResume: true},
-		{name: "new branch", provider: "codex", localWorktree: &execenv.LocalWorktree{}, stableStore: true, codexHome: true, rolloutPresent: true},
-		{name: "missing conversation key", provider: "codex", localWorktree: &execenv.LocalWorktree{Continued: true}, codexHome: true, rolloutPresent: true},
-		{name: "missing Codex home", provider: "codex", localWorktree: &execenv.LocalWorktree{Continued: true}, stableStore: true, rolloutPresent: true},
-		{name: "missing rollout", provider: "codex", localWorktree: &execenv.LocalWorktree{Continued: true}, stableStore: true, codexHome: true},
-		{name: "managed workdir", provider: "codex", stableStore: true, codexHome: true, rolloutPresent: true},
-		{name: "in-place changed workdir", provider: "codex", localDirectory: true, stableStore: true, codexHome: true, rolloutPresent: true},
-		{name: "in-place same workdir", provider: "codex", localDirectory: true, stableStore: true, codexHome: true, sameWorkdir: true, rolloutPresent: true, wantResume: true},
-		{name: "other provider", provider: "claude", localWorktree: &execenv.LocalWorktree{Continued: true}, stableStore: true, codexHome: true, rolloutPresent: true},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			task := Task{PriorSessionID: "session-1", PriorWorkDir: priorDir}
-			taskCtx := execenv.TaskContextForEnv{AgentID: "agent-1", PriorSessionResumed: true}
-			if tt.stableStore {
-				taskCtx.IssueID = "issue-1"
-			}
-			env := &execenv.Environment{WorkDir: workDir, LocalDirectory: tt.localDirectory, LocalWorktree: tt.localWorktree}
-			if tt.codexHome {
-				env.CodexHome = codexHome
-			}
-			if tt.sameWorkdir {
-				env.WorkDir = priorDir
-			}
-			store := execenv.CodexSessionStorePath("test", taskCtx)
-			eligible := codexWorktreeResumeEligible(env, store)
-			if got := gateResumeToReachableSession(&task, &taskCtx, tt.provider, env.WorkDir, true, false, tt.provider == "codex" && eligible, slog.Default()); got {
-				if tt.provider == "codex" && !tt.rolloutPresent {
-					gateCodexResumeToRolloutPresence(&task, &taskCtx, tt.provider, t.TempDir(), slog.Default())
-				} else {
-					gateCodexResumeToRolloutPresence(&task, &taskCtx, tt.provider, env.CodexHome, slog.Default())
-				}
-			}
-			if got := task.PriorSessionID != ""; got != tt.wantResume {
-				t.Fatalf("resume=%v, want %v", got, tt.wantResume)
-			}
-			if taskCtx.PriorSessionResumed != tt.wantResume || task.PriorSessionResumeUnavailable == tt.wantResume || taskCtx.PriorSessionResumeUnavailable == tt.wantResume {
-				t.Fatalf("inconsistent resume state: task=%+v taskCtx=%+v", task, taskCtx)
-			}
-		})
-	}
-}
-
 // Hermes resumes from HERMES_HOME, independently of the task's cwd (#9062).
 func TestGateHermesResumeToSessionHome(t *testing.T) {
 	t.Parallel()
@@ -5703,7 +5641,7 @@ func TestHandleTask_BareErrorReportsFailureWithCancelledParent(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	d.handleTask(ctx, Task{ID: "task-bare-error", RuntimeID: "rt-1"}, nil)
+	d.handleTask(ctx, Task{ID: "task-bare-error", RuntimeID: "rt-1"}, 0)
 
 	if got := failCalls.Load(); got != 1 {
 		t.Fatalf("fail callback calls = %d, want 1", got)
@@ -5745,7 +5683,7 @@ func TestHandleTask_UntrackedRuntimeFailsBackForRetry(t *testing.T) {
 		return TaskResult{}, nil
 	})
 
-	d.handleTask(context.Background(), Task{ID: "task-gone-runtime", RuntimeID: "rt-demoted"}, nil)
+	d.handleTask(context.Background(), Task{ID: "task-gone-runtime", RuntimeID: "rt-demoted"}, 0)
 
 	body, _ := failBody.Load().(map[string]any)
 	if body == nil {
@@ -5818,7 +5756,7 @@ func TestHandleTask_ReportsUsageBeforeCancel(t *testing.T) {
 		Agent:     &AgentData{Name: "test-agent"},
 	}
 
-	d.handleTask(context.Background(), task, nil)
+	d.handleTask(context.Background(), task, 0)
 
 	mu.Lock()
 	order := make([]string, len(callOrder))
@@ -5921,7 +5859,7 @@ func TestHandleTask_ReportsUsageWhenCancelledByPoll(t *testing.T) {
 		Agent:     &AgentData{Name: "test-agent"},
 	}
 
-	d.handleTask(context.Background(), task, nil)
+	d.handleTask(context.Background(), task, 0)
 
 	mu.Lock()
 	order := make([]string, len(callOrder))
@@ -6579,7 +6517,7 @@ func TestHandleTask_AcksCancelAfterPollCancelled(t *testing.T) {
 		Agent:     &AgentData{Name: "test-agent"},
 	}
 
-	d.handleTask(context.Background(), task, nil)
+	d.handleTask(context.Background(), task, 0)
 
 	mu.Lock()
 	order := make([]string, len(callOrder))
@@ -6648,7 +6586,7 @@ func TestHandleTask_AcksCancelOnPostRunStatusCheck(t *testing.T) {
 		Agent:     &AgentData{Name: "test-agent"},
 	}
 
-	d.handleTask(context.Background(), task, nil)
+	d.handleTask(context.Background(), task, 0)
 
 	if got := ackCalls.Load(); got != 1 {
 		t.Fatalf("cancel-ack calls = %d, want 1", got)

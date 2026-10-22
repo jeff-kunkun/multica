@@ -626,7 +626,6 @@ func TestPrepareWithProjectResources(t *testing.T) {
 	for _, want := range []string{
 		"## Project Context",
 		"Agent UX 2026",
-		"Always write copy in British English. Ship behind a feature flag.",
 		"GitHub repo",
 		"https://github.com/multica-ai/multica",
 		"checkout ref: `release/v2`",
@@ -636,6 +635,10 @@ func TestPrepareWithProjectResources(t *testing.T) {
 		if !strings.Contains(s, want) {
 			t.Errorf("CLAUDE.md missing %q", want)
 		}
+	}
+	// The project description is not part of the brief.
+	if strings.Contains(s, "Always write copy in British English") {
+		t.Error("CLAUDE.md still carries the project description")
 	}
 }
 
@@ -678,7 +681,6 @@ func TestChatProjectContextInjectedIntoRuntimeBrief(t *testing.T) {
 			for _, want := range []string{
 				"## Project Context",
 				"Project Beta",
-				"Use the beta repository and follow the beta rollout plan.",
 				"https://github.com/org/beta",
 			} {
 				if !strings.Contains(s, want) {
@@ -686,6 +688,7 @@ func TestChatProjectContextInjectedIntoRuntimeBrief(t *testing.T) {
 				}
 			}
 			for _, banned := range []string{
+				"Use the beta repository and follow the beta rollout plan.",
 				"This issue belongs to",
 				"## Issue Metadata",
 				"## Sub-issue Creation",
@@ -699,7 +702,7 @@ func TestChatProjectContextInjectedIntoRuntimeBrief(t *testing.T) {
 }
 
 // A chat can attach several projects (DENE-523). The brief must carry every
-// project's description and resources — not just the primary one — so an agent
+// project's resources — not just the primary one — so an agent
 // can work across the attached codebases in one run, and it must say who
 // decides attribution when a new artifact has to belong to one project.
 func TestMultiProjectContextInjectedIntoRuntimeBrief(t *testing.T) {
@@ -754,9 +757,7 @@ func TestMultiProjectContextInjectedIntoRuntimeBrief(t *testing.T) {
 				"## Project Context",
 				"bound to 2 projects",
 				"### Project: Project Alpha",
-				"Alpha owns the shared client library.",
 				"### Project: Project Beta",
-				"Beta consumes the client library and ships the app.",
 				"https://github.com/org/alpha",
 				"https://github.com/org/beta",
 				"ask the user which project to use",
@@ -770,6 +771,9 @@ func TestMultiProjectContextInjectedIntoRuntimeBrief(t *testing.T) {
 			// feature removes.
 			if strings.Contains(s, "The active project for this task is") {
 				t.Errorf("%s still frames one project as the task's only project", tc.filename)
+			}
+			if strings.Contains(s, "Alpha owns the shared client library.") {
+				t.Errorf("%s still carries a project description", tc.filename)
 			}
 		})
 	}
@@ -794,7 +798,6 @@ func TestMultiProjectContextInjectedIntoRuntimeBrief(t *testing.T) {
 		s := string(content)
 		for _, want := range []string{
 			"The active project for this task is **Project Alpha**.",
-			"Alpha owns the shared client library.",
 			"This project has no resources attached yet.",
 		} {
 			if !strings.Contains(s, want) {
@@ -1629,8 +1632,7 @@ func TestInjectRuntimeConfigAvailableCommandsCoreOnly(t *testing.T) {
 		"`issue create | update | assign`",
 		"`--no-start` records a change without starting a run",
 		"`issue status <id> <status>`",
-		"`issue handoff --to <seat|agent>`",
-		"`issue wakeup`",
+		"`issue handoff --to <agent>`",
 		"`repo checkout <url>`",
 		"`attachment upload | download`",
 	} {
@@ -2537,7 +2539,6 @@ func TestInjectRuntimeConfigRequiresExplicitCommentPost(t *testing.T) {
 			mustContain := []string{
 				"4. Post one result comment with `multica issue comment add`, under the `--parent` the per-turn message gave",
 				"5. Leave the status true with `multica issue status`",
-				"`issue comment add <id> --verdict pass`; send it back with `--verdict hold`",
 			}
 			for _, want := range mustContain {
 				if !strings.Contains(s, want) {

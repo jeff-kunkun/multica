@@ -4416,24 +4416,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		}
 	}
 
-	// Last gate before dispatch: refuse to hand a worktree-mode local_directory
-	// task to a daemon that cannot implement the mode.
-	//
-	// The save-time gate in project_resource.go cannot cover this. It checks the
-	// version at the moment the resource is written; a machine downgraded
-	// afterwards still claims tasks, and an old daemon json-skips execution_mode
-	// entirely — it would run the task IN PLACE, editing the working copy the
-	// user asked to isolate. That is the exact outcome worktree mode exists to
-	// prevent, so it fails closed here, against the version of the runtime that
-	// is actually claiming.
-	//
-	// Shared mode runs the same gate for the milder failure: an old daemon
-	// would take the mutex and serialise a directory the user asked to share.
-	//
-	// Same question, opposite answer, for worktree_root: an old daemon simply
-	// ignores it and behaves as it always has, so that one is narrowed out of
-	// the payload rather than refused. Done BEFORE the gates read the resource
-	// set, so the gates and the daemon reason about one payload.
+	// Narrow the resource set to what the claiming daemon can act on before the
+	// code decision reads it, so the decision and the daemon reason about one
+	// payload.
 	claimingDaemon := daemonForRequest(r, runtime.DaemonID.String)
 	resp.ProjectResources = filterResourcesForDaemonCapabilities(resp.ProjectResources, claimingDaemon)
 	for i := range resp.Projects {
@@ -4445,66 +4430,6 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	applyCodeDecision(&resp, claimingDaemon)
 	if resp.CodeDecision != nil {
 		h.persistCodeDecision(r.Context(), task.ID, *resp.CodeDecision)
-	}
-
-	reason := worktreeClaimBlockReason(
-		resp.ProjectResources,
-		runtime,
-		requestHasClientCapability(r, protocol.DaemonCapabilityLocalWorktreeV1),
-	)
-	if reason == "" {
-		reason = sharedClaimBlockReason(
-			resp.ProjectResources,
-			runtime,
-			requestHasClientCapability(r, protocol.DaemonCapabilityLocalSharedV1),
-		)
-	}
-	if reason != "" {
-		slog.Error("task claim: runtime too old for worktree mode; cancelling rather than running in place",
-			"task_id", uuidToString(task.ID),
-			"runtime_id", runtimeID,
-			"daemon_id", runtime.DaemonID.String,
-			"reason", reason,
-		)
-		// Cancel rather than leave it dispatched: the resource is pinned to this
-		// daemon, so redelivery would hand it straight back to the same too-old
-		// runtime forever.
-		//
-		// Cancel WITH the reason persisted on the row. The 4xx below only
-		// reaches the daemon's log, and the batch-claim path drops the task from
-		// its response entirely — so without this the user is left with a task
-		// that says "cancelled" and nothing else, for a condition only they can
-		// fix (update the app on that machine).
-		//
-		// Through the TaskService, not a raw query: cancellation has side
-		// effects beyond the row — audit capture, chat settle, agent status
-		// reconcile, the task:cancelled broadcast that clears live cards, and
-		// NotifyTaskFinished waking capacity/serial waiters. A direct query
-		// leaves all of those stale.
-		if _, cerr := h.TaskService.CancelTaskWithReason(r.Context(), task.ID, reason, "local_directory_error"); cerr != nil {
-			// The cancel did not commit, so the row is still claimed. The
-			// daemon is about to be refused, so left alone the task would
-			// strand in dispatched until stale reclaim, with no visible
-			// reason. Requeue it instead — the next claim re-runs this gate
-			// and retries the cancel — and report a 5xx so the daemon reads
-			// this as a transient server problem, not a claim refusal.
-			slog.Error("task claim: cancel after worktree version gate failed; requeueing so the gate can run again",
-				"task_id", uuidToString(task.ID), "error", cerr)
-			if _, rerr := h.TaskService.RequeueTaskAfterClaimFailure(r.Context(), *task); rerr != nil {
-				slog.Error("task claim: requeue after worktree-gate cancel failure failed; stale reclaim will recover it",
-					"task_id", uuidToString(task.ID), "error", rerr)
-			}
-			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, &claimBuildFailure{
-				outcome: "error_worktree_gate_cancel",
-				status:  http.StatusInternalServerError,
-				message: "failed to cancel a worktree task blocked by daemon version; task requeued",
-			}
-		}
-		return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, &claimBuildFailure{
-			outcome: "error_worktree_daemon_version",
-			status:  http.StatusUnprocessableEntity,
-			message: reason,
-		}
 	}
 
 	// DENE-727: an automatic retry that inherited the parent's session already
@@ -4548,40 +4473,6 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, nil
 }
 
-// worktreeClaimBlockReason returns a user-facing reason when this runtime must
-// not run the task, or "" when it may proceed.
-//
-// The decision is made on the CAPABILITY the daemon advertised on this very
-// request, not on its version string. A daemon without the implementation does
-// not merely lose concurrency — it json-skips execution_mode and runs the task
-// in place, editing the working copy the user asked to isolate. Version strings
-// could not answer that reliably: the git-describe dev-build exemption that
-// keeps `make daemon` unblocked let a v0.4.23-era daemon straight through, and
-// two tasks silently ran in the user's own directory (MUL-5707).
-//
-// Only resources bound to the claiming runtime's own daemon are considered: a
-// project may carry one local_directory per machine, and another machine's
-// worktree resource says nothing about this one's ability to run the task.
-func worktreeClaimBlockReason(resources []ProjectResourceData, runtime db.AgentRuntime, hasWorktreeCapability bool) string {
-	return localDirectoryModeClaimBlockReason(resources, runtime, localDirectoryModeWorktree, hasWorktreeCapability,
-		"This machine's Multica runtime does not support parallel (worktree) mode, which %q is set to use. "+
-			"Update the Multica app on that machine to the latest version, then re-run this task. "+
-			"Refusing to run rather than falling back to editing the directory directly, which is what this mode exists to prevent.")
-}
-
-// sharedClaimBlockReason is worktreeClaimBlockReason for execution_mode=shared.
-// The daemon without the capability would run the task in place under the
-// per-path mutex — nothing of the user's is edited that they did not expect,
-// but the directory they asked to share is silently serialised again and the
-// queue they wanted gone comes back with no visible cause. Refusing with a
-// reason on the row is what makes the cause visible.
-func sharedClaimBlockReason(resources []ProjectResourceData, runtime db.AgentRuntime, hasSharedCapability bool) string {
-	return localDirectoryModeClaimBlockReason(resources, runtime, localDirectoryModeShared, hasSharedCapability,
-		"This machine's Multica runtime does not support shared-workspace mode, which %q is set to use. "+
-			"Update the Multica app on that machine to the latest version, then re-run this task. "+
-			"Refusing to run rather than falling back to the exclusive in-place lock, which would silently queue tasks the resource asked to run concurrently.")
-}
-
 // filterResourcesForDaemonCapabilities narrows a claim's resource set to what
 // the claiming daemon declared it can act on (DENE-617 invariant 15), so an
 // old daemon receives exactly the payload shape it receives today and needs no
@@ -4596,47 +4487,9 @@ func filterResourcesForDaemonCapabilities(resources []ProjectResourceData, daemo
 	}
 	filtered := coderesolve.FilterForCapabilities(resourcesToResolve(resources), daemon)
 	if len(filtered) == len(resources) {
-		// Nothing was dropped, but a ref may have been stripped; rebuilding is
-		// how that edit reaches the payload.
-		unchanged := true
-		for i := range filtered {
-			if string(filtered[i].Ref) != string(resources[i].ResourceRef) {
-				unchanged = false
-				break
-			}
-		}
-		if unchanged {
-			return resources
-		}
+		return resources
 	}
 	return resourcesFromResolve(filtered)
-}
-
-// localDirectoryModeClaimBlockReason is the shared body of the per-mode claim
-// gates: "" when the runtime may proceed, otherwise messageFmt rendered with
-// the resource's local_path. Only a resource in exactly mode, bound to the
-// claiming runtime's own daemon, can block.
-func localDirectoryModeClaimBlockReason(resources []ProjectResourceData, runtime db.AgentRuntime, mode string, hasCapability bool, messageFmt string) string {
-	if !runtime.DaemonID.Valid || runtime.DaemonID.String == "" {
-		return ""
-	}
-	if hasCapability {
-		return ""
-	}
-	for _, res := range resources {
-		if res.ResourceType != "local_directory" {
-			continue
-		}
-		var ref localDirectoryRef
-		if err := json.Unmarshal(res.ResourceRef, &ref); err != nil {
-			continue
-		}
-		if ref.ExecutionMode != mode || ref.DaemonID != runtime.DaemonID.String {
-			continue
-		}
-		return fmt.Sprintf(messageFmt, ref.LocalPath)
-	}
-	return ""
 }
 
 // ClaimTaskByRuntime atomically claims the next queued task for a runtime.
@@ -5077,46 +4930,6 @@ func (h *Handler) StartTask(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)
-}
-
-// TaskWaitLocalDirectoryRequest is the body the daemon POSTs when it parks
-// a freshly-dispatched task on a busy local_directory path.
-type TaskWaitLocalDirectoryRequest struct {
-	// Reason is a short hint surfaced by the UI alongside the status —
-	// typically "<path>" or "<path> (holder: <task short id>)". Small
-	// enough to fit on the issue card. Empty is accepted; the column is
-	// nullable on the server.
-	Reason string `json:"reason"`
-}
-
-// MarkTaskWaitingLocalDirectory transitions a dispatched task to
-// waiting_local_directory. Called by the daemon when, after claiming a task
-// whose project carries a local_directory resource, it discovers another
-// in-flight task already holds the path's mutex.
-func (h *Handler) MarkTaskWaitingLocalDirectory(w http.ResponseWriter, r *http.Request) {
-	taskID := chi.URLParam(r, "taskId")
-
-	_, workspaceID, ok := h.requireDaemonTaskAccessWithWorkspace(w, r, taskID)
-	if !ok {
-		return
-	}
-
-	var req TaskWaitLocalDirectoryRequest
-	if r.ContentLength != 0 {
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid request body")
-			return
-		}
-	}
-
-	task, err := h.TaskService.MarkTaskWaitingLocalDirectory(r.Context(), parseUUID(taskID), req.Reason)
-	if err != nil {
-		slog.Warn("mark task waiting_local_directory failed", "task_id", taskID, "error", err)
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-
-	writeJSON(w, http.StatusOK, taskToResponse(*task, workspaceID))
 }
 
 // ReportTaskProgress broadcasts a progress update.

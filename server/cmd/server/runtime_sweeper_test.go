@@ -173,9 +173,12 @@ func TestRefreshAgentStatusFromTasks(t *testing.T) {
 		t.Fatalf("expected dispatched task to refresh agent status to working, got %q", agent.Status)
 	}
 
-	if _, err := taskService.MarkTaskWaitingLocalDirectory(ctx, parseUUID(taskID), "test path busy"); err != nil {
-		t.Fatalf("MarkTaskWaitingLocalDirectory failed: %v", err)
+	// No current daemon parks a task here, but rows written by older ones
+	// still exist and must not count as working.
+	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status = 'waiting_local_directory' WHERE id = $1`, taskID); err != nil {
+		t.Fatalf("failed to park task in waiting_local_directory: %v", err)
 	}
+	taskService.ReconcileAgentStatus(ctx, parseUUID(agentID))
 	agent, err = queries.GetAgent(ctx, parseUUID(agentID))
 	if err != nil {
 		t.Fatalf("GetAgent after local-directory wait failed: %v", err)

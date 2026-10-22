@@ -214,8 +214,7 @@ func writeAvailableCommands(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("- `issue comment list | add` — read / post comments (bodies via `--content-file`)\n")
 	b.WriteString("- `issue create | update | assign` — create and edit issues; `--no-start` records a change without starting a run\n")
 	writeIssueStatusCommand(b, ctx)
-	b.WriteString("- `issue handoff --to <seat|agent>` — wake the next owner\n")
-	b.WriteString("- `issue wakeup` — wait for a condition, then resume\n")
+	b.WriteString("- `issue handoff --to <agent>` — wake the next owner\n")
 	b.WriteString("- `chat list | search | history` — read chats\n")
 	b.WriteString("- `repo checkout <url>` — other repositories\n")
 	b.WriteString("- `attachment upload | download` — files\n")
@@ -419,6 +418,12 @@ func writeRepositories(b *strings.Builder, ctx TaskContextForEnv) {
 		}
 		b.WriteString("\n")
 	}
+	// Without a bound folder the checkout lives in this task's own workdir,
+	// which is garbage-collected later: committed work only survives on the
+	// remote.
+	if len(repos) > 0 && !ctx.CodeSource.UsesLocalDirectory() {
+		b.WriteString("\nYour checkout lives in this task's own workdir, which is cleaned up later: if you committed anything, push your branch to the remote before you finish.\n")
+	}
 	if projectScoped {
 		other := ctx.OtherWorkspaceRepoCount
 		if other > 0 {
@@ -426,20 +431,6 @@ func writeRepositories(b *strings.Builder, ctx TaskContextForEnv) {
 		}
 	}
 	b.WriteString("\n")
-}
-
-// executionModeSummary renders a local_directory execution mode in words. A
-// bare `worktree` tells an agent nothing about whether its edits land in the
-// user's working copy, which is the only thing it actually needs to know.
-func executionModeSummary(mode string) string {
-	switch mode {
-	case "worktree":
-		return "`worktree` — this task has its own git worktree of that repository; your edits do NOT touch the user's working copy, and you deliver work on the task branch you start on (stay on it; merge newer code into it instead of switching branches)"
-	case "shared":
-		return "`shared` — you are in the user's own directory, and other tasks may be running in it at the same time; keep your work on your own branch"
-	default:
-		return "`in_place` — you are in the user's own directory and hold it exclusively for this task; your edits land in their working copy"
-	}
 }
 
 // writeCodeSource emits the Code Source section: where this task's code is, and
@@ -457,13 +448,31 @@ func writeCodeSource(b *strings.Builder, ctx TaskContextForEnv) {
 	}
 	src := ctx.CodeSource
 	b.WriteString("## Code Source\n\n")
-	b.WriteString("This project is pinned to a directory on THIS machine, so its code is already here. That is a rule, not a preference: do not clone a repository this directory already holds.\n\n")
-	fmt.Fprintf(b, "- Directory: `%s`\n", src.LocalPath)
-	fmt.Fprintf(b, "- Execution mode: %s\n", executionModeSummary(src.ExecutionMode))
+	b.WriteString("This project is bound to a folder on THIS machine and you are running in it, so its code is already here. That is a rule, not a preference: do not clone a repository this folder already holds.\n\n")
+	fmt.Fprintf(b, "- Folder: `%s`\n", src.LocalPath)
+	if branch := strings.TrimSpace(src.Branch); branch != "" {
+		fmt.Fprintf(b, "- Current branch: `%s`\n", branch)
+	}
 	if name := strings.TrimSpace(src.DisplayName); name != "" {
 		fmt.Fprintf(b, "- Matched project resource: local directory %q\n", name)
 	}
 	b.WriteString("\n")
+	if len(src.CoRunners) > 0 {
+		b.WriteString("Other tasks running in this folder right now:\n\n")
+		for _, r := range src.CoRunners {
+			label := strings.TrimSpace(strings.TrimSpace(r.Identifier) + " " + strings.TrimSpace(r.Title))
+			if label == "" {
+				label = "a task"
+			}
+			if branch := strings.TrimSpace(r.Branch); branch != "" {
+				fmt.Fprintf(b, "- %s (branch `%s`)\n", label, branch)
+			} else {
+				fmt.Fprintf(b, "- %s\n", label)
+			}
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("Other agents may be working in this folder at the same time: don't switch branches, reset, or discard changes you didn't make; for a different feature, create a git worktree inside or beside the project folder (e.g. `<folder>.worktrees/<branch>`).\n\n")
 
 	if len(src.CoveredRepos) > 0 {
 		b.WriteString("Already on this machine — do NOT run `multica repo checkout` for these:\n\n")
@@ -525,31 +534,22 @@ func writeProjectContext(b *strings.Builder, ctx TaskContextForEnv) {
 		if project.Title != "" {
 			fmt.Fprintf(b, "The active project for this task is **%s**.\n\n", project.Title)
 		}
-		if desc := strings.TrimSpace(project.Description); desc != "" {
-			b.WriteString("Project description — durable context the project owner set for work in this project:\n\n")
-			b.WriteString(desc)
-			b.WriteString("\n\n")
-		}
 		writeProjectChatDirectoryHint(b, project)
 		writeProjectResourceList(b, ctx, project.Resources)
 		return
 	}
 
-	fmt.Fprintf(b, "This task is bound to %d projects. Their descriptions and resources are aggregated below, and repositories from every one of them are available to `multica repo checkout` (see Repositories above). Treat all of them as context for this task.\n\n", len(projects))
+	fmt.Fprintf(b, "This task is bound to %d projects. Their resources are aggregated below, and repositories from every one of them are available to `multica repo checkout` (see Repositories above). Treat all of them as context for this task.\n\n", len(projects))
 	for _, project := range projects {
 		if project.Title != "" {
 			fmt.Fprintf(b, "### Project: %s\n\n", project.Title)
 		} else {
 			b.WriteString("### Project\n\n")
 		}
-		if desc := strings.TrimSpace(project.Description); desc != "" {
-			b.WriteString(desc)
-			b.WriteString("\n\n")
-		}
 		writeProjectChatDirectoryHint(b, project)
 		writeProjectResourceList(b, ctx, project.Resources)
 	}
-	b.WriteString("When a deliverable must be attributed to one project — creating an issue, for example — infer the target from the request and the project descriptions above. If it is still ambiguous, ask the user which project to use instead of guessing.\n\n")
+	b.WriteString("When a deliverable must be attributed to one project — creating an issue, for example — infer the target from the request and the project titles above. If it is still ambiguous, ask the user which project to use instead of guessing.\n\n")
 }
 
 func writeProjectChatDirectoryHint(b *strings.Builder, project ProjectContextForEnv) {
@@ -719,11 +719,11 @@ func writeWorkflowIssue(b *strings.Builder, ctx TaskContextForEnv) {
 	} else {
 		b.WriteString("4. Post one result comment with `multica issue comment add`, under the `--parent` the per-turn message gave (top-level when none).\n")
 	}
-	b.WriteString("5. Leave the status true with `multica issue status`: `in_review` when delivered, `in_progress` while the work continues beyond this turn, `blocked` with `--block-kind` / `--block-action` when you cannot proceed. A turn that only answered a question writes no status. A refused write names what is missing; fix it and call again. ")
+	b.WriteString("5. Leave the status true with `multica issue status`: `in_review` when delivered, `in_progress` while the work continues beyond this turn, `blocked` with `--block-kind` / `--block-action` when you cannot proceed. A turn that only answered a question writes no status. A refused write names what is missing; fix it and call again.")
 	if ctx.IsSquadLeader {
-		b.WriteString("Dispatching members is not delivery: a dispatch turn leaves the parent `in_progress`; it goes to `in_review` only on the later turn where you confirm the overall goal is met. ")
+		b.WriteString(" Dispatching members is not delivery: a dispatch turn leaves the parent `in_progress`; it goes to `in_review` only on the later turn where you confirm the overall goal is met.")
 	}
-	b.WriteString("Acceptance seat: pass with `issue comment add <id> --verdict pass`; send it back with `--verdict hold`.\n\n")
+	b.WriteString("\n\n")
 	// A custom catalog needs one reminder that workflow updates use exact keys.
 	if len(ctx.IssueStatuses) > 0 {
 		b.WriteString("Workflow rules name exact built-in status keys; custom statuses share lifecycle only, not built-in automation.\n\n")
@@ -738,9 +738,9 @@ func writeWorkflowIssue(b *strings.Builder, ctx TaskContextForEnv) {
 // brief keeps the one-line map so the flags remain discoverable without it.
 func writeSubIssueCreation(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("## Sub-issue Creation\n\n")
-	b.WriteString("`--status todo` starts an agent-assigned child immediately; `--status backlog` parks it only when it waits on something (`--waiting-for`); `--stage <N>` groups children into ordered stages.")
+	b.WriteString("`--status todo` starts an agent-assigned child immediately; `--status backlog` parks it only when it waits on something (`--waiting-for`).")
 	if where, ok := issueContractsSkill(modelVisibleSkills(ctx.AgentSkills)); ok {
-		b.WriteString(" Before creating sub-issues, read " + where + " — it covers serial chains, promotion, and stage wake semantics.")
+		b.WriteString(" Before creating sub-issues, read " + where + " — it covers serial chains and promotion.")
 	}
 	b.WriteString("\n\n")
 }
@@ -925,7 +925,7 @@ func writeOutput(b *strings.Builder, kind taskKind, ctx TaskContextForEnv) {
 		} else {
 			b.WriteString("⚠️ **Deliver through a comment on the issue**. ")
 		}
-		b.WriteString("Nobody sees your terminal or run log. Post exactly ONE comment per run, the final result — no progress updates; only a `[WAKEUP]` check that found nothing may use `multica issue wakeup checkin` instead. State the outcome, not the process.\n\n")
+		b.WriteString("Nobody sees your terminal or run log. Post exactly ONE comment per run, the final result — no progress updates. State the outcome, not the process.\n\n")
 		b.WriteString("**Delivering files here:** `--attachment <path>` on `issue comment add` (repeatable). Fetch attachments with `multica attachment download`, never by opening Multica URLs; a downloaded file is a private copy, so its path is no deliverable either.\n")
 		writeInlineBlocksPolicy(b)
 	}

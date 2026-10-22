@@ -485,8 +485,6 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 	mux.HandleFunc("/shutdown", d.shutdownHandler())
 	mux.HandleFunc("/drain", d.drainHandler())
 	mux.HandleFunc("/repo/checkout", d.repoCheckoutHandler())
-	mux.HandleFunc("/worktrees/cleanup", d.worktreeCleanupHandler())
-	mux.HandleFunc("/sessions/scratch", d.sharedScratchHandler())
 	mux.HandleFunc("/outputs", d.localOutputsHandler())
 
 	srv := &http.Server{Handler: mux}
@@ -688,11 +686,6 @@ type localCheckoutResponse struct {
 	Path       string `json:"path"`
 	BranchName string `json:"branch_name,omitempty"`
 	Source     string `json:"source"`
-	// ExecutionMode is the pinned resource's execution mode. The CLI needs it
-	// to describe the path: in in_place and shared it is the user's own
-	// checkout, in worktree it is this task's private one. Additive — a CLI
-	// that does not know the field keeps its old wording.
-	ExecutionMode string `json:"execution_mode,omitempty"`
 }
 
 // serveLocalDirectoryCheckout enforces the source rule for one checkout
@@ -703,7 +696,7 @@ type localCheckoutResponse struct {
 // verify the local directory" must END the request. Letting it fall through to
 // the cache is exactly the silent remote re-clone this exists to stop.
 func (d *Daemon) serveLocalDirectoryCheckout(w http.ResponseWriter, activeTask activeRepoCheckoutTask, req repoCheckoutRequest) bool {
-	outcome := decideLocalCheckout(activeTask.LocalDirectory, activeTask.WorkDir, req.URL, nil)
+	outcome := decideLocalCheckout(activeTask.LocalDirectory, req.URL, nil)
 	if outcome.Refusal != "" {
 		d.logger.Warn("repo checkout refused: local directory could not be verified",
 			"task_id", req.TaskID, "url", req.URL, "local_path", activeTask.LocalDirectory.AbsPath)
@@ -717,10 +710,9 @@ func (d *Daemon) serveLocalDirectoryCheckout(w http.ResponseWriter, activeTask a
 		"task_id", req.TaskID, "url", req.URL, "path", outcome.Path)
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(localCheckoutResponse{
-		Path:          outcome.Path,
-		BranchName:    currentGitBranch(outcome.Path),
-		Source:        localDirectoryCheckoutSource,
-		ExecutionMode: outcome.ExecutionMode,
+		Path:       outcome.Path,
+		BranchName: currentGitBranch(outcome.Path),
+		Source:     localDirectoryCheckoutSource,
 	})
 	return true
 }

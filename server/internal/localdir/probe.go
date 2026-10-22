@@ -73,37 +73,6 @@ func Probe(path string) ProbeResult {
 	return out
 }
 
-// WritableLocation reports whether path can be created-in: the path itself is
-// writable, or (if it does not exist yet) the nearest existing ancestor is.
-// Used for worktree_root, which the first task often creates.
-func WritableLocation(path string) bool {
-	trimmed := strings.TrimSpace(path)
-	if trimmed == "" {
-		return false
-	}
-	current := filepath.Clean(trimmed)
-	for {
-		if info, err := os.Stat(current); err == nil {
-			if !info.IsDir() {
-				return false
-			}
-			tmp, err := os.CreateTemp(current, ".multica-write-*")
-			if err != nil {
-				return false
-			}
-			name := tmp.Name()
-			_ = tmp.Close()
-			_ = os.Remove(name)
-			return true
-		}
-		parent := filepath.Dir(current)
-		if parent == current {
-			return false
-		}
-		current = parent
-	}
-}
-
 func gitTopLevel(path string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), gitProbeTimeout)
 	defer cancel()

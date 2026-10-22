@@ -70,11 +70,17 @@ type CodeSourceForEnv struct {
 	// Kind is "local_directory" or "remote_checkout"; empty means the daemon
 	// did not resolve a source (older daemon, or a task with no project).
 	Kind string
-	// LocalPath is the pinned directory, ExecutionMode how tasks share it.
-	LocalPath     string
-	ExecutionMode string
+	// LocalPath is the bound folder the task runs in.
+	LocalPath string
+	// Branch is the folder's current git branch, read when the task started.
+	// Empty when the folder is not a git checkout or HEAD is detached.
+	Branch string
 	// DisplayName is the resource's label, or the directory's basename.
 	DisplayName string
+	// CoRunners are the other tasks this daemon is running in the same folder
+	// right now. The daemon does not serialise them; the brief names them so
+	// the agent knows whose changes it may find.
+	CoRunners []CodeSourceCoRunnerForEnv
 	// CoveredRepos are repo URLs PROVEN to already live in LocalPath — a git
 	// remote there resolves to the same repository. The brief tells the agent
 	// not to check these out.
@@ -92,6 +98,14 @@ type CodeSourceForEnv struct {
 	// directories the agent may read, and naming them is what stops it from
 	// discovering one by accident and treating it as a second place to work.
 	ReadOnlyDirs []CodeSourceDirForEnv
+}
+
+// CodeSourceCoRunnerForEnv is one other task running in the same folder.
+// Branch is the folder's branch when that task started.
+type CodeSourceCoRunnerForEnv struct {
+	Identifier string
+	Title      string
+	Branch     string
 }
 
 // CodeSourceDirForEnv is one local directory the task may read but not write.
@@ -163,26 +177,12 @@ type PrepareParams struct {
 	// would place in the agent's cwd — the task-context marker, the project
 	// resources file, the provider-native skills tree — out of the user's
 	// directory and under {envRoot}/sidecar instead; Environment.SidecarRoot
-	// reports where. This is shared mode's contract: several tasks run in
-	// the same directory at once, so files the daemon writes per task cannot
-	// live at one shared path. The daemon then hands the sidecar root to the
-	// provider by its own route (see daemon.sharedModeBriefDelivery). Ignored
-	// without LocalWorkDir: a daemon-owned workdir is already per task.
+	// reports where. Several tasks may run in the same directory at once, so
+	// files the daemon writes per task cannot live at one shared path. The
+	// daemon then hands the sidecar root to the provider by its own route (see
+	// daemon.sharedModeBriefDelivery). Ignored without LocalWorkDir: a
+	// daemon-owned workdir is already per task.
 	IsolateSidecars bool
-	// LocalWorktree, when non-nil, is the worktree-mode counterpart of
-	// LocalWorkDir: instead of running in the user's directory, the task gets
-	// its own git worktree of that repo inside envRoot and delivers its work
-	// as a branch. Tasks sharing the directory then run concurrently.
-	// Mutually exclusive with LocalWorkDir — the daemon picks one based on the
-	// resource's execution_mode.
-	LocalWorktree *LocalWorktreeParams
-	// SharedScratchDir, when set, is the session folder this run works in
-	// (DENE-622). There is no per-task env root: RootDir and the workdir's
-	// parent are this directory, it is not emptied, and a later turn of the
-	// same session finds the previous turn's files. The caller must already
-	// hold the claim (EnvRootPreclaimed). Mutually exclusive with
-	// LocalWorkDir and LocalWorktree.
-	SharedScratchDir string
 	// HermesSourceHome is the shared Hermes home the per-task overlay is seeded
 	// from — resolved by the daemon via execenv.ResolveHermesProfile so it honors
 	// the agent's custom_env HERMES_HOME and any -p/--profile or sticky selection.
@@ -269,7 +269,7 @@ type TaskContextForEnv struct {
 	CodeSource         CodeSourceForEnv
 	ProjectID          string                  // active project for this task, when present
 	ProjectTitle       string                  // human-readable project title
-	ProjectDescription string                  // durable project-level context, rendered into the brief's Project Context section
+	ProjectDescription string                  // project description; carried in resources.json, not rendered into the brief
 	ProjectResources   []ProjectResourceForEnv // resources attached to the project
 	// Projects is the task's project set in priority order (DENE-523). The
 	// singular Project* fields above mirror its first entry and remain the
@@ -419,19 +419,9 @@ type Environment struct {
 	// outside RootDir (the local_directory flow). Callers that key behavior
 	// on "may I remove WorkDir as scratch?" must check this — for example
 	// the GC loop never deletes the user's directory.
-	//
-	// Deliberately FALSE in worktree mode: there the workdir is a disposable
-	// git worktree inside RootDir, so the env root is ordinary daemon-owned
-	// scratch that the GC should reclaim on the normal schedule, and the
-	// sidecar rollback that protects a user's directory is unnecessary.
 	LocalDirectory bool
-	// SharedScratch is true when RootDir is the machine's shared session
-	// folder rather than a per-task env root. Cleanup must not delete it;
-	// the shared-scratch GC is the only thing that reclaims it, and only
-	// under that GC's own rules.
-	SharedScratch bool
 	// SidecarRoot is the per-task directory holding the files Prepare kept
-	// out of a shared-mode workdir (PrepareParams.IsolateSidecars): the task
+	// out of the user's directory (PrepareParams.IsolateSidecars): the task
 	// marker, project resources, provider skills and, once the daemon injects
 	// it, the runtime brief. Empty for every other flow, where those files sit
 	// in WorkDir. A non-empty value also says "the user's directory received
@@ -441,11 +431,6 @@ type Environment struct {
 	// child CLI invocations. It prevents implicit discovery of the daemon
 	// owner's ~/.multica profile without changing the provider-facing HOME.
 	MulticaConfigRoot string
-	// LocalWorktree is set when the task runs in worktree mode against a
-	// local_directory resource. The daemon calls Finalize on it after the
-	// agent exits to commit leftovers, drop the worktree, and learn the
-	// branch name to report as the task's result.
-	LocalWorktree *LocalWorktree
 	// CodexHome is the path to the per-task CODEX_HOME directory (set only for codex provider).
 	CodexHome string
 	// ClaudeSettingsPath is a task-local --settings JSON file that applies
@@ -575,34 +560,15 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		return nil, fmt.Errorf("execenv: task ID is required")
 	}
 
-	var envRoot string
-	if params.SharedScratchDir != "" {
-		if params.LocalWorkDir != "" || params.LocalWorktree != nil {
-			return nil, fmt.Errorf("execenv: shared scratch cannot be combined with a local directory")
-		}
-		if !params.EnvRootPreclaimed {
-			return nil, fmt.Errorf("execenv: shared scratch directory must already be claimed by the caller")
-		}
-		info, statErr := os.Lstat(params.SharedScratchDir)
-		if statErr != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-			return nil, fmt.Errorf("execenv: shared scratch directory %s is not a real directory", params.SharedScratchDir)
-		}
-		// The session folder already exists and already holds this
-		// conversation. Do not resolve a per-task env root and do not empty
-		// this one: both are how a question used to mint a new directory.
-		envRoot = params.SharedScratchDir
-	} else {
-		var err error
-		envRoot, err = ResolveRootDir(RootDirParams{
-			WorkspacesRoot:  params.WorkspacesRoot,
-			WorkspaceID:     params.WorkspaceID,
-			WorkspaceSlug:   params.WorkspaceSlug,
-			TaskID:          params.TaskID,
-			IssueIdentifier: params.IssueIdentifier,
-		})
-		if err != nil {
-			return nil, err
-		}
+	envRoot, err := ResolveRootDir(RootDirParams{
+		WorkspacesRoot:  params.WorkspacesRoot,
+		WorkspaceID:     params.WorkspaceID,
+		WorkspaceSlug:   params.WorkspaceSlug,
+		TaskID:          params.TaskID,
+		IssueIdentifier: params.IssueIdentifier,
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	// Self-heal the root-level daemon marker on every task start so a marker
@@ -668,9 +634,9 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// envRoot.
 	workDir := filepath.Join(envRoot, "workdir")
 	scratchDirs := []string{filepath.Join(envRoot, "output"), filepath.Join(envRoot, "logs")}
-	if params.LocalWorkDir == "" && params.LocalWorktree == nil {
+	if params.LocalWorkDir == "" {
 		scratchDirs = append(scratchDirs, workDir)
-	} else if params.LocalWorkDir != "" {
+	} else {
 		workDir = params.LocalWorkDir
 	}
 	for _, dir := range scratchDirs {
@@ -678,13 +644,10 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 			return nil, fmt.Errorf("execenv: create directory %s: %w", dir, err)
 		}
 	}
-	// Shared mode: the context files go under the env root, not the cwd. The
-	// cwd is the user's directory and is shared with concurrent tasks, so a
-	// per-task file at a fixed path there would be overwritten by the next
-	// task to start and removed by the first to finish. Worktree mode never
-	// takes this branch (LocalWorkDir is empty there): its cwd is a private
-	// checkout, and the sidecars written into it are what Finalize removes
-	// before committing.
+	// Isolated sidecars: the context files go under the env root, not the cwd.
+	// The cwd is the user's directory and may be shared with concurrent tasks,
+	// so a per-task file at a fixed path there would be overwritten by the next
+	// task to start and removed by the first to finish.
 	sidecarRoot := ""
 	if params.LocalWorkDir != "" && params.IsolateSidecars {
 		sidecarRoot = filepath.Join(envRoot, sidecarDirName)
@@ -700,54 +663,16 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		return nil, fmt.Errorf("execenv: restrict task-local Multica config directory: %w", err)
 	}
 
-	// Worktree mode: build the task's own checkout of the user's repo inside
-	// envRoot and use it as the workdir. Done before any context file is
-	// written so the sidecars land inside the disposable worktree instead of
-	// the user's directory.
-	var localWorktree *LocalWorktree
-	// Tracks whether Prepare reached its successful return. Everything after
-	// worktree creation can still fail — context files, provider homes, MCP
-	// config — and on those paths the caller never receives an Environment, so
-	// nothing downstream knows a worktree exists to clean up. Without the
-	// rollback below, each such failure would leave a registration in the
-	// user's repo and a branch that no task ever ran in.
+	// Tracks whether Prepare reached its successful return. On every earlier
+	// failure the caller never receives an Environment, so the rollback below
+	// is the only thing that can undo what Prepare wrote.
 	prepareSucceeded := false
-	if params.LocalWorktree != nil {
-		wtParams := *params.LocalWorktree
-		wtParams.EnvRoot = envRoot
-		wtParams.AgentName = params.AgentName
-		wtParams.TaskID = params.TaskID
-		wtParams.ConversationKey, wtParams.ConversationID = localWorktreeConversation(params)
-		wtParams.WorkspaceID = params.WorkspaceID
-		wtParams.AgentID = params.Task.AgentID
-		var err error
-		localWorktree, err = PrepareLocalWorktree(wtParams, logger)
-		if err != nil {
-			return nil, err
-		}
-		defer func() {
-			if prepareSucceeded {
-				return
-			}
-			// Safe to discard unconditionally: no agent has run yet, so the
-			// worktree holds only what Prepare itself put there.
-			localWorktree.Discard(logger)
-		}()
-		workDir = localWorktree.WorkDir
-		// The resource may point at a subdirectory that holds only ignored
-		// files, in which case git doesn't materialise it in the worktree.
-		if err := os.MkdirAll(workDir, 0o755); err != nil {
-			return nil, fmt.Errorf("execenv: create worktree workdir %s: %w", workDir, err)
-		}
-	}
 
 	env := &Environment{
 		RootDir:           envRoot,
 		WorkDir:           workDir,
 		LocalDirectory:    params.LocalWorkDir != "",
-		SharedScratch:     params.SharedScratchDir != "",
 		SidecarRoot:       sidecarRoot,
-		LocalWorktree:     localWorktree,
 		MulticaConfigRoot: multicaConfigRoot,
 		logger:            logger,
 		lockFile:          lockFile,
@@ -776,10 +701,9 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// registered. Without this rollback the files stay on disk with no record
 	// of what to remove (MUL-6132).
 	//
-	// In place only. Worktree mode discards the whole worktree on failure just
-	// above, and a cloud envRoot is wiped wholesale by the GC — only the
-	// local_directory flow writes into a directory that outlives the task and
-	// belongs to the user, where a leftover marker disables every multica
+	// Local directory only. A cloud envRoot is wiped wholesale by the GC — only
+	// the local_directory flow writes into a directory that outlives the task
+	// and belongs to the user, where a leftover marker disables every multica
 	// command in that directory tree until someone removes it by hand.
 	if params.LocalWorkDir != "" {
 		defer func() {
@@ -792,9 +716,8 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		}()
 	}
 
-	// Resolved here, after the worktree branch above has settled workDir: the
-	// sidecars follow the cwd everywhere except shared mode, where they go to
-	// the sidecar root instead.
+	// The sidecars follow the cwd unless they were isolated, in which case
+	// they go to the sidecar root instead.
 	contextRoot := workDir
 	if sidecarRoot != "" {
 		contextRoot = sidecarRoot
@@ -837,7 +760,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// For Codex, set up a per-task CODEX_HOME seeded from ~/.codex/ with skills.
 	if params.Provider == "codex" {
 		codexHome := filepath.Join(envRoot, codexHomeDirName)
-		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, IsLocalDirectory: params.LocalWorkDir != "" || params.LocalWorktree != nil, SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task), CodexCustomArgs: params.CodexCustomArgs}, logger); err != nil {
+		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, IsLocalDirectory: params.LocalWorkDir != "", SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task), CodexCustomArgs: params.CodexCustomArgs}, logger); err != nil {
 			return nil, fmt.Errorf("execenv: prepare codex-home: %w", err)
 		}
 		if err := hydrateCodexSkills(codexHome, params.Task.AgentSkills, params.Task.DisabledRuntimeSkills, logger); err != nil {
@@ -1484,13 +1407,6 @@ func (env *Environment) Cleanup(removeAll bool) error {
 	// rerun fail closed. The daemon also defers ReleaseLock for the task run;
 	// both paths are idempotent.
 	env.ReleaseLock()
-
-	// The session folder outlives the turn. Removing it here would delete the
-	// conversation the next turn is supposed to come back to, and it would
-	// do so on a path Cleanup's caller thinks of as an env root.
-	if env.SharedScratch {
-		return nil
-	}
 
 	if env.LocalDirectory {
 		// Never touch the user's directory. RootDir is the daemon's own

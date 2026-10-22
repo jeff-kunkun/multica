@@ -32,7 +32,6 @@ func TestCursorSupplementHookCommandOnlyForManagedWorkdirs(t *testing.T) {
 	for name, env := range map[string]*execenv.Environment{
 		"nil env":         nil,
 		"local directory": {WorkDir: "/Users/me/project", LocalDirectory: true},
-		"local worktree":  {WorkDir: "/Users/me/project-wt", LocalWorktree: &execenv.LocalWorktree{}},
 	} {
 		if _, ok := cursorSupplementHookCommand(env); ok {
 			t.Fatalf("%s: cursor steering offered", name)
