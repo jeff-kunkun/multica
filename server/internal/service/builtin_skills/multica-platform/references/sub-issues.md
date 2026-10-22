@@ -6,7 +6,7 @@ On an agent-assigned issue, create status decides whether the assignee fires
 immediately. A non-backlog status (e.g. `todo`) enqueues the agent at create
 time; `backlog` sets the assignee without triggering.
 
-Routing never picks up `backlog`, so a ticket that should start now goes in
+`backlog` never starts a run, so a ticket that should start now goes in
 `todo` (the default when `--status` is left out). An agent parking a ticket in
 `backlog` names what it waits for with `--waiting-for "<one line>"`; without
 it the server refuses and points at `todo`. Staged children (`--stage <N>`)
@@ -48,7 +48,7 @@ A parent nobody holds still advances: a closed stage promotes the next stage's
 sub-issues whose description says there is no extra dependency, and the rest
 reach a person's inbox. When you, an agent, add a staged sub-issue to a
 top-level parent you created without an executor, the server seats a
-coordinator on it (routing's pick, else you) and moves a `backlog` parent to
+coordinator on it (you) and moves a `backlog` parent to
 `in_progress`; no run starts until a stage closes.
 
 ```bash

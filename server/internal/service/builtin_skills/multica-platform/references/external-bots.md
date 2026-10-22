@@ -156,12 +156,7 @@ multica settings set bot_wake_chain_limit --value-json '6'
 ```
 
 Agent task tokens cannot change the guard. Every blocked attempt is recorded
-and emits `wake_blocked` to the originating Bot's webhook. For patrol and
-dispatch daily reports, read the routing-health inspection response:
-`bot_wake_chain.blocked_last_24h` and `recent_blocks` report counts and details.
-Authenticated Bots can inspect their own blocks only; human workspace owners
-and admins can inspect viewer-visible records. Task tokens do not read the audit. Other members see the limit and recovery contract.
-`audit_read_failed: true` means the audit is unavailable, not zero blocks.
+and emits `wake_blocked` to the originating Bot's webhook.
 
 ## Mention delivery and replying in place
 
@@ -337,7 +332,7 @@ multica events download <attachment-id>
 
 `must_relay: true` means tell the person, even if a similar message went out
 (`bypass_semantic_dedupe`). `pending_approval: true` with the notice
-「系统改成完成，正式发布仍待批准」 means routing, an agent, a review verdict or a
+「系统改成完成，正式发布仍待批准」 means an agent, a review verdict or a
 Bot (not the person by hand) closed a release ticket: it is not a deploy
 permission. A must-relay result you do not relay reaches the person's
 inbox instead.

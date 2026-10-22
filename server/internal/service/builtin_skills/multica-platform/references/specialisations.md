@@ -31,18 +31,10 @@ re-parented with the same field, on `PUT /api/agents/{id}`. `parent_agent_id`
 there is a tri-state keyed on the field being present in the body — absent means
 no change, `""` detaches, an id attaches.
 
-A specialisation records the **domain** it covers (`domain_id`; see
-`multica domain list`). Create one by base role + domain and the name is
-generated (孙悟空 + 出海 = 孙悟空出海); a base role holds at most one
-specialisation per domain, and a second is refused with 409 naming the one
-that exists. Routing reads the recorded domain, not the name, so renaming a
-specialisation never moves its work; renaming a domain renames the
-specialisations still named base + old domain.
-
 From the CLI:
 
 ```bash
-multica agent create --base-role 孙悟空 --domain 出海                           # creates 孙悟空出海
+multica agent create --name "..." --base-role 孙悟空                            # same as --parent-agent-id, by name or id
 multica agent create --name "..." --parent-agent-id <base-role-id>              # follows the base role's runtime
 multica agent create --name "..." --parent-agent-id <base-role-id> \
   --runtime-id <id> --runtime-inherited=false                                  # owns its own runtime instead
@@ -101,7 +93,6 @@ Inherited, and read-only on the child:
   /api/agents/{id}` with `custom_args`/`mcp_config`, and `PUT
   /api/agents/{id}/env`, are 400); edit the base role, or set
   `runtime_inherited: false` first. Across owners they stay the child's own.
-- **Routing tier and usage** (DENE-1016) ride the same flag: changing a base role's `routing_tier`, `routing_usage` or `dispatch_mode` (`PUT /api/agents/{id}`, the seats bulk write, or `multica agent update --routing-tier` / `--routing-usage` / `--dispatch-mode`) copies onto every specialisation that is following it, in that same write. A follower cannot set either until follow is turned off — the server answers `跟随 <父角色名>，先关掉跟随` — and turning follow on copies the base role's current tier, usage and dispatch mode immediately.
 
 Everything else stays INDEPENDENT per agent — a specialisation is the same role
 with its own configuration, not a clone. In particular `max_concurrent_tasks`

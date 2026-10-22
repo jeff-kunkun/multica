@@ -25,7 +25,7 @@ Archival does not move issues automatically. Historical issues on previously
 archived statuses remain readable via an explicit status filter.
 
 - **`backlog`** parks an agent-assigned issue: the assignee is set but no task
-  fires, and routing does not touch it. Moving `backlog → todo` (or any
+  fires. Moving `backlog → todo` (or any
   non-done/non-cancelled status) enqueues the assigned agent then. Work that
   should start now is `todo`; an agent moving or creating an issue in
   `backlog` must say what it waits for with `--waiting-for "<one line>"`
@@ -47,7 +47,7 @@ archived statuses remain readable via an explicit status filter.
   issue asks for (a review-the-PR issue is being worked the moment reviewing
   starts). Questions, discussion, or acknowledgements never move the status.
   Acceptance is parent-scoped: a sub-issue with `parent_issue_id` is execution-only
-  and must not enter `in_review` or receive an independent 验收席. Its terminal
+  and must not enter `in_review` or receive an independent reviewer. Its terminal
   state is only an input to the parent's stage/barrier; after the full child tree
   is complete, the parent is the one issue that moves to unified `in_review`.
   Squad leaders: dispatching members is not delivery — a dispatch turn
@@ -67,8 +67,7 @@ archived statuses remain readable via an explicit status filter.
   one is rejected (a member's only warns); "等 DENE-N" in a comment is only a
   suggestion. An agent also passes `--block-kind <decision|permission|external|dependency|capacity>`
   and `--block-action "<one-line next step>"` (≤80 chars), or the change is
-  rejected. Routing seats an empty executor parked (no run) and the command
-  says if it did. A cleared blocker or passed acceptance wakes the waiter (no
+  rejected. The command warns when the executor is empty. A cleared blocker or passed acceptance wakes the waiter (no
   executor: a person gets a 缺执行人 card); the patrol wakes a quiet one ~30 min.
   A member's reply that starts a run for the executor moves the issue back to
   `in_progress` and marks the blocked record superseded — do not re-block to

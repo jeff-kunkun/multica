@@ -44,9 +44,8 @@ editable, but no trigger path will run it — they all refuse with
 binds it again. Unbound is orthogonal to archived.
 
 An agent can also be **disabled** (`work_enabled: false`): it stays on the
-agents list, keeps its routing tag and specialisations, and does not cancel
-running tasks, but routing will not pick it, assignment will not wake it, and
-the daemon will not claim a new run. From the CLI:
+agents list, keeps its specialisations, and does not cancel running tasks,
+but assignment will not wake it and the daemon will not claim a new run. From the CLI:
 
 ```bash
 multica agent update <agent-id> --work-enabled=false --output json   # close the seat
@@ -58,36 +57,12 @@ Same as `PUT /api/agents/{id}` with `work_enabled`; omitted on update preserves
 the stored value. A base role carries its direct specialisations both ways:
 turning it off or on sets every specialisation to the same value. Turning a
 specialisation off does not turn off its base role or its siblings. Turning a
-seat back on (by hand or when a quota breaker expires) also requeues the
+seat back on also requeues the
 `todo` / `in_progress` issues it still owns that have no run, except halted
 ones. Distinct from archive — archive is the delete path. Disabled is
 orthogonal to unbound and archived.
 
-A seat can be **mention only** (`dispatch_mode: mention_only`, DENE-1600,
-ADR-0008): it keeps its routing tier and still takes work by @mention,
-assignment and delegation, but routing, quota relay and seat relay never pick
-it — it is not in the candidate list the judge sees. Tagging a tier does not
-put a seat into the automatic pool; this flag decides that. Unlike
-`work_enabled=false`, a mention-only seat still runs what it is pointed at.
-
 ```bash
-multica agent update <agent-id> --dispatch-mode mention_only --output json   # only when named
-multica agent update <agent-id> --dispatch-mode auto --output json           # back in the pool
-multica agent list --output json                                             # each agent carries dispatch_mode
-```
-
-A following specialisation inherits it with the tier and usage.
-
-A seat can also be **limited to projects** (`dispatch_projects`, DENE-1648):
-automatic dispatch — routing, quota relay, seat relay — picks it only for
-issues in those projects. Empty means every project. @mention, assignment and
-delegation are not limited. Not inherited by followers. The reverse — a
-project naming the only seats it accepts — is the project's
-`executor_agent_ids` (see routing.md, Project executor allowlist).
-
-```bash
-multica agent update <agent-id> --dispatch-projects IPA-input,game --output json   # titles, ids or id prefixes
-multica agent update <agent-id> --dispatch-projects "" --output json               # every project again
 multica agent update <agent-id> --fallback-runtime <runtime-id> --output json      # standby for chat send --urgent (same owner + provider)
 multica agent update <agent-id> --fallback-runtime none --output json              # no standby
 ```
@@ -98,17 +73,7 @@ in place on the same agent, resuming the same session, after 30s, 1m, 2m, 5m
 and then every 5m with no attempt cap. The chain stops when the issue is
 done, cancelled, halted, or reassigned. While it waits, `multica issue get`
 and `multica issue runs` (`--output json`) carry `capacity_retry`
-(`{task_id, retry, next_at}`). Only real quota exhaustion (weekly / model
-limits, `402` / balance) closes the seat and relays the issue.
-
-A `401`/`403` (`agent_error.provider_auth_or_access`) also closes the seat
-(DENE-1647): `work_pause.reason` is `auth_failure`, it retries on its own
-after an hour, and switching the seat back on clears it at once. The relay
-keeps the role: a failed acceptance run hands acceptance to another seat that
-did not work on the ticket, and the ticket stays `in_review`. With no seat to
-cover, the ticket stays put and the creator gets an options ask (换席位 /
-我来验 / 直接关票). `multica issue runs` shows where each failed run went in
-its RELAY column (`relay` in `--output json`).
+(`{task_id, retry, next_at}`).
 
 `agent get` returns the persisted agent including `runtime_id`, `model`,
 `thinking_level`, `service_tier`, `custom_args`, `has_custom_env`,
@@ -228,10 +193,8 @@ the child own its runtime instead of following the base role's.
 | `mcp_config` | `mcp_config` (raw JSON) | CLI checks it is a JSON object or `null`; server stores as-is. At create, literal `null` is dropped (no-op); at update, `null` clears the field | daemon → provider (provider-specific MCP handling); redacted on read |
 | `visibility` | `visibility` | — | access control; defaults to `private`; gates who can read/route a private agent (e.g. a private squad leader) — NOT the runtime prompt |
 | `max_concurrent_tasks` | `max_concurrent_tasks` | integer from 1 through 50; out-of-range values return 400 | scheduler task cap; defaults to `6` |
-| `work_enabled` | `work_enabled` | boolean; omitted on update preserves | reversible seat gate (DENE-714). Default `true`. `false` keeps the seat in the list but routing will not pick it, assignment will not wake it, and claim will not take a new run. Running tasks are not cancelled. A base role sets its direct specialisations to the same value, both off and on. Turning a seat on requeues its stranded `todo` / `in_progress` issues. CLI: `agent update --work-enabled=true\|false`. Distinct from archive |
-| `dispatch_mode` | `dispatch_mode` | `auto` (default) or `mention_only`; omitted on update preserves; anything else returns 400 | automatic-dispatch gate (DENE-1600). `mention_only` keeps the tier but routing, quota relay and seat relay never select it; @mention, assignment and delegation still run it. Followers inherit it. CLI: `agent update --dispatch-mode auto\|mention_only` |
+| `work_enabled` | `work_enabled` | boolean; omitted on update preserves | reversible seat gate (DENE-714). Default `true`. `false` keeps the seat in the list but assignment will not wake it, and claim will not take a new run. Running tasks are not cancelled. A base role sets its direct specialisations to the same value, both off and on. Turning a seat on requeues its stranded `todo` / `in_progress` issues. CLI: `agent update --work-enabled=true\|false`. Distinct from archive |
 | `fallback_runtime_id` | `fallback_runtime_id` (nullable) | must be a different runtime of this workspace with the same `owner_id` and `provider` as `runtime_id`; set a primary runtime first; the caller must be allowed to use it; `""` clears | standby for `chat send --urgent` only (DENE-1844): an urgent message whose primary runtime is offline is dispatched here when it is online. Ordinary chat and issue runs never use it. Changing `runtime_id` to an incompatible pair clears it. Followers inherit it with the runtime profile. CLI: `agent update --fallback-runtime <runtime-id\|none>`; `agent get` shows `FALLBACK_RUNTIME` |
-| `dispatch_projects` | `dispatch_projects` | project ids of this workspace; omitted on update preserves, `[]` clears; an unknown id returns 400 | automatic dispatch only picks the seat for issues in these projects (DENE-1648); empty = every project. @mention, assignment and delegation are not limited. Not inherited by followers. CLI: `agent update --dispatch-projects <titles\|ids>` |
 
 Defaults when omitted or explicitly `null`: `max_concurrent_tasks` → `6`.
 Other defaults when omitted: `runtime_config` → `{}`, `custom_env` → `{}`,
@@ -416,27 +379,3 @@ State-changing (require an explicit instruction — do not run speculatively):
 - "Detaching a specialisation keeps the inherited prompt." It does not — the
   child is left with only its own `instructions`. Solidify first to freeze the
   text in.
-
-## Series
-
-`agent list/get --output json` exposes `series` (effective name),
-`series_source` (`auto` or `manual`), `automatic_series`, and `series_override`.
-The configured model decides the automatic series first, then the runtime CLI,
-then the legacy ladder fallback: Claude, Codex, DeepSeek, Grok, or Gemini.
-An unknown runtime/model has an empty automatic series.
-
-```bash
-multica agent update <agent-id> --series '破甲系列' --output json
-multica agent update <agent-id> --series '' --output json  # restore automatic
-multica agent create --name <name> --runtime-id <runtime-id> --series '破甲系列'
-```
-
-Names are trimmed, limited to 64 characters, and cannot contain control characters.
-Omitting `series` on update preserves the override. Series are per-seat and do not
-inherit a parent's manual override; following specialisations derive their automatic
-series from the inherited model/runtime. The settings page and CLI use the same API.
-
-A routing `policy_prompt` may request a series for a kind of work. The judge can
-return `preferred_series`; routing prefers an eligible seat in that series only
-within the chosen tier and otherwise keeps its ordinary choice. Manual grouping
-never changes the automatic provider used by acceptance and quota family rotation.

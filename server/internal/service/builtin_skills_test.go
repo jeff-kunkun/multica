@@ -357,7 +357,6 @@ func TestPlatformSkillDescriptionNamesEveryDomain(t *testing.T) {
 		"references/sub-issues.md":      "sub-issue",
 		"references/wakeups.md":         "wakeup",
 		"references/github-app.md":      "github app",
-		"references/routing.md":         "routing",
 		"references/mentions.md":        "mention",
 		"references/agents.md":          "agent",
 		"references/agent-env.md":       "env",
@@ -373,7 +372,6 @@ func TestPlatformSkillDescriptionNamesEveryDomain(t *testing.T) {
 		"references/progress.md":        "progress",
 		"references/chat-spawn.md":      "open a chat",
 		"references/chats.md":           "chat",
-		"references/consult.md":         "consult",
 		"references/drivers.md":         "driver",
 		"references/run-control.md":     "halt",
 		"references/external-bots.md":   "bot",
@@ -563,23 +561,6 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"Start from the trigger, not from memory",
 				"multica issue comment list <issue-id> --thread <trigger-comment-id>",
 				"multica issue comment add <issue-id> --parent <trigger-comment-id>",
-			},
-		},
-		{
-			file: "references/routing.md",
-			want: []string{
-				"Top-level issues only own acceptance",
-				"not considered by the stale-review sweep",
-				"`in_review` (top-level only)",
-				// The stall sweep catches up a status; the acceptance
-				// seat's verdict is what closes the issue, and it merges
-				// nothing.
-				"The sweep is not the acceptance path",
-				"A pass does not merge any linked PR",
-			},
-			notWant: []string{
-				"multica issue close",
-				"makes the platform merge",
 			},
 		},
 		{

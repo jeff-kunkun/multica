@@ -159,19 +159,6 @@ func stagePromotionNote(promoted []string, started int, held []stagegate.Hold) s
 	return b.String()
 }
 
-func (h *Handler) postSeatRelayComment(ctx context.Context, issue db.Issue, kind, body string) {
-	_, err := h.Queries.CreateRoutingComment(ctx, db.CreateRoutingCommentParams{
-		IssueID:     issue.ID,
-		WorkspaceID: issue.WorkspaceID,
-		AuthorID:    pgtype.UUID{Valid: true},
-		Content:     body,
-		RoutingKind: kind,
-	})
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		slog.Warn("seat relay: comment failed", "error", err, "issue_id", uuidToString(issue.ID), "kind", kind)
-	}
-}
-
 func (h *Handler) wakeStageRelay(ctx context.Context, parent db.Issue, commentID pgtype.UUID, relay *db.Agent) {
 	if relay == nil {
 		return

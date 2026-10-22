@@ -294,21 +294,6 @@ Project workflows can limit which statuses an issue takes and turn a status
 change into a handoff to another agent. When the per-turn prompt carries a
 `[Project workflow]` block, read `references/projects.md`.
 
-## Automatic routing (off unless the workspace turned it on)
-
-Routing fills the assignee and 验收席 slots on creation and on status changes,
-and never writes a status. Its rules, the 验收席 field, and what a `route`
-result means are in `references/routing.md`.
-
-Do not name another agent as executor on your own: with routing on the server
-ignores it. Only the words of the person you are talking to, passed as
-`--per-quote "<原话>"`, carry a pick through, and a quote that does not check
-out is handed to routing like no quote at all. One exception needs no quote:
-a sub-issue you create under the ticket your run is working, assigned to
-yourself, is kept and labelled 自领 — you are splitting your own work, not
-picking a seat. Ask for a stronger seat with
-`multica issue escalate <id> --reason "..."`. See `references/routing.md`.
-
 ## Who else is running right now
 
 Nothing about concurrent runs is pushed into your prompt: the answer changes

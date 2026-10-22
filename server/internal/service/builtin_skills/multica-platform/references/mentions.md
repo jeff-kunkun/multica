@@ -142,7 +142,7 @@ prints it as `Woke: ...`. `wake.none_woken: true` â€” printed as `Woke no one` â
 means no run started, nothing is running, and the issue is open: nobody will act
 on it. The assignee never wakes itself, so a seat that posts "please continue"
 with no @ has dispatched nothing. Run `multica issue handoff <id> --to
-<reviewer|dispatcher|agent>` or @ the agent before telling anyone the work is
+<reviewer|agent>` or @ the agent before telling anyone the work is
 underway.
 
 - **A name where a UUID belongs.** `mention://member/Alice` is dead. The id

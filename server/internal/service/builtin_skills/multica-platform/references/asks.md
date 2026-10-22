@@ -18,12 +18,6 @@ multica ask answer <ask-id> --answers-file ./answers.json --output json
 answer file maps question indexes (`"0"`, `"1"`, …) to option ids or the text
 entered through the explicit “other” choice.
 
-When an acceptance seat fails and no other seat can cover it (DENE-1647), the
-server opens one `needs_you` ask on the issue with `review_stuck.retry` (换席位),
-`review_stuck.member` (我来验) and `review_stuck.close` (直接关票). The answer is
-carried out by the server: retry looks for another acceptance seat, member
-makes the answerer the reviewer, close marks the issue done.
-
 ### Cards and the person's Bot (DENE-1933)
 
 A person who connected a Bot gets their cards through it. A `needs_you` card

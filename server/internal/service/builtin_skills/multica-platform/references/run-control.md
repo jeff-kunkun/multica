@@ -41,14 +41,10 @@ The stop response reports `cancelled_count`, `issue_ids` and
 `chat_session_ids`. Already stopped runs are not counted again. A later human
 message may start a chat again; the stop never archives or deletes it.
 
-The guard is issue-scoped. A human comment clears it and resets the
-delegation-chain budget; `resume` only clears an explicit halt and does not
-reset an already-exceeded budget. Direct human-triggered runs are never
-consumed by that budget. The default chain limit is thirty runs; a workspace
-admin changes it under Settings → General → Agent run limits (stored as
-`agent_chain_budget` in the workspace `settings` JSON, `0` = unlimited). Hitting
-the limit posts a system comment in the triggering thread instead of stopping
-silently.
+The guard is issue-scoped. A human comment or `resume` clears it. While it
+holds, agent-triggered runs on the issue are refused with a system comment in
+the triggering thread instead of stopping silently; direct human-triggered runs
+are never refused.
 
 The same settings section holds a run time limit
 (`agent_task_timeout_minutes`, `0`/absent = none). A run that outlives it fails with reason `task_time_limit`:
@@ -228,7 +224,7 @@ runtime last-seen time. An empty chat has no `task_status` or `reason` yet.
 
 ## Unanswered Bot wakes
 
-Separate from the agent handoff budget above, `bot_wake_chain_limit` caps
+Separate from the halt guard above, `bot_wake_chain_limit` caps
 unanswered automatic Bot wakes across a trusted root (default 4, range 1–100).
 Queued wakes reserve a slot; terminal tasks that never ran release it. An actual
 agent reply or completed running task clears the count. Human sends bypass it;
@@ -240,6 +236,4 @@ and exits nonzero. Do not duplicate that message. A saved issue comment warns
 with each target's `bot_wake_chain_limit` outcome. Wait for a reply/completion or
 a human message; a workspace administrator can change the limit using
 `multica settings set bot_wake_chain_limit --value-json '6'`.
-Routing health exposes the current limit
-and visibility-scoped recent blocks for patrol/daily reports. The initiating
-Bot also receives a `wake_blocked` operational webhook event.
+The initiating Bot also receives a `wake_blocked` operational webhook event.
