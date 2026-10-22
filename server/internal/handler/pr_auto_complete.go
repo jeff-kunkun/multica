@@ -285,15 +285,9 @@ func (h *Handler) maybeAutoCompleteIssue(ctx context.Context, workspaceID, issue
 		return
 	}
 	h.broadcastCancelledWakeups(ctx, updated.WorkspaceID, cancelledWakeups)
-	h.syncBlockWait(ctx, issue, updated)
 	// A merged PR is the most common way a sub-issue reaches done; the parent
-	// hears about it on the same path as a manual status change. The fork's
-	// child-done barrier and waiting_on wake re-check every guard themselves
-	// (prev != done, parent exists and is not terminal), so calling them
-	// unconditionally is safe.
-	h.notifyParentOfChildDone(ctx, issue, updated)
+	// hears about it on the same path as a manual status change.
 	h.postSourceChatReceipt(ctx, issue, updated)
-	h.notifyWaitersOfIssueDone(ctx, issue, updated)
 	if updated.ParentIssueID.Valid {
 		h.processChildEvents(ctx, updated.ParentIssueID)
 	}

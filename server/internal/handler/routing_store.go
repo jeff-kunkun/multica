@@ -10,7 +10,6 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/blockwait"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/routing"
@@ -199,18 +198,10 @@ func (s routingStore) issueView(ctx context.Context, row db.Issue) (routing.Issu
 	return out, nil
 }
 
-// blockWait reads the ticket's wait record and the live state of every
-// ticket it names, through the same reads the block patrol uses, so the
-// blocked row and the patrol cannot disagree about whether a blocker ended.
+// blockWait is empty: the structured wait record and its patrol are gone, so
+// a blocked ticket names no blocker routing could watch.
 func (s routingStore) blockWait(ctx context.Context, row db.Issue) routing.BlockWait {
-	rec := blockwait.ParseMetadata(parseIssueMetadata(row.Metadata))
-	out := routing.BlockWait{Registered: rec.Structured(), BlockedBy: rec.BlockedBy}
-	for _, view := range s.h.blockerViews(ctx, row, rec) {
-		if view.Cleared() {
-			out.Ended = append(out.Ended, view.Ref)
-		}
-	}
-	return out
+	return routing.BlockWait{}
 }
 
 // relatedTickets lists the agent-held tickets whose executor may continue
@@ -754,9 +745,6 @@ func routingSummonFor(issue db.Issue) (source, reason string) {
 	if !issue.AssigneeID.Valid && issue.Status != "in_review" {
 		return service.SummonSourceUnseated, unseatedReason
 	}
-	if issue.Status == "blocked" && !blockwait.ParseMetadata(parseIssueMetadata(issue.Metadata)).Structured() {
-		return service.SummonSourceRouting, "挂在阻塞但没写在等什么：让执行人用 `multica issue status <票号> blocked --blocked-by <挡路的票>` 补上，没在等就改回待办。"
-	}
 	return service.SummonSourceRouting, routingSummonReason
 }
 
@@ -1226,21 +1214,9 @@ func (s routingStore) CompleteFromReview(ctx context.Context, workspaceID, issue
 		return false, err
 	}
 	s.publishIssueUpdated(prev, issue)
-	// A status write is not finished when the row is written. Everything that
-	// depends on a ticket reaching a terminal status — the parent's child-done
-	// comment, the stage barrier that wakes the next stage, the cross-family
-	// waiters — hangs off these two helpers, which the request path calls on
-	// every status change (see UpdateIssue). Leaving them out here would trade
-	// one stall for a quieter one: an agent cannot set done itself, so "the
-	// reviewer passed it and the status never moved" is the commonest way a
-	// SUB-issue stalls, and closing it without telling the parent would stop
-	// the next stage from ever waking.
-	//
-	// Both are best-effort and guard on the transition themselves; the status
-	// write has already committed, so neither can undo it.
-	s.h.notifyParentOfChildDone(ctx, prev, issue)
+	// The source chat's receipt follows every status change (see UpdateIssue);
+	// best-effort, the status write has already committed.
 	s.h.postSourceChatReceipt(ctx, prev, issue)
-	s.h.notifyWaitersOfIssueDone(ctx, prev, issue)
 	return true, nil
 }
 

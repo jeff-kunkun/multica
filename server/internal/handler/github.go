@@ -25,6 +25,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/githubapp"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -1631,10 +1632,6 @@ func (h *Handler) triggerPRRefreshFromCIEvent(ctx context.Context, body []byte) 
 // linkPolicy is the delivery-wide verdict on which identifiers this workspace
 // may link; this function only ever narrows it.
 func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype.UUID, installationID int64, p *ghPullRequestPayload, linkPolicy prLinkPolicy) {
-	// The auto-complete decision, the child-done barrier and the waiting_on
-	// wake all resolve raw statuses below; share one catalog per workspace
-	// across the delivery.
-	ctx = withStatusResolverCache(ctx)
 	state := derivePRState(p.PullRequest.State, p.PullRequest.Draft, p.PullRequest.Merged)
 	mergeable, clearMergeable := derivePRMergeableState(p.Action, p.PullRequest.MergeableState, baseRefChanged(p.Changes))
 	// The stored state before this event, so a merge is acted on once — when it
@@ -1723,7 +1720,7 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 		}
 		// One status-catalog read per workspace per delivery, however many
 		// issues the PR touches.
-		resolver := h.statusResolver(ctx, wsID)
+		resolver := issuestatus.NewResolver(wsID)
 		for issueID := range touched {
 			h.maybeAutoCompleteIssue(ctx, wsID, issueID, resolver)
 		}

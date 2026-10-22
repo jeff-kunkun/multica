@@ -5,10 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/blockwait"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/issueworkflow"
 	"github.com/multica-ai/multica/server/internal/routing"
@@ -25,8 +23,6 @@ type statusTransition struct {
 	reviewerType pgtype.Text
 	reviewerID   pgtype.UUID
 	setReviewer  bool
-	block        blockwait.Record
-	persistBlock bool
 	note         string
 	handoff      bool
 	refuse       string
@@ -176,30 +172,13 @@ func (h *Handler) fillAcceptanceSeat(ctx context.Context, issue db.Issue, assign
 	tr := h.pickAcceptanceSeat(ctx, issue, assigneeID)
 	if tr.refuse != "" {
 		// A close must never leave an in_review ticket with nobody to wake.
-		// Convert an unseatable review into a structured human decision block;
-		// the caller persists it together with the status write.
+		// Convert an unseatable review into a block a person resolves.
 		why := tr.refuse
 		tr.refuse = ""
 		tr.status = issuestatus.Blocked
-		tr.persistBlock = true
-		tr.block, tr.note = h.reviewSeatBlock(ctx, issue, why)
+		tr.note = why + "。平台补不上验收席，这张票改成阻塞，等人指定验收席后再送审。"
 	}
 	return tr
-}
-
-func (h *Handler) reviewSeatBlock(ctx context.Context, issue db.Issue, why string) (blockwait.Record, string) {
-	managers, err := h.Queries.ListWorkspaceManagerUserIDs(ctx, issue.WorkspaceID)
-	if err != nil {
-		slog.Warn("acceptance seat: list managers failed", "issue_id", uuidToString(issue.ID), "error", err)
-	}
-	rec := blockwait.Record{}
-	if len(managers) > 0 && managers[0].Valid {
-		rec.NeedsHuman = uuidToString(managers[0])
-	} else {
-		rec = blockwait.FailureWake(time.Now(), "验收席由人来定", 1)
-	}
-	reason := why + "。平台补不上验收席，这张票改成阻塞，等人指定验收席后再送审。"
-	return rec, reason
 }
 
 // pickAcceptanceSeat chooses a different-family acceptance seat for an agent

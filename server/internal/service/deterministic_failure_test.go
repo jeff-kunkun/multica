@@ -8,7 +8,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/multica-ai/multica/server/internal/blockwait"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -84,13 +83,13 @@ func failAndTakeChild(t *testing.T, pool *pgxpool.Pool, svc *TaskService, taskID
 
 // TestDeterministicFailureStopsRetryAndHandsToHuman pins DENE-819: the second
 // consecutive hit of the same deterministic error on the same input stops
-// the auto-retry chain early, records the fingerprint, blocks the issue with
-// a structured needs_human wait, and tells the issue what to do next.
+// the auto-retry chain early, records the fingerprint, blocks the issue, and
+// tells the issue what to do next.
 func TestDeterministicFailureStopsRetryAndHandsToHuman(t *testing.T) {
 	pool := newResolveOriginatorPool(t)
 	ctx := context.Background()
 	q := db.New(pool)
-	_, userID, agentID, issueID := seedAttributionFixture(t, pool)
+	_, _, agentID, issueID := seedAttributionFixture(t, pool)
 	parentID := seedRetryableRun(t, pool, agentID, issueID, 4)
 	svc := NewTaskService(q, pool, nil, events.New())
 
@@ -118,12 +117,6 @@ func TestDeterministicFailureStopsRetryAndHandsToHuman(t *testing.T) {
 	}
 	if status != "blocked" {
 		t.Fatalf("issue status = %q, want blocked", status)
-	}
-	if got := blockwait.MetaString(metadata, blockwait.KeyNeedsHuman); got != userID {
-		t.Fatalf("needs_human = %q, want issue creator %s", got, userID)
-	}
-	if blockwait.MetaString(metadata, blockwait.KeyWaitCondition) == "" {
-		t.Fatal("blocked issue must say what it waits on")
 	}
 	notice := latestComment(t, pool, issueID)
 	for _, want := range []string{"自动重试已停止", fingerprint, "blocked", "重新运行"} {

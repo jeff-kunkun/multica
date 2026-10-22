@@ -15,7 +15,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/auth"
-	"github.com/multica-ai/multica/server/internal/blockwait"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -807,12 +806,15 @@ func (h *Handler) resolveAskTarget(w http.ResponseWriter, r *http.Request, ws pg
 	return member.UserID, member.UserName, true
 }
 
+// askHumanBlockKey records who an ask-human block waits on, so only that
+// person's answer unblocks the ticket.
+const askHumanBlockKey = "block.needs_human"
+
 // blockForHuman parks the ticket on the person asked. A ticket already
 // blocked just records who it waits on.
 func (h *Handler) blockForHuman(ctx context.Context, issue db.Issue, target pgtype.UUID) bool {
-	rec := blockwait.Record{NeedsHuman: uuidToString(target)}
 	if issue.Status == "blocked" {
-		h.persistBlockRecord(ctx, issue, rec)
+		h.setIssueMetaString(ctx, issue, askHumanBlockKey, uuidToString(target))
 		return true
 	}
 	updated, err := h.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
@@ -823,8 +825,7 @@ func (h *Handler) blockForHuman(ctx context.Context, issue db.Issue, target pgty
 		slog.Warn("ask-human: block failed", "error", err, "issue_id", uuidToString(issue.ID))
 		return false
 	}
-	h.syncBlockWait(ctx, issue, updated)
-	h.persistBlockRecord(ctx, updated, rec)
+	h.setIssueMetaString(ctx, updated, askHumanBlockKey, uuidToString(target))
 	h.publishBlockStatus(issue, updated)
 	return true
 }
@@ -843,7 +844,7 @@ func (h *Handler) unblockAfterAsk(ctx context.Context, issueID, answerer pgtype.
 	if err != nil || issue.Status != "blocked" {
 		return
 	}
-	if blockwait.MetaString(parseIssueMetadata(issue.Metadata), blockwait.KeyNeedsHuman) != uuidToString(answerer) {
+	if who, _ := parseIssueMetadata(issue.Metadata)[askHumanBlockKey].(string); strings.TrimSpace(who) != uuidToString(answerer) {
 		return
 	}
 	updated, err := h.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
@@ -854,7 +855,6 @@ func (h *Handler) unblockAfterAsk(ctx context.Context, issueID, answerer pgtype.
 		slog.Warn("ask-human: unblock failed", "error", err, "issue_id", uuidToString(issueID))
 		return
 	}
-	h.syncBlockWait(ctx, issue, updated)
 	h.publishBlockStatus(issue, updated)
 }
 

@@ -3669,13 +3669,6 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		// Project workflow (MUL-7420): best-effort, like the status catalog
 		// below — a failure degrades to the workspace-wide status rules.
 		resp.ProjectWorkflow = h.claimProjectWorkflow(r.Context(), issue, task)
-		// Plan approval is opt-in per workspace: best-effort, a failed check
-		// leaves the brief as it was.
-		if usesPlans, planErr := h.Queries.WorkspaceUsesPlans(r.Context(), issue.WorkspaceID); planErr != nil {
-			slog.Warn("claim: could not check plan usage", "workspace_id", uuidToString(issue.WorkspaceID), "error", planErr)
-		} else {
-			resp.PlanFlow = usesPlans
-		}
 
 		// Load every planned input as one chronological, de-duplicated set.
 		// The trigger is included here so the delivery receipt can only contain
@@ -4668,10 +4661,6 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	// on the full-prompt path.
 	if task.RetryOfTaskID.Valid && !task.ForceFreshSession && task.SessionID.Valid {
 		resp.ContinueInterruptedSession = true
-		if parent, err := h.Queries.GetAgentTask(r.Context(), task.RetryOfTaskID); err == nil &&
-			parent.FailureReason.Valid && parent.FailureReason.String == "task_time_limit" {
-			resp.ContinueAfterTimeLimit = true
-		}
 	}
 
 	// Wakeup rules that waited for this run hand it their inputs now, after

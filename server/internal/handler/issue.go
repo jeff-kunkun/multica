@@ -20,7 +20,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/blockwait"
 	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/channelmedia"
 	"github.com/multica-ai/multica/server/internal/dispatch"
@@ -161,9 +160,6 @@ type IssueResponse struct {
 	// CapacityRetry is detail-only: the waiting in-place retry after a full
 	// model (DENE-1093), absent when nothing is waiting.
 	CapacityRetry *CapacityRetryResponse `json:"capacity_retry,omitempty"`
-	// Driver is who or what moves this issue now (ADR-0006, DENE-1342). Set
-	// on the detail and the children list; absent for a closed or parked one.
-	Driver *DriverResponse `json:"driver,omitempty"`
 	// duplicateOfIssueID is the raw mark, kept off the wire; see DuplicateOf.
 	duplicateOfIssueID pgtype.UUID
 }
@@ -2684,9 +2680,6 @@ func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
 	if row, err := h.Queries.GetIssueCapacityRetry(r.Context(), issue.ID); err == nil {
 		resp.CapacityRetry = capacityRetryResponse(row.ID, row.Attempt, row.FireAt)
 	}
-	if driver, ok := h.issueDriver(r.Context(), issue); ok {
-		resp.Driver = driverResponse(driver)
-	}
 
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -2722,13 +2715,9 @@ func (h *Handler) ListChildIssues(w http.ResponseWriter, r *http.Request) {
 	// built-in statuses still cost no query, and a list full of custom ones
 	// costs one catalog read rather than one per row.
 	statusResolver := issuestatus.NewResolver(issue.WorkspaceID)
-	drivers := h.issueDrivers(r.Context(), issue.WorkspaceID, children)
 	resp := make([]IssueResponse, len(children))
 	for i, child := range children {
 		resp[i] = issueToResponse(child, prefix)
-		if driver, ok := drivers[uuidToString(child.ID)]; ok {
-			resp[i].Driver = driverResponse(driver)
-		}
 		resp[i].StatusCategory = issuestatus.WireCategory(child.Status, statusResolver.Category(r.Context(), h.Queries, child.Status))
 		labels := labelsMap[resp[i].ID]
 		if labels == nil {
@@ -3932,12 +3921,6 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 
 	issue := res.Issue
 	spawnSlots.fill(r.Context(), issue.ID)
-	if issue.Status == "blocked" || issue.Status == "in_review" {
-		h.setIssueMetaString(r.Context(), issue, blockwait.KeyWatched, blockwait.WatchedYes)
-	}
-	if issue.Status == "in_review" {
-		h.setIssueMetaString(r.Context(), issue, blockwait.KeyReviewRound, time.Now().UTC().Format(time.RFC3339))
-	}
 	issue = h.syncBacklogWaitingFor(r.Context(), issue, req.WaitingFor)
 	slog.Info("issue created", append(logger.RequestAttrs(r), "issue_id", uuidToString(issue.ID), "title", issue.Title, "status", issue.Status, "workspace_id", workspaceID)...)
 
@@ -3996,7 +3979,6 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	} else {
 		h.RouteIssueAsync(r, workspaceID, uuidToString(issue.ID))
 	}
-	h.seatStagedParent(r, workspaceID, issue, creatorType, actualCreatorID)
 
 	writeJSON(w, http.StatusCreated, resp)
 }
@@ -4051,15 +4033,6 @@ type UpdateIssueRequest struct {
 	// predate the handoff UI removal. It is consumed only when this write starts
 	// a run and is never stored on the issue itself.
 	HandoffNote string `json:"handoff_note,omitempty"`
-	// Block fields are required when an agent moves the issue to blocked
-	// (DENE-850). At least one kind must be present: another issue, a clock,
-	// a probe with a deadline, or a person.
-	BlockedBy     *string `json:"blocked_by,omitempty"`
-	WakeAt        *string `json:"wake_at,omitempty"`
-	WaitCondition *string `json:"wait_condition,omitempty"`
-	WaitProbe     *string `json:"wait_probe,omitempty"`
-	WaitTimeout   *string `json:"wait_timeout,omitempty"`
-	NeedsHuman    *string `json:"needs_human,omitempty"`
 	// BlockKind and BlockAction are what the blocker card shows for this
 	// ticket: the kind of stop and the one-line next step. An agent moving
 	// the issue to blocked must send both (DENE-1301).
@@ -4442,8 +4415,6 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	var blockRecord blockwait.Record
-	persistBlock := false
 	// Resolved once: the blocked gate (DENE-850) and the review gate (DENE-869)
 	// both apply to agents only.
 	statusActorType := ""
@@ -4451,17 +4422,10 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		statusActorType, _ = h.resolveActor(r, userID, workspaceID)
 	}
 	if statusKeyForGuard == issuestatus.Blocked && prevIssue.Status != issuestatus.Blocked {
-		actorType := statusActorType
-		rec, persist, reject := h.gateBlockedStatus(r, prevIssue, req, actorType)
-		if reject == "" {
-			reject = blockAttributionRejection(req, actorType)
-		}
-		if reject != "" {
+		if reject := blockAttributionRejection(req, statusActorType); reject != "" {
 			writeError(w, http.StatusBadRequest, reject)
 			return
 		}
-		blockRecord = rec
-		persistBlock = persist
 	}
 	if statusActorType != "" && h.isBacklogStatus(r.Context(), prevIssue.WorkspaceID, statusKeyForGuard) && !h.isBacklogStatus(r.Context(), prevIssue.WorkspaceID, prevIssue.Status) {
 		if reject := backlogWaitingForRejection(req.WaitingFor, statusActorType, prevIssue.Stage.Valid || req.Stage != nil); reject != "" {
@@ -4753,10 +4717,6 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		params.ReviewerType = tr.reviewerType
 		params.ReviewerID = tr.reviewerID
 	}
-	if tr.persistBlock {
-		blockRecord = tr.block
-		persistBlock = true
-	}
 
 	attachmentIDs, ok := parseUUIDSliceOrBadRequest(w, req.AttachmentIDs, "attachment_ids")
 	if !ok {
@@ -4946,29 +4906,15 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		h.dispatchIssueRun(runCtx, issue, trigger, actorType, actorID, handoffNote)
 	}
 
-	// Platform-driven parent notification: when this issue transitions into
-	// `done` and has a parent, post a top-level system comment on the parent
-	// (MUL-2538 — replaces the agent-prompt rule that caused self-mention
-	// loops in PR #2918). The helper guards on transition + parent state and
-	// fails best-effort.
-	if statusChanged {
-		h.syncBlockWait(r.Context(), prevIssue, issue)
-	}
 	if statusChanged && issue.Status == issuestatus.Blocked {
 		h.persistBlockAttribution(r.Context(), issue, req)
-	}
-	if persistBlock {
-		h.persistBlockRecord(r.Context(), issue, blockRecord)
-		h.summonNeedsHuman(r.Context(), issue, blockRecord.NeedsHuman, actorType, actorID, "")
 	}
 	// Clearing the executor hands the ticket back to routing (DENE-1665: the
 	// chat ticket card's 改给智能体); the routing table decides per status.
 	executorCleared := prevIssue.AssigneeID.Valid && !issue.AssigneeID.Valid
 	if statusChanged || titleChanged || descriptionChanged || pickSetAside || executorCleared {
 		if statusChanged {
-			h.notifyParentOfChildDone(r.Context(), prevIssue, issue)
 			h.postSourceChatReceipt(r.Context(), prevIssue, issue)
-			h.notifyWaitersOfIssueDone(r.Context(), prevIssue, issue)
 		}
 		// Route after content edits as well as status changes, and after an
 		// agent's pick was set aside: the reply says routing picks, so this
@@ -5570,11 +5516,6 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	// One Resolver for the whole batch — a per-issue filler would query the
 	// catalog once per custom-status row. (MUL-6243)
 	fillBatch := h.newStatusCategoryFiller(r.Context(), wsUUID)
-	// Children that transitioned into a terminal status this batch, collected so
-	// the parent/stage notification is evaluated once against the final state
-	// after the loop (MUL-4155) rather than per-child mid-batch.
-	var childDoneCompleted []db.Issue
-	var waitingOnCompleted []db.Issue
 	// Parents whose sub-issues changed this batch. Their rules are evaluated
 	// once after the loop against the final state (MUL-4155), not per child
 	// against a mid-batch snapshot.
@@ -5821,15 +5762,8 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 		}
-		var batchBlock blockwait.Record
-		batchPersistBlock := false
 		if batchStatusKey == issuestatus.Blocked && prevIssue.Status != issuestatus.Blocked {
-			var rejection string
-			batchBlock, batchPersistBlock, rejection = h.gateBlockedStatus(r, prevIssue, req.Updates, batchActorType)
-			if rejection == "" {
-				rejection = blockAttributionRejection(req.Updates, batchActorType)
-			}
-			if rejection != "" {
+			if rejection := blockAttributionRejection(req.Updates, batchActorType); rejection != "" {
 				reject(issueID, rejection)
 				continue
 			}
@@ -5889,17 +5823,11 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		if _, touched := rawUpdates["parent_issue_id"]; touched || batchDomainRequest != nil || batchTargetProject != prevIssue.ProjectID {
 			issue = h.settleIssueDomain(r.Context(), issue, batchDomainRequest)
 		}
-		if batchPersistBlock {
-			h.persistBlockRecord(r.Context(), issue, batchBlock)
-		}
 		if issue.Status == issuestatus.Blocked && prevIssue.Status != issuestatus.Blocked {
 			h.persistBlockAttribution(r.Context(), issue, req.Updates)
 		}
 		if batchStatusKey != "" || req.Updates.WaitingFor != nil {
 			issue = h.syncBacklogWaitingFor(r.Context(), issue, req.Updates.WaitingFor)
-		}
-		if batchTransition.persistBlock {
-			h.persistBlockRecord(r.Context(), issue, batchTransition.block)
 		}
 		if batchStamp != nil {
 			issue = h.stampAssignee(r.Context(), issue, *batchStamp)
@@ -5915,9 +5843,6 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		assigneeChanged := (req.Updates.AssigneeType != nil || req.Updates.AssigneeID != nil || handoff != nil) &&
 			(prevIssue.AssigneeType.String != issue.AssigneeType.String || uuidToString(prevIssue.AssigneeID) != uuidToString(issue.AssigneeID))
 		statusChanged := (req.Updates.Status != nil || params.Status.Valid) && prevIssue.Status != issue.Status
-		if statusChanged {
-			h.syncBlockWait(r.Context(), prevIssue, issue)
-		}
 		priorityChanged := req.Updates.Priority != nil && prevIssue.Priority != issue.Priority
 		projectChanged := req.Updates.ProjectID != nil && uuidToString(prevIssue.ProjectID) != uuidToString(issue.ProjectID)
 
@@ -5978,27 +5903,11 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		// stages at once (MUL-4155). Collect the terminal transitions and let
 		// notifyParentsOfBatchChildDone below evaluate each parent once against
 		// the batch's final committed state. Same transition guard as
-		// notifyParentOfChildDone: a non-terminal -> terminal move on a child.
-		// Resolve both sides to the canonical status they inherit before the
-		// terminal test, so a batch that moves the last child onto a CUSTOM
-		// done/cancelled status still enters the stage barrier below. A literal
-		// comparison here left childDoneCompleted empty and silently skipped
-		// notifyParentsOfBatchChildDone entirely. (MUL-6243)
 		if statusChanged || batchPickSetAside {
 			h.RouteIssueAsync(r, uuidToString(issue.WorkspaceID), uuidToString(issue.ID))
 		}
 		if statusChanged {
 			h.postSourceChatReceipt(r.Context(), prevIssue, issue)
-			prevTerminal := isTerminalChildStatus(
-				issuestatus.Effective(r.Context(), h.Queries, prevIssue.WorkspaceID, prevIssue.Status))
-			nowTerminal := isTerminalChildStatus(
-				issuestatus.Effective(r.Context(), h.Queries, issue.WorkspaceID, issue.Status))
-			if !prevTerminal && nowTerminal {
-				waitingOnCompleted = append(waitingOnCompleted, issue)
-				if issue.ParentIssueID.Valid {
-					childDoneCompleted = append(childDoneCompleted, issue)
-				}
-			}
 		}
 		if statusChanged || prevIssue.ParentIssueID != issue.ParentIssueID || prevIssue.Stage != issue.Stage {
 			changedParents = append(changedParents, issue.ParentIssueID, prevIssue.ParentIssueID)
@@ -6010,12 +5919,6 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		updated++
 	}
 
-	// Aggregate parent/stage notification over the whole batch's final state so
-	// each affected parent gets at most one accurate comment + wake, independent
-	// of issue_ids order (MUL-4155). Best-effort; failure does not abort the
-	// batch. Single-issue UpdateIssue is unchanged and still notifies inline.
-	h.notifyParentsOfBatchChildDone(r.Context(), childDoneCompleted)
-	h.notifyWaitersOfIssuesDone(r.Context(), waitingOnCompleted)
 	// Each write recorded its sub-issue change; processing claims them per
 	// parent, so each parent is evaluated once against the batch's final
 	// state, independent of issue_ids order (MUL-4155). A failure is retried

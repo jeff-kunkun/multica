@@ -251,13 +251,6 @@ var issueGetCmd = &cobra.Command{
 	RunE: runIssueGet,
 }
 
-var issueWaitCmd = &cobra.Command{
-	Use:   "wait <id|url>",
-	Short: "Show what a blocked issue is waiting on and its last probe",
-	Args:  exactArgs(1),
-	RunE:  runIssueWait,
-}
-
 var issuePullRequestsCmd = &cobra.Command{
 	Use:     "pull-requests <id>",
 	Aliases: []string{"prs"},
@@ -341,10 +334,8 @@ var issueStatusCmd = &cobra.Command{
 		"  multica issue status <id> cancelled --duplicate-of <original>\n" +
 		"The original then lists it as a duplicate. Moving the issue to any status other\n" +
 		"than cancelled later removes the mark.\n\n" +
-		"Moving to blocked without --blocked-by / --wake-at / --wait-condition / --needs-human\n" +
-		"prints a warning: the platform cannot tell when to wake the issue. An agent must\n" +
-		"also pass --block-kind and --block-action (what the parent's blocker card shows);\n" +
-		"the server refuses the move without them.\n" +
+		"An agent moving an issue to blocked must pass --block-kind and --block-action\n" +
+		"(what the parent's blocker card shows); the server refuses the move without them.\n" +
 		"A blocked issue with no executor is seated by routing (parked, no run starts);\n" +
 		"the command reports whether that happened and, if not, why.",
 	Args: exactArgs(2),
@@ -389,25 +380,6 @@ var issueTitleCmd = &cobra.Command{
 	Short: "Suggest a clearer issue title without applying it",
 	Args:  exactArgs(1),
 	RunE:  runIssueTitle,
-}
-
-var issueDisposeCmd = &cobra.Command{
-	Use:   "dispose <id>",
-	Short: "Decide what happens to an issue nobody is driving",
-	Long: "One command for an issue with no driver: no run, no recorded wait, no person\n" +
-		"named (the issue's driver.kind is \"none\" in `issue get` / `issue children`).\n" +
-		"The patrol reruns such an issue on its own seat, then asks the parent's\n" +
-		"executor to pick one of:\n\n" +
-		"  --action rerun                     run it again on the same seat\n" +
-		"  --action reroute                   empty the executor seat; routing picks anew\n" +
-		"  --action split --into \"title\"      create sub-issues (repeat --into, up to 10)\n" +
-		"                                     and block this issue on them\n" +
-		"  --action cancel --reason \"...\"     cancel it, with the reason on the issue\n\n" +
-		"The server refuses an issue that already has a driver, and an agent may only\n" +
-		"dispose a child of an issue it holds. The response reports status and the new\n" +
-		"driver — quote them, do not restate them from memory.",
-	Args: exactArgs(1),
-	RunE: runIssueDispose,
 }
 
 var issueHandoffCmd = &cobra.Command{
@@ -751,7 +723,6 @@ func validateIssueEnum(field, value string, allowed []string) error {
 func init() {
 	issueCmd.AddCommand(issueListCmd)
 	issueCmd.AddCommand(issueGetCmd)
-	issueCmd.AddCommand(issueWaitCmd)
 	issueCmd.AddCommand(issuePullRequestsCmd)
 	issueCmd.AddCommand(issueChildrenCmd)
 	issueCmd.AddCommand(issueCreateCmd)
@@ -762,7 +733,6 @@ func init() {
 	issueCmd.AddCommand(issueProgressCmd)
 	issueCmd.AddCommand(issueTitleCmd)
 	issueCmd.AddCommand(issueHandoffCmd)
-	issueCmd.AddCommand(issueDisposeCmd)
 	issueCmd.AddCommand(issueReorderCmd)
 	issueCmd.AddCommand(issueCommentCmd)
 	issueCmd.AddCommand(issueSubscriberCmd)
@@ -810,7 +780,6 @@ func init() {
 	// issue get
 	issueGetCmd.Flags().String("output", "json", "Output format: table or json")
 	issueGetCmd.Flags().Bool("resolve-properties", false, resolvePropertiesHelp)
-	issueWaitCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// issue pull-requests
 	issuePullRequestsCmd.Flags().String("output", "table", "Output format: table or json")
@@ -874,17 +843,10 @@ func init() {
 	issueStatusCmd.Flags().Bool("no-start", false, "Change status without starting an agent run")
 	issueStatusCmd.Flags().String("duplicate-of", "", "Mark the issue as a duplicate of this original issue (key like MUL-123, or full UUID); the status must be cancelled")
 	issueStatusCmd.Flags().String("output", "table", "Output format: table or json")
-	issueStatusCmd.Flags().String("blocked-by", "", "Comma-separated issue identifiers this blocked issue is waiting on")
-	issueStatusCmd.Flags().String("wake-at", "", "RFC3339 time to wake a blocked issue for another look")
-	issueStatusCmd.Flags().String("wait-condition", "", "External condition a blocked issue is waiting on")
-	issueStatusCmd.Flags().String("wait-probe", "", "How to check the wait condition")
-	issueStatusCmd.Flags().String("wait-timeout", "", "RFC3339 deadline for the wait condition")
-	issueStatusCmd.Flags().String("needs-human", "", "Member UUID a blocked issue is waiting on")
 	issueStatusCmd.Flags().String("block-kind", "", "Kind of stop for blocked: decision, permission, external, dependency or capacity (required for agents)")
 	issueStatusCmd.Flags().String("block-action", "", "One-line next step for blocked, at most 80 characters (required for agents)")
 	issueStatusCmd.Flags().String("waiting-for", "", "What this backlog issue is waiting for, one line (80 chars max). Required when an agent puts an issue in backlog; nothing to wait for means use todo")
 	registerIssueHandoffFlags(issueHandoffCmd)
-	registerIssueDisposeFlags(issueDisposeCmd)
 	issueStatusBatchCmd.Flags().Bool("no-start", false, "Change status without starting agent runs")
 	issueStatusBatchCmd.Flags().String("waiting-for", "", "What this backlog issue is waiting for, one line (80 chars max). Required when an agent puts an issue in backlog; nothing to wait for means use todo")
 	issueStatusBatchCmd.Flags().String("output", "table", "Output format: table or json")
@@ -1406,44 +1368,6 @@ func runIssueGet(cmd *cobra.Command, args []string) error {
 	return cli.PrintJSON(os.Stdout, issue)
 }
 
-func runIssueWait(cmd *cobra.Command, args []string) error {
-	client, err := newAPIClient(cmd)
-	if err != nil {
-		return err
-	}
-	ctx, cancel := cli.APIContext(context.Background())
-	defer cancel()
-	issueRef, err := resolveIssueRef(ctx, client, args[0])
-	if err != nil {
-		return fmt.Errorf("resolve issue: %w", err)
-	}
-	var issue map[string]any
-	if err := client.GetJSON(ctx, "/api/issues/"+url.PathEscape(issueRef.ID), &issue); err != nil {
-		return fmt.Errorf("get issue: %w", err)
-	}
-	meta, _ := issue["metadata"].(map[string]any)
-	result := map[string]any{
-		"issue_id":       issueRef.ID,
-		"identifier":     issueDisplayKey(issue),
-		"status":         strVal(issue, "status"),
-		"wait_condition": strVal(meta, blockwait.KeyWaitCondition),
-		"wait_probe":     strVal(meta, blockwait.KeyWaitProbe),
-		"wait_timeout":   strVal(meta, blockwait.KeyWaitTimeout),
-		"probe_status":   strVal(meta, blockwait.KeyProbeStatus),
-		"probe_at":       strVal(meta, blockwait.KeyProbeAt),
-		"probe_output":   strVal(meta, blockwait.KeyProbeOutput),
-	}
-	output, _ := cmd.Flags().GetString("output")
-	if output == "json" {
-		return cli.PrintJSON(os.Stdout, result)
-	}
-	cli.PrintTable(os.Stdout, []string{"KEY", "STATUS", "WAITING FOR", "LAST PROBE", "CHECKED AT", "OUTPUT"}, [][]string{{
-		strVal(result, "identifier"), strVal(result, "status"), strVal(result, "wait_condition"),
-		strVal(result, "probe_status"), strVal(result, "probe_at"), strVal(result, "probe_output"),
-	}})
-	return nil
-}
-
 // childStage extracts the integer stage from a child issue response map.
 // Returns ok=false when the child is unstaged (stage null/absent).
 func childStage(m map[string]any) (int, bool) {
@@ -1502,7 +1426,7 @@ func runIssueChildren(cmd *cobra.Command, args []string) error {
 	output, _ := cmd.Flags().GetString("output")
 	if output == "table" {
 		actors := loadActorDisplayLookup(ctx, client)
-		headers := []string{"STAGE", "KEY", "TITLE", "STATUS", "PRIORITY", "ASSIGNEE", "DRIVER"}
+		headers := []string{"STAGE", "KEY", "TITLE", "STATUS", "PRIORITY", "ASSIGNEE"}
 		rows := make([][]string, 0, len(children))
 		for _, c := range children {
 			stageCell := "-"
@@ -1516,7 +1440,6 @@ func runIssueChildren(cmd *cobra.Command, args []string) error {
 				strVal(c, "status"),
 				strVal(c, "priority"),
 				formatAssignee(c, actors),
-				driverCell(c),
 			})
 		}
 		cli.PrintTable(os.Stdout, headers, rows)
@@ -2352,12 +2275,6 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 		body["suppress_run"] = true
 	}
 	for _, pair := range []struct{ flag, key string }{
-		{"blocked-by", "blocked_by"},
-		{"wake-at", "wake_at"},
-		{"wait-condition", "wait_condition"},
-		{"wait-probe", "wait_probe"},
-		{"wait-timeout", "wait_timeout"},
-		{"needs-human", "needs_human"},
 		{"block-kind", "block_kind"},
 		{"block-action", "block_action"},
 		{"waiting-for", "waiting_for"},
@@ -2383,7 +2300,6 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 
 	if status == "blocked" {
 		display := issueDisplayKey(result)
-		warnUnregisteredBlock(cmd, os.Stderr, display)
 		if assignee, _ := result["assignee_id"].(string); assignee == "" {
 			// Its own budget: the poll plus a synchronous route call must not
 			// eat the time the status write already used.

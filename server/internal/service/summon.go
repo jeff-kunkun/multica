@@ -23,11 +23,9 @@ import (
 // nothing branches on it except the inbox type the routing notices keep.
 const (
 	SummonSourceManual     = "manual"      // `multica issue summon`
-	SummonSourceNeedsHuman = "needs_human" // close/status with --needs-human
+	SummonSourceNeedsHuman = "needs_human" // a person was asked to decide
 	SummonSourceRouting    = "routing"     // routing has nobody left to push the ticket
-	SummonSourcePatrol     = "patrol"      // block-wait patrol could not seat a reviewer
 	SummonSourceUnseated   = "unseated"    // nobody holds the ticket and routing could not seat one
-	SummonSourceTimeLimit  = "time_limit"  // a run hit the workspace time limit
 	SummonSourceQuotaRelay = "quota_relay" // quota tripped with no seat to relay to
 	SummonSourceMention    = "mention"     // a person or agent @-mentioned a member
 	SummonSourceAskHuman   = "ask_human"   // `multica issue ask-human`: a structured question

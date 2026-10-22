@@ -2136,7 +2136,6 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	if len(steerTaskIDs) > 0 {
 		applyCommentSupplements(&resp, h.listCommentSupplements(r.Context(), issue.WorkspaceID, []pgtype.UUID{comment.ID})[uuidToString(comment.ID)])
 	}
-	h.maybeReleaseOnAcceptance(r.Context(), issue, comment)
 	h.followIssueFromChatTask(r, authorType, authorID, issue)
 
 	writeJSON(w, http.StatusCreated, resp)
@@ -2243,9 +2242,6 @@ func (h *Handler) triggerTasksForCommentReport(ctx context.Context, issue db.Iss
 	if len(forceFreshSession) == 0 || !forceFreshSession[0] {
 		h.recordMentionSummons(ctx, issue, comment, actorType, actorID)
 		summonWoke := h.answerSummons(ctx, issue, comment, actorType, actorID, triggerOutcomesStartedRun(outcomes))
-		if actorType == "member" {
-			h.resumeBlockedOnReply(ctx, issue, enqueued, summonWoke.Valid)
-		}
 		if summonWoke.Valid {
 			woken = append(woken, h.summonAnswerWokenRun(ctx, summonWoke))
 		}

@@ -1690,8 +1690,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Get("/workspaces", h.ListDaemonWorkspaces)
 		r.Get("/workspaces/{workspaceId}/repos", h.GetDaemonWorkspaceRepos)
 		r.Get("/workspaces/{workspaceId}/runtime-profiles", h.DaemonListRuntimeProfiles)
-		r.Get("/workspaces/{workspaceId}/block-waits", h.ListDaemonBlockWaits)
-		r.Post("/issues/{issueId}/wait-probe", h.ReportDaemonBlockWait)
 
 		// Agent-triggered plugin hooks. The daemon's local MCP server calls
 		// this when an agent picks one of its tools; the server makes the
@@ -2332,8 +2330,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/quick-create", h.QuickCreateIssue)
 				r.Post("/preview-trigger", h.PreviewIssueTrigger)
 				r.Post("/batch-update", h.BatchUpdateIssues)
-				// One plan file, one transaction, the whole staged tree
-				// (DENE-864) — `multica plan apply`.
 				r.Post("/batch-delete", h.BatchDeleteIssues)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetIssue)
@@ -2362,9 +2358,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/comments", h.CreateComment)
 					r.Get("/comments", h.ListComments)
 					r.Get("/timeline", h.ListTimeline)
-					r.Get("/plans", h.ListPlans)
-					r.Post("/plans", h.ProposePlan)
-					r.Post("/plans/{version}/approve", h.ApprovePlan)
 					r.Get("/workflow-handoff", h.PreviewWorkflowHandoff)
 					r.Get("/subscribers", h.ListIssueSubscribers)
 					r.Post("/subscribe", h.SubscribeToIssue)
@@ -2407,9 +2400,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// One-shot handoff (DENE-863): server routes, dedupes and
 					// reports what actually landed — `multica issue handoff`.
 					r.Post("/handoff", h.HandoffIssue)
-					// What to do with a child nobody drives (DENE-1342): rerun,
-					// reroute, split or cancel — `multica issue dispose`.
-					r.Post("/dispose", h.DisposeIssue)
 					// One "叫人" entry (DENE-880): inbox, subscription, a
 					// visible @ and an open call the reply answers —
 					// `multica issue summon`.
@@ -2417,9 +2407,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// A structured question to one person, pushed to their Bot
 					// when they have one (DENE-1933) — `multica issue ask-human`.
 					r.Post("/ask-human", h.AskHumanIssue)
-					// Promote the next stage once the one below is terminal
-					// (DENE-864) — `multica issue stage advance`.
-					r.Post("/stage-advance", h.AdvanceIssueStage)
 					r.Post("/quick-actions/{quickActionId}/run", h.RunQuickAction)
 					r.Post("/quick-actions/{quickActionId}/render", h.RenderQuickAction)
 					r.Get("/task-runs", h.ListTasksByIssue)
@@ -2485,13 +2472,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/", h.GetProperty)
 					r.Patch("/", h.UpdateProperty)
 				})
-			})
-
-			// Plan approvers: members besides owners who may approve plans.
-			r.Route("/api/plan-approvers", func(r chi.Router) {
-				r.Get("/", h.ListPlanApprovers)
-				r.Post("/", h.AddPlanApprover)
-				r.Delete("/{userId}", h.RemovePlanApprover)
 			})
 
 			// Labels

@@ -152,7 +152,7 @@ func TestBatchUpdateReportsStatusGuardRejection(t *testing.T) {
 	if resp.Updated != 0 || len(resp.Rejected) != 1 {
 		t.Fatalf("response = %+v, want one rejected issue and no updates", resp)
 	}
-	if resp.Rejected[0].IssueID != issueID || !strings.Contains(resp.Rejected[0].Reason, "--blocked-by") {
+	if resp.Rejected[0].IssueID != issueID || !strings.Contains(resp.Rejected[0].Reason, "--block-kind") {
 		t.Fatalf("rejection = %+v, want issue id and blocked guidance", resp.Rejected[0])
 	}
 	if got := issueStatusDirect(t, issueID); got != "in_progress" {
@@ -298,12 +298,10 @@ func newStagedBatchFixture(t *testing.T) stagedBatchFixture {
 	fx.stage2 = []IssueResponse{mkChild(2), mkChild(2)}
 
 	t.Cleanup(func() {
-		ctx := context.Background()
-		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, parent.ID)
 		for _, c := range append(append([]IssueResponse{}, fx.stage1...), fx.stage2...) {
-			testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, c.ID)
+			cleanupChildDoneIssue(c.ID)
 		}
-		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, parent.ID)
+		cleanupChildDoneIssue(parent.ID)
 	})
 
 	return fx
@@ -323,134 +321,11 @@ func batchSetStatus(t *testing.T, ids []string, status string) {
 	}
 }
 
-// systemCommentIDOn returns the id of the single (latest) system comment on issueID.
-func systemCommentIDOn(t *testing.T, issueID string) string {
-	t.Helper()
-	var id string
-	if err := testPool.QueryRow(context.Background(),
-		`SELECT id::text FROM comment
-		   WHERE issue_id = $1 AND author_type = 'system'
-		   ORDER BY created_at DESC LIMIT 1`,
-		issueID,
-	).Scan(&id); err != nil {
-		t.Fatalf("read system comment id: %v", err)
-	}
-	return id
-}
-
-// triggerCommentIDForAgentTask returns the trigger_comment_id of the single
-// pending task on issueID for agentID.
-func triggerCommentIDForAgentTask(t *testing.T, issueID, agentID string) string {
-	t.Helper()
-	var id string
-	if err := testPool.QueryRow(context.Background(),
-		`SELECT trigger_comment_id::text FROM agent_task_queue
-		   WHERE issue_id = $1 AND agent_id = $2
-		     AND status IN ('queued','dispatched','running')
-		   ORDER BY created_at DESC LIMIT 1`,
-		issueID, agentID,
-	).Scan(&id); err != nil {
-		t.Fatalf("read task trigger_comment_id: %v", err)
-	}
-	return id
-}
-
-// TestBatchChildDoneCrossStage_OneComment is the MUL-4155 core. A single batch
-// that finishes children across two stages must produce exactly ONE accurate
-// system comment on the parent — announcing the highest stage closed by the
-// final state, never a stale "Stage 2 is next" — and the parent assignee's
-// single wake must be pinned to that final comment, regardless of id order.
-func TestBatchChildDoneCrossStage_OneComment(t *testing.T) {
-	assertFinal := func(t *testing.T, parentID, agentID string) {
-		t.Helper()
-		if got := countSystemCommentsOn(t, parentID); got != 1 {
-			t.Fatalf("expected exactly 1 system comment on parent, got %d", got)
-		}
-		content, _, _, _ := systemCommentOn(t, parentID)
-		if !strings.Contains(content, "Stage 2 of this issue is complete") {
-			t.Errorf("expected the comment to announce the top closed stage (Stage 2), got: %s", content)
-		}
-		if !strings.Contains(content, "Stage 1: 2/2 done; Stage 2: 2/2 done") {
-			t.Errorf("expected the final-state stage summary, got: %s", content)
-		}
-		// The bug: a mid-batch snapshot told the parent to advance a stage this
-		// same batch had already finished.
-		if strings.Contains(content, "is next") || strings.Contains(content, "(next)") {
-			t.Errorf("comment must not carry a stale next-stage instruction, got: %s", content)
-		}
-		// Exactly one wake, pinned to the final comment.
-		if got := countPendingTasksForAgent(t, parentID, agentID); got != 1 {
-			t.Fatalf("expected exactly 1 pending parent task, got %d", got)
-		}
-		if trig, want := triggerCommentIDForAgentTask(t, parentID, agentID), systemCommentIDOn(t, parentID); trig != want {
-			t.Errorf("parent wake pinned to %s, want the final comment %s", trig, want)
-		}
-	}
-
-	t.Run("forward order [stage1, stage2]", func(t *testing.T) {
-		fx := newStagedBatchFixture(t)
-		batchSetStatus(t, []string{fx.stage1[0].ID, fx.stage1[1].ID, fx.stage2[0].ID, fx.stage2[1].ID}, "done")
-		assertFinal(t, fx.parent.ID, fx.agentID)
-	})
-
-	t.Run("reverse order [stage2, stage1]", func(t *testing.T) {
-		fx := newStagedBatchFixture(t)
-		batchSetStatus(t, []string{fx.stage2[0].ID, fx.stage2[1].ID, fx.stage1[0].ID, fx.stage1[1].ID}, "done")
-		assertFinal(t, fx.parent.ID, fx.agentID)
-	})
-}
-
-// TestBatchChildDoneCrossStage_Cancelled — cancelling every stage in one batch
-// is terminal too, but the notification must distinguish cancellation from
-// successful completion while still emitting one accurate final comment.
-func TestBatchChildDoneCrossStage_Cancelled(t *testing.T) {
-	fx := newStagedBatchFixture(t)
-	batchSetStatus(t, []string{fx.stage1[0].ID, fx.stage1[1].ID, fx.stage2[0].ID, fx.stage2[1].ID}, "cancelled")
-
-	if got := countSystemCommentsOn(t, fx.parent.ID); got != 1 {
-		t.Fatalf("expected exactly 1 system comment on parent, got %d", got)
-	}
-	content, _, _, _ := systemCommentOn(t, fx.parent.ID)
-	if !strings.Contains(content, "Stage 2 of this issue is closed") {
-		t.Errorf("expected Stage 2 closed announcement for cancelled work, got: %s", content)
-	}
-	if !strings.Contains(content, "Stage 1: 0/2 done, 2 cancelled; Stage 2: 0/2 done, 2 cancelled") {
-		t.Errorf("expected cancelled children to be counted separately from done, got: %s", content)
-	}
-	if strings.Contains(content, "is next") || strings.Contains(content, "(next)") {
-		t.Errorf("comment must not carry a stale next-stage instruction, got: %s", content)
-	}
-}
-
-// TestBatchChildDoneClosesLowerStageOnly — when a batch finishes only the lower
-// stage (a later stage still has open children), the parent must be told Stage 1
-// is complete AND accurately pointed at Stage 2 as next. Guards against
-// over-suppressing the legitimate advance instruction.
-func TestBatchChildDoneClosesLowerStageOnly(t *testing.T) {
-	fx := newStagedBatchFixture(t)
-	batchSetStatus(t, []string{fx.stage1[0].ID, fx.stage1[1].ID}, "done")
-
-	if got := countSystemCommentsOn(t, fx.parent.ID); got != 1 {
-		t.Fatalf("expected exactly 1 system comment on parent, got %d", got)
-	}
-	content, _, _, _ := systemCommentOn(t, fx.parent.ID)
-	if !strings.Contains(content, "Stage 1 of this issue is complete") {
-		t.Errorf("expected Stage 1 completion announcement, got: %s", content)
-	}
-	if !strings.Contains(content, "Stage 2: 0/2 done (next)") {
-		t.Errorf("expected accurate next-stage progress, got: %s", content)
-	}
-	if !strings.Contains(content, "Stage 2 is next") {
-		t.Errorf("expected the advance-to-next-stage instruction, got: %s", content)
-	}
-}
-
-// TestBatchChildDoneCrossStage_OneWakeRule is the MUL-4155 core. A single batch
+// TestBatchChildDoneCrossStage_OneWake is the MUL-4155 core. A single batch
 // that finishes children across two stages must wake the parent once, from
 // the final state: every sub-issue closed, never a stale "Stage 2 is next",
 // regardless of id order.
-func TestBatchChildDoneCrossStage_OneWakeRule(t *testing.T) {
-	enableChildDoneRule(t)
+func TestBatchChildDoneCrossStage_OneWake(t *testing.T) {
 	assertFinal := func(t *testing.T, parentID, agentID string) {
 		t.Helper()
 		entries := childDoneEntries(t, parentID)
@@ -479,10 +354,9 @@ func TestBatchChildDoneCrossStage_OneWakeRule(t *testing.T) {
 	})
 }
 
-// TestBatchChildDoneCrossStage_CancelledRule — cancelling every stage in one batch
+// TestBatchChildDoneCrossStage_Cancelled — cancelling every stage in one batch
 // closes them too; the facts count the cancellations apart from finished work.
-func TestBatchChildDoneCrossStage_CancelledRule(t *testing.T) {
-	enableChildDoneRule(t)
+func TestBatchChildDoneCrossStage_Cancelled(t *testing.T) {
 	fx := newStagedBatchFixture(t)
 	batchSetStatus(t, []string{fx.stage1[0].ID, fx.stage1[1].ID, fx.stage2[0].ID, fx.stage2[1].ID}, "cancelled")
 
@@ -492,10 +366,9 @@ func TestBatchChildDoneCrossStage_CancelledRule(t *testing.T) {
 	}
 }
 
-// TestBatchChildDoneClosesLowerStageOnlyRule — when a batch finishes only the lower
+// TestBatchChildDoneClosesLowerStageOnly — when a batch finishes only the lower
 // stage, the parent is told Stage 1 closed and pointed at Stage 2.
-func TestBatchChildDoneClosesLowerStageOnlyRule(t *testing.T) {
-	enableChildDoneRule(t)
+func TestBatchChildDoneClosesLowerStageOnly(t *testing.T) {
 	fx := newStagedBatchFixture(t)
 	batchSetStatus(t, []string{fx.stage1[0].ID, fx.stage1[1].ID}, "done")
 

@@ -860,7 +860,6 @@ type AgentTaskResponse struct {
 	// ProjectWorkflow is the issue's project workflow, when it has one other
 	// than the Default (MUL-7420). Absent keeps the brief unchanged.
 	ProjectWorkflow         *TaskProjectWorkflowData `json:"project_workflow,omitempty"`
-	PlanFlow                bool                     `json:"plan_flow,omitempty"`             // the issue's workspace uses plan approval (has a plan or a plan approver), so its brief lists `plan propose`; absent keeps the brief unchanged. Mirror field: internal/daemon/types.go, same JSON name
 	ThreadName              string                   `json:"thread_name,omitempty"`           // semantic title for provider-native session/thread history
 	MagpieGroup             string                   `json:"magpie_group,omitempty"`          // issue metadata magpie_group; honoured only for a group in the agent's runtime_config.magpie_groups
 	MagpieGroupsEnabled     bool                     `json:"magpie_groups_enabled,omitempty"` // the workspace's magpie mode switch; off means no magpie group pin and an empty MagpieGroup
@@ -917,12 +916,8 @@ type AgentTaskResponse struct {
 	// and sends a short continue prompt instead of re-injecting the original
 	// task. omitempty keeps it off the wire for every other claim and for old
 	// daemons.
-	ContinueInterruptedSession bool `json:"continue_interrupted_session,omitempty"`
-	// ContinueAfterTimeLimit marks a continue-retry whose parent stopped on
-	// the workspace time limit (DENE-857). The daemon's continue prompt then
-	// tells the agent to close out finished work and split what remains.
-	ContinueAfterTimeLimit bool   `json:"continue_after_time_limit,omitempty"`
-	WorkDir                string `json:"work_dir,omitempty"` // local working directory pinned for this task; populated once the daemon reports it
+	ContinueInterruptedSession bool   `json:"continue_interrupted_session,omitempty"`
+	WorkDir                    string `json:"work_dir,omitempty"` // local working directory pinned for this task; populated once the daemon reports it
 	// RelativeWorkDir is a privacy-safe display form of WorkDir intended for
 	// the UI. For standard tasks it strips the daemon's workspaces root while
 	// preserving either the legacy or readable workspace/task segments; for local_directory
