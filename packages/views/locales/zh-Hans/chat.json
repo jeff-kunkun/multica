@@ -13,7 +13,7 @@
   },
   "project_bar": {
     "all": "全部",
-    "more": "⋯ 更多 ({{count}})",
+    "more": "更多 ({{count}})",
     "menu_title": "项目栏",
     "done": "完成",
     "search": "搜项目…",

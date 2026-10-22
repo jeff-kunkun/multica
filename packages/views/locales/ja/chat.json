@@ -13,7 +13,7 @@
   },
   "project_bar": {
     "all": "すべて",
-    "more": "⋯ その他 ({{count}})",
+    "more": "その他 ({{count}})",
     "menu_title": "プロジェクト",
     "done": "完了",
     "search": "プロジェクトを検索…",

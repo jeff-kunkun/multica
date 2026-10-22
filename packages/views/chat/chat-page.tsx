@@ -705,7 +705,6 @@ export function ChatPage() {
       onMovePin={moveProjectPin}
       filter={projectFilter}
       onFilterChange={changeProjectFilter}
-      onOpenSwitcher={() => setSwitcherOpen(true)}
       onFitWidthChange={setProjectBarFitWidth}
     />
   );

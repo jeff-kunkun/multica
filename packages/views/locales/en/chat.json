@@ -13,7 +13,7 @@
   },
   "project_bar": {
     "all": "All",
-    "more": "⋯ More ({{count}})",
+    "more": "More ({{count}})",
     "menu_title": "Projects",
     "done": "Done",
     "search": "Search projects…",

@@ -54,7 +54,7 @@ const projects = Array.from({ length: 20 }, (_, index) =>
 );
 
 describe("ChatProjectBar", () => {
-  it("shows each project's own icon on its chip and in More, like the sidebar pins", async () => {
+  it("keeps the bar to plain names and shows the project's icon only in More", async () => {
     const user = userEvent.setup();
     const game = { ...project("p1", "game"), icon: "🎮" };
     const { container } = render(
@@ -71,8 +71,7 @@ describe("ChatProjectBar", () => {
       </I18nProvider>,
     );
 
-    // The chip renderer also feeds the width mirror, so the icon is measured too.
-    expect(container.textContent).toContain("🎮game");
+    expect(container.textContent).not.toContain("🎮");
     await user.click(screen.getByRole("button", { name: /More/ }));
     expect(screen.getByRole("button", { name: "game, 1 chat" }).textContent).toContain("🎮");
   });
@@ -177,43 +176,42 @@ describe("ChatProjectBar", () => {
       const chips = () =>
         within(view.container.querySelector<HTMLElement>("[data-slot='chat-project-chips']")!)
           .getAllByRole("button")
-          // The project icon is decoration; compare chips by their words.
-          .map((button) => button.textContent?.replace(/^📁/, ""));
+          .map((button) => button.textContent);
       return { ...view, chips, onFilterChange, onFitWidthChange };
     }
 
-    it("fills two rows before anything goes into More", () => {
-      // 3 chips per row (100 + 6 + 100 + 6 + 100 = 312): All + 5 projects.
-      areaWidth = 320;
+    it("fills one row before anything goes into More", () => {
+      // 6 chips fit (6 * 100 + 5 * 6 = 630): All + 5 projects.
+      areaWidth = 640;
       const { chips } = renderBar();
       expect(chips()).toEqual([
         "All",
-        "Project 11",
-        "Project 21",
-        "Project 31",
-        "Project 41",
-        "Project 51",
+        "Project 1",
+        "Project 2",
+        "Project 3",
+        "Project 4",
+        "Project 5",
       ]);
       // 20 projects, 5 on the bar.
       expect(screen.getByRole("button", { name: /More \(15\)/ })).toBeInTheDocument();
     });
 
     it("keeps pinned projects on the bar when space runs out", () => {
-      areaWidth = 320;
+      areaWidth = 640;
       const { chips } = renderBar({ pinnedIds: ["p8", "p20"] });
       expect(chips()).toEqual([
         "All",
-        "Project 81",
-        "Project 200",
-        "Project 11",
-        "Project 21",
-        "Project 31",
+        "Project 8",
+        "Project 20",
+        "Project 1",
+        "Project 2",
+        "Project 3",
       ]);
     });
 
     it("lists every project once in More and marks the ones behind it", async () => {
       // Seven pins, five slots: p6 and p7 are pinned but behind More.
-      areaWidth = 320;
+      areaWidth = 640;
       const user = userEvent.setup();
       const onTogglePin = vi.fn();
       const { onFilterChange } = renderBar({
@@ -237,7 +235,7 @@ describe("ChatProjectBar", () => {
     });
 
     it("filters and groups the projects in More", async () => {
-      areaWidth = 320;
+      areaWidth = 640;
       const user = userEvent.setup();
       renderBar({ pinnedIds: ["p2"] });
 
@@ -258,25 +256,25 @@ describe("ChatProjectBar", () => {
     });
 
     it("moves the project picked from More to a visible slot right after the pins", () => {
-      areaWidth = 320;
+      areaWidth = 640;
       const { chips } = renderBar({ pinnedIds: ["p8"], filter: { type: "project", id: "p7" } });
       expect(chips()).toEqual([
         "All",
-        "Project 81",
-        "Project 71",
-        "Project 11",
-        "Project 21",
-        "Project 31",
+        "Project 8",
+        "Project 7",
+        "Project 1",
+        "Project 2",
+        "Project 3",
       ]);
       expect(screen.getByRole("button", { name: /Project 7/, pressed: true })).toBeInTheDocument();
     });
 
-    it("reports the bar width at which every project fits in two rows", () => {
-      areaWidth = 320;
+    it("reports the bar width at which every project fits on one row", () => {
+      areaWidth = 640;
       const { onFitWidthChange } = renderBar();
-      // All + 8 projects = 9 chips; 5 on row one needs 5 * 100 + 4 * 6 = 524,
+      // All + 8 projects = 9 chips: 9 * 100 + 8 * 6 = 948,
       // plus the 120px beside the chips and 2px of slack.
-      expect(onFitWidthChange).toHaveBeenLastCalledWith(524 + 120 + 2);
+      expect(onFitWidthChange).toHaveBeenLastCalledWith(948 + 120 + 2);
     });
   });
 });

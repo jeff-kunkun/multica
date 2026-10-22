@@ -678,7 +678,10 @@ describe("ChatPage compact back navigation", () => {
     };
     const { push } = renderPage("");
 
-    fireEvent.click(screen.getByRole("button", { name: "Switch project" }));
+    for (const mod of [{ metaKey: true }, { ctrlKey: true }]) {
+      if (screen.queryByRole("option", { name: /Tarot/ })) break;
+      fireEvent.keyDown(document, { key: "\\", code: "Backslash", ...mod });
+    }
     fireEvent.click(screen.getByRole("option", { name: /Tarot/ }));
     expect(push).not.toHaveBeenCalled();
     expect(mockSetActiveSession).not.toHaveBeenCalledWith("session-2");

@@ -13,7 +13,7 @@
   },
   "project_bar": {
     "all": "Tout",
-    "more": "⋯ Plus ({{count}})",
+    "more": "Plus ({{count}})",
     "menu_title": "Projets",
     "done": "Terminé",
     "search": "Rechercher un projet…",

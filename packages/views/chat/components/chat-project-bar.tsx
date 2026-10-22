@@ -1,7 +1,7 @@
 "use client";
 
 import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
-import { ChevronsUpDown, GripVertical, Pin } from "lucide-react";
+import { GripVertical, Pin } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { useIsCompact } from "@multica/ui/hooks/use-mobile";
 import { Button } from "@multica/ui/components/ui/button";
@@ -11,9 +11,6 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@multica/ui/components/ui/popover";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@multica/ui/components/ui/tooltip";
-import { useShortcut } from "@multica/core/shortcuts";
-import { ShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { chatSessionProjectIds } from "@multica/core/chat/project-context";
 import {
   CHAT_PROJECT_BAR_ROWS,
@@ -71,9 +68,8 @@ const CHIP_SLOT_STYLE: CSSProperties = {
 const PAINTED_SLOT_STYLE: CSSProperties = { ...CHIP_SLOT_STYLE, maxWidth: "100%" };
 
 /**
- * Above the chat list, on up to two rows: All, then the person's pinned
- * projects, then projects they have chatted in recently. The second row only
- * appears when the first is full. Whatever still does not fit goes into More,
+ * Above the chat list, on one row: All, then the person's pinned projects,
+ * then projects they have chatted in recently. Whatever does not fit goes into More,
  * the one place every project is listed once: searched, filtered, grouped,
  * pinned or unpinned, and — for pins — reordered. Rows that are behind More
  * rather than on the bar are marked.
@@ -86,7 +82,6 @@ export function ChatProjectBar({
   onMovePin,
   filter,
   onFilterChange,
-  onOpenSwitcher,
   onFitWidthChange,
 }: {
   projects: Project[];
@@ -97,8 +92,6 @@ export function ChatProjectBar({
   onMovePin: (fromProjectId: string, toProjectId: string) => void;
   filter: ChatProjectFilter;
   onFilterChange: (filter: ChatProjectFilter) => void;
-  /** Opens the searchable jump list. Omitted on surfaces that don't switch. */
-  onOpenSwitcher?: () => void;
   /**
    * Reports how wide this bar has to be for every chip to fit on its rows
    * (null until measured). The chat page turns it into the divider's
@@ -108,11 +101,8 @@ export function ChatProjectBar({
 }) {
   const { t } = useT("chat");
   const { t: tProjects } = useT("projects");
-  const projectSwitchChord = useShortcut("switchChatProject");
-  // Phones grow every button to a 44px touch target, so two rows of chips
-  // would not fit the fixed chip-area height. Compact keeps one row.
   const isCompact = useIsCompact();
-  const rows = isCompact ? 1 : CHAT_PROJECT_BAR_ROWS;
+  const rows = CHAT_PROJECT_BAR_ROWS;
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -284,8 +274,6 @@ export function ChatProjectBar({
         className={chipClass(active)}
         onClick={() => select({ type: "project", id })}
       >
-        {pinnedIds.includes(id) && <Pin className="size-3 shrink-0" aria-hidden />}
-        <ProjectIcon project={projectById.get(id)} size="sm" />
         {row?.hasUnread && (
           <span
             aria-label={t(($) => $.project_bar.unread)}
@@ -293,9 +281,6 @@ export function ChatProjectBar({
           />
         )}
         <span className="min-w-0 max-w-32 truncate">{title}</span>
-        <span className={cn("tabular-nums", active ? "text-background/70" : "text-muted-foreground")}>
-          {row?.chatCount ?? 0}
-        </span>
       </Button>
     );
   };
@@ -338,10 +323,9 @@ export function ChatProjectBar({
         ref={containerRef}
         data-slot="chat-project-chips"
         className={cn(
-          "flex min-w-0 flex-1 content-start items-center overflow-hidden",
-          isCompact ? "flex-nowrap" : "flex-wrap",
+          "flex min-w-0 flex-1 flex-nowrap content-start items-center overflow-hidden",
         )}
-        style={{ gap: CHIP_GAP, maxHeight: isCompact ? undefined : CHIPS_MAX_HEIGHT }}
+        style={{ gap: CHIP_GAP, maxHeight: CHIPS_MAX_HEIGHT }}
       >
         <span style={PAINTED_SLOT_STYLE}>{allChip}</span>
         {visibleIds.map((id) => (
@@ -350,31 +334,6 @@ export function ChatProjectBar({
           </span>
         ))}
       </div>
-
-      {onOpenSwitcher && (
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Button
-                type="button"
-                variant="outline"
-                size="icon-sm"
-                className="size-7 shrink-0 rounded-full"
-                aria-label={t(($) => $.project_bar.switch)}
-                onClick={onOpenSwitcher}
-              />
-            }
-          >
-            <ChevronsUpDown className="size-3.5" />
-          </TooltipTrigger>
-          <TooltipContent side="bottom">
-            <span className="inline-flex items-center gap-1.5">
-              {t(($) => $.project_bar.switch)}
-              {projectSwitchChord ? <ShortcutKeycaps shortcut={projectSwitchChord} /> : null}
-            </span>
-          </TooltipContent>
-        </Tooltip>
-      )}
 
       <Popover
         open={menuOpen}

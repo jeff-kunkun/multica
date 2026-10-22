@@ -97,7 +97,7 @@ export function rankChatProjects(
 }
 
 /** The bar wraps onto this many rows before anything goes into More. */
-export const CHAT_PROJECT_BAR_ROWS = 2;
+export const CHAT_PROJECT_BAR_ROWS = 1;
 
 /**
  * How many leading chips fit when the bar wraps onto `rows` rows of
