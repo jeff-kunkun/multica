@@ -8,13 +8,11 @@ import (
 	"strings"
 
 	"github.com/multica-ai/multica/server/internal/issuestatus"
-	"github.com/multica-ai/multica/server/internal/parking"
 )
 
 // Sources, in display priority for issues: an agent's own line, then the
-// close summary, then the parking summary. Agent and close
-// lines are both explicit statements, so between them the latest wins; the
-// parking summary only fills in while neither exists. Chats use agent, then
+// close summary. Agent and close lines are both explicit statements, so
+// between them the latest wins. Chats use agent, then
 // a model recap of the latest turn ("model"), or the reply itself when the
 // deployment has no model configured ("reply").
 const (
@@ -58,23 +56,6 @@ func ForStatus(status string) string {
 	default:
 		return ToneWorking
 	}
-}
-
-// ForParking maps a parking category onto a tone: a stall the agent did not
-// explain is stuck, the same as an explicit block.
-func ForParking(category string) string {
-	switch category {
-	case parking.CategoryDone:
-		return ToneDone
-	case parking.CategoryAwaitReview, parking.CategoryWaitingPerson:
-		return ToneWaiting
-	case parking.CategoryBlocked:
-		return ToneStuck
-	}
-	if parking.Unexplained(category) {
-		return ToneStuck
-	}
-	return ToneWorking
 }
 
 // Clip trims and bounds a line. Returns "" when nothing is left.

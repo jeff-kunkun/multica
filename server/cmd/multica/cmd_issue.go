@@ -371,8 +371,7 @@ var issueProgressCmd = &cobra.Command{
 	Short: "Report or read the progress line under an issue's title",
 	Long: `Report where this issue stands — the second line under its title on the
 board, in the list and on the detail page. Report when the state changes,
-not on every step. The parking summary only fills in while yours does not
-exist.
+not on every step.
 
   multica issue progress DENE-12 "API done, wiring the settings page"
   multica issue progress DENE-12 "Waiting on the design review" --tone waiting

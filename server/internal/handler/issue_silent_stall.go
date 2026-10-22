@@ -11,7 +11,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/blockwait"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/issueworkflow"
-	"github.com/multica-ai/multica/server/internal/parking"
 	"github.com/multica-ai/multica/server/internal/routing"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -54,8 +53,7 @@ func reviewerIsAssigned(issue db.Issue) bool {
 // children; the seat is now filled here by the same ladder fallback the parent
 // gets, and ensureAcceptanceRunning starts it once the executor's run is gone.
 //
-// Every refusal it returns is also kept in issue_rejection, so the parking
-// record (DENE-881) can say "送审被拒" after the run is gone.
+// Every refusal it returns is also kept in issue_rejection.
 func (h *Handler) guardSilentStall(ctx context.Context, issue db.Issue, projectID pgtype.UUID, nextStatus string, actorType, actorID string, assigneeType pgtype.Text, assigneeID pgtype.UUID, reviewerType pgtype.Text, reviewerID pgtype.UUID, reviewerExplicit bool) statusTransition {
 	tr := h.decideSilentStall(ctx, issue, projectID, nextStatus, actorType, actorID, assigneeType, assigneeID, reviewerType, reviewerID, reviewerExplicit)
 	if tr.refuse != "" {
@@ -65,11 +63,11 @@ func (h *Handler) guardSilentStall(ctx context.Context, issue db.Issue, projectI
 }
 
 // recordRejection keeps a refused status move. Best effort: losing the row
-// only costs the parking record one reason, never the refusal itself.
+// never costs the refusal itself.
 func (h *Handler) recordRejection(ctx context.Context, issue db.Issue, nextStatus, actorType, actorID, reason string) {
-	kind := parking.RejectClose
+	kind := "close_refused"
 	if nextStatus == issuestatus.InReview {
-		kind = parking.RejectReview
+		kind = "review_refused"
 	}
 	actor := pgtype.UUID{}
 	if id, err := util.ParseUUID(actorID); err == nil {

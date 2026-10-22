@@ -56,39 +56,6 @@ func TestWriteIssueProgress_RejectsUnknownTone(t *testing.T) {
 	}
 }
 
-// The parking summary is the last-priority fallback: it fills an empty line
-// but never replaces an agent report or a close summary.
-func TestIssueProgress_ParkingFallbackNeverBeatsExplicitLines(t *testing.T) {
-	requireDB(t)
-	ctx := context.Background()
-	fx := testutil.New(testPool, testWorkspaceID, testUserID)
-	issue := loadProgressIssue(t, fx.Issue(t, "progress fallback"))
-	parked := func(text string) bool {
-		_, err := testHandler.Queries.UpdateIssueProgress(ctx, db.UpdateIssueProgressParams{
-			ID: issue.ID, WorkspaceID: issue.WorkspaceID, Text: text, Source: "parking", Tone: progress.ToneStuck,
-			AuthorType: "system", FallbackOnly: true,
-		})
-		return err == nil
-	}
-	if !parked("stalled") {
-		t.Fatal("parking summary did not fill an empty line")
-	}
-	if !parked("stalled again") {
-		t.Fatal("parking summary did not replace its own line")
-	}
-	for _, source := range []string{progress.SourceAgent, progress.SourceClose} {
-		if _, err := testHandler.recordIssueProgress(ctx, issue, progressEntry{Text: source + " line", Source: source, AuthorType: "agent"}); err != nil {
-			t.Fatal(err)
-		}
-		if parked("stalled") {
-			t.Fatalf("parking summary replaced the %s line", source)
-		}
-		if got := loadProgressIssue(t, uuidToString(issue.ID)); got.ProgressText != source+" line" {
-			t.Fatalf("progress = %q", got.ProgressText)
-		}
-	}
-}
-
 // Agent and close lines are both explicit: the latest one wins.
 func TestIssueProgress_CloseAndAgentLatestWins(t *testing.T) {
 	requireDB(t)

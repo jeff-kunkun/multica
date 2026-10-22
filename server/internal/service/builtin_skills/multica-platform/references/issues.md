@@ -426,7 +426,7 @@ For GitLab, `glab ci status` can be used directly when it returns non-zero while
 
 ### Report progress
 
-`multica issue progress <issue-id> "<progress>" [--tone working|waiting|stuck|done] --output json` sets the line under the issue's title; `--history` reads earlier lines. Who wins between your line and the parking summary: `references/progress.md`.
+`multica issue progress <issue-id> "<progress>" [--tone working|waiting|stuck|done] --output json` sets the line under the issue's title; `--history` reads earlier lines. Who wins between your line and other writers: `references/progress.md`.
 
 `multica issue title <issue-id> --suggest "<title>" --output json` stores a pending title suggestion for a human-created issue. It does not rename the issue; the issue page's adopt action is the only writer that applies it.
 

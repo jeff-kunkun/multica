@@ -612,9 +612,6 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 	// The analysis role reads the whole ticket and reduces it to facts
 	// (DENE-923). It is always a general chat model.
 	h.Routing.Analyst = routing.LLMAnalyst{Gen: llmClient, Dial: dialRouting, Runtime: runtimeRoutingPromptRunner{h: h}}
-	// The parking record's one sentence comes from the same routing model,
-	// under the same switch and breaker (DENE-881).
-	taskSvc.ParkingSummarizer = h.Routing
 	h.WebhookDeliveryWorker = NewWebhookDeliveryWorker(h)
 	h.BotWakeWorker = NewBotWakeWorker(h)
 	h.HumanNeededWorker = NewHumanNeededWorker(h, h.BotWakeWorker)

@@ -5474,12 +5474,6 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	// task's agent capacity or serialization key is re-claimed immediately.
 	h.TaskService.NotifyTaskFinished(*task)
 
-	// Parking record for the issue (DENE-881), the completion-path mirror of
-	// the one HandleFailedTasks writes. Deliberately AFTER
-	// reconcileCommentsOnCompletion: a follow-up run it queued reads as still
-	// running rather than as a stop.
-	h.TaskService.HandleCompletedTasks(r.Context(), []db.AgentTaskQueue{*task})
-
 	// The executor's status write to in_review usually lands while this run
 	// is still open, and the in-review row waits for the run to end before
 	// it wakes the reviewer. Ask again now that the run is gone. A follow-up
