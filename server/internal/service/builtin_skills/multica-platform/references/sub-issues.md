@@ -33,23 +33,17 @@ Creating every serial step as `todo` enqueues the whole chain at once.
 ### Stages: order sub-issues into barrier groups
 
 `--stage <N>` (N >= 1) groups sub-issues under the same parent into ordered
-stages. The server **tries once to wake the parent assignee when a whole stage
-finishes** — i.e. every sub-issue in the lowest unfinished stage has reached a
-terminal status (`done`/`cancelled`); a notification that fails is not replayed.
-A completion that does not close a stage is silent (no comment, no wake). A
-sibling set with **no** stages is one implicit stage, so the parent is woken
-once when the *last* sub-issue finishes — not on every child.
+stages. The platform's sub-issue wakeup **wakes the parent assignee when a stage
+closes while a later stage is waiting** — every sub-issue up to that stage has
+reached a terminal status (`done`/`cancelled`) — and **once more when every
+sub-issue, staged or not, is closed**. A completion that closes nothing is
+silent. A sibling set with **no** stages wakes the parent once, when the *last*
+sub-issue finishes. A parent in `backlog` is not woken; it catches up once it
+leaves backlog. A member assignee gets an inbox notification instead of a run.
 
 Advancement is agent-driven: the server only detects the closed barrier and
 wakes the parent assignee, who then decides whether to promote the next stage's
 `backlog` sub-issues to `todo`.
-
-A parent nobody holds still advances: a closed stage promotes the next stage's
-sub-issues whose description says there is no extra dependency, and the rest
-reach a person's inbox. When you, an agent, add a staged sub-issue to a
-top-level parent you created without an executor, the server seats a
-coordinator on it (routing's pick, else you) and moves a `backlog` parent to
-`in_progress`; no run starts until a stage closes.
 
 ```bash
 # Stage 1 runs now; later stages parked until promoted
@@ -59,8 +53,9 @@ multica issue create --title "Build"      --parent <id> --assignee <agent> --sta
 multica issue create --title "Ship"       --parent <id> --assignee <agent> --stage 3 --status backlog
 ```
 
-When both Stage 1 sub-issues finish you (the parent assignee) are woken with a
-"Stage 1 complete" comment. Inspect the layout, then promote the next stage:
+When both Stage 1 sub-issues finish you (the parent assignee) are woken by the
+sub-issue wakeup; its `[WAKEUP]` block lists every stage and names the next one.
+Inspect the layout, then promote the next stage:
 
 ```bash
 multica issue children <parent-id>             # sub-issues grouped by stage

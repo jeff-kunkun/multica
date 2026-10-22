@@ -374,7 +374,6 @@ func TestPlatformSkillDescriptionNamesEveryDomain(t *testing.T) {
 		"references/chat-spawn.md":      "open a chat",
 		"references/chats.md":           "chat",
 		"references/consult.md":         "consult",
-		"references/drivers.md":         "driver",
 		"references/run-control.md":     "halt",
 		"references/external-bots.md":   "bot",
 	}
@@ -650,7 +649,7 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 				"A status change is not cosmetic",
 				"Acceptance is parent-scoped",
 				"the parent is the one issue that moves to unified `in_review`",
-				"--blocked-by <DENE-N>",
+				"--block-kind <decision|permission|external|dependency|capacity>",
 			},
 			notWant: []string{
 				"multica issue close",

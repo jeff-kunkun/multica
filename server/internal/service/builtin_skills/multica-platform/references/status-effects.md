@@ -55,24 +55,15 @@ archived statuses remain readable via an explicit status filter.
   later re-trigger confirms the overall goal is met.
 - **`in_review`** is an accepted issue status. Some workflows use it while a PR
   is open and awaiting review; moving to it is an explicit mutation.
-- **`done`** on a child issue posts a system comment on its parent once the
-  stage closes, listing each finished child and its PRs
-  (子任务回执); a sub-issue some reader of the parent cannot see stays off
-  it. If a PR
-  carries close intent (`Closes MUL-XXXX`), it advances the issue to `done`
+- **`done`** on a child issue can wake its parent's assignee (see
+  `references/sub-issues.md`). If a PR carries close intent (`Closes MUL-XXXX`), it advances the issue to `done`
   itself on merge — you do not also need to flip it manually.
-- **`blocked`** requires the wait on the same `multica issue status <id> blocked`
-  call: `--blocked-by <DENE-N>`, `--wake-at <RFC3339>`, `--wait-condition` with
-  `--wait-timeout`, or `--needs-human <member uuid>`. An agent change without
-  one is rejected (a member's only warns); "等 DENE-N" in a comment is only a
-  suggestion. An agent also passes `--block-kind <decision|permission|external|dependency|capacity>`
-  and `--block-action "<one-line next step>"` (≤80 chars), or the change is
-  rejected. Routing seats an empty executor parked (no run) and the command
-  says if it did. A cleared blocker or passed acceptance wakes the waiter (no
-  executor: a person gets a 缺执行人 card); the patrol wakes a quiet one ~30 min.
-  A member's reply that starts a run for the executor moves the issue back to
-  `in_progress` and marks the blocked record superseded — do not re-block to
-  "acknowledge" it.
+- **`blocked`**: an agent moving an issue to blocked passes `--block-kind <decision|permission|external|dependency|capacity>`
+  and `--block-action "<one-line next step>"` (≤80 chars) on the same
+  `multica issue status <id> blocked` call, or the change is rejected; a
+  member's change is not asked for them. Routing seats an empty executor
+  parked (no run) and the command says if it did. Nothing wakes a blocked
+  issue on a timer; a person or another run moves it on.
 - **`cancelled`** is a terminal, user-driven decision to close the issue. Like
   `done` it enqueues no new agent work, but it does **not** stop tasks already in
   flight — a run in progress keeps going. To stop a running task, cancel the
@@ -90,9 +81,9 @@ archived statuses remain readable via an explicit status filter.
   when it is really separate work. Marking logs `duplicate_marked` on the
   duplicate and `duplicate_added` on the original; removing the mark logs
   `duplicate_unmarked` / `duplicate_removed` (`multica issue timeline --action`).
-- **Failed issue-triggered tasks** with no retry queued leave an agent-owned issue `blocked` with
-  a failure wake clock the patrol acts on (a sweeper-reaped run may still roll it back to `todo`);
-  the parent gets a note that only promises a wake when one was recorded (DENE-1339).
+- **Failed issue-triggered tasks** may roll an issue from `in_progress` back to
+  `todo` when no active task / retry remains. A failure that repeats unchanged
+  on the same input moves the issue to `blocked` with a system comment instead.
 - **Completed issue-triggered tasks** are the mirror case, and they write no
   status at all. A run ending is therefore not the issue ending, and
   an agent that delivered part of its acceptance criteria must write the
