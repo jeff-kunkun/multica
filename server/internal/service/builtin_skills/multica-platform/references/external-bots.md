@@ -284,16 +284,6 @@ event is sent again. Woken but not `relayed` in 5 minutes: you get a
 owners are reminded, and the nudge repeats every 30 minutes. Receipts for the
 same call are shared by the original and its escalations.
 
-## Office events that need nobody
-
-`multica bot bind --activity everything` (`owner_visible_all`; a first
-connection starts on it, `--activity off` keeps it off) also pushes office
-events the person can see that need nobody — for their information. Events
-they must hear about arrive either way (see the office event stream below).
-The older full activity stream (`type: "activity"`, `bot wake activity`,
-`bot wake handled`) is retired: nothing new is queued, rows left from before
-the upgrade are cancelled, and its endpoints answer 404.
-
 ## Acting with the owner's permission (DENE-1936)
 
 You act with the owner's permission, and every write you make is recorded as
@@ -312,50 +302,3 @@ value (another member, role or amount) is a new request and opens a new card.
 A body the server cannot read whole or unambiguously (not JSON, over 64 KB, or
 one key named twice in any letter case) is refused with
 `owner_confirmation_unscannable`: send plain JSON, each key once. `owner_confirmation_denied` means the owner said no: do not ask again.
-
-## Office event stream (DENE-1963)
-
-Results meant for your owner — chat replies, handoffs, finished or blocked
-tickets, delivered files, settings and member changes — also arrive one by one
-as `type: "office_event"` with an `event_id`, a gap-free `stream_seq`, a
-`meaning` (`round_done` one run ended / `handoff` / `task_done` the whole ticket
-/ `reply` / `blocked` / `failed` / `artifact` / `release_pending_approval` /
-`change`), the real `actor` (and `via_bot_id` + `on_behalf_of_user_id` when a
-Bot acted for someone) and an `artifacts` catalog (filename, size, sha256,
-authorized download). An HTTP 200 is not a receipt: the same `event_id` comes
-back, forever, until you post one. Dedupe on `event_id`.
-
-```bash
-multica events receipt <event-id> --bot <bot-id> --stage received
-multica events receipt <event-id> --bot <bot-id> --stage relayed --channel telegram --ref <msg-id> --file <attachment-id>=sent:<file-msg-id>
-multica events receipt <event-id> --bot <bot-id> --stage handled --reason "…"   # 409 must_relay if not relayed first
-multica events list --after <stream-seq> --output json      # catch up by cursor
-multica events deliveries --bot <bot-id> --status blocked   # what is stuck and why
-multica events retry --bot <bot-id> [--event <event-id>]
-multica events download <attachment-id>
-```
-
-`must_relay: true` means tell the person, even if a similar message went out
-(`bypass_semantic_dedupe`). `pending_approval: true` with the notice
-「系统改成完成，正式发布仍待批准」 means routing, an agent, a review verdict or a
-Bot (not the person by hand) closed a release ticket: it is not a deploy
-permission. A must-relay result you do not relay reaches the person's
-inbox instead.
-
-Receiver rules the server holds you to:
-
-- Store the event (by `event_id`) in your own durable inbox **before** posting
-  `received`; read every member of a batch, not just the first.
-- `relayed` needs `--channel` and `--ref` (the message id where you told the
-  person); `relay_failed` needs `--error`. Per file: `=sent:<ref>`,
-  `=failed:<error>` or `=skipped`, only for files in that event's `artifacts`,
-  each file once per receipt; a file once sent stays sent.
-- `delivery.reconcile: true` (any resend of something already sent, also
-  after a server restart) means the previous push may already be in your
-  inbox: look the `event_id` up, re-send the receipt you have, and do only the
-  steps still missing (never tell the person twice).
-- After a restart, list `multica events deliveries --bot <bot-id> --status
-  sent,received` and finish what your inbox shows as not done.
-- `recipient_gap` on an event says an owner could not be reached through a
-  Bot; once they reconnect and verify, missed results (of any age) are
-  delivered to the new connection.

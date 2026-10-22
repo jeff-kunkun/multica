@@ -793,9 +793,6 @@ func main() {
 	if h.HumanNeededWorker != nil {
 		go h.HumanNeededWorker.Run(sweepCtx)
 	}
-	if h.OfficeEventWorker != nil {
-		go h.OfficeEventWorker.Run(sweepCtx)
-	}
 	if h.SeatCapacityWorker != nil {
 		go h.SeatCapacityWorker.Run(sweepCtx)
 	}
@@ -963,9 +960,6 @@ func main() {
 			}
 			if h.HumanNeededWorker != nil && !h.HumanNeededWorker.WaitWithTimeout(5*time.Second) {
 				slog.Warn("human needed worker did not exit within shutdown timeout")
-			}
-			if h.OfficeEventWorker != nil && !h.OfficeEventWorker.WaitWithTimeout(5*time.Second) {
-				slog.Warn("office event worker did not exit within shutdown timeout")
 			}
 			if h.WebhookDeliveryWorker != nil && !h.WebhookDeliveryWorker.WaitWithTimeout(5*time.Second) {
 				slog.Warn("webhook delivery worker did not exit within shutdown timeout")

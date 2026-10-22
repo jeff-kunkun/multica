@@ -2,7 +2,6 @@ package handler
 
 import (
 	"context"
-	"strings"
 	"testing"
 	"time"
 
@@ -20,7 +19,6 @@ func issueAlerts(t *testing.T, issueID, kind string) int {
 }
 
 func TestIssueRelayHandoffAndManagerAlerts(t *testing.T) {
-	f := newOfficeFixture(t)
 	ctx := context.Background()
 	agentA := createHandlerTestAgent(t, "RelayA", []byte("[]"))
 	agentB := createHandlerTestAgent(t, "RelayB", []byte("[]"))
@@ -92,15 +90,6 @@ func TestIssueRelayHandoffAndManagerAlerts(t *testing.T) {
 	testHandler.sweepStalled(ctx)
 	if n := issueAlerts(t, issueID, "stalled"); n != 1 {
 		t.Fatalf("stalled alerts = %d, want exactly 1", n)
-	}
-	ev := latestOfficeEvent(t, `issue_id=$1 AND event_type='issue.alert'`, issueID)
-	f.seal(t)
-	ev = latestOfficeEvent(t, `event_id=$1`, ev.eventID)
-	if ev.meaning != "alert" || !strings.Contains(ev.summary, "停摆") || !strings.Contains(ev.summary, "RelayA") || ev.actorType != "system" {
-		t.Fatalf("sealed alert: %+v", ev)
-	}
-	if status, _, _, _ := deliveryStatus(t, ev.eventID, uuidToString(f.bot.ID)); status == "" {
-		t.Fatal("the issue owner's Bot got no delivery for the alert")
 	}
 	dbfx.Exec(t, `UPDATE issue SET updated_at=$2, last_activity_at=$2 WHERE id=$1`, issueID, time.Now().Add(-16*time.Minute))
 	testHandler.sweepStalled(ctx)
