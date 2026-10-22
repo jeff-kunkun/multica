@@ -275,6 +275,7 @@ import { isAccessChangeReady } from "@multica/core/agents";
 import { AgentBatchToolbar } from "./agent-batch-toolbar";
 import { useWorkspaceMagpieEnabled } from "../../workspace/use-magpie-mode";
 import { MagpieAgentsPage } from "./magpie/magpie-agents-page";
+import { MagpieSwitchRow } from "./magpie/magpie-switch-row";
 export { isAccessChangeReady };
 
 export interface AgentsPageProps {
@@ -297,22 +298,25 @@ function PageHeaderBar({
 }) {
   const { t, i18n } = useT("agents");
   return (
-    <CollectionPageHeader
-      icon={Bot}
-      title={t(($) => $.page.title)}
-      count={totalCount}
-      learnMore={{
-        href: `https://multica.ai/docs${docsLocalePrefix(i18n.language)}/agents`,
-        label: t(($) => $.page.learn_more),
-      }}
-      actions={
-        <CollectionPageHeaderAction
-          icon={Plus}
-          label={t(($) => $.page.new_agent)}
-          onClick={onCreate}
-        />
-      }
-    />
+    <>
+      <CollectionPageHeader
+        icon={Bot}
+        title={t(($) => $.page.title)}
+        count={totalCount}
+        learnMore={{
+          href: `https://multica.ai/docs${docsLocalePrefix(i18n.language)}/agents`,
+          label: t(($) => $.page.learn_more),
+        }}
+        actions={
+          <CollectionPageHeaderAction
+            icon={Plus}
+            label={t(($) => $.page.new_agent)}
+            onClick={onCreate}
+          />
+        }
+      />
+      <MagpieSwitchRow />
+    </>
   );
 }
 
@@ -1005,8 +1009,9 @@ function LoadingSkeleton() {
 // Page
 
 /**
- * Magpie mode shows the read-only magpie mirror; off (the default) keeps the
- * editable agents page.
+ * Magpie mode shows the read-only magpie mirror, where only magpie agents
+ * carry a route; off (the default) keeps the editable agents page. Both lead
+ * with the owner's 接入 Magpie switch when the workspace has magpie.
  */
 export function AgentsPage(props: AgentsPageProps = {}) {
   const magpie = useWorkspaceMagpieEnabled();

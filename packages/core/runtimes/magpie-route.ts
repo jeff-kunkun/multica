@@ -83,6 +83,19 @@ export function readRuntimeMagpieRoute(
 }
 
 /**
+ * The runtime's magpie route when magpie serves its CLI through a group, else
+ * `null`. With the workspace switch on, agents on such a runtime are magpie
+ * agents; every other agent is native and shows no magpie controls. Matches
+ * the server's `runtimeHasMagpieRoute`.
+ */
+export function readRuntimeMagpieGroupRoute(
+  metadata: Record<string, unknown> | null | undefined,
+): MagpieRoute | null {
+  const route = readRuntimeMagpieRoute(metadata);
+  return route && route.group !== "" ? route : null;
+}
+
+/**
  * How each CLI is pinned to a magpie group: the `--model` value prefix magpie's
  * provider gives its groups in that CLI. A CLI missing here cannot be pinned
  * from the office.

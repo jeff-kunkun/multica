@@ -1106,6 +1106,15 @@ describe("WorkspaceMagpieSchema", () => {
       EMPTY_WORKSPACE_MAGPIE,
     );
   });
+
+  it("reads availability, unavailable from servers that predate it", () => {
+    expect(
+      parseWithFallback({ enabled: false, available: true }, WorkspaceMagpieSchema, EMPTY_WORKSPACE_MAGPIE, ENDPOINT),
+    ).toMatchObject({ enabled: false, available: true });
+    expect(
+      parseWithFallback({ enabled: true }, WorkspaceMagpieSchema, EMPTY_WORKSPACE_MAGPIE, ENDPOINT),
+    ).toMatchObject({ available: false });
+  });
 });
 
 describe("DeleteAgentResponseSchema", () => {

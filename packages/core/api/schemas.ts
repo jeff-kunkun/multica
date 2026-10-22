@@ -1293,13 +1293,16 @@ export const EMPTY_CREATE_FEEDBACK_RESPONSE: CreateFeedbackResponse = {
 
 // `GET/PUT /api/workspaces/{id}/magpie`: the workspace's magpie mode switch.
 // Anything but an explicit `enabled: true` reads as off, the old behaviour.
+// `available` says a daemon reported a magpie route for one of the
+// workspace's runtimes; servers that predate it read as unavailable.
 export const WorkspaceMagpieSchema = z.object({
   enabled: z.boolean().catch(false).default(false),
+  available: z.boolean().catch(false).default(false),
 }).loose();
 
 export type WorkspaceMagpie = z.infer<typeof WorkspaceMagpieSchema>;
 
-export const EMPTY_WORKSPACE_MAGPIE: WorkspaceMagpie = { enabled: false };
+export const EMPTY_WORKSPACE_MAGPIE: WorkspaceMagpie = { enabled: false, available: false };
 
 // `DELETE /api/agents/{id}` (magpie mode only): the server backs the agent's
 // full configuration up before deleting it, and only returns once both

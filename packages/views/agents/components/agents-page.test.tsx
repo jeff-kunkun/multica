@@ -234,6 +234,7 @@ vi.mock("./agent-list-toolbar", () => ({
     ].filter((dim) => dim.length > 0).length,
 }));
 vi.mock("../presence", () => ({ availabilityConfig: {} }));
+vi.mock("./magpie/magpie-switch-row", () => ({ MagpieSwitchRow: () => null }));
 vi.mock("@multica/ui/components/ui/skeleton", () => ({
   Skeleton: (props: Record<string, unknown>) => (
     <div data-testid="skeleton" {...props} />

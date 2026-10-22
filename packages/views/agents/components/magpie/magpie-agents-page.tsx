@@ -17,7 +17,7 @@ import { issueDetailOptions } from "@multica/core/issues";
 import { useWorkspacePaths } from "@multica/core/paths";
 import {
   agentMagpieRoutes,
-  readRuntimeMagpieRoute,
+  readRuntimeMagpieGroupRoute,
   runtimeListOptions,
 } from "@multica/core/runtimes";
 import { agentListOptions } from "@multica/core/workspace/queries";
@@ -37,6 +37,7 @@ import {
 } from "../../../layout/collection-page";
 import { availabilityConfig } from "../../presence";
 import { MagpieRouteLine } from "./magpie-route-line";
+import { MagpieSwitchRow } from "./magpie-switch-row";
 import { useT } from "../../../i18n";
 
 // Most recent activity bucket with runs, as "days ago" (0 = today), from the
@@ -66,18 +67,21 @@ function PageHeaderBar({
 }) {
   const { t } = useT("agents");
   return (
-    <CollectionPageHeader
-      icon={Bot}
-      title={t(($) => $.page.title)}
-      count={count}
-      actions={
-        <CollectionPageHeaderAction
-          icon={Plus}
-          label={t(($) => $.page.new_agent)}
-          onClick={onCreate}
-        />
-      }
-    />
+    <>
+      <CollectionPageHeader
+        icon={Bot}
+        title={t(($) => $.page.title)}
+        count={count}
+        actions={
+          <CollectionPageHeaderAction
+            icon={Plus}
+            label={t(($) => $.page.new_agent)}
+            onClick={onCreate}
+          />
+        }
+      />
+      <MagpieSwitchRow />
+    </>
   );
 }
 
@@ -165,8 +169,9 @@ function AgentRow({
   const paths = useWorkspacePaths();
   const rowLink = useRowLink();
 
+  // Native agents (no magpie group route on their runtime) show no route.
   const routes = agentMagpieRoutes(
-    readRuntimeMagpieRoute(runtime?.metadata),
+    readRuntimeMagpieGroupRoute(runtime?.metadata),
     runtime?.provider,
     agent,
   );

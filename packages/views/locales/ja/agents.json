@@ -1294,12 +1294,13 @@
     "current_work": "作業中の課題"
   },
   "magpie": {
-    "unrouted": "Magpie を経由しない",
-    "cli_models": "CLI 標準のモデル",
     "edit_hint": "Magpie で変更",
     "group_label": "Magpie グループ",
     "save_failed": "Magpie グループを変更できませんでした",
     "default": "既定",
-    "make_default": "既定にする"
+    "make_default": "既定にする",
+    "switch_label": "Magpie に接続",
+    "switch_description": "オンにすると、Magpie グループのエージェントはグループを選べ、削除前にバックアップされます。オフでは公式と同じです。",
+    "switch_failed": "Magpie の切り替えに失敗しました"
   }
 }

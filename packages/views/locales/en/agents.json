@@ -1331,12 +1331,13 @@
     "current_work": "Working on"
   },
   "magpie": {
-    "unrouted": "Bypasses Magpie",
-    "cli_models": "CLI's own models",
     "edit_hint": "Change it in Magpie",
     "group_label": "Magpie groups",
     "save_failed": "Couldn't change the Magpie groups",
     "default": "Default",
-    "make_default": "Make default"
+    "make_default": "Make default",
+    "switch_label": "Connect to Magpie",
+    "switch_description": "When on, agents on a Magpie group can pick groups and are backed up before delete; off works like official Multica.",
+    "switch_failed": "Couldn't change the Magpie switch"
   }
 }

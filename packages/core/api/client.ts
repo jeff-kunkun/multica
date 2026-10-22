@@ -3656,7 +3656,8 @@ export class ApiClient {
       method: "PUT",
       body: JSON.stringify({ enabled }),
     });
-    return parseWithFallback(raw, WorkspaceMagpieSchema, { enabled }, {
+    // The switch is only offered where magpie is available.
+    return parseWithFallback(raw, WorkspaceMagpieSchema, { enabled, available: true }, {
       endpoint: "PUT /api/workspaces/{id}/magpie",
     });
   }

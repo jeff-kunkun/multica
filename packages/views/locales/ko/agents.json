@@ -1294,12 +1294,13 @@
     "current_work": "작업 중"
   },
   "magpie": {
-    "unrouted": "Magpie 미경유",
-    "cli_models": "CLI 기본 모델",
     "edit_hint": "Magpie에서 변경",
     "group_label": "Magpie 그룹",
     "save_failed": "Magpie 그룹을 바꾸지 못했습니다",
     "default": "기본",
-    "make_default": "기본으로 설정"
+    "make_default": "기본으로 설정",
+    "switch_label": "Magpie 연결",
+    "switch_description": "켜면 Magpie 그룹의 에이전트가 그룹을 고를 수 있고 삭제 전에 백업됩니다. 끄면 공식과 같습니다.",
+    "switch_failed": "Magpie 설정을 바꾸지 못했습니다"
   }
 }

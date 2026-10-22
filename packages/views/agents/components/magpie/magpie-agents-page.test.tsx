@@ -61,6 +61,8 @@ vi.mock("@multica/core/paths", () => ({
   }),
 }));
 
+vi.mock("./magpie-switch-row", () => ({ MagpieSwitchRow: () => null }));
+
 vi.mock("@multica/core/workspace/queries", () => ({
   agentListOptions: () => ({ queryKey: ["agents"] }),
 }));
@@ -159,7 +161,7 @@ beforeEach(() => {
 });
 
 describe("MagpieAgentsPage", () => {
-  it("shows each agent's magpie route, or says it is not routed", () => {
+  it("shows a magpie agent's route and nothing magpie for native agents", () => {
     mocks.agents = [
       makeAgent({ id: "a-routed", name: "Routed" }),
       makeAgent({ id: "a-unrouted", name: "Unrouted", runtime_id: "runtime-unrouted" }),
@@ -172,14 +174,10 @@ describe("MagpieAgentsPage", () => {
     expect(within(routed).getByText("Opus 5.5")).toBeInTheDocument();
     expect(within(routed).getByText("Sonnet 5.5")).toBeInTheDocument();
 
-    const unrouted = row("Unrouted");
-    expect(within(unrouted).getByText("Bypasses Magpie")).toBeInTheDocument();
-    expect(within(unrouted).getByText("CLI's own models")).toBeInTheDocument();
-
-    // No magpie on that machine: no route line at all.
-    const plain = row("Plain");
-    expect(within(plain).queryByText("Bypasses Magpie")).not.toBeInTheDocument();
-    expect(within(plain).queryByText("CLI's own models")).not.toBeInTheDocument();
+    // Magpie installed but not routing the CLI, or no magpie at all: native.
+    for (const name of ["Unrouted", "Plain"]) {
+      expect(row(name).querySelector("[title='Change it in Magpie']")).toBeNull();
+    }
   });
 
   // DENE-2078: an OpenCode agent pinned to office-pojia showed its CLI's group.

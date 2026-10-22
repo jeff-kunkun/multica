@@ -75,7 +75,7 @@ import {
 } from "../specialization";
 import { ExpandableDescription } from "../../common/expandable-description";
 import { useT, useTimeAgo } from "../../i18n";
-import { useWorkspaceMagpieEnabled } from "../../workspace/use-magpie-mode";
+import { useIsMagpieAgent } from "../../workspace/use-magpie-mode";
 import { MagpieAgentDetailPage } from "./magpie/magpie-agent-detail-page";
 
 interface AgentDetailPageProps {
@@ -83,11 +83,12 @@ interface AgentDetailPageProps {
 }
 
 /**
- * Magpie mode shows the read-only magpie detail with real delete; off (the
- * default) keeps the editable detail page with archive.
+ * A magpie agent (switch on, runtime routed through a magpie group) gets the
+ * read-only magpie detail with group selection and real delete; every other
+ * agent keeps the official editable detail page with archive.
  */
 export function AgentDetailPage(props: AgentDetailPageProps) {
-  const magpie = useWorkspaceMagpieEnabled();
+  const magpie = useIsMagpieAgent(props.agentId);
   return magpie ? <MagpieAgentDetailPage {...props} /> : <LegacyAgentDetailPage {...props} />;
 }
 

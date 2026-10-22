@@ -3,7 +3,11 @@ import { render, screen } from "@testing-library/react";
 
 const mocks = vi.hoisted(() => ({ magpie: true }));
 
-vi.mock("../../../workspace/use-magpie-mode", () => ({ useWorkspaceMagpieEnabled: () => mocks.magpie }));
+vi.mock("../../../workspace/use-magpie-mode", () => ({
+  useWorkspaceMagpieEnabled: () => mocks.magpie,
+  useIsMagpieAgent: () => mocks.magpie,
+}));
+vi.mock("./magpie-switch-row", () => ({ MagpieSwitchRow: () => null }));
 vi.mock("./magpie-agents-page", () => ({ MagpieAgentsPage: () => <div>magpie agents mirror</div> }));
 vi.mock("./magpie-agent-detail-page", () => ({
   MagpieAgentDetailPage: ({ agentId }: { agentId: string }) => <div>magpie detail {agentId}</div>,
@@ -21,7 +25,7 @@ describe("magpie mode switch on the agents pages", () => {
     expect(screen.getByText("magpie agents mirror")).toBeInTheDocument();
   });
 
-  it("shows the magpie detail when the workspace is in magpie mode", () => {
+  it("shows the magpie detail for a magpie agent", () => {
     mocks.magpie = true;
     render(<AgentDetailPage agentId="agent-1" />);
     expect(screen.getByText("magpie detail agent-1")).toBeInTheDocument();

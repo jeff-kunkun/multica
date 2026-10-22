@@ -6,9 +6,21 @@ import {
   canPinMagpieGroup,
   agentMagpieGroups,
   agentMagpieRoutes,
+  readRuntimeMagpieGroupRoute,
   readRuntimeMagpieRoute,
   withAgentMagpieGroups,
 } from "./magpie-route";
+
+describe("readRuntimeMagpieGroupRoute", () => {
+  it("keeps only a route that serves the CLI through a group", () => {
+    expect(
+      readRuntimeMagpieGroupRoute({ magpie: { group: "office-claude", models: [{ id: "claude/opus" }] } })?.group,
+    ).toBe("office-claude");
+    expect(readRuntimeMagpieGroupRoute({ magpie: { group: "", models: [] } })).toBeNull();
+    expect(readRuntimeMagpieGroupRoute({ version: "1.0.0" })).toBeNull();
+    expect(readRuntimeMagpieGroupRoute(null)).toBeNull();
+  });
+});
 
 describe("readRuntimeMagpieRoute", () => {
   it("reads a routed CLI's group and models in order", () => {

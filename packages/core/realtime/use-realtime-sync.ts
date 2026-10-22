@@ -20,6 +20,7 @@ import { invalidateProjectMemberLists } from "../projects/member-queries";
 import { pinKeys } from "../pins/queries";
 import { autopilotKeys } from "../autopilots/queries";
 import { runtimeKeys } from "../runtimes/queries";
+import { workspaceMagpieOptions } from "../workspace/magpie";
 import { dashboardKeys } from "../dashboard/queries";
 import { labelKeys } from "../labels/queries";
 import { propertyKeys } from "../properties/queries";
@@ -1129,6 +1130,8 @@ export function useRealtimeSync(
         const wsId = getCurrentWsId();
         if (wsId) {
           qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
+          // A reported magpie route can make the workspace switch available.
+          qc.invalidateQueries({ queryKey: workspaceMagpieOptions(wsId).queryKey });
           // Shared agents may carry a redacted runtime liveness projection;
           // refetch it when a daemon changes state even if its private runtime
           // is absent from this member's runtime list.
