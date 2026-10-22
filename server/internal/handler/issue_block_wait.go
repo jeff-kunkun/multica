@@ -474,31 +474,6 @@ func reviewerSlotEmpty(issue db.Issue) bool {
 	return !issue.ReviewerID.Valid
 }
 
-// blockReviewNeedingHuman turns a seatless review into a structured block
-// that names a workspace manager: the platform could not find a reviewer, so
-// a person has to. The block is what keeps the patrol from asking again.
-func (h *Handler) blockReviewNeedingHuman(ctx context.Context, issue db.Issue, why string) {
-	managers, err := h.Queries.ListWorkspaceManagerUserIDs(ctx, issue.WorkspaceID)
-	if err != nil {
-		slog.Warn("block wait: list managers failed", "error", err, "issue_id", uuidToString(issue.ID))
-	}
-	rec := blockwait.Record{}
-	mention := ""
-	if len(managers) > 0 && managers[0].Valid {
-		rec.NeedsHuman = uuidToString(managers[0])
-		mention = h.memberWakeMention(ctx, managers[0])
-	} else {
-		rec = blockwait.FailureWake(time.Now(), "验收席由人来定", 1)
-	}
-	reason := why + "平台补不上验收席，这张票改成阻塞，等人指定验收席后再送审（`multica issue update <issue> --reviewer <name>`）。"
-	h.blockAcceptedIssue(ctx, issue, blockwait.Decision{Record: rec, Reason: mention + reason})
-	if rec.NeedsHuman != "" {
-		// The block comment carries the @, but a system comment's @ reaches
-		// nobody's inbox; the summon entry writes the inbox row.
-		h.summonPatrol(ctx, issue, managers[0], reason, pgtype.UUID{}, true)
-	}
-}
-
 // summonPatrol is the patrol calling a person through the summon entry
 // (DENE-880). commentID is a block comment already carrying the @; unset
 // posts the entry's own. An unanswered call to the same person dedupes.

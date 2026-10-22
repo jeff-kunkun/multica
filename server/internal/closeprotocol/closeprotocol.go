@@ -57,10 +57,8 @@ const (
 
 	WakeStageDone = "stage_done"
 	WakeMention   = "mention"
-	// WakeRoute is the acceptance hand-off the platform performs itself: an
-	// in_review ticket is handed to its reviewer seat by routing (DENE-633),
-	// once per stay, so the executor does not @ the seat and enqueue a second
-	// run (DENE-859).
+	// WakeRoute is the platform acceptance hand-off older close records may
+	// still carry; nothing records it now.
 	WakeRoute = "route"
 	// WakeClock is the deliberate pause an in_progress close recorded
 	// (DENE-1002): the ticket stays in progress and the block-wait patrol
