@@ -40,7 +40,6 @@ multica runtime delete <runtime-id>
 multica repo checkout <url>
 multica repo checkout <url> --ref <branch-or-sha>
 multica repo checkout <url> --fresh
-multica issue wait <id> --output json
 ```
 
 Runtime and repo commands affect active agent execution. Do not restart daemons,
@@ -143,19 +142,6 @@ absent, you are not in the normal agent checkout path. When a project
 ref by default for the current task; an explicit
 `repo checkout <url> --ref <branch-or-sha>` overrides it.
 
-When an issue is blocked on a condition that can be checked by one command, put
-that command in the same `multica issue status ... blocked` call with `--wait-condition`, `--wait-probe`, and
-`--wait-timeout`. The daemon runs the probe in the ticket's last known workdir
-every few minutes and reports only its result to the server. Exit code `0`
-means ready, exit code `10` (or GitHub CLI's `gh pr checks` exit code `8`) means
-still pending, and every other exit code means failed; probe output is truncated
-and shown to the executor. A pending result is
-silent until the deadline, after which the server escalates once. Use
-`multica issue wait <id> --output json` to see the condition, the last result,
-the check time, and its output. Use `--wake-at` instead when no one-line probe
-can answer the question, and `--needs-human` only when a person's decision is
-actually required.
-
 ## Task CLI boundary
 
 The daemon injects a task-scoped `mat_` credential for Multica API commands and
@@ -209,7 +195,7 @@ Check in this order:
    the normal daemon poll. Any other runtime, including one of the same owner
    and provider, never receives it.
 5. Did the daemon heartbeat recently? Runtime `last_seen_at` is the visible clue.
-6. Did the task get claimed or is it stuck pending/running/waiting for local directory?
+6. Did the task get claimed or is it stuck pending/running?
 7. If repo checkout failed, classify it after checking whether repo context was
    present in the task/project context.
 
@@ -226,14 +212,9 @@ Workspace repos and project resources are not the same thing:
   future tasks; optional `resource_ref.ref` pins the default checkout ref for
   tasks in that project;
 - `local_directory` resources point at a path owned by a daemon and carry
-  local-machine assumptions. `execution_mode` is `in_place` (default: one
-  task at a time, path mutex), `worktree` (isolated git worktree per task),
-  or `shared` (cwd is the user's directory, no path mutex; sidecar files
-  live under the task env root). Use `shared` for an umbrella directory of
-  several repositories whose tasks already isolate themselves via per-repo
-  worktrees — see `references/projects.md`. An old daemon that does not
-  advertise `local-shared-v1` must not run a shared resource: it would take
-  the mutex and silently re-serialise the directory.
+  local-machine assumptions. A run on that machine works directly in the
+  directory, alongside any other task running there — see
+  `references/projects.md`.
 
 Do not add a project resource just because `repo checkout` failed. First
 determine whether the user asked for durable project context or just a task
@@ -246,7 +227,7 @@ workspaces (`daemon_id` scoped to the runtime owner, so another account cannot
 reuse a daemon name to change its capacity; an ownerless runtime or one without
 a daemon id has its own capacity).
 The default is **12**, alongside each agent's existing `max_concurrent_tasks`.
-Dispatched, running and directory-waiting tasks reserve slots. Overflow stays
+Dispatched and running tasks reserve slots. Overflow stays
 queued; reclaiming an existing dispatch consumes no extra slot.
 
 ```bash
