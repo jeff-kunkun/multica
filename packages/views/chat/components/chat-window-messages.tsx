@@ -69,7 +69,6 @@ export function ChatWindowMessages({
           key={sessionId}
           active={isPresent}
           messages={messages}
-          sessionId={sessionId ?? undefined}
           pendingTask={pendingTask}
           availability={availability}
           firstItemIndex={messages.length > 0

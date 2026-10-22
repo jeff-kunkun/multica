@@ -1070,35 +1070,6 @@ describe("ChatMessageList opened-chat cards (DENE-1271)", () => {
     fireEvent.click(screen.getByRole("button", { name: /Pricing research/ }));
     expect(setActiveSession).toHaveBeenCalledWith("child-1");
   });
-
-  it("shows why a chat was not opened", () => {
-    renderMessages([{
-      id: "spawn-refused",
-      chat_session_id: "session-1",
-      role: "assistant",
-      content: "没有新开聊天：这个聊天本身是派生出来的，不能再往下开。",
-      message_kind: "chat_spawn_refused",
-      task_id: null,
-      created_at: "2026-10-04T00:00:00Z",
-    }]);
-
-    expect(screen.getByText("没有新开聊天：这个聊天本身是派生出来的，不能再往下开。")).toBeInTheDocument();
-  });
-
-  it("frames a dispatched task's result as a receipt card", () => {
-    renderMessages([{
-      id: "receipt",
-      chat_session_id: "session-1",
-      role: "assistant",
-      content: "DENE-9 修登录 · 已完成\n\n结论：登录改走新令牌",
-      message_kind: "issue_receipt",
-      task_id: null,
-      created_at: "2026-10-08T00:00:00Z",
-    }]);
-
-    expect(screen.getByText("Task receipt")).toBeInTheDocument();
-    expect(screen.getByText(/结论：登录改走新令牌/)).toBeInTheDocument();
-  });
 });
 
 it("keeps linked delivery provenance and body as literal external text", () => {

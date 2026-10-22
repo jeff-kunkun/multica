@@ -84,10 +84,6 @@ const h = vi.hoisted(() => {
 });
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
-const routing = vi.hoisted(() => ({ available: false }));
-vi.mock("./use-routed-pick", () => ({
-  useRoutingPicksAgents: () => routing.available,
-}));
 vi.mock("@multica/core/platform", () => ({
   getCurrentWsId: () => "ws-1",
 }));
@@ -153,7 +149,6 @@ vi.mock("../../common/use-app-foreground", () => ({
   useAppForeground: () => h.appForeground.value,
 }));
 vi.mock("@multica/core/chat", () => ({
-  ROUTED_AGENT_ID: "routed",
   useChatStore: Object.assign(
     (sel: (s: typeof h.store) => unknown) => sel(h.store),
     { getState: () => h.store },

@@ -10,17 +10,13 @@ function payload(over: Partial<InboxBoardRowPayload> & { issue_id: string }): In
     identifier: `DENE-${over.issue_id}`,
     title: `title ${over.issue_id}`,
     parent_issue_id: null,
-    lane: "stalled",
-    kind: "stalled_unclosed",
-    stuck_kind: "no_close",
-    reason: "",
-    before: "PR 已合入",
+    lane: "running",
+    kind: "running",
     from: null,
     from_name: "",
     next: { type: "agent", id: "agent-1" },
     next_name: "孙悟空",
     at: "2026-09-26T08:00:00Z",
-    timeline: null,
     unread: 0,
     children: null,
     ...over,
@@ -30,10 +26,8 @@ function payload(over: Partial<InboxBoardRowPayload> & { issue_id: string }): In
 describe("boardFromResponse", () => {
   it("reshapes every lane, children included, and fills absent lists", () => {
     const res = {
-      waiting: [payload({ issue_id: "w", lane: "waiting", from: { type: "agent", id: "a" }, from_name: "悟空" })],
-      stalled: [payload({ issue_id: "s", unread: 2, children: [payload({ issue_id: "c", parent_issue_id: "s" })] })],
-      running: [],
-      todo: [payload({ issue_id: "t", lane: "todo", kind: "todo" })],
+      running: [payload({ issue_id: "s", unread: 2, children: [payload({ issue_id: "c", parent_issue_id: "s" })] })],
+      todo: [payload({ issue_id: "t", lane: "todo", kind: "todo", from: { type: "agent", id: "a" }, from_name: "悟空" })],
       fresh: [],
       done: null as unknown as InboxBoardRowPayload[],
       viewer_id: "me",
@@ -44,13 +38,12 @@ describe("boardFromResponse", () => {
       unread_markable: 2,
     } satisfies InboxBoardResponse;
     const board = boardFromResponse(res);
-    expect(board.waiting[0]).toMatchObject({ issueId: "w", fromName: "悟空", from: { type: "agent", id: "a" } });
-    const s = board.stalled[0]!;
-    expect(s).toMatchObject({ stuckKind: "no_close", before: "PR 已合入", nextName: "孙悟空", unread: 2, timeline: [] });
+    const s = board.running[0]!;
+    expect(s).toMatchObject({ nextName: "孙悟空", unread: 2 });
     expect(s.children.map((c) => c.issueId)).toEqual(["c"]);
     expect(s.children[0]!.parentIssueId).toBe("s");
     expect(s.children[0]!.children).toEqual([]);
-    expect(board.todo[0]).toMatchObject({ issueId: "t", lane: "todo" });
+    expect(board.todo[0]).toMatchObject({ issueId: "t", lane: "todo", fromName: "悟空", from: { type: "agent", id: "a" } });
     expect(board.done).toEqual([]);
   });
 });
@@ -82,11 +75,10 @@ describe("splitSeenDone", () => {
 describe("boardLaneByIssue", () => {
   it("files every issue under the lane it shows in, sub-issues under their parent's", () => {
     const board = boardFromResponse({
-      waiting: [payload({ issue_id: "w", lane: "waiting" })],
-      stalled: [payload({ issue_id: "s", children: [payload({ issue_id: "c", lane: "running", parent_issue_id: "s" })] })],
+      blocked: [payload({ issue_id: "s", lane: "blocked", children: [payload({ issue_id: "c", parent_issue_id: "s" })] })],
       done: [payload({ issue_id: "d", lane: "done" })],
     } as InboxBoardResponse);
     const lanes = boardLaneByIssue(board);
-    expect(Object.fromEntries(lanes)).toEqual({ w: "waiting", s: "stalled", c: "stalled", d: "done" });
+    expect(Object.fromEntries(lanes)).toEqual({ s: "blocked", c: "blocked", d: "done" });
   });
 });

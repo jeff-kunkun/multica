@@ -188,7 +188,7 @@ vi.mock("@multica/ui/components/ui/resizable", () => ({
 // The merged inbox's board (DENE-1004). The stub exposes what the page hands
 // it — the highlighted issue, the active lane and the two callbacks.
 const boardData: { board: import("@multica/core/home").InboxBoard } = {
-  board: { waiting: [], stalled: [], running: [], blocked: [], todo: [], fresh: [], done: [] },
+  board: { running: [], blocked: [], todo: [], fresh: [], done: [] },
 };
 const boardReads: Array<{ autoRead?: boolean } | undefined> = [];
 vi.mock("@multica/core/home", async (importOriginal) => {
@@ -203,7 +203,7 @@ vi.mock("@multica/core/home", async (importOriginal) => {
   };
 });
 vi.mock("../../home/components/home-page", () => ({
-  LANE_TAG_CLASS: { waiting: "w", stalled: "s", running: "r", todo: "t", fresh: "f", done: "d" },
+  LANE_TAG_CLASS: { running: "r", todo: "t", fresh: "f", done: "d" },
   BoardProjectControls: () => null,
   InboxBoardLanes: ({
     board,
@@ -213,7 +213,7 @@ vi.mock("../../home/components/home-page", () => ({
     linking: import("../../home/components/home-page").BoardLinking;
   }) => (
     <div data-testid="board" data-highlight={linking.highlightIssueId ?? ""} data-lane={linking.activeLane ?? ""}>
-      {(["waiting", "stalled", "running", "todo", "fresh", "done"] as const).map((lane) => (
+      {(["running", "todo", "fresh", "done"] as const).map((lane) => (
         <button key={lane} type="button" data-testid={`lane-${lane}`} onClick={() => linking.onToggleLane(lane)} />
       ))}
       {Object.values(board).flat().map((r) => (
@@ -336,7 +336,7 @@ function reset() {
   searchParams = new URLSearchParams();
   replace.mockClear();
   push.mockClear();
-  boardData.board = { waiting: [], stalled: [], running: [], blocked: [], todo: [], fresh: [], done: [] };
+  boardData.board = { running: [], blocked: [], todo: [], fresh: [], done: [] };
   boardReads.length = 0;
   markReadMutate.mockReset();
   markUnreadMutate.mockClear();
@@ -1181,8 +1181,8 @@ describe("InboxPage", () => {
     function boardRow(issueId: string, lane: import("@multica/core/home").BoardLane) {
       return {
         issueId, identifier: issueId, title: issueId, parentIssueId: null, lane, kind: lane,
-        stuckKind: "", reason: "", before: "", from: null, fromName: "", next: null, nextName: "",
-        at: "2026-06-15T08:00:00Z", timeline: [], unread: 0, children: [],
+        from: null, fromName: "", next: null, nextName: "",
+        at: "2026-06-15T08:00:00Z", unread: 0, children: [],
       };
     }
     function setup() {
@@ -1193,7 +1193,7 @@ describe("InboxPage", () => {
         item({ id: "n-wait", issue_id: "issue-wait" }),
         item({ id: "n-loose", issue_id: "issue-loose" }),
       ];
-      boardData.board.waiting = [boardRow("issue-wait", "waiting")];
+      boardData.board.todo = [boardRow("issue-wait", "todo")];
       boardData.board.running = [boardRow("issue-run", "running")];
       boardData.board.done = [boardRow("issue-gone", "done")];
     }
@@ -1203,7 +1203,7 @@ describe("InboxPage", () => {
       setup();
       render(<InboxPage merged />);
       expect(screen.getByTestId("board")).toBeInTheDocument();
-      expect(rows().map((r) => r.dataset.lane)).toEqual(["r", "w", ""]);
+      expect(rows().map((r) => r.dataset.lane)).toEqual(["r", "t", ""]);
       // The list is where unread gets read here, not the board's arrival.
       expect(boardReads.every((o) => o?.autoRead === false)).toBe(true);
     });
@@ -1211,11 +1211,11 @@ describe("InboxPage", () => {
     it("brings a lane's notifications to the top and dims the rest, until cleared", () => {
       setup();
       render(<InboxPage merged />);
-      fireEvent.click(screen.getByTestId("lane-waiting"));
+      fireEvent.click(screen.getByTestId("lane-todo"));
       expect(rows().map((r) => r.textContent)).toEqual(["n-wait", "n-run", "n-loose"]);
       expect(rows().map((r) => r.dataset.dimmed)).toEqual([undefined, "true", "true"]);
       expect(screen.getByTestId("inbox-lane-filter-bar")).toBeInTheDocument();
-      fireEvent.click(screen.getByTestId("lane-waiting"));
+      fireEvent.click(screen.getByTestId("lane-todo"));
       expect(screen.queryByTestId("inbox-lane-filter-bar")).toBeNull();
       expect(rows().map((r) => r.textContent)).toEqual(["n-run", "n-wait", "n-loose"]);
     });

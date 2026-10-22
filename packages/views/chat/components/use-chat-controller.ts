@@ -13,7 +13,7 @@ import { getCurrentWsId } from "@multica/core/platform";
 import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { canAssignAgent } from "../../issues/components/pickers/assignee-picker";
-import { clientErrorMessage, dispatchReasonCode } from "@multica/core/api";
+import { dispatchReasonCode } from "@multica/core/api";
 import { sendChatMessageInMode } from "./send-chat-message";
 import {
   isAgentRuntimeBound as hasAgentRuntime,
@@ -35,8 +35,7 @@ import {
   useSetChatSessionProjects,
   useSetChatSessionArchived,
 } from "@multica/core/chat/mutations";
-import { ROUTED_AGENT_ID, useChatStore } from "@multica/core/chat";
-import { useRoutingPicksAgents } from "./use-routed-pick";
+import { useChatStore } from "@multica/core/chat";
 import {
   chatSessionProjectIds,
   sameProjectIds,
@@ -55,7 +54,6 @@ import type {
   Attachment,
   ChatMessage,
   ChatPendingTask,
-  ChatRoutingReceipt,
   ChatSendMode,
 } from "@multica/core/types";
 import { useT } from "../../i18n";
@@ -224,12 +222,6 @@ export function useChatController(opts?: { isActive?: boolean }) {
   const setSelectedAgentId = useChatStore((s) => s.setSelectedAgentId);
   const setSelectedProjectIds = useChatStore((s) => s.setSelectedProjectIds);
   const user = useAuthStore((s) => s.user);
-  const routingAvailable = useRoutingPicksAgents();
-  // The receipt of the last routed create, shown until the user leaves that chat.
-  const [routingNotice, setRoutingNotice] = useState<{
-    sessionId: string;
-    receipt: ChatRoutingReceipt;
-  } | null>(null);
   const { data: agents = [], isSuccess: agentsLoaded } = useQuery(
     agentListOptions(wsId),
   );
@@ -396,24 +388,14 @@ export function useChatController(opts?: { isActive?: boolean }) {
 
   // An open session stays on its own agent. A new chat (no session) falls
   // through to the picker.
-  // 「由路由选派」: a new chat with no agent in hand — the server picks one from
-  // the first message (DENE-1834). Only offered while the workspace routes.
-  const routedPick =
-    !currentSession && routingAvailable && selectedAgentId === ROUTED_AGENT_ID;
   const activeAgent = currentSession
     ? sessionAgent
-    : routedPick
-      ? null
-      : (availableAgents.find((a) => a.id === selectedAgentId) ??
-        availableAgents[0] ??
-        null);
+    : (availableAgents.find((a) => a.id === selectedAgentId) ??
+      availableAgents[0] ??
+      null);
   const isAgentRuntimeBound = sharedSpeaker
     ? currentSession?.agent_runtime_bound !== false
-    : routedPick || (!!activeAgent && hasAgentRuntime(activeAgent));
-  const routingReceipt =
-    routingNotice && routingNotice.sessionId === activeSessionId
-      ? routingNotice.receipt
-      : null;
+    : !!activeAgent && hasAgentRuntime(activeAgent);
 
   // A session outlives the permission that created it. The agent can be flipped
   // to personal, change owner, or drop this member from its allow-list, and the
@@ -496,20 +478,16 @@ export function useChatController(opts?: { isActive?: boolean }) {
       ) {
         return activeSessionId;
       }
-      if (!activeAgent && !routedPick) return null;
+      if (!activeAgent) return null;
       if (sessionPromiseRef.current) return sessionPromiseRef.current;
 
       const promise = (async () => {
         try {
-          // Routed: no agent_id; the brief lets the router read the message.
           const session = await createSession.mutateAsync({
-            ...(activeAgent ? { agent_id: activeAgent.id } : { brief: titleSeed }),
+            agent_id: activeAgent.id,
             title: deriveChatTitle(titleSeed),
             project_ids: activeProjectIds,
           });
-          if (session.routing) {
-            setRoutingNotice({ sessionId: session.id, receipt: session.routing });
-          }
           return session.id;
         } finally {
           sessionPromiseRef.current = null;
@@ -521,7 +499,6 @@ export function useChatController(opts?: { isActive?: boolean }) {
     [
       activeSessionId,
       activeAgent,
-      routedPick,
       activeProjectIds,
       createSession,
       sessions,
@@ -548,7 +525,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
 
   // Upload transport moved into the coordinated-upload engine inside ChatInput
   // (MUL-5181 L2); surfaces only forward whether the affordance exists.
-  const uploadEnabled = !!activeAgent || routedPick || sharedSpeaker;
+  const uploadEnabled = !!activeAgent || sharedSpeaker;
 
   const handleSend = useCallback(
     async (
@@ -559,7 +536,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
       mode?: ChatSendMode,
     ): Promise<boolean> => {
       if (isChatViewOnly) return false;
-      if (!activeAgent && !routedPick && !sharedSpeaker) {
+      if (!activeAgent && !sharedSpeaker) {
         apiLogger.warn("sendChatMessage skipped: no active agent");
         return false;
       }
@@ -612,14 +589,10 @@ export function useChatController(opts?: { isActive?: boolean }) {
       } catch (err) {
         apiLogger.error("sendChatMessage.ensureSession.error", err);
         // A revoked invoke permission blocks session create with a structured
-        // 403 (MUL-4525) — name the cause instead of a generic failure. A
-        // routed create that found nobody says so in the server's own words.
+        // 403 (MUL-4525) — name the cause instead of a generic failure.
         const reason = dispatchReasonCode(err);
-        const routingMessage = routedPick ? clientErrorMessage(err) : null;
         toast.error(
-          routingMessage
-            ? routingMessage
-            : reason === "invocation_not_allowed"
+          reason === "invocation_not_allowed"
             ? t(($) => $.input.send_blocked_toast)
             : reason === "agent_runtime_required"
               ? t(($) => $.input.runtime_required_toast)
@@ -751,7 +724,6 @@ export function useChatController(opts?: { isActive?: boolean }) {
       pendingTask,
       pendingTaskId,
       isAgentRuntimeBound,
-      routedPick,
       ensureSession,
       cancelChatTask,
       qc,
@@ -812,28 +784,6 @@ export function useChatController(opts?: { isActive?: boolean }) {
         projectIds,
       });
       setSelectedAgentId(agent.id);
-      setSelectedProjectIds([...projectIds]);
-      setActiveSession(null);
-      requestInputFocus();
-    },
-    [
-      activeSessionId,
-      setSelectedAgentId,
-      setSelectedProjectIds,
-      setActiveSession,
-      requestInputFocus,
-    ],
-  );
-
-  // Start a fresh chat with no agent chosen: routing picks one from the first
-  // message (DENE-1834). Same project contract as handleNewChat.
-  const handleStartRoutedChat = useCallback(
-    (projectIds: readonly string[] = []) => {
-      uiLogger.info("startRoutedChat", {
-        previousSessionId: activeSessionId,
-        projectIds,
-      });
-      setSelectedAgentId(ROUTED_AGENT_ID);
       setSelectedProjectIds([...projectIds]);
       setActiveSession(null);
       requestInputFocus();
@@ -959,9 +909,6 @@ export function useChatController(opts?: { isActive?: boolean }) {
     sharedSpeaker,
     isAgentRuntimeBound,
     activeAgent,
-    routingAvailable,
-    routedPick,
-    routingReceipt,
     customizeConversationStartersHref,
     noAgent,
     availability,
@@ -994,7 +941,6 @@ export function useChatController(opts?: { isActive?: boolean }) {
     uploadEnabled,
     handleNewChat,
     handleStartNewChat,
-    handleStartRoutedChat,
     handleSelectSession,
     handleProjectsChange,
     advanceSelectionAfterArchive,

@@ -109,8 +109,7 @@ export function useCreateChatSession() {
 
   return useMutation({
     mutationFn: (data: {
-      agent_id?: string;
-      brief?: string;
+      agent_id: string;
       title?: string;
       project_ids?: string[];
     }) => {
@@ -122,11 +121,7 @@ export function useCreateChatSession() {
       return api.createChatSession(data);
     },
     onSuccess: (session) => {
-      logger.info("createChatSession.success", {
-        sessionId: session.id,
-        agentId: session.agent_id,
-        routed: session.routing?.routed ?? false,
-      });
+      logger.info("createChatSession.success", { sessionId: session.id, agentId: session.agent_id });
     },
     onError: (err) => {
       logger.error("createChatSession.error", err);
@@ -489,27 +484,6 @@ export function useRegenerateChatQuickActions() {
           ctx.previous ?? null,
         );
       }
-    },
-  });
-}
-
-/**
- * Pin an issue to a chat's tickets or take one off (DENE-1719) — the same
- * server write as `multica chat tickets add|remove`. Waits for the server: a
- * pin names the issue by identifier, which only the server resolves. Other
- * tabs refetch on `chat:tickets_changed`.
- */
-export function useSetChatTicket() {
-  const qc = useQueryClient();
-  const wsId = useWorkspaceId();
-
-  return useMutation({
-    mutationFn: (data: { sessionId: string; issue: string; remove?: boolean }) =>
-      data.remove
-        ? api.removeChatTicket(data.sessionId, data.issue)
-        : api.addChatTicket(data.sessionId, data.issue),
-    onSettled: (_data, _err, vars) => {
-      qc.invalidateQueries({ queryKey: chatKeys.tickets(wsId, vars.sessionId) });
     },
   });
 }

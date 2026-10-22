@@ -5,7 +5,7 @@ import { ConvertedChatNotice } from "./converted-chat-notice";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "motion/react";
-import { Minus, Maximize2, Minimize2, ChevronDown, Plus, Check, Archive, Pencil, Loader2, Square, LockKeyhole, Route } from "lucide-react";
+import { Minus, Maximize2, Minimize2, ChevronDown, Plus, Check, Archive, Pencil, Loader2, Square, LockKeyhole } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
@@ -20,7 +20,7 @@ import { useAuthStore } from "@multica/core/auth";
 import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { canAssignAgent } from "../../issues/components/pickers/assignee-picker";
-import { api, clientErrorMessage, dispatchReasonCode } from "@multica/core/api";
+import { api, dispatchReasonCode } from "@multica/core/api";
 import { sendChatMessageInMode } from "./send-chat-message";
 import {
   isAgentRuntimeBound,
@@ -39,7 +39,7 @@ import {
 } from "../../common/row-actions-menu";
 import { PropertyPicker } from "../../issues/components/pickers/property-picker";
 import { AgentPickerGroups } from "./agent-picker-groups";
-import { AgentPickerItem, RoutedPickerItem } from "./new-chat-button";
+import { AgentPickerItem } from "./new-chat-button";
 import { OfflineBanner } from "./offline-banner";
 import { NoAgentBanner } from "./no-agent-banner";
 import { ArchivedAgentBanner } from "./archived-agent-banner";
@@ -61,9 +61,7 @@ import {
   useSetChatSessionProjects,
   useUpdateChatSession,
 } from "@multica/core/chat/mutations";
-import { ROUTED_AGENT_ID, useChatStore } from "@multica/core/chat";
-import { useRoutingPicksAgents } from "./use-routed-pick";
-import { RoutedPickBanner } from "./routed-pick-banner";
+import { useChatStore } from "@multica/core/chat";
 import {
   chatSessionProjectIds,
   sameProjectIds,
@@ -85,7 +83,6 @@ import { ChatQueue } from "./chat-queue";
 import { EmptyState } from "./chat-empty-state";
 import { SessionRenameInput } from "./session-rename-input";
 import { ChatResizeHandles } from "./chat-resize-handles";
-import { AskPromptList } from "../../common/ask-prompt";
 import { useChatContextItems } from "./use-chat-context-items";
 import { useChatResize } from "./use-chat-resize";
 import { useVisualViewportKeyboard } from "./use-visual-viewport-keyboard";
@@ -102,7 +99,7 @@ import {
   useCurrentRouteProjectId,
 } from "./use-chat-project-follow";
 import { createLogger } from "@multica/core/logger";
-import type { Agent, Attachment, ChatMessage, ChatRoutingReceipt, ChatSendMode, ChatSession, PendingChatTasksResponse, Project } from "@multica/core/types";
+import type { Agent, Attachment, ChatMessage, ChatSendMode, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
 import { useLocale, useT } from "../../i18n";
 
 const uiLogger = createLogger("chat.ui");
@@ -131,11 +128,6 @@ export function ChatWindow() {
   const setSelectedProjectIds = useChatStore((s) => s.setSelectedProjectIds);
   const setProjectContextLocked = useChatStore((s) => s.setProjectContextLocked);
   const user = useAuthStore((s) => s.user);
-  const routingAvailable = useRoutingPicksAgents();
-  const [routingNotice, setRoutingNotice] = useState<{
-    sessionId: string;
-    receipt: ChatRoutingReceipt;
-  } | null>(null);
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   // Single sessions cache — eliminates the separate active/all queries
@@ -275,24 +267,14 @@ export function ChatWindow() {
     : !!sessionAgent?.archived_at;
 
   // An open session stays on its own agent. A new chat falls through to the picker.
-  // 「由路由选派」: a new chat with no agent in hand — the server picks one from
-  // the first message (DENE-1834). Mirrors use-chat-controller.
-  const routedPick =
-    !currentSession && routingAvailable && selectedAgentId === ROUTED_AGENT_ID;
   const activeAgent = currentSession
     ? sessionAgent
-    : routedPick
-      ? null
-      : (availableAgents.find((a) => a.id === selectedAgentId) ??
-        availableAgents[0] ??
-        null);
+    : (availableAgents.find((a) => a.id === selectedAgentId) ??
+      availableAgents[0] ??
+      null);
   const activeAgentRuntimeBound = sharedSpeaker
     ? currentSession?.agent_runtime_bound !== false
-    : routedPick || (!!activeAgent && isAgentRuntimeBound(activeAgent));
-  const routingReceipt =
-    routingNotice && routingNotice.sessionId === activeSessionId
-      ? routingNotice.receipt
-      : null;
+    : !!activeAgent && isAgentRuntimeBound(activeAgent);
 
   // A session outlives the permission that created it: the agent can be flipped
   // to personal, change owner, or drop this member from its allow-list, and the
@@ -322,12 +304,6 @@ export function ChatWindow() {
   // (server confirmed: zero usable agents) drives the disabled UI.
   const agentAvailability = useWorkspaceAgentAvailability();
   const noAgent = agentAvailability === "none";
-
-  // Projects the chat is in, for ordering the agent picker by domain.
-  const activeProjects = useMemo(
-    () => projects.filter((project) => activeProjectIds.includes(project.id)),
-    [projects, activeProjectIds],
-  );
 
   // Presence drives both the avatar status dot (via ActorAvatar) and the
   // OfflineBanner / TaskStatusPill availability copy. `useAgentPresenceDetail`
@@ -436,19 +412,16 @@ export function ChatWindow() {
       ) {
         return activeSessionId;
       }
-      if (!activeAgent && !routedPick) return null;
+      if (!activeAgent) return null;
       if (sessionPromiseRef.current) return sessionPromiseRef.current;
 
       const promise = (async () => {
         try {
           const session = await createSession.mutateAsync({
-            ...(activeAgent ? { agent_id: activeAgent.id } : { brief: titleSeed }),
+            agent_id: activeAgent.id,
             title: titleSeed.slice(0, 50),
             project_ids: activeProjectIds,
           });
-          if (session.routing) {
-            setRoutingNotice({ sessionId: session.id, receipt: session.routing });
-          }
           return session.id;
         } finally {
           sessionPromiseRef.current = null;
@@ -460,7 +433,6 @@ export function ChatWindow() {
     [
       activeSessionId,
       activeAgent,
-      routedPick,
       activeProjectIds,
       createSession,
       sessions,
@@ -483,7 +455,7 @@ export function ChatWindow() {
       mode?: ChatSendMode,
     ): Promise<boolean> => {
       if (isChatViewOnly) return false;
-      if (!activeAgent && !routedPick && !sharedSpeaker) {
+      if (!activeAgent && !sharedSpeaker) {
         apiLogger.warn("sendChatMessage skipped: no active agent");
         return false;
       }
@@ -536,11 +508,8 @@ export function ChatWindow() {
       } catch (err) {
         apiLogger.error("sendChatMessage.ensureSession.error", err);
         const reason = dispatchReasonCode(err);
-        const routingMessage = routedPick ? clientErrorMessage(err) : null;
         toast.error(
-          routingMessage
-            ? routingMessage
-            : reason === "invocation_not_allowed"
+          reason === "invocation_not_allowed"
             ? t(($) => $.input.send_blocked_toast)
             : reason === "agent_runtime_required"
               ? t(($) => $.input.runtime_required_toast)
@@ -672,7 +641,6 @@ export function ChatWindow() {
     [
       activeSessionId,
       activeAgent,
-      routedPick,
       currentSession,
       sharedSpeaker,
       isChatViewOnly,
@@ -742,27 +710,6 @@ export function ChatWindow() {
       requestInputFocus,
     ],
   );
-
-  // Pick 「由路由选派」 from the agent dropdown: a fresh chat with no agent; the
-  // server routes it on the first send (DENE-1834).
-  const handleSelectRouted = useCallback(() => {
-    if (routedPick) return;
-    uiLogger.info("selectRouted", { from: selectedAgentId, previousSessionId: activeSessionId });
-    setSelectedAgentId(ROUTED_AGENT_ID);
-    setSelectedProjectIds(currentSession ? [] : activeProjectIds);
-    setActiveSession(null);
-    requestInputFocus();
-  }, [
-    routedPick,
-    selectedAgentId,
-    activeSessionId,
-    activeProjectIds,
-    currentSession,
-    setSelectedAgentId,
-    setSelectedProjectIds,
-    setActiveSession,
-    requestInputFocus,
-  ]);
 
   const handleNewChat = useCallback(() => {
     uiLogger.info("newChat", {
@@ -1021,8 +968,6 @@ export function ChatWindow() {
         />
       )}
 
-      <AskPromptList className="shrink-0 px-3 pt-2" />
-
       {/* Messages / skeleton / empty state */}
       <AnimatePresence initial={false}>
         {isOpen && (
@@ -1064,8 +1009,6 @@ export function ChatWindow() {
        *  first agent-list response stays banner-free. */}
       {noAgent ? (
         <NoAgentBanner />
-      ) : routedPick || routingReceipt ? (
-        <RoutedPickBanner receipt={routingReceipt} />
       ) : isChatViewOnly ? (
         <p className="px-3 py-2 text-caption text-muted-foreground">
           {t(($) => $.sharing.view_only)}
@@ -1141,10 +1084,7 @@ export function ChatWindow() {
             agents={availableAgents}
             activeAgent={activeAgent}
             userId={user?.id}
-            projects={activeProjects}
             onSelect={handleSelectAgent}
-            routed={routedPick}
-            onSelectRouted={routingAvailable && !currentSession ? handleSelectRouted : undefined}
           />
         }
         contextItems={contextItems}
@@ -1165,20 +1105,12 @@ export function AgentDropdown({
   agents,
   activeAgent,
   userId,
-  projects,
   onSelect,
-  routed = false,
-  onSelectRouted,
 }: {
   agents: Agent[];
   activeAgent: Agent | null;
   userId: string | undefined;
-  projects: readonly Project[];
   onSelect: (agent: Agent) => void;
-  /** The new chat has no agent: routing picks one on the first send. */
-  routed?: boolean;
-  /** Offered as the first row when set; absent while the workspace does not route. */
-  onSelectRouted?: () => void;
 }) {
   const { t } = useT("chat");
   const [open, setOpen] = useState(false);
@@ -1188,7 +1120,7 @@ export function AgentDropdown({
     setOpen(false);
   };
 
-  if (!activeAgent && !routed) {
+  if (!activeAgent) {
     return <span className="text-caption text-muted-foreground">{t(($) => $.window.no_agents)}</span>;
   }
 
@@ -1209,40 +1141,22 @@ export function AgentDropdown({
         />
       }
       trigger={
-        activeAgent ? (
-          <>
-            <ActorAvatar
-              actorType="agent"
-              actorId={activeAgent.id}
-              size="md"
-              enableHoverCard
-              showStatusDot
-            />
-            <span className="text-caption font-medium max-w-28 truncate">{activeAgent.name}</span>
-            <ChevronDown className="size-3 text-muted-foreground shrink-0" />
-          </>
-        ) : (
-          <>
-            <Route className="size-4 text-muted-foreground shrink-0" />
-            <span className="text-caption font-medium max-w-28 truncate">{t(($) => $.window.routed_pick)}</span>
-            <ChevronDown className="size-3 text-muted-foreground shrink-0" />
-          </>
-        )
+        <>
+          <ActorAvatar
+            actorType="agent"
+            actorId={activeAgent.id}
+            size="md"
+            enableHoverCard
+            showStatusDot
+          />
+          <span className="text-caption font-medium max-w-28 truncate">{activeAgent.name}</span>
+          <ChevronDown className="size-3 text-muted-foreground shrink-0" />
+        </>
       }
     >
-      {onSelectRouted && (
-        <RoutedPickerItem
-          isCurrent={routed}
-          onSelect={() => {
-            onSelectRouted();
-            setOpen(false);
-          }}
-        />
-      )}
       <AgentPickerGroups
         agents={agents}
         userId={userId}
-        projects={projects}
         query={filter}
         renderAgent={(agent) => (
           <AgentPickerItem

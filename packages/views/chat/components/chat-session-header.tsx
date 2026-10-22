@@ -12,7 +12,6 @@ import {
   LockKeyhole,
   MoreHorizontal,
   Pencil,
-  Pin,
   Trash2,
   UserRound,
   Users,
@@ -64,7 +63,6 @@ import { useAuthStore } from "@multica/core/auth";
 import { conversationToMarkdown } from "../lib/copy-text";
 import { PrivateLinkPrompt, SharingHoverCard } from "../../common/sharing-guide";
 import { ChatAccessDialog } from "./chat-access-dialog";
-import { ChatTicketPinDialog } from "./chat-ticket-pin-dialog";
 
 /**
  * Per-session header for the conversation pane: agent avatar + chat title +
@@ -122,9 +120,6 @@ export function ChatSessionHeader({
   const canOpenAccess = canEditAccess ?? canManage;
   const [accessOpen, setAccessOpen] = useState(false);
   const [privateLinkOpen, setPrivateLinkOpen] = useState(false);
-  const [pinOpen, setPinOpen] = useState(false);
-  // Pinning changes the chat, so it needs the same right as speaking in it.
-  const canPin = canManage || session.access === "speak";
   const shareLabel = t(($) => $.sharing.trigger[accessMode]);
   const shareDescription = t(($) => $.sharing[`header_${accessMode}` as const]);
   const ShareIcon = accessMode === "private" ? LockKeyhole : accessMode === "workspace" ? Globe : Users;
@@ -444,12 +439,6 @@ export function ChatSessionHeader({
               </DropdownMenuSubContent>
             </DropdownMenuSub>
           )}
-          {canPin && (
-            <DropdownMenuItem onClick={() => setPinOpen(true)} className="max-sm:min-h-11">
-              <Pin className="h-4 w-4" />
-              {t(($) => $.tickets.pin)}
-            </DropdownMenuItem>
-          )}
           <DropdownMenuItem onClick={() => void copyConversation()}>
             <Copy className="h-4 w-4" />
             {t(($) => $.header.copy_conversation)}
@@ -486,7 +475,6 @@ export function ChatSessionHeader({
       {trailing}
 
       <ChatAccessDialog session={session} open={accessOpen} onOpenChange={setAccessOpen} />
-      {canPin && <ChatTicketPinDialog sessionId={session.id} open={pinOpen} onOpenChange={setPinOpen} />}
       <PrivateLinkPrompt
         open={privateLinkOpen}
         onOpenChange={setPrivateLinkOpen}

@@ -26,26 +26,8 @@ const membersRef = vi.hoisted(() => ({
     { user_id: "user-1", role: "owner" as "owner" | "admin" | "member", name: "Ada" },
   ] as { user_id: string; role: "owner" | "admin" | "member"; name?: string }[],
 }));
-const namingRef = vi.hoisted(() => {
-  const initial = {
-    source: "runtime",
-    options: [
-      { id: "server_llm", label: "Server model", available: false, reason: "No model key configured" },
-      { id: "runtime", label: "Chat agent runtime", available: true, recommended: true },
-      { id: "rules", label: "Rules only", available: true },
-    ],
-    stats: { titled: 0, runtime: 0, rules: 0, failed: 0 },
-  } as Record<string, unknown>;
-  return { initial, current: initial };
-});
-
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: (options: { queryKey?: readonly unknown[] }) => {
-    if (options?.queryKey?.[2] === "naming") {
-      return { data: namingRef.current, isFetched: true };
-    }
-    return { data: membersRef.current, isFetched: true };
-  },
+  useQuery: () => ({ data: membersRef.current, isFetched: true }),
   useQueryClient: () => ({
     setQueryData: vi.fn(),
     getQueryData: vi.fn(() => []),
@@ -65,11 +47,9 @@ vi.mock("@multica/core/platform", () => ({
 
 vi.mock("@multica/core/workspace/queries", () => ({
   memberListOptions: () => ({ queryKey: ["members"], queryFn: vi.fn() }),
-  workspaceNamingOptions: () => ({ queryKey: ["workspaces", "workspace-1", "naming"], queryFn: vi.fn() }),
   workspaceListOptions: () => ({ queryKey: ["workspaces"], queryFn: vi.fn() }),
   workspaceKeys: {
     list: () => ["workspaces"],
-    naming: () => ["workspaces", "workspace-1", "naming"],
   },
 }));
 
@@ -85,7 +65,6 @@ vi.mock("@multica/core/workspace/mutations", () => ({
 vi.mock("@multica/core/api", () => ({
   api: {
     updateWorkspace: mockUpdateWorkspace,
-    updateWorkspaceNaming: vi.fn(async (_id: string, source: string) => ({ ...namingRef.current, source })),
     getBaseUrl: () => "http://127.0.0.1:8080",
   },
 }));
@@ -111,7 +90,6 @@ vi.mock("sonner", () => ({
   toast: { success: mockToastSuccess, error: vi.fn() },
 }));
 
-import { api } from "@multica/core/api";
 import { WorkspaceTab } from "./workspace-tab";
 
 const TEST_RESOURCES = {
@@ -141,7 +119,6 @@ describe("WorkspaceTab — automatic updates", () => {
       settings: {},
     };
     membersRef.current = [{ user_id: "user-1", role: "owner", name: "Ada" }];
-    namingRef.current = namingRef.initial;
     mockUpdateWorkspace.mockImplementation(
       async (_id: string, payload: Record<string, unknown>) => ({
         ...workspaceRef.current,
@@ -259,47 +236,4 @@ describe("WorkspaceTab — automatic updates", () => {
     expect(screen.queryByRole("button", { name: "Change prefix..." })).toBeNull();
   });
 
-  it("leads the naming card with whether naming works", () => {
-    namingRef.current = {
-      ...namingRef.current,
-      health: "ok",
-      stats: { titled: 3, runtime: 2, rules: 1, failed: 0 },
-      last: { title: "Multica · naming card", source: "runtime", created_at: new Date().toISOString() },
-    };
-    render(<WorkspaceTab />, { wrapper: I18nWrapper });
-
-    expect(screen.getByText("Agents are naming new chats")).toBeTruthy();
-    expect(screen.getByText(/Latest: “Multica · naming card”/)).toBeTruthy();
-    expect(screen.queryByRole("radiogroup")).toBeNull();
-  });
-
-  it("says what to do when agents stop naming", () => {
-    namingRef.current = { ...namingRef.current, health: "degraded", stats: { titled: 5, runtime: 0, rules: 5, failed: 0 }, last: null };
-    render(<WorkspaceTab />, { wrapper: I18nWrapper });
-
-    expect(screen.getByText("Agents haven't named a chat in 24 hours")).toBeTruthy();
-    expect(screen.getByText(/5 new chats were named by rules instead/)).toBeTruthy();
-  });
-
-  it("keeps the source picker behind Change and blocks the unavailable server model", async () => {
-    namingRef.current = { ...namingRef.current, health: "idle", stats: { titled: 0, runtime: 0, rules: 0, failed: 0 }, last: null };
-    render(<WorkspaceTab />, { wrapper: I18nWrapper });
-
-    const user = setupUser();
-    await user.click(screen.getByRole("button", { name: "Change" }));
-    expect(screen.getByRole("radio", { name: "Server model" })).toBeDisabled();
-    expect(screen.getByRole("radio", { name: "Chat agent" })).toHaveAttribute("aria-checked", "true");
-    expect(screen.getByText(/needs a model key configured/)).toBeTruthy();
-
-    await user.click(screen.getByRole("radio", { name: "Rules only" }));
-    await waitFor(() => expect(api.updateWorkspaceNaming).toHaveBeenCalledWith("workspace-1", "rules"));
-  });
-
-  it("keeps naming source read-only for regular members with an explanation", () => {
-    membersRef.current = [{ user_id: "user-1", role: "member" }];
-    render(<WorkspaceTab />, { wrapper: I18nWrapper });
-
-    expect(screen.queryByRole("button", { name: "Change" })).toBeNull();
-    expect(screen.getByText("Only owners and admins can change this")).toBeTruthy();
-  });
 });

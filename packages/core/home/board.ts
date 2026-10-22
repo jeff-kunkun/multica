@@ -1,12 +1,9 @@
-import type { InboxBoardResponse, InboxBoardRowPayload, ParkingEvent } from "../types/home";
+import type { InboxBoardResponse, InboxBoardRowPayload } from "../types/home";
 
 /**
  * The one-row-per-issue inbox (DENE-882).
  *
  * Every issue lands in at most one lane, checked in this order:
- *   waiting — someone called the viewer and the call is still open, or the
- *             issue's parking record names the viewer as the next owner;
- *   stalled — the parking record says it stopped without explaining why;
  *   running — an agent is on it right now;
  *   blocked — it is held and waits on other tickets; it moves on by itself
  *             when they end, so nobody is asked anything (DENE-1409);
@@ -22,7 +19,7 @@ import type { InboxBoardResponse, InboxBoardRowPayload, ParkingEvent } from "../
  * page, the CLI and an agent reading the inbox for its person all see the
  * same board. Here it is only reshaped for the page.
  */
-export type BoardLane = "waiting" | "stalled" | "running" | "blocked" | "todo" | "fresh" | "done";
+export type BoardLane = "running" | "blocked" | "todo" | "fresh" | "done";
 
 export interface BoardOwner {
   type: string;
@@ -36,17 +33,8 @@ export interface BoardRow {
   status?: string;
   parentIssueId: string | null;
   lane: BoardLane;
-  /**
-   * What put the row in its lane: the summon source or `waiting_person` for
-   * waiting, the parking category for stalled, `running` / `done` otherwise.
-   */
+  /** What put the row in its lane: `running` / `done` and so on. */
   kind: string;
-  /** The parking record's stuck kind, when the lane came from one. */
-  stuckKind: string;
-  /** Why it stopped, in the server's or the caller's words. May be empty. */
-  reason: string;
-  /** What happened before it stopped, from the parking summary. May be empty. */
-  before: string;
   /** Who raised the row: the caller of a summon. */
   from: BoardOwner | null;
   fromName: string;
@@ -56,15 +44,12 @@ export interface BoardRow {
   nextName: string;
   /** The moment the row is about: call time, verdict time, start, finish. */
   at: string;
-  timeline: ParkingEvent[];
   /** Unread inbox rows on this issue when the board was opened. */
   unread: number;
   children: BoardRow[];
 }
 
 export interface InboxBoard {
-  waiting: BoardRow[];
-  stalled: BoardRow[];
   running: BoardRow[];
   blocked: BoardRow[];
   todo: BoardRow[];
@@ -81,15 +66,11 @@ function row(r: InboxBoardRowPayload): BoardRow {
     parentIssueId: r.parent_issue_id,
     lane: r.lane,
     kind: r.kind,
-    stuckKind: r.stuck_kind,
-    reason: r.reason,
-    before: r.before,
     from: r.from,
     fromName: r.from_name,
     next: r.next,
     nextName: r.next_name,
     at: r.at,
-    timeline: r.timeline ?? [],
     unread: r.unread,
     children: (r.children ?? []).map(row),
   };
@@ -98,8 +79,6 @@ function row(r: InboxBoardRowPayload): BoardRow {
 /** The server's board (GET /api/inbox/board) in the shape the page reads. */
 export function boardFromResponse(res: InboxBoardResponse): InboxBoard {
   return {
-    waiting: (res.waiting ?? []).map(row),
-    stalled: (res.stalled ?? []).map(row),
     running: (res.running ?? []).map(row),
     blocked: (res.blocked ?? []).map(row),
     todo: (res.todo ?? []).map(row),
@@ -125,7 +104,7 @@ export function splitSeenDone(
   return { fresh, seen };
 }
 
-export const BOARD_LANES: readonly BoardLane[] = ["waiting", "stalled", "running", "blocked", "todo", "fresh", "done"];
+export const BOARD_LANES: readonly BoardLane[] = ["running", "blocked", "todo", "fresh", "done"];
 
 /**
  * Which lane each issue sits in on the board, sub-issues filed under the lane
