@@ -9,33 +9,22 @@ import (
 // makes the round-trip and exhaustiveness tests below fail until it is handled
 // everywhere.
 var allKinds = []Kind{
-	KindLocalInPlace, KindLocalShared, KindLocalWorktree,
-	KindRemoteCache, KindSharedScratch, KindUnresolvable,
+	KindLocalInPlace, KindRemoteCache, KindSharedScratch, KindUnresolvable,
 }
 
 func sampleOf(kind Kind) Decision {
 	target := LocalTarget{
 		ResourceID: "res-1", ProjectID: "project-1",
-		Path: "/Users/u/app", LockKey: "/Users/u/app",
-		ExecutionMode: ModeInPlace, DisplayName: "app",
+		Path: "/Users/u/app", DisplayName: "app",
 	}
 	readOnly := []Dir{{ResourceID: "res-2", ProjectID: "project-1", Path: "/Users/u/other", Name: "other"}}
 	switch kind {
 	case KindLocalInPlace:
 		return NewLocalInPlace(target).WithReadOnly(readOnly)
-	case KindLocalShared:
-		target.ExecutionMode, target.LockKey = ModeShared, ""
-		return NewLocalShared(target).WithReadOnly(readOnly)
-	case KindLocalWorktree:
-		target.ExecutionMode, target.LockKey = ModeWorktree, ""
-		target.RepoPath = "/Users/u/app"
-		target.WorktreeRoot = "/Users/u/app.multica-worktrees"
-		target.Path = "/Users/u/app.multica-worktrees/dene-619-142f15c86d34"
-		return NewLocalWorktree(target).WithReadOnly(readOnly)
 	case KindRemoteCache:
 		return NewRemoteCache(RemoteTarget{URL: "https://github.com/example/app", ResourceID: "res-repo", ProjectID: "project-1"}).WithReadOnly(readOnly)
 	case KindSharedScratch:
-		return NewSharedScratch(ScratchTarget{SessionID: "chat-7", Path: "sessions/chat-7"})
+		return NewSharedScratch(ScratchTarget{SessionID: "chat-7"})
 	default:
 		return NewUnresolvable(CodePinnedResourceNotFound, "pinned resource is not attached to this run")
 	}
@@ -70,7 +59,7 @@ func TestDecision_RoundTripsThroughJSON(t *testing.T) {
 	}
 }
 
-// The zero value is not a seventh state. A Decision nobody computed reads as
+// The zero value is not a fifth state. A Decision nobody computed reads as
 // Unresolvable, so no caller has to invent behaviour for "no decision" — and
 // in particular none can mistake it for a local run at path "".
 func TestDecision_ZeroValueIsUnresolvableNotAnEmptyLocalRun(t *testing.T) {
@@ -100,7 +89,7 @@ func TestDecision_ZeroValueIsUnresolvableNotAnEmptyLocalRun(t *testing.T) {
 }
 
 // Each variant's payload is reachable only through its own accessor. Without
-// this a caller could read RepoPath off an in-place run and act on a field the
+// this a caller could read a remote URL off a local run and act on a field the
 // kind never set.
 func TestDecision_AccessorsAreVariantScoped(t *testing.T) {
 	for _, kind := range allKinds {
@@ -128,8 +117,6 @@ func TestDecision_AccessorsAreVariantScoped(t *testing.T) {
 func TestFold_DispatchesEveryKind(t *testing.T) {
 	visitor := Visitor[Kind]{
 		LocalInPlace:  func(LocalTarget) Kind { return KindLocalInPlace },
-		LocalShared:   func(LocalTarget) Kind { return KindLocalShared },
-		LocalWorktree: func(LocalTarget) Kind { return KindLocalWorktree },
 		RemoteCache:   func(RemoteTarget) Kind { return KindRemoteCache },
 		SharedScratch: func(ScratchTarget) Kind { return KindSharedScratch },
 		Unresolvable:  func(Failure) Kind { return KindUnresolvable },
@@ -148,8 +135,6 @@ func TestFold_DispatchesEveryKind(t *testing.T) {
 func TestFold_PanicsOnAMissingArmRegardlessOfTheDecision(t *testing.T) {
 	incomplete := Visitor[int]{
 		LocalInPlace:  func(LocalTarget) int { return 1 },
-		LocalShared:   func(LocalTarget) int { return 2 },
-		LocalWorktree: func(LocalTarget) int { return 3 },
 		RemoteCache:   func(RemoteTarget) int { return 4 },
 		SharedScratch: func(ScratchTarget) int { return 5 },
 		// Unresolvable deliberately absent.
@@ -192,5 +177,27 @@ func TestDecision_ReadOnlyIsCopiedNotAliased(t *testing.T) {
 	out[0].Path = "/Users/u/also-mutated"
 	if again := d.ReadOnly(); again[0].Path != "/Users/u/other" {
 		t.Fatalf("mutating the output changed the decision: %q", again[0].Path)
+	}
+}
+
+// A decision stored by an older server for a folder mode that no longer
+// exists still names the bound folder, and reads back as a run in it.
+func TestDecision_LegacyFolderModesDecodeAsInPlace(t *testing.T) {
+	cases := map[string]string{
+		`{"kind":"local_shared","resource_id":"res-1","path":"/Users/u/app"}`:                                                  "/Users/u/app",
+		`{"kind":"local_worktree","resource_id":"res-1","path":"/Users/u/app.multica-worktrees/x","repo_path":"/Users/u/app"}`: "/Users/u/app",
+	}
+	for raw, wantPath := range cases {
+		var got Decision
+		if err := json.Unmarshal([]byte(raw), &got); err != nil {
+			t.Fatal(err)
+		}
+		target, ok := got.Local()
+		if got.Kind() != KindLocalInPlace || !ok {
+			t.Fatalf("%s decoded as %q, want %q", raw, got.Kind(), KindLocalInPlace)
+		}
+		if target.Path != wantPath || target.ResourceID != "res-1" {
+			t.Fatalf("%s decoded to %+v, want path %q", raw, target, wantPath)
+		}
 	}
 }

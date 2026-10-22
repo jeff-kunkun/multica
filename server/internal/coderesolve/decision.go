@@ -33,32 +33,34 @@ import (
 	"fmt"
 )
 
-// Kind names one of the six answers. The set is closed: Decision cannot be
+// Kind names one of the four answers. The set is closed: Decision cannot be
 // constructed outside this package, so every value in the wild carries one of
 // these and nothing else.
 type Kind string
 
 const (
-	// KindLocalInPlace runs the agent in the user's own directory, serialised
-	// against other runs on the same path. The default for a bound directory.
+	// KindLocalInPlace runs the agent in the user's own bound folder. Other
+	// runs may be in the same folder; nothing serialises them.
 	KindLocalInPlace Kind = "local_in_place"
-	// KindLocalShared runs in the user's own directory without the path lock,
-	// for a directory that holds several repositories rather than one tree.
-	KindLocalShared Kind = "local_shared"
-	// KindLocalWorktree runs in a git worktree of the user's repository,
-	// placed beside that repository on the user's own disk.
-	KindLocalWorktree Kind = "local_worktree"
 	// KindRemoteCache runs in a Multica-owned checkout of a remote repository,
 	// because no directory on the claiming machine holds this project's code.
 	KindRemoteCache Kind = "remote_cache"
-	// KindSharedScratch runs in the machine's shared per-session folder: the
-	// task bound no directory and named no repository, so there is no code to
-	// work in, only somewhere to leave artifacts.
+	// KindSharedScratch: the task bound no directory and named no repository,
+	// so there is no code to work in. The daemon runs it in its own workdir
+	// under the workspaces root. The wire value predates that and is kept so
+	// existing readers keep parsing it.
 	KindSharedScratch Kind = "shared_scratch"
 	// KindUnresolvable is a first-class answer, not an error channel. The
 	// inputs describe a run that cannot be placed, and the task must fail with
-	// the carried code rather than fall back to any of the five above.
+	// the carried code rather than fall back to any of the three above.
 	KindUnresolvable Kind = "unresolvable"
+)
+
+// Kinds an older server stored for the folder modes it used to have. Both
+// still name a bound folder, and both read back as KindLocalInPlace.
+const (
+	legacyKindLocalShared   Kind = "local_shared"
+	legacyKindLocalWorktree Kind = "local_worktree"
 )
 
 // Code identifies why a Decision is Unresolvable, in a form the UI can
@@ -68,7 +70,7 @@ type Code string
 
 const (
 	// CodeUnset is the zero Decision: a value that was never computed. It
-	// exists so that "nobody resolved this" is one of the six answers rather
+	// exists so that "nobody resolved this" is one of the answers rather
 	// than a nil that each caller re-interprets.
 	CodeUnset Code = "unset"
 	// CodeMalformedResource is a local_directory row the server cannot read:
@@ -87,43 +89,21 @@ const (
 	// CodePinnedResourceUnusable is an explicit resource id naming a resource
 	// type this run cannot be placed in.
 	CodePinnedResourceUnusable Code = "pinned_resource_unusable"
-	// CodeUnknownExecutionMode is a mode string this server does not know. The
-	// row was written by a newer server than the one resolving it, and guessing
-	// in_place would run the agent inside a directory the user may have asked
-	// to isolate.
+	// CodeUnknownExecutionMode is a decision kind this binary does not know:
+	// it was produced by a newer server, and guessing would run the agent
+	// somewhere the decision did not say.
 	CodeUnknownExecutionMode Code = "unknown_execution_mode"
-	// CodeDaemonCannotRunMode is a mode the claiming daemon did not advertise.
-	// Degrading to in_place is refused for the same reason: losing concurrency
-	// is a nuisance, ignoring a request not to touch someone's files is not.
-	CodeDaemonCannotRunMode Code = "daemon_cannot_run_mode"
 )
 
-// LocalTarget describes a run that writes somewhere on the user's own disk.
-// Which fields carry meaning depends on the Kind, and the accessors are the
-// only way to reach it, so no caller can read RepoPath off an in-place run.
+// LocalTarget describes a run that writes in a bound folder on the user's own
+// disk.
 type LocalTarget struct {
 	// ResourceID and ProjectID say which binding produced this target, so the
 	// UI can link the answer back to the row the user can edit.
 	ResourceID string `json:"resource_id"`
 	ProjectID  string `json:"project_id,omitempty"`
-	// Path is the directory the agent runs in. For in-place and shared it is
-	// the bound directory itself; for worktree it is the working copy beside
-	// the repository.
+	// Path is the bound folder the agent runs in.
 	Path string `json:"path"`
-	// RepoPath is the repository a worktree run branches from — the bound
-	// directory. Empty for the other two kinds, where Path already is it.
-	RepoPath string `json:"repo_path,omitempty"`
-	// WorktreeRoot is the directory holding this repository's working copies.
-	// Worktree runs only.
-	WorktreeRoot string `json:"worktree_root,omitempty"`
-	// LockKey is the identity the per-path mutex serialises on: the recorded
-	// real_path when the machine reported one, otherwise the bound path.
-	// Non-empty ONLY for in-place runs — shared and worktree runs skip the
-	// mutex by definition, and an empty key is how they say so.
-	LockKey string `json:"lock_key,omitempty"`
-	// ExecutionMode is the mode string as stored, echoed so a daemon can
-	// verify the server read the row the same way it does.
-	ExecutionMode string `json:"execution_mode,omitempty"`
 	// DisplayName is the label the user gave the directory, or its basename.
 	// Never the absolute path: this is what the UI renders into screenshots.
 	DisplayName string `json:"display_name,omitempty"`
@@ -142,14 +122,10 @@ type RemoteTarget struct {
 }
 
 // ScratchTarget describes a run with no code at all: a question, a plan, a
-// conversation. It gets a folder to leave artifacts in, archived per session
-// rather than per task, so twenty questions do not make twenty directories.
+// conversation. The daemon gives it its own workdir.
 type ScratchTarget struct {
-	// SessionID is what the folder is archived under.
+	// SessionID is the conversation the run belongs to, or the task id.
 	SessionID string `json:"session_id"`
-	// Path is RELATIVE to the daemon's own scratch root, which is the daemon's
-	// to choose and the server's not to know. Joining it is the daemon's job.
-	Path string `json:"path"`
 }
 
 // Failure is the Unresolvable payload. Code is for machines, Reason for the
@@ -170,12 +146,12 @@ type Dir struct {
 	Name       string `json:"name,omitempty"`
 }
 
-// Decision is the closed sum type: exactly one of the six kinds, with only
+// Decision is the closed sum type: exactly one of the four kinds, with only
 // that kind's payload reachable.
 //
 // The fields are unexported and there is no literal form, so the only
 // Decisions that exist are the ones the constructors below produce. The zero
-// value is not a seventh state — it reads as Unresolvable{CodeUnset}, which is
+// value is not a fifth state — it reads as Unresolvable{CodeUnset}, which is
 // the true statement about a Decision nobody computed.
 type Decision struct {
 	kind     Kind
@@ -189,14 +165,6 @@ type Decision struct {
 // NewLocalInPlace and friends are the only ways to build a Decision.
 func NewLocalInPlace(t LocalTarget) Decision {
 	return Decision{kind: KindLocalInPlace, local: t}
-}
-
-func NewLocalShared(t LocalTarget) Decision {
-	return Decision{kind: KindLocalShared, local: t}
-}
-
-func NewLocalWorktree(t LocalTarget) Decision {
-	return Decision{kind: KindLocalWorktree, local: t}
 }
 
 func NewRemoteCache(t RemoteTarget) Decision {
@@ -220,8 +188,8 @@ func (d Decision) WithReadOnly(dirs []Dir) Decision {
 	return d
 }
 
-// Kind reports which of the six this is. A zero Decision reports
-// KindUnresolvable, so no caller ever has to handle a seventh case.
+// Kind reports which of the four this is. A zero Decision reports
+// KindUnresolvable, so no caller ever has to handle a fifth case.
 func (d Decision) Kind() Kind {
 	if d.kind == "" {
 		return KindUnresolvable
@@ -229,14 +197,12 @@ func (d Decision) Kind() Kind {
 	return d.kind
 }
 
-// Local returns the local target and true for the three local kinds.
+// Local returns the local target and true for KindLocalInPlace.
 func (d Decision) Local() (LocalTarget, bool) {
-	switch d.Kind() {
-	case KindLocalInPlace, KindLocalShared, KindLocalWorktree:
+	if d.Kind() == KindLocalInPlace {
 		return d.local, true
-	default:
-		return LocalTarget{}, false
 	}
+	return LocalTarget{}, false
 }
 
 // Remote returns the remote target and true for KindRemoteCache.
@@ -277,8 +243,6 @@ func (d Decision) ReadOnly() []Dir {
 // its first call rather than on the one input that happens to reach it.
 type Visitor[T any] struct {
 	LocalInPlace  func(LocalTarget) T
-	LocalShared   func(LocalTarget) T
-	LocalWorktree func(LocalTarget) T
 	RemoteCache   func(RemoteTarget) T
 	SharedScratch func(ScratchTarget) T
 	Unresolvable  func(Failure) T
@@ -291,10 +255,6 @@ func Fold[T any](d Decision, v Visitor[T]) T {
 	switch {
 	case v.LocalInPlace == nil:
 		panic("coderesolve: Visitor.LocalInPlace is nil")
-	case v.LocalShared == nil:
-		panic("coderesolve: Visitor.LocalShared is nil")
-	case v.LocalWorktree == nil:
-		panic("coderesolve: Visitor.LocalWorktree is nil")
 	case v.RemoteCache == nil:
 		panic("coderesolve: Visitor.RemoteCache is nil")
 	case v.SharedScratch == nil:
@@ -305,10 +265,6 @@ func Fold[T any](d Decision, v Visitor[T]) T {
 	switch d.Kind() {
 	case KindLocalInPlace:
 		return v.LocalInPlace(d.local)
-	case KindLocalShared:
-		return v.LocalShared(d.local)
-	case KindLocalWorktree:
-		return v.LocalWorktree(d.local)
 	case KindRemoteCache:
 		return v.RemoteCache(d.remote)
 	case KindSharedScratch:
@@ -325,15 +281,14 @@ func Fold[T any](d Decision, v Visitor[T]) T {
 // `kind` and `path` working.
 type decisionWire struct {
 	Kind Kind `json:"kind"`
-	// Local fields, present on the three local kinds.
-	ResourceID    string `json:"resource_id,omitempty"`
-	ProjectID     string `json:"project_id,omitempty"`
-	Path          string `json:"path,omitempty"`
-	RepoPath      string `json:"repo_path,omitempty"`
-	WorktreeRoot  string `json:"worktree_root,omitempty"`
-	LockKey       string `json:"lock_key,omitempty"`
-	ExecutionMode string `json:"execution_mode,omitempty"`
-	DisplayName   string `json:"display_name,omitempty"`
+	// Local fields.
+	ResourceID  string `json:"resource_id,omitempty"`
+	ProjectID   string `json:"project_id,omitempty"`
+	Path        string `json:"path,omitempty"`
+	DisplayName string `json:"display_name,omitempty"`
+	// RepoPath is read, never written: a stored local_worktree decision put
+	// the bound folder here and a worktree path in Path.
+	RepoPath string `json:"repo_path,omitempty"`
 	// Remote.
 	URL string `json:"url,omitempty"`
 	// Scratch.
@@ -350,14 +305,10 @@ type decisionWire struct {
 func (d Decision) MarshalJSON() ([]byte, error) {
 	w := decisionWire{Kind: d.Kind(), ReadOnly: d.readOnly}
 	switch d.Kind() {
-	case KindLocalInPlace, KindLocalShared, KindLocalWorktree:
+	case KindLocalInPlace:
 		w.ResourceID = d.local.ResourceID
 		w.ProjectID = d.local.ProjectID
 		w.Path = d.local.Path
-		w.RepoPath = d.local.RepoPath
-		w.WorktreeRoot = d.local.WorktreeRoot
-		w.LockKey = d.local.LockKey
-		w.ExecutionMode = d.local.ExecutionMode
 		w.DisplayName = d.local.DisplayName
 	case KindRemoteCache:
 		w.URL = d.remote.URL
@@ -365,7 +316,6 @@ func (d Decision) MarshalJSON() ([]byte, error) {
 		w.ProjectID = d.remote.ProjectID
 	case KindSharedScratch:
 		w.SessionID = d.scratch.SessionID
-		w.Path = d.scratch.Path
 	default:
 		f, _ := d.Failure()
 		w.Code = f.Code
@@ -383,22 +333,23 @@ func (d *Decision) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	local := LocalTarget{
-		ResourceID:    w.ResourceID,
-		ProjectID:     w.ProjectID,
-		Path:          w.Path,
-		RepoPath:      w.RepoPath,
-		WorktreeRoot:  w.WorktreeRoot,
-		LockKey:       w.LockKey,
-		ExecutionMode: w.ExecutionMode,
-		DisplayName:   w.DisplayName,
+		ResourceID:  w.ResourceID,
+		ProjectID:   w.ProjectID,
+		Path:        w.Path,
+		DisplayName: w.DisplayName,
 	}
 	switch w.Kind {
-	case KindLocalInPlace, KindLocalShared, KindLocalWorktree:
-		*d = Decision{kind: w.Kind, local: local}
+	case KindLocalInPlace, legacyKindLocalShared:
+		*d = Decision{kind: KindLocalInPlace, local: local}
+	case legacyKindLocalWorktree:
+		if w.RepoPath != "" {
+			local.Path = w.RepoPath
+		}
+		*d = Decision{kind: KindLocalInPlace, local: local}
 	case KindRemoteCache:
 		*d = Decision{kind: w.Kind, remote: RemoteTarget{URL: w.URL, ResourceID: w.ResourceID, ProjectID: w.ProjectID}}
 	case KindSharedScratch:
-		*d = Decision{kind: w.Kind, scratch: ScratchTarget{SessionID: w.SessionID, Path: w.Path}}
+		*d = Decision{kind: w.Kind, scratch: ScratchTarget{SessionID: w.SessionID}}
 	case KindUnresolvable:
 		*d = NewUnresolvable(w.Code, w.Reason)
 	default:

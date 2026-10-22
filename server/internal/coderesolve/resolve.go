@@ -13,16 +13,6 @@ const (
 	ResourceTypeGitHubRepo     = "github_repo"
 )
 
-// Execution modes for a local_directory. Mirrors the constants in
-// handler/project_resource.go and internal/daemon/local_directory.go. The
-// empty value means ModeInPlace, so rows written before parallel mode existed
-// keep their original behaviour without a migration.
-const (
-	ModeInPlace  = "in_place"
-	ModeWorktree = "worktree"
-	ModeShared   = "shared"
-)
-
 // Resource is one project_resource row, as the server holds it.
 type Resource struct {
 	ID           string
@@ -67,9 +57,7 @@ type Task struct {
 
 // Daemon is the machine asking, and what it said it can do. Capabilities are
 // read from what the runtime ADVERTISED on this request, never from a version
-// string: the git-describe dev-build exemption once let a daemon without the
-// implementation straight through a version gate, and two tasks ran in a
-// directory the user had asked to isolate (MUL-5707).
+// string.
 type Daemon struct {
 	// ID is the daemon registration claiming the task. A local_directory is
 	// bound to one of these; "available on this machine" means "bound to this
@@ -80,27 +68,18 @@ type Daemon struct {
 	// local_directory for a project and knows the first in position order is
 	// the writable one. A daemon without it FAILS the task on the second row.
 	MultiLocalDirectory bool
-	// WorktreeUserRoot: parallel working copies go under the user's chosen
-	// root. A daemon without it builds them inside its own env root, where the
-	// workspace GC reclaims them on a schedule the user never agreed to.
-	WorktreeUserRoot bool
-	// LocalWorktree and LocalShared: the daemon implements those execution
-	// modes at all.
-	LocalWorktree bool
-	LocalShared   bool
 }
 
 // LocalDirRef is the stored JSONB shape of a local_directory resource_ref.
 // Mirrors handler.localDirectoryRef; only the fields the decision reads are
-// declared, and unknown keys are ignored so a row written by a newer server
-// still resolves.
+// declared, and unknown keys are ignored, so a row that still carries an
+// execution_mode or worktree_root from an older release resolves the same way
+// as one that does not: the run goes into the bound folder.
 type LocalDirRef struct {
-	LocalPath     string `json:"local_path"`
-	DaemonID      string `json:"daemon_id"`
-	Label         string `json:"label,omitempty"`
-	ExecutionMode string `json:"execution_mode,omitempty"`
-	RealPath      string `json:"real_path,omitempty"`
-	WorktreeRoot  string `json:"worktree_root,omitempty"`
+	LocalPath string `json:"local_path"`
+	DaemonID  string `json:"daemon_id"`
+	Label     string `json:"label,omitempty"`
+	RealPath  string `json:"real_path,omitempty"`
 }
 
 // gitHubRepoRef is the stored shape of a github_repo resource_ref.
@@ -153,8 +132,8 @@ func (c candidate) dir() Dir {
 //     bound to the claiming machine.
 //
 // Only when neither yields a directory does the run look outward: a repository
-// checkout when the run has one, and the shared session folder when it has
-// nothing at all. Every other outcome is Unresolvable, which is an answer the
+// checkout when the run has one, and its own workdir when it has nothing at
+// all. Every other outcome is Unresolvable, which is an answer the
 // caller must act on — never a nil, never a quiet fall-through to somewhere
 // else on the user's disk.
 func Resolve(task Task, projects []Project, daemon Daemon) Decision {
@@ -164,20 +143,19 @@ func Resolve(task Task, projects []Project, daemon Daemon) Decision {
 	}
 
 	// A squad leader coordinates: it may create child issues and comments, but
-	// it must not bind the user's working tree — nor hold its path mutex —
-	// while the workers that will actually write it are waiting to run.
+	// it does not bind the user's working tree; the workers write it.
 	if task.IsLeader {
 		return outward(task, repos)
 	}
 
 	if pinned := strings.TrimSpace(task.PinnedResourceID); pinned != "" {
-		return resolvePinned(task, pinned, here, others, repos, daemon)
+		return resolvePinned(pinned, here, others, repos)
 	}
 
 	if len(here) == 0 {
 		return outward(task, repos).WithReadOnly(nil)
 	}
-	return local(task, here[0], daemon).WithReadOnly(dirsExcept(here, 0))
+	return local(here[0]).WithReadOnly(dirsExcept(here, 0))
 }
 
 // gather walks every project's resources once, in the order given, and splits
@@ -247,8 +225,6 @@ func parseLocalDirRef(res Resource) (LocalDirRef, error) {
 	ref.DaemonID = strings.TrimSpace(ref.DaemonID)
 	ref.LocalPath = strings.TrimSpace(ref.LocalPath)
 	ref.RealPath = strings.TrimSpace(ref.RealPath)
-	ref.WorktreeRoot = strings.TrimSpace(ref.WorktreeRoot)
-	ref.ExecutionMode = strings.TrimSpace(ref.ExecutionMode)
 	if ref.DaemonID == "" {
 		return ref, fmt.Errorf("local_directory %s: resource_ref names no daemon, so no machine can claim it", res.ID)
 	}
@@ -259,10 +235,10 @@ func parseLocalDirRef(res Resource) (LocalDirRef, error) {
 }
 
 // resolvePinned handles the first selection rule: the task named a resource.
-func resolvePinned(task Task, pinned string, here []candidate, others map[string]candidate, repos []RemoteTarget, daemon Daemon) Decision {
+func resolvePinned(pinned string, here []candidate, others map[string]candidate, repos []RemoteTarget) Decision {
 	for i, c := range here {
 		if c.resource.ID == pinned {
-			return local(task, c, daemon).WithReadOnly(dirsExcept(here, i))
+			return local(c).WithReadOnly(dirsExcept(here, i))
 		}
 	}
 	if c, ok := others[pinned]; ok {
@@ -279,98 +255,32 @@ func resolvePinned(task Task, pinned string, here []candidate, others map[string
 		"this run was pinned to resource %s, which is not attached to any of its projects", pinned))
 }
 
-// local turns the chosen directory into the decision its execution mode calls
-// for, or into the reason it cannot be run here.
-func local(task Task, c candidate, daemon Daemon) Decision {
-	target := LocalTarget{
-		ResourceID:    c.resource.ID,
-		ProjectID:     c.projectID,
-		ExecutionMode: normalizeMode(c.ref.ExecutionMode),
-		DisplayName:   c.displayName(),
-	}
-	switch target.ExecutionMode {
-	case ModeInPlace:
-		target.Path = c.ref.LocalPath
-		// The lock serialises on the directory's IDENTITY, so two routes to
-		// one directory collapse to one lock. real_path is that identity when
-		// the machine reported one; the bound path is the best the server can
-		// do when it did not, and the daemon re-resolves it either way.
-		target.LockKey = c.ref.RealPath
-		if target.LockKey == "" {
-			target.LockKey = c.ref.LocalPath
-		}
-		return NewLocalInPlace(target)
-
-	case ModeShared:
-		if !daemon.LocalShared {
-			return cannotRunMode(c, ModeShared, "shared workspace")
-		}
-		// No LockKey by design: not taking the mutex IS the mode. Leaving it
-		// empty is how the decision says so, rather than carrying a key a
-		// reader might take.
-		target.Path = c.ref.LocalPath
-		return NewLocalShared(target)
-
-	case ModeWorktree:
-		if !daemon.LocalWorktree {
-			return cannotRunMode(c, ModeWorktree, "parallel (worktree)")
-		}
-		target.RepoPath = c.ref.LocalPath
-		target.WorktreeRoot = c.ref.WorktreeRoot
-		if target.WorktreeRoot == "" || !daemon.WorktreeUserRoot {
-			// Two ways to end up on the default sibling: the resource names no
-			// root, or the daemon cannot honour one. The second case is not a
-			// silent downgrade — a daemon without the capability never
-			// receives worktree_root at all (see FilterForCapabilities), so
-			// stating the default here is stating what will actually happen.
-			target.WorktreeRoot = DefaultWorktreeRoot(c.ref.LocalPath)
-		}
-		target.Path = Join(target.WorktreeRoot, TaskPathSegment(task.IssueIdentifier, "task", task.ID))
-		return NewLocalWorktree(target)
-
-	default:
-		return NewUnresolvable(CodeUnknownExecutionMode, fmt.Sprintf(
-			"directory %q asks for execution mode %q, which this server does not know; "+
-				"refusing to guess in_place, since that would write into a directory the mode may exist to keep out of",
-			c.displayName(), c.ref.ExecutionMode))
-	}
-}
-
-func cannotRunMode(c candidate, mode, humanMode string) Decision {
-	return NewUnresolvable(CodeDaemonCannotRunMode, fmt.Sprintf(
-		"directory %q runs in %s mode, but the Multica runtime claiming this task did not advertise it. "+
-			"Update the app on that machine, or set the directory back to in-place. "+
-			"Running it in place instead is refused: losing concurrency is a nuisance, "+
-			"writing into a directory the mode exists to protect is not",
-		c.displayName(), humanMode))
+// local turns the chosen directory into the decision: the run goes into the
+// bound folder itself. Several runs may share it; the brief tells each one who
+// else is there.
+func local(c candidate) Decision {
+	return NewLocalInPlace(LocalTarget{
+		ResourceID:  c.resource.ID,
+		ProjectID:   c.projectID,
+		Path:        c.ref.LocalPath,
+		DisplayName: c.displayName(),
+	})
 }
 
 // outward is the answer when no directory on this machine holds the code: a
-// repository checkout if the run has a repository, and the shared session
-// folder if it has nothing at all.
+// repository checkout if the run has a repository, and the run's own workdir
+// under the daemon's workspaces root if it has nothing at all.
 func outward(task Task, repos []RemoteTarget) Decision {
 	if len(repos) > 0 {
 		return NewRemoteCache(repos[0])
 	}
-	// No directory, no repository — a question, a plan, a conversation. It
-	// still needs somewhere to leave artifacts, and that somewhere is archived
-	// per SESSION, not per task: twenty questions in one conversation must not
-	// make twenty directories.
-	//
-	// Path is RELATIVE to the daemon's scratch root. Which root that is, is the
-	// daemon's to choose and not something the server can know.
+	// No directory, no repository — a question, a plan, a conversation. The
+	// daemon gives it its own workdir; the session id is carried for display.
 	session := strings.TrimSpace(task.SessionID)
 	if session == "" {
 		session = task.ID
 	}
-	return NewSharedScratch(ScratchTarget{SessionID: session, Path: "sessions/" + session})
-}
-
-func normalizeMode(mode string) string {
-	if mode == "" {
-		return ModeInPlace
-	}
-	return mode
+	return NewSharedScratch(ScratchTarget{SessionID: session})
 }
 
 func dirsOf(cands []candidate) []Dir {

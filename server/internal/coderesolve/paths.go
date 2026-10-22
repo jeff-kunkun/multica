@@ -1,7 +1,6 @@
 package coderesolve
 
 import (
-	"regexp"
 	"strings"
 )
 
@@ -67,19 +66,6 @@ func Base(p string) string {
 	return p
 }
 
-// dir returns everything before the last element, keeping the separator style.
-func dir(p string) string {
-	p = trimTrailingSeparators(p)
-	i := strings.LastIndexAny(p, `/\`)
-	if i < 0 {
-		return ""
-	}
-	if i == 0 {
-		return string(p[0])
-	}
-	return p[:i]
-}
-
 // Join appends child to parent with parent's separator.
 func Join(parent, child string) string {
 	if parent == "" {
@@ -94,67 +80,4 @@ func Join(parent, child string) string {
 		return trimmed + child
 	}
 	return trimmed + sep + child
-}
-
-// worktreeRootSuffix names the sibling directory holding a repository's
-// Multica working copies. Mirrors execenv.worktreeRootSuffix; the two must
-// agree or the server would tell the user one location and the daemon would
-// build the copy in another. Kept inline rather than imported for the reason
-// handler.taskDirSegment gives: the server must not depend on the daemon
-// package.
-const worktreeRootSuffix = ".multica-worktrees"
-
-// DefaultWorktreeRoot is where a repository's working copies go when the
-// resource names no location: the repository's sibling. Mirrors
-// execenv.DefaultWorktreeRoot.
-func DefaultWorktreeRoot(repoPath string) string {
-	clean := trimTrailingSeparators(repoPath)
-	return Join(dir(clean), Base(clean)+worktreeRootSuffix)
-}
-
-// readablePathSegmentMax, taskKeyLen, nonAlphanumeric and TaskPathSegment
-// mirror execenv.readablePathSegment / execenv.taskKey — the naming rule for a
-// task's own directory. The server needs it to state, before the run starts,
-// which directory a parallel run will land in; the daemon needs it to build
-// that directory. Same lock-step contract as handler.taskDirSegment, and the
-// same reason for the duplication: no handler import of the daemon package.
-//
-// The suffix must keep coming from the TAIL of the id. A UUIDv7's leading hex
-// chars are timestamp bits shared by every task created within ~65.5s (#7326).
-const (
-	readablePathSegmentMax = 24
-	taskKeyLen             = 12
-)
-
-var nonAlphanumeric = regexp.MustCompile(`[^a-z0-9]+`)
-
-// TaskPathSegment converts a user-facing label plus a task id into the bounded
-// lowercase segment a task's directory is named with.
-func TaskPathSegment(label, fallback, id string) string {
-	prefix := strings.ToLower(strings.TrimSpace(label))
-	prefix = nonAlphanumeric.ReplaceAllString(prefix, "-")
-	prefix = strings.Trim(prefix, "-")
-	if prefix == "" {
-		prefix = fallback
-	}
-	suffix := strings.ToLower(taskKey(id))
-	maxPrefix := readablePathSegmentMax - len(suffix) - 1
-	if maxPrefix < 0 {
-		maxPrefix = 0
-	}
-	if len(prefix) > maxPrefix {
-		prefix = strings.TrimRight(prefix[:maxPrefix], "-")
-	}
-	if prefix == "" {
-		prefix = fallback
-	}
-	return prefix + "-" + suffix
-}
-
-func taskKey(uuid string) string {
-	s := strings.ReplaceAll(uuid, "-", "")
-	if len(s) > taskKeyLen {
-		return s[len(s)-taskKeyLen:]
-	}
-	return s
 }
