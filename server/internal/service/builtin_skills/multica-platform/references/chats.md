@@ -1,8 +1,7 @@
 # Chats
 
-Contracts for reading and messaging chats from the CLI. Opening a chat with
-another agent is `references/chat-spawn.md`; steer / queue / restart costs are
-`references/run-control.md`.
+Contracts for reading and messaging chats from the CLI. Steer / queue /
+restart costs are `references/run-control.md`.
 
 Use the read-only chat directory before opening a transcript:
 
@@ -25,8 +24,3 @@ The same `--mode` works on `multica issue comment add`, which also takes
 moves to another agent with `multica chat handoff --to <agent>`. What each mode costs,
 and what happens when the running CLI cannot steer, is in
 `references/run-control.md`.
-
-To talk to another agent without creating work, open a chat from your chat:
-`multica chat open --agent <name> --brief-file ./brief.md`. Work with an owner
-and a deliverable is still an issue. Limits and refusal codes:
-`references/chat-spawn.md`.

@@ -316,7 +316,6 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			resp = append(resp, chatSessionListResponse(s.ID, s.WorkspaceID, s.AgentID, s.CreatorID, s.ProjectID, s.Title, s.Status, s.Visibility, s.ViewerAccess, s.AgentName, s.Pinned, s.ProjectNudgeDismissedAt, s.CreatedAt, s.UpdatedAt, s.UnreadCount, s.ExtraCount, s.AgentRuntimeBound, s.AgentArchived, s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason, s.LastMessageKind, s.LastMessageSenderID, s.TitleLocked, s.ProgressText, s.ProgressSource, s.ProgressTone, s.ProgressAuthorType, s.ProgressAuthorID, s.ProgressUpdatedAt, s.ConvertedIssueID))
-			resp[len(resp)-1].OriginSessionID = uuidToPtr(s.OriginSessionID)
 		}
 	} else {
 		rows, err := h.Queries.ListChatSessionsByCreator(r.Context(), db.ListChatSessionsByCreatorParams{
@@ -336,7 +335,6 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			resp = append(resp, chatSessionListResponse(s.ID, s.WorkspaceID, s.AgentID, s.CreatorID, s.ProjectID, s.Title, s.Status, s.Visibility, s.ViewerAccess, s.AgentName, s.Pinned, s.ProjectNudgeDismissedAt, s.CreatedAt, s.UpdatedAt, s.UnreadCount, s.ExtraCount, s.AgentRuntimeBound, s.AgentArchived, s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason, s.LastMessageKind, s.LastMessageSenderID, s.TitleLocked, s.ProgressText, s.ProgressSource, s.ProgressTone, s.ProgressAuthorType, s.ProgressAuthorID, s.ProgressUpdatedAt, s.ConvertedIssueID))
-			resp[len(resp)-1].OriginSessionID = uuidToPtr(s.OriginSessionID)
 		}
 	}
 	if err := h.hydrateChatSessionChannelMetadata(r.Context(), resp); err != nil {
@@ -2495,15 +2493,10 @@ type ChatSessionResponse struct {
 	IsCurrentChannelRoute *bool                             `json:"is_current_channel_route,omitempty"`
 	// Routing is set on the create response only: who the chat opened with
 	// and why (DENE-1834). 人工 when the caller named the agent.
-	Routing *RoutingReceipt `json:"routing,omitempty"`
-	// OriginSessionID names the chat an agent opened this one from
-	// (DENE-1271). OriginTitle is that chat's title, filled only on
-	// single-session reads and only when the viewer can open it.
-	OriginType      *string `json:"origin_type,omitempty"`
-	OriginSessionID *string `json:"origin_session_id,omitempty"`
-	OriginTitle     *string `json:"origin_title,omitempty"`
-	CreatedAt       string  `json:"created_at"`
-	UpdatedAt       string  `json:"updated_at"`
+	Routing    *RoutingReceipt `json:"routing,omitempty"`
+	OriginType *string         `json:"origin_type,omitempty"`
+	CreatedAt  string          `json:"created_at"`
+	UpdatedAt  string          `json:"updated_at"`
 }
 
 // ProgressResponse is one goal/progress subtitle line (DENE-1037): what was
@@ -2860,7 +2853,6 @@ func chatSessionToResponse(s db.ChatSession) ChatSessionResponse {
 		// Pinned is per viewer (DENE-866); decorateChatSession fills it in.
 		Visibility:            s.Visibility,
 		OriginType:            textToPtr(s.OriginType),
-		OriginSessionID:       uuidToPtr(s.OriginSessionID),
 		ProjectNudgeDismissed: s.ProjectNudgeDismissedAt.Valid,
 		CreatedAt:             timestampToString(s.CreatedAt),
 		UpdatedAt:             timestampToString(s.UpdatedAt),

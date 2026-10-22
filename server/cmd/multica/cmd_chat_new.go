@@ -15,8 +15,7 @@ import (
 
 // chat new — a person (or an external bot holding a person's key, DENE-1788)
 // starts a chat the way the web composer does: the human create-chat route,
-// then the first message. Agent runs keep using "chat open", whose spawn
-// guards (depth, budget, scope) this command does not touch.
+// then the first message. Agent runs cannot start chats.
 
 var chatNewCmd = &cobra.Command{
 	Use:   "new [text]",
@@ -38,7 +37,7 @@ message, prints their receipt (routing included), and exits nonzero before
 waiting. Do not resend the saved message; see chat send --help for recovery.
 
 For people and external bots logged in with a personal key. An agent run
-is refused here: use "multica chat open" from a chat run instead.
+is refused here.
 
   multica chat new "帮我看看 DENE-1788 现在卡在哪" --wait
   multica chat new --agent 孙悟空 --content-file ./ask.md --title "Multica · 外部 Bot" --wait --output table
@@ -63,7 +62,7 @@ func init() {
 
 func runChatNew(cmd *cobra.Command, args []string) error {
 	if inAgentExecutionContext() {
-		return fmt.Errorf("chat new: an agent run cannot start a chat this way; use \"multica chat open\" from a chat run")
+		return fmt.Errorf("chat new: an agent run cannot start a chat")
 	}
 	agentRef, _ := cmd.Flags().GetString("agent")
 	content, err := readChatContent(cmd, args, "chat new")

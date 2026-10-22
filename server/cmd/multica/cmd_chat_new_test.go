@@ -141,8 +141,8 @@ func TestRunChatNewRefusesAgentRuns(t *testing.T) {
 	t.Setenv("MULTICA_AGENT_ID", "a-1")
 	t.Setenv("MULTICA_TASK_ID", "t-1")
 	err := runChatNew(chatNewCmd, []string{"hi"})
-	if err == nil || !strings.Contains(err.Error(), "chat open") {
-		t.Fatalf("err = %v, want refusal pointing at chat open", err)
+	if err == nil || !strings.Contains(err.Error(), "agent run cannot start a chat") {
+		t.Fatalf("err = %v, want refusal for agent runs", err)
 	}
 }
 

@@ -48,11 +48,8 @@ type IssueResponse struct {
 	Identifier  string            `json:"identifier"`
 	Title       string            `json:"title"`
 	Progress    *ProgressResponse `json:"progress"`
-	// SourceChat is the chat this issue was opened from (DENE-1665); set on
-	// the single-issue read only.
-	SourceChat  *IssueSourceChat `json:"source_chat,omitempty"`
-	Description *string          `json:"description"`
-	Status      string           `json:"status"`
+	Description *string           `json:"description"`
+	Status      string            `json:"status"`
 	// StatusCategory encodes lifecycle using the legacy seven-value wire enum. It is
 	// omitted when an endpoint cannot resolve a custom status, so consumers must
 	// fall back to their catalog rather than treat a blank as "no category".
@@ -2639,7 +2636,6 @@ func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 	resp := issueToResponse(issue, prefix)
 	h.fillStatusCategory(r.Context(), issue.WorkspaceID, &resp)
-	resp.SourceChat = h.issueSourceChat(r.Context(), r, issue)
 	detailLabels := h.labelsByIssue(r.Context(), issue.WorkspaceID, []pgtype.UUID{issue.ID})[uuidToString(issue.ID)]
 	if detailLabels == nil {
 		detailLabels = []LabelResponse{}
@@ -3724,18 +3720,10 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 				if task, terr := h.Queries.GetAgentTask(r.Context(), taskUUID); terr == nil && uuidToString(task.AgentID) == actualCreatorID {
 					originType = pgtype.Text{String: "agent_create", Valid: true}
 					originID = taskUUID
-					// A chat run's issue points back at its chat (DENE-1665)
-					// and must carry what the chat aligned on.
+					// A chat run's issue points back at its chat (DENE-1665).
 					originChat = task.ChatSessionID
 				}
 			}
-		}
-	}
-
-	if originChat.Valid {
-		if msg := chatTicketDescriptionProblem(ptrToText(req.Description).String); msg != "" {
-			writeError(w, http.StatusBadRequest, msg)
-			return
 		}
 	}
 
@@ -3772,14 +3760,6 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	if domainPinned {
 		pickedDomain = createDomain
 	}
-
-	// Agent permissions (DENE-1271): an agent run may only create an issue
-	// when the workspace table allows it for this kind of run.
-	spawnSlots, ok := h.gateAgentIssueSpawn(w, r, wsUUID, creatorType, actualCreatorID, 1)
-	if !ok {
-		return
-	}
-	defer spawnSlots.release()
 
 	// Whose pick is the executor (DENE-1033). A person's own hand stands; an
 	// agent's stands only with a quote the server can verify, and on a ticket
@@ -3931,7 +3911,6 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	issue := res.Issue
-	spawnSlots.fill(r.Context(), issue.ID)
 	if issue.Status == "blocked" || issue.Status == "in_review" {
 		h.setIssueMetaString(r.Context(), issue, blockwait.KeyWatched, blockwait.WatchedYes)
 	}
@@ -4967,7 +4946,6 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	if statusChanged || titleChanged || descriptionChanged || pickSetAside || executorCleared {
 		if statusChanged {
 			h.notifyParentOfChildDone(r.Context(), prevIssue, issue)
-			h.postSourceChatReceipt(r.Context(), prevIssue, issue)
 			h.notifyWaitersOfIssueDone(r.Context(), prevIssue, issue)
 		}
 		// Route after content edits as well as status changes, and after an
@@ -4982,11 +4960,6 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// is retried by the scheduler sweep.
 	if statusChanged || prevIssue.ParentIssueID != issue.ParentIssueID || prevIssue.Stage != issue.Stage {
 		h.processChildEvents(r.Context(), issue.ParentIssueID, prevIssue.ParentIssueID)
-	}
-	// A chat's run moving the issue or its executor follows it from that
-	// chat (DENE-1719).
-	if statusChanged || assigneeChanged || executorCleared {
-		h.followIssueFromChatTask(r, actorType, actorID, issue)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -5988,7 +5961,6 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			h.RouteIssueAsync(r, uuidToString(issue.WorkspaceID), uuidToString(issue.ID))
 		}
 		if statusChanged {
-			h.postSourceChatReceipt(r.Context(), prevIssue, issue)
 			prevTerminal := isTerminalChildStatus(
 				issuestatus.Effective(r.Context(), h.Queries, prevIssue.WorkspaceID, prevIssue.Status))
 			nowTerminal := isTerminalChildStatus(
@@ -6003,10 +5975,6 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		if statusChanged || prevIssue.ParentIssueID != issue.ParentIssueID || prevIssue.Stage != issue.Stage {
 			changedParents = append(changedParents, issue.ParentIssueID, prevIssue.ParentIssueID)
 		}
-		if statusChanged || assigneeChanged || (prevIssue.AssigneeID.Valid && !issue.AssigneeID.Valid) {
-			h.followIssueFromChatTask(r, actorType, actorID, issue)
-		}
-
 		updated++
 	}
 

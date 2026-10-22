@@ -597,9 +597,8 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// An agent run must not be able to raise its own limits through the
-		// generic settings write: agent_spawn is carried forward unchanged.
+		// generic settings write: bot_wake_chain_limit is carried forward unchanged.
 		if r.Header.Get("X-Actor-Source") == "task_token" {
-			merged = keepStoredAgentSpawn(merged, stored)
 			merged = keepStoredBotWakeChainLimit(merged, stored)
 		}
 		// The magpie mode switch is written only through its own endpoint.

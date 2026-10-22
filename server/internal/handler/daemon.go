@@ -4003,7 +4003,6 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		}
 		resp.ChatSessionID = uuidToString(cs.ID)
 		resp.ThreadName = cs.Title
-		resp.ChatDispatchedIssues = h.chatDispatchedLines(r.Context(), cs)
 		// Legacy compatibility: agent creation no longer creates intro chats,
 		// but historical is_agent_intro sessions can still be resumed. Such a
 		// session carries no user message on its opening turn, so flag it for

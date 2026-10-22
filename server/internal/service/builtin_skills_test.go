@@ -371,7 +371,6 @@ func TestPlatformSkillDescriptionNamesEveryDomain(t *testing.T) {
 		"references/inbox.md":           "inbox",
 		"references/asks.md":            "ask",
 		"references/progress.md":        "progress",
-		"references/chat-spawn.md":      "open a chat",
 		"references/chats.md":           "chat",
 		"references/consult.md":         "consult",
 		"references/drivers.md":         "driver",

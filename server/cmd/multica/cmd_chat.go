@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -123,86 +121,6 @@ and queued_behind_N.
 	RunE: runChatProgress,
 }
 
-var chatTicketsCmd = &cobra.Command{
-	Use:   "tickets",
-	Short: "List the issues a chat opened or follows",
-	Long: `List a chat's tickets, in the order they joined it, each with its source:
-
-  created  opened from this chat — by its agent's "issue create"
-  auto     followed: this chat's run changed its status or assignee,
-           commented on it, handed it off or closed it (naming an issue in a
-           reply does not count)
-  manual   pinned by hand ("multica chat tickets add" or the chat bar)
-
-Each ticket carries status, assignee and the first line of its 目标 section,
-plus its latest status move (from_status, changed_at) and phase — waiting_you,
-in_progress or done, bucketed for the caller. A ticket that
-is done, blocked, cancelled or in review also carries its result: the close's
-summary and PRs (summary, pull_requests). The chat shows
-the same list as its ticket cards and progress bar. An issue names the chat it
-was opened from as source_chat in "multica issue get"; following never moves
-that.
-
-  multica chat tickets
-  multica chat tickets --session <id|url> --output json
-  multica chat tickets add DENE-12
-  multica chat tickets remove DENE-12
-`,
-	Args: cobra.NoArgs,
-	RunE: runChatTickets,
-}
-
-var chatTicketsAddCmd = &cobra.Command{
-	Use:   "add <issue>",
-	Short: "Pin an issue to a chat's tickets",
-	Long: `Pin an issue to a chat's ticket list by hand (source manual). Also undoes
-an earlier "remove". The chat bar's 挂上 does the same.
-
-  multica chat tickets add DENE-12
-  multica chat tickets add DENE-12 --session <id|url>
-`,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error { return runChatTicketsPin(cmd, args[0], false) },
-}
-
-var chatTicketsRemoveCmd = &cobra.Command{
-	Use:   "remove <issue>",
-	Short: "Take an issue off a chat's tickets",
-	Long: `Take an issue off a chat's ticket list, whatever its source. The issue is
-untouched, and the chat's run acting on it again does not bring it back; only
-"add" does. The ticket card's 取下 does the same.
-
-  multica chat tickets remove DENE-12
-`,
-	Args: cobra.ExactArgs(1),
-	RunE: func(cmd *cobra.Command, args []string) error { return runChatTicketsPin(cmd, args[0], true) },
-}
-
-var chatOpenCmd = &cobra.Command{
-	Use:   "open",
-	Short: "Open a new chat with another agent from the current chat",
-	Long: `Open a new chat with an agent and send it a brief as the first message.
-The server creates the chat, records which chat it came from, and posts a
-card in the current chat linking to it, all in one step.
-
-Only a chat run can open a chat (a task run gets chat_spawn_task_mode: use
-"multica issue create" instead). A chat opened this way cannot open another
-one, and its visibility and project can only be narrower than the current
-chat. The workspace caps how many chats each chat and each run may open.
-
-Refusals come back as JSON with a code:
-  agent_spawn_disabled, agent_spawn_budget_exceeded, chat_spawn_depth_exceeded,
-  chat_spawn_task_mode, chat_spawn_scope_exceeded, chat_spawn_agent_only
-
-Retrying with the same --client-key (default: derived from agent, title and
-brief) returns the chat already opened instead of a second one.
-
-  multica chat open --agent 布尔玛 --brief-file ./brief.md --title "Billing · retry design"
-`,
-	Args: cobra.NoArgs,
-	RunE: runChatOpen,
-}
-
 var chatSendCmd = &cobra.Command{
 	Use:   "send [text]",
 	Short: "Send a message to a chat, steering, queueing, restarting or replacing its reply",
@@ -294,15 +212,6 @@ func init() {
 	chatCmd.AddCommand(chatHistoryCmd)
 	chatCmd.AddCommand(chatThreadCmd)
 	chatCmd.AddCommand(chatProgressCmd)
-	chatCmd.AddCommand(chatTicketsCmd)
-	chatTicketsCmd.Flags().String("session", "", "Chat session id or URL (defaults to MULTICA_CHAT_SESSION_ID)")
-	chatTicketsCmd.Flags().String("output", "table", "Output format: table or json")
-	chatTicketsCmd.AddCommand(chatTicketsAddCmd, chatTicketsRemoveCmd)
-	for _, c := range []*cobra.Command{chatTicketsAddCmd, chatTicketsRemoveCmd} {
-		c.Flags().String("session", "", "Chat session id or URL (defaults to MULTICA_CHAT_SESSION_ID)")
-		c.Flags().String("output", "table", "Output format: table or json")
-	}
-	chatCmd.AddCommand(chatOpenCmd)
 	chatCmd.AddCommand(chatSendCmd)
 	chatCmd.AddCommand(chatHandoffCmd)
 	chatHandoffCmd.Flags().String("session", "", "Chat session id or URL (defaults to MULTICA_CHAT_SESSION_ID)")
@@ -315,114 +224,10 @@ func init() {
 	chatSendCmd.Flags().String("output", "json", "Output format: table or json")
 	chatSendCmd.Flags().StringSlice("attachment", nil, "Local files to attach to this message (repeatable)")
 	chatSendCmd.Flags().Bool("allow-external-file", false, "Allow attachment paths outside the working directory")
-	chatOpenCmd.Flags().String("agent", "", "Agent to talk to: name or id (required)")
-	chatOpenCmd.Flags().String("brief-file", "", "File holding the first message for the agent (required)")
-	chatOpenCmd.Flags().String("title", "", "Chat title, Project · topic")
-	chatOpenCmd.Flags().String("project", "", "Project id or prefix (must be the current chat's project, or narrower)")
-	chatOpenCmd.Flags().String("visibility", "", "private or workspace (cannot be wider than the current chat)")
-	chatOpenCmd.Flags().String("client-key", "", "Idempotency key; defaults to a hash of agent, title and brief")
-	chatOpenCmd.Flags().String("output", "json", "Output format: table or json")
 	chatProgressCmd.Flags().String("session", "", "Chat session id or URL (defaults to MULTICA_CHAT_SESSION_ID)")
 	chatProgressCmd.Flags().String("output", "json", "Output format: table or json")
 	chatProgressCmd.Flags().String("tone", "", "Dot colour: working, waiting, stuck, or done (default working)")
 	chatProgressCmd.Flags().Bool("history", false, "List earlier progress lines instead of reporting one")
-}
-
-func runChatTickets(cmd *cobra.Command, _ []string) error {
-	session, _ := cmd.Flags().GetString("session")
-	if strings.TrimSpace(session) == "" {
-		session = os.Getenv("MULTICA_CHAT_SESSION_ID")
-	}
-	ref, err := parseChatSessionLinkRef(session)
-	if err != nil {
-		return fmt.Errorf("chat tickets: --session is required (or set MULTICA_CHAT_SESSION_ID): %w", err)
-	}
-	client, err := newAPIClient(cmd)
-	if err != nil {
-		return err
-	}
-	ctx, cancel := cli.APIContext(context.Background())
-	defer cancel()
-	var out struct {
-		ChatSessionID string           `json:"chat_session_id"`
-		Tickets       []map[string]any `json:"tickets"`
-	}
-	if err := client.GetJSON(ctx, "/api/chat/sessions/"+url.PathEscape(ref.ID)+"/tickets", &out); err != nil {
-		return fmt.Errorf("list chat tickets: %w", err)
-	}
-	output, _ := cmd.Flags().GetString("output")
-	if output != "table" {
-		return cli.PrintJSON(os.Stdout, out)
-	}
-	if len(out.Tickets) == 0 {
-		fmt.Println("This chat has no tickets: it has not opened or followed any issue.")
-		return nil
-	}
-	headers := []string{"IDENTIFIER", "SOURCE", "STATUS", "PHASE", "ASSIGNEE", "TITLE", "RESULT"}
-	rows := make([][]string, 0, len(out.Tickets))
-	for _, t := range out.Tickets {
-		assignee, _ := t["assignee_name"].(string)
-		if assignee == "" {
-			assignee = "-"
-		}
-		phase, _ := t["phase"].(string)
-		if phase == "" {
-			phase = "-"
-		}
-		source, _ := t["source"].(string)
-		if source == "" {
-			source = "-"
-		}
-		rows = append(rows, []string{fmt.Sprint(t["identifier"]), source, fmt.Sprint(t["status"]), phase, assignee, fmt.Sprint(t["title"]), chatTicketResult(t)})
-	}
-	cli.PrintTable(os.Stdout, headers, rows)
-	return nil
-}
-
-// runChatTicketsPin is "chat tickets add|remove": the same server write the
-// chat bar's 挂上 / 取下 uses.
-func runChatTicketsPin(cmd *cobra.Command, issueArg string, remove bool) error {
-	verb := "add"
-	if remove {
-		verb = "remove"
-	}
-	session, _ := cmd.Flags().GetString("session")
-	if strings.TrimSpace(session) == "" {
-		session = os.Getenv("MULTICA_CHAT_SESSION_ID")
-	}
-	ref, err := parseChatSessionLinkRef(session)
-	if err != nil {
-		return fmt.Errorf("chat tickets %s: --session is required (or set MULTICA_CHAT_SESSION_ID): %w", verb, err)
-	}
-	client, err := newAPIClient(cmd)
-	if err != nil {
-		return err
-	}
-	ctx, cancel := cli.APIContext(context.Background())
-	defer cancel()
-	issueRef, err := resolveIssueRef(ctx, client, issueArg)
-	if err != nil {
-		return fmt.Errorf("resolve issue %s: %w", issueArg, err)
-	}
-	path := "/api/chat/sessions/" + url.PathEscape(ref.ID) + "/tickets"
-	if remove {
-		err = client.DeleteJSON(ctx, path+"/"+url.PathEscape(issueRef.ID))
-	} else {
-		err = client.PostJSON(ctx, path, map[string]any{"issue": issueRef.ID}, nil)
-	}
-	if err != nil {
-		return fmt.Errorf("chat tickets %s: %w", verb, err)
-	}
-	result := map[string]any{"chat_session_id": ref.ID, "issue_id": issueRef.ID, "identifier": issueRef.Display, "removed": remove}
-	if output, _ := cmd.Flags().GetString("output"); output == "json" {
-		return cli.PrintJSON(os.Stdout, result)
-	}
-	if remove {
-		fmt.Printf("Took %s off this chat's tickets.\n", issueRef.Display)
-	} else {
-		fmt.Printf("Pinned %s to this chat's tickets.\n", issueRef.Display)
-	}
-	return nil
 }
 
 // chatTicketResult is a ticket's receipt in one table cell: its close summary
@@ -757,79 +562,6 @@ func numVal(m map[string]any, key string) string {
 		return strconv.Itoa(int(v))
 	}
 	return ""
-}
-
-func runChatOpen(cmd *cobra.Command, _ []string) error {
-	agentRef, _ := cmd.Flags().GetString("agent")
-	briefPath, _ := cmd.Flags().GetString("brief-file")
-	if strings.TrimSpace(agentRef) == "" || strings.TrimSpace(briefPath) == "" {
-		return fmt.Errorf("chat open: --agent and --brief-file are required")
-	}
-	raw, err := os.ReadFile(briefPath)
-	if err != nil {
-		return fmt.Errorf("chat open: read brief: %w", err)
-	}
-	brief := strings.TrimSpace(string(raw))
-	if brief == "" {
-		return fmt.Errorf("chat open: brief file is empty")
-	}
-	title, _ := cmd.Flags().GetString("title")
-	visibility, _ := cmd.Flags().GetString("visibility")
-	project, _ := cmd.Flags().GetString("project")
-	clientKey, _ := cmd.Flags().GetString("client-key")
-
-	client, err := newAPIClient(cmd)
-	if err != nil {
-		return err
-	}
-	ctx, cancel := cli.APIContext(context.Background())
-	defer cancel()
-	agentID, err := resolveAgent(ctx, client, agentRef)
-	if err != nil {
-		return fmt.Errorf("chat open: %w", err)
-	}
-	if strings.TrimSpace(clientKey) == "" {
-		sum := sha256.Sum256([]byte(agentID + "\x00" + title + "\x00" + brief))
-		clientKey = hex.EncodeToString(sum[:16])
-	}
-	body := map[string]any{
-		"agent_id":   agentID,
-		"brief":      brief,
-		"client_key": clientKey,
-	}
-	if title != "" {
-		body["title"] = title
-	}
-	if visibility != "" {
-		body["visibility"] = visibility
-	}
-	if project != "" {
-		p, err := resolveProjectID(ctx, client, project)
-		if err != nil {
-			return fmt.Errorf("chat open: %w", err)
-		}
-		body["project_id"] = p.ID
-	}
-
-	output, _ := cmd.Flags().GetString("output")
-	var out map[string]any
-	if err := client.PostJSON(ctx, "/api/chat/sessions/spawn", body, &out); err != nil {
-		var httpErr *cli.HTTPError
-		var refusal map[string]any
-		if errors.As(err, &httpErr) && json.Unmarshal([]byte(httpErr.Body), &refusal) == nil && refusal["code"] != nil {
-			if output != "table" {
-				_ = cli.PrintJSON(os.Stdout, refusal)
-			}
-			return fmt.Errorf("chat open refused (%v): %v", refusal["code"], refusal["error"])
-		}
-		return fmt.Errorf("open chat: %w", err)
-	}
-	if output == "table" {
-		session, _ := out["session"].(map[string]any)
-		fmt.Printf("Chat: %v (%v)\n", session["title"], session["id"])
-		return nil
-	}
-	return cli.PrintJSON(os.Stdout, out)
 }
 
 func runChatSend(cmd *cobra.Command, args []string) error {

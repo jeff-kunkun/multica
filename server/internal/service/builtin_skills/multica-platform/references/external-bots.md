@@ -99,8 +99,7 @@ Use the relevant references in this skill and each command's `--help`:
 - Agent/settings commands supported by the installed CLI for administration.
 
 Command availability is not proof that a personal login can use the endpoint.
-In particular, `chat open` may be the agent-only chat-spawn API, and
-`attachment upload` may require a chat task. Check the command's actual
+In particular, `attachment upload` may require a chat task. Check the command's actual
 contract; report a missing personal-client entry point rather than inventing
 an agent identity to make it work.
 

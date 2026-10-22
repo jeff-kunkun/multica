@@ -58,8 +58,6 @@ func (h *Handler) HandoffIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	finish := func(resp HandoffIssueResponse) {
-		actorType, actorID := h.resolveActor(r, requestUserID(r), uuidToString(issue.WorkspaceID))
-		h.followIssueFromChatTask(r, actorType, actorID, issue)
 		writeJSON(w, http.StatusOK, resp)
 	}
 	if target == "reviewer" || target == "dispatcher" {

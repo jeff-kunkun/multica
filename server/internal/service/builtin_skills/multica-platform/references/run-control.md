@@ -20,10 +20,10 @@ combines the status and stop in one transaction.
 `--related` stays in the current workspace and follows the named root:
 
 - Issue root: the issue and its descendant issues, plus each selected issue's
-  source chat and visible chat ticket bindings.
+  source chat.
 - Chat root: the named chat's direct parent/children and sessions sharing its
-  exact external thread binding key; issues opened from or visibly bound to
-  the named chat and their descendants; those issues' source/bound chats.
+  exact external thread binding key; issues opened from the named chat and
+  their descendants; those issues' source chats.
 
 Only child-issue links recurse. Reached chats are endpoints: they never expand
 again to sibling issues, other followed tickets, more spawned chats or further

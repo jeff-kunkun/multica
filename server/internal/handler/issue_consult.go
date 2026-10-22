@@ -32,6 +32,8 @@ const (
 	ConsultRefusedLimit       = "consult_limit_reached"
 	ConsultRefusedNoAdvisor   = "consult_no_advisor"
 	ConsultRefusedUnavailable = "consult_advisors_unavailable"
+	defaultConsultPerIssue    = 3
+	maxConsultPerIssue        = 1000
 )
 
 type ConsultResponse struct {
@@ -96,8 +98,8 @@ func (h *Handler) CreateIssueConsult(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	actorType, actorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
-	task, isRun := h.agentSpawnTask(r, actorType, actorID)
-	if !isRun || task.IssueID != issue.ID || (task.Status != "running" && task.Status != "dispatched") {
+	task, isRun := h.taskFromRequestHeader(r)
+	if actorType != "agent" || !isRun || uuidToString(task.AgentID) != actorID || task.IssueID != issue.ID || (task.Status != "running" && task.Status != "dispatched") {
 		writeConsultRefusal(w, consultRefusal{status: http.StatusForbidden, code: ConsultRefusedNotARun,
 			message: "only an agent run working this ticket can consult; people can comment and @mention a seat instead"})
 		return
@@ -117,22 +119,12 @@ func (h *Handler) CreateIssueConsult(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	policy, err := h.agentSpawnPolicy(r.Context(), h.Queries, issue.WorkspaceID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to read agent permissions")
-		return
-	}
-	if !policy.Consult.Enabled {
-		writeConsultRefusal(w, consultRefusal{status: http.StatusForbidden, code: ConsultRefusedDisabled,
-			message: "this workspace does not allow consults (Settings → Agent permissions); keep working on your own judgment"})
-		return
-	}
-	limit := policy.Consult.PerIssue
+	limit := defaultConsultPerIssue
 	if settings, err := (routingStore{h: h}).Settings(r.Context(), uuidToString(issue.WorkspaceID)); err == nil && settings.ConsultPerIssue != nil {
 		limit = *settings.ConsultPerIssue
 	}
 	if limit <= 0 {
-		limit = maxAgentSpawnLimit
+		limit = maxConsultPerIssue
 	}
 
 	if h.Routing == nil {
@@ -208,7 +200,6 @@ func (h *Handler) ListIssueConsults(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list consults")
 		return
 	}
-	policy, _ := h.agentSpawnPolicy(r.Context(), h.Queries, issue.WorkspaceID)
 	out := make([]ConsultResponse, 0, len(rows))
 	used := 0
 	for _, c := range rows {
@@ -218,12 +209,12 @@ func (h *Handler) ListIssueConsults(w http.ResponseWriter, r *http.Request) {
 		}
 		out = append(out, h.consultToResponse(r.Context(), c))
 	}
-	limit := policy.Consult.PerIssue
+	limit := defaultConsultPerIssue
 	if settings, err := (routingStore{h: h}).Settings(r.Context(), uuidToString(issue.WorkspaceID)); err == nil && settings.ConsultPerIssue != nil {
 		limit = *settings.ConsultPerIssue
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"consults": out, "used": used, "limit": limit, "enabled": policy.Consult.Enabled,
+		"consults": out, "used": used, "limit": limit, "enabled": true,
 	})
 }
 

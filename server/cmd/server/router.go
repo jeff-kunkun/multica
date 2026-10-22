@@ -1859,7 +1859,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
 					r.Get("/", h.GetWorkspace)
-					r.Get("/agent-spawn", h.GetWorkspaceAgentSpawn)
 					r.Get("/magpie", h.GetWorkspaceMagpie)
 					r.Get("/members", h.ListMembersWithUser)
 					r.Post("/leave", h.LeaveWorkspace)
@@ -1912,7 +1911,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// Admin-level access
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
-					r.Put("/agent-spawn", h.UpdateWorkspaceAgentSpawn)
 					r.Put("/magpie", h.UpdateWorkspaceMagpie)
 					r.Put("/", h.UpdateWorkspace)
 					r.Patch("/", h.UpdateWorkspace)
@@ -2876,15 +2874,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/", h.ListChatSessions)
 				// Registered before /{sessionId} so "make-private" is not captured as an id.
 				r.Post("/make-private", h.MakeChatSessionsPrivate)
-				// Agent-only: open a chat from the chat this run belongs to (DENE-1271).
-				r.Post("/spawn", h.SpawnChatSession)
 				r.Route("/{sessionId}", func(r chi.Router) {
 					r.Get("/", h.GetChatSession)
 					r.Post("/stop", h.StopChatSession)
-					r.Get("/tickets", h.ListChatSessionTickets)
-					// Pin / take down by hand (DENE-1719) — `multica chat tickets add|remove`.
-					r.Post("/tickets", h.AddChatSessionTicket)
-					r.Delete("/tickets/{issueId}", h.RemoveChatSessionTicket)
 					r.Get("/access", h.GetChatSessionAccess)
 					r.Put("/access", h.PutChatSessionAccess)
 					r.Get("/work-thread", h.GetChatWorkThread)

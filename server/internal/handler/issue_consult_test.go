@@ -108,3 +108,13 @@ func TestIssueConsult_LimitAnswerAndActivity(t *testing.T) {
 		t.Fatalf("activity details = %v", d)
 	}
 }
+
+func nextTestIssueNumber(t *testing.T) int {
+	t.Helper()
+	var n int
+	if err := testPool.QueryRow(context.Background(),
+		`UPDATE workspace SET issue_counter = issue_counter + 1 WHERE id = $1 RETURNING issue_counter`, testWorkspaceID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
+}

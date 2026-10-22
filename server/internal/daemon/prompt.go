@@ -968,7 +968,7 @@ func commentReplyThreads(task Task) []execenv.ThreadReplyTarget {
 }
 
 // chatTicketBoundary is the per-turn chat ⇄ issue boundary (DENE-1665).
-const chatTicketBoundary = "Boundary: in chat, only make an aligned small fix (at most 3 files and 150 lines, no migration, not a server+UI+CLI change). Aligned work bigger than that becomes an issue (`multica issue create`) whose description has `## 目标` and `## 验收`: leave the executor empty for agent work so routing picks, assign the person when a human must do it. The issue is linked back to this chat; `multica chat tickets` lists them.\n\n"
+const chatTicketBoundary = "Boundary: in chat, only make an aligned small fix (at most 3 files and 150 lines, no migration, not a server+UI+CLI change). Aligned work bigger than that becomes an issue (`multica issue create`) whose description has `## 目标` and `## 验收`: leave the executor empty for agent work so routing picks, assign the person when a human must do it.\n\n"
 
 // buildChatPrompt constructs a prompt for interactive chat tasks.
 func buildChatPrompt(task Task) string {
@@ -1048,19 +1048,8 @@ func buildChatPrompt(task Task) string {
 	}
 	b.WriteString(selectedSkillsBlock(task.Agent, task.ChatMessage))
 	// Chat aligns, issues execute (DENE-1665). Every turn, because the urge to
-	// keep working in the chat grows with the conversation; the server checks
-	// the 目标/验收 half on create.
+	// keep working in the chat grows with the conversation.
 	b.WriteString(chatTicketBoundary)
-	// Where the tasks this chat dispatched stand, so the agent answers "how is
-	// it going" from fact instead of memory (DENE-1672). Changes every turn,
-	// so it lives here, not in the brief (ADR-0007).
-	if len(task.ChatDispatchedIssues) > 0 {
-		b.WriteString("Tickets this chat opened, where each stands (newest first; `multica chat tickets` for all):\n")
-		for _, line := range task.ChatDispatchedIssues {
-			fmt.Fprintf(&b, "- %s\n", line)
-		}
-		b.WriteString("\n")
-	}
 	fmt.Fprintf(&b, "User message:\n%s\n", task.ChatMessage)
 	// List attachments by id + filename so the agent can fetch them via
 	// the CLI. We deliberately do NOT inline the URL: chat attachments
