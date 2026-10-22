@@ -2446,19 +2446,8 @@ func TestAvailableCommandsListIssueHandoff(t *testing.T) {
 	}
 	statusIdx := strings.Index(out, "- `issue status <id> <status>`")
 	handoffIdx := strings.Index(out, "- `issue handoff")
-	summonIdx := strings.Index(out, "- `issue summon")
-	if !(statusIdx >= 0 && statusIdx < handoffIdx && handoffIdx < summonIdx) {
-		t.Errorf("issue handoff should sit right after the status verb (status=%d handoff=%d summon=%d)", statusIdx, handoffIdx, summonIdx)
-	}
-}
-
-// TestAvailableCommandsListIssueSummon pins the `issue summon` verb
-// (DENE-880): the one way to call a person; the --needs-human overlap lives
-// in `--help`.
-func TestAvailableCommandsListIssueSummon(t *testing.T) {
-	t.Parallel()
-	out := buildMetaSkillContent("claude", TaskContextForEnv{IssueID: "issue-1"})
-	if !strings.Contains(out, "- `issue summon --to <member>` — call a person in") {
-		t.Errorf("command map missing the summon verb\n---\n%s", out)
+	wakeupIdx := strings.Index(out, "- `issue wakeup")
+	if !(statusIdx >= 0 && statusIdx < handoffIdx && handoffIdx < wakeupIdx) {
+		t.Errorf("issue handoff should sit right after the status verb (status=%d handoff=%d wakeup=%d)", statusIdx, handoffIdx, wakeupIdx)
 	}
 }

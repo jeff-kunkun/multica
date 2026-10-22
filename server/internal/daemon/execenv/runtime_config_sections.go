@@ -215,7 +215,6 @@ func writeAvailableCommands(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("- `issue create | update | assign` — create and edit issues; `--no-start` records a change without starting a run\n")
 	writeIssueStatusCommand(b, ctx)
 	b.WriteString("- `issue handoff --to <seat|agent>` — wake the next owner\n")
-	b.WriteString("- `issue summon --to <member>` — call a person in\n")
 	b.WriteString("- `issue wakeup` — wait for a condition, then resume\n")
 	b.WriteString("- `chat list | search | history` — read chats\n")
 	b.WriteString("- `repo checkout <url>` — other repositories\n")

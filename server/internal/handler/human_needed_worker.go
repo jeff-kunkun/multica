@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -15,7 +14,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
-	"github.com/multica-ai/multica/server/pkg/dbid"
 )
 
 // HumanNeededWorker pushes "this needs a person" to the person's Bot and
@@ -351,9 +349,8 @@ func (h *Handler) humanNeededAsker(ctx context.Context, ev db.HumanNeededEvent) 
 	return a
 }
 
-// Sweep is the chase: recover interrupted pushes, push again when the Bot
-// never woke, escalate when it woke but never relayed, nudge every 30 minutes
-// after that, and move people off a channel that went bad.
+// Sweep recovers interrupted pushes, pushes again when the Bot never woke, and
+// moves people off a channel that went bad.
 func (w *HumanNeededWorker) Sweep(ctx context.Context) {
 	q := w.h.Queries
 	if err := q.RecoverStaleHumanNeededSending(ctx); err != nil {
@@ -368,94 +365,7 @@ func (w *HumanNeededWorker) Sweep(ctx context.Context) {
 	if _, err := q.ResendUnwokenHumanNeeded(ctx); err != nil {
 		slog.Error("human needed: resend failed", "error", err)
 	}
-	w.escalate(ctx)
-	w.nudge(ctx)
 	w.checkChannels(ctx)
-}
-
-func (w *HumanNeededWorker) escalate(ctx context.Context) {
-	q := w.h.Queries
-	due, err := q.ListHumanNeededToEscalate(ctx)
-	if err != nil {
-		slog.Error("human needed: list escalations failed", "error", err)
-		return
-	}
-	for _, ev := range due {
-		// Mark first: a crash after this leaves a missed escalation row rather
-		// than a loop of them.
-		if err := q.MarkHumanNeededEscalated(ctx, ev.EventID); err != nil {
-			slog.Error("human needed: mark escalated failed", "error", err)
-			continue
-		}
-		if _, err := service.CreateHumanNeededFollowUp(ctx, q, ev, "escalation:"+uuidToString(ev.EventID)); err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			slog.Error("human needed: escalation write failed", "error", err)
-		}
-		service.FallbackHumanNeededInApp(ctx, q, w.h.Bus, ev)
-		w.remindOwners(ctx, ev)
-	}
-}
-
-func (w *HumanNeededWorker) nudge(ctx context.Context) {
-	q := w.h.Queries
-	due, err := q.ListHumanNeededToNudge(ctx)
-	if err != nil {
-		slog.Error("human needed: list nudges failed", "error", err)
-		return
-	}
-	for _, ev := range due {
-		if err := q.TouchHumanNeededNudge(ctx, ev.EventID); err != nil {
-			continue
-		}
-		key := "nudge:" + uuidToString(ev.EventID) + ":" + strconv.FormatInt(time.Now().Unix(), 10)
-		if _, err := service.CreateHumanNeededFollowUp(ctx, q, ev, key); err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			slog.Error("human needed: nudge write failed", "error", err)
-		}
-	}
-}
-
-// remindOwners tells the workspace owners that a person's Bot has not relayed
-// a call, so someone can reach the person another way. The person asked is
-// never reminded here: the in-app fallback already reaches them.
-func (w *HumanNeededWorker) remindOwners(ctx context.Context, ev db.HumanNeededEvent) {
-	if !ev.IssueID.Valid {
-		return
-	}
-	q := w.h.Queries
-	issue, err := q.GetIssue(ctx, ev.IssueID)
-	if err != nil {
-		return
-	}
-	owners, err := q.ListWorkspaceOwnerIDs(ctx, ev.WorkspaceID)
-	if err != nil {
-		return
-	}
-	name := "对方"
-	if u, getErr := q.GetUser(ctx, ev.TargetUserID); getErr == nil && u.Name != "" {
-		name = u.Name
-	}
-	for _, owner := range owners {
-		if owner == ev.TargetUserID {
-			continue
-		}
-		item, createErr := q.CreateInboxItem(ctx, db.CreateInboxItemParams{
-			ID:            dbid.NewV7(),
-			WorkspaceID:   ev.WorkspaceID,
-			RecipientType: "member",
-			RecipientID:   owner,
-			Type:          service.InboxTypeNeedsYou,
-			Severity:      "action_required",
-			IssueID:       ev.IssueID,
-			Title:         issue.Title,
-			Body:          pgtype.Text{String: name + " 的 Bot 还没把这件事转达给 " + name + "：" + ev.Question, Valid: true},
-			ActorType:     pgtype.Text{String: "system", Valid: true},
-			Details:       []byte(`{"human_needed":"bot_not_relayed"}`),
-		})
-		if createErr != nil {
-			slog.Warn("human needed: owner reminder failed", "error", createErr)
-			continue
-		}
-		service.PublishInboxNew(w.h.Bus, item, issue.Status)
-	}
 }
 
 // checkChannels moves people off a Bot that went bad: the open calls fall

@@ -4938,7 +4938,6 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	if persistBlock {
 		h.persistBlockRecord(r.Context(), issue, blockRecord)
-		h.summonNeedsHuman(r.Context(), issue, blockRecord.NeedsHuman, actorType, actorID, "")
 	}
 	// Clearing the executor hands the ticket back to routing (DENE-1665: the
 	// chat ticket card's 改给智能体); the routing table decides per status.

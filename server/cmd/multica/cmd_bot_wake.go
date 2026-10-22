@@ -48,7 +48,6 @@ are grouped for 30 seconds; webhooks include events[].`
 		wake.AddCommand(cmd)
 	}
 	addBotWakeReceipts(wake)
-	addHumanNeededReceipts(wake)
 	botCmd.AddCommand(wake)
 }
 func runBotWake(cmd *cobra.Command, args []string, verb string) error {

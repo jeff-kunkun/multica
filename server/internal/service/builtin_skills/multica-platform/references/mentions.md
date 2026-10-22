@@ -136,8 +136,7 @@ not injected into an already running prompt. Different threads queue independent
 
 A comment is not a dispatch. `trigger_outcomes` covers only explicit mentions;
 `wake` covers the whole comment. `wake.woken` lists every run it queued, folded
-into or steered (assignee, @agent, @squad, thread, conversation, or a reply
-answering a needs_human call — `summon_answer`), and the CLI
+into or steered (assignee, @agent, @squad, thread or conversation), and the CLI
 prints it as `Woke: ...`. `wake.none_woken: true` — printed as `Woke no one` —
 means no run started, nothing is running, and the issue is open: nobody will act
 on it. The assignee never wakes itself, so a seat that posts "please continue"
@@ -331,23 +330,3 @@ unanswered wake budget; a missing/client-reset hop cannot bypass it. Real agent
 replies/completed runs reset that budget, and human writes are exempt. At the cap read pending or
 the cancelled run error. Do not repeatedly rerun a capped chain. Bot tombstones
 retain history but are absent from the mention directory.
-
-## Asking a person to decide: use ask-human, not an @ (DENE-1933)
-
-A `mention://member/<uid>` is an in-app notification. A person who connected a
-Bot gets their decisions pushed to that Bot instead, and an @ in a comment does
-not carry a question, options or an answer path. To get a decision from a
-person:
-
-```sh
-multica issue ask-human <issue> --to <member|owner> --question "..." --option "..." [--urgent] [--deadline <RFC3339>]
-multica chat ask-human --question "..." --option "..."   # in a chat; asks the chat's person
-```
-
-The server writes the structured comment, blocks the ticket on that person and
-pushes a `human_needed` event to their Bot when they have one (inbox and @
-otherwise). With two or more options the question is also a card (`ask_id`).
-Each @ added to a description is its own ask: the same edit never pushes twice,
-removing the @ and adding it back pushes again with the line that carries it. Their answer — in the app or through the Bot — wakes you and clears
-the block. As a backstop, an agent's @ of a person with a Bot is also pushed to
-that Bot, but it carries no question or options: do not rely on it.

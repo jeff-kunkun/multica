@@ -2104,11 +2104,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/bots/{botId}/wake/events/{eventId}", h.RecordBotWakeReceipt)
 					r.Post("/bots/{botId}/wake/events/{eventId}/ack", h.RecordBotWakeReceipt)
 					r.Post("/bots/{botId}/wake/events/{eventId}/result", h.RecordBotWakeReceipt)
-					// What a Bot owes its person (DENE-1933): receipts for the
-					// relay and the answer, and the open list to catch up on.
-					r.Post("/bots/{botId}/wake/events/{eventId}/relayed", h.RelayHumanNeeded)
-					r.Post("/bots/{botId}/wake/events/{eventId}/answered", h.AnswerHumanNeeded)
-					r.Get("/bots/{botId}/human-needed", h.ListHumanNeededForBot)
 				})
 
 				// Your own Bot channel for decisions (DENE-1933): only the
@@ -2322,13 +2317,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/batch-delete", h.BatchDeleteIssues)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetIssue)
-					r.Get("/asks", func(w http.ResponseWriter, req *http.Request) {
-						q := req.URL.Query()
-						q.Set("issue_id", chi.URLParam(req, "id"))
-						req.URL.RawQuery = q.Encode()
-						h.ListAsks(w, req)
-					})
-					r.Post("/asks", h.CreateAsk)
 					r.Get("/work-thread", h.GetIssueWorkThread)
 					r.Post("/work-thread/action", h.WorkThreadAction)
 					r.Put("/", h.UpdateIssue)
@@ -2395,13 +2383,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// What to do with a child nobody drives (DENE-1342): rerun,
 					// reroute, split or cancel — `multica issue dispose`.
 					r.Post("/dispose", h.DisposeIssue)
-					// One "叫人" entry (DENE-880): inbox, subscription, a
-					// visible @ and an open call the reply answers —
-					// `multica issue summon`.
-					r.Post("/summon", h.SummonIssue)
-					// A structured question to one person, pushed to their Bot
-					// when they have one (DENE-1933) — `multica issue ask-human`.
-					r.Post("/ask-human", h.AskHumanIssue)
 					// Promote the next stage once the one below is terminal
 					// (DENE-864) — `multica issue stage advance`.
 					r.Post("/stage-advance", h.AdvanceIssueStage)
@@ -2428,11 +2409,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
-			// Generic agent questions. The same contract is used by the CLI and
-			// every UI surface (issue activity, chat and inbox).
+			// Owner-confirmation questions: read one and answer it.
 			r.Route("/api/asks", func(r chi.Router) {
-				r.Get("/", h.ListAsks)
-				r.Post("/", h.CreateAsk)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetAsk)
 					r.Post("/answer", h.AnswerAsk)
@@ -2887,8 +2865,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Patch("/archive", h.SetChatSessionArchived)
 					r.Delete("/", h.DeleteChatSession)
 					r.Post("/messages", h.SendChatMessage)
-					// `multica chat ask-human` (DENE-1933).
-					r.Post("/ask-human", h.AskHumanChat)
 					r.Post("/progress", h.WriteChatProgress)
 					r.Get("/progress", h.ListChatProgress)
 					r.Post("/onboarding", h.StartMikaOnboarding)
@@ -2931,8 +2907,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Get("/api/chat/thread", h.GetChatThread)
 
 			// Inbox
-			// Calls still waiting on the current user (DENE-880).
-			r.Get("/api/summons/waiting", h.ListWaitingSummons)
 			r.Route("/api/inbox", func(r chi.Router) {
 				r.Get("/", h.ListInbox)
 				// Archived notifications, for the inbox's "Archived" sub-view.

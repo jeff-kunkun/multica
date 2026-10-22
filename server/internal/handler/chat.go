@@ -1401,19 +1401,6 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		SenderUserID:  uuidToString(msg.SenderUserID),
 	})
 
-	// The person wrote in the chat: any question their Bot was still chasing
-	// for this chat (DENE-1933) is answered.
-	if actorType != "agent" {
-		if err := h.Queries.SettleHumanNeededByChat(r.Context(), db.SettleHumanNeededByChatParams{ChatSessionID: session.ID, TargetUserID: parseUUID(userID)}); err != nil {
-			slog.Warn("human needed: settle by chat failed", "error", err, "chat_session_id", resolvedSessionID)
-		}
-		// Their typed reply is the answer: a choice card still open for this
-		// chat would otherwise stay in the inbox and answer a second time.
-		if _, err := h.DB.Exec(r.Context(), `UPDATE agent_ask SET status='cancelled' WHERE chat_session_id=$1 AND recipient_id=$2 AND status='open'`, session.ID, parseUUID(userID)); err != nil {
-			slog.Warn("human needed: close chat cards failed", "error", err, "chat_session_id", resolvedSessionID)
-		}
-	}
-
 	// First user message → kick off best-effort LLM auto-titling (MUL-4295).
 	// Fire-and-forget and non-blocking: the response below is written whether
 	// or not a title is ever generated, and a disabled/failing LLM layer

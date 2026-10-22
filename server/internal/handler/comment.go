@@ -2237,17 +2237,9 @@ func (h *Handler) triggerTasksForCommentReport(ctx context.Context, issue db.Iss
 		namedAgents[agentID] = true
 	}
 	woken := commentWokenRuns(resolved, enqueued)
-	// Summons (DENE-880) follow a new comment only; an edit neither answers
-	// a call nor makes a new one.
-	if len(forceFreshSession) == 0 || !forceFreshSession[0] {
-		h.recordMentionSummons(ctx, issue, comment, actorType, actorID)
-		summonWoke := h.answerSummons(ctx, issue, comment, actorType, actorID, triggerOutcomesStartedRun(outcomes))
-		if actorType == "member" {
-			h.resumeBlockedOnReply(ctx, issue, enqueued, summonWoke.Valid)
-		}
-		if summonWoke.Valid {
-			woken = append(woken, h.summonAnswerWokenRun(ctx, summonWoke))
-		}
+	// Only a new comment resumes a blocked ticket; an edit does not.
+	if (len(forceFreshSession) == 0 || !forceFreshSession[0]) && actorType == "member" {
+		h.resumeBlockedOnReply(ctx, issue, enqueued, false)
 	}
 	return outcomes, woken
 }

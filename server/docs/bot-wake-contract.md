@@ -7,6 +7,12 @@
 > `inherit_owner_follows` has no effect. The wake-chain guard still applies at
 > its default of 4, but `bot_wake_chain_limit` is no longer a setting: no API,
 > CLI or settings write changes it, and the routing-health block audit is gone.
+> Human-needed pushes keep the binding, `binding.verify` and the `woken`
+> receipt, but `ask-human` (issue and chat), `POST /api/asks`, `GET /api/asks`,
+> `issue summon`, `/api/summons/waiting`, member-mention routing to a person's
+> Bot, the `relayed`/`answered`/`human-needed` Bot receipts, and the
+> escalation, nudge and owner reminders are gone. Owner-confirmation cards
+> (`GET /api/asks/{id}`, `POST /api/asks/{id}/answer`) remain.
 > Sections below that describe the removed behaviour are historical.
 
 Based on PR #626's `personal_access_token.kind=bot`; the Bot ID survives key

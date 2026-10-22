@@ -1630,7 +1630,6 @@ func TestInjectRuntimeConfigAvailableCommandsCoreOnly(t *testing.T) {
 		"`--no-start` records a change without starting a run",
 		"`issue status <id> <status>`",
 		"`issue handoff --to <seat|agent>`",
-		"`issue summon --to <member>`",
 		"`issue wakeup`",
 		"`repo checkout <url>`",
 		"`attachment upload | download`",

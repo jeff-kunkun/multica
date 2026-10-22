@@ -29,9 +29,6 @@ func TestIssueHelpCarriesMovedBriefRules(t *testing.T) {
 			"refused if a person holds the seat",
 			"never a hand-written @mention",
 		}},
-		"issue summon": {issueSummonCmd.Long, []string{
-			"blocked with --needs-human already calls that person",
-		}},
 	}
 	for name, tc := range cases {
 		for _, want := range tc.want {
