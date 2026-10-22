@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -12,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/inboxboard"
+	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -121,7 +123,8 @@ func (h *Handler) GetInboxBoard(w http.ResponseWriter, r *http.Request) {
 
 	in, markable, err := h.gatherInboxBoard(ctx, wsUUID, userUUID, member.Role, viewer, unreadSince, dayStart, projectFilter)
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, err.Error())
+		slog.Warn("inbox board: gather failed", append(logger.RequestAttrs(r), "error", err)...)
+		writeError(w, http.StatusInternalServerError, "failed to load inbox board")
 		return
 	}
 	board := inboxboard.Build(in)

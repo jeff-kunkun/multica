@@ -812,9 +812,7 @@ func TestRuntimeReconnectRetryHasBoundedTerminalPath(t *testing.T) {
 	taskSvc := service.NewTaskService(queries, testPool, nil, events.New())
 	taskSvc.HandleFailedTasks(ctx, failed)
 
-	// DENE-1342: an agent-owned issue is parked with a failure clock, not
-	// dropped back to todo with nothing driving it.
-	assertParkedAfterFailure(t, issueID)
+	assertResetToTodoAfterFailure(t, issueID)
 
 	var undrained, retryChildren int
 	if err := testPool.QueryRow(ctx, `
@@ -829,14 +827,11 @@ func TestRuntimeReconnectRetryHasBoundedTerminalPath(t *testing.T) {
 	}
 }
 
-// TestSweepParksInProgressIssueAfterFailure verifies the core fix: when the
-// sweeper force-fails a stale task whose issue is still in_progress (because
-// the daemon crashed mid-run), the issue leaves in_progress with a driver.
-//
-// Without this fix the issue stays in_progress permanently — the agent never runs
-// to update the status because it was never dispatched. Resetting to todo
-// (the earlier fix) left it with nothing that would start it (DENE-1342).
-func TestSweepParksInProgressIssueAfterFailure(t *testing.T) {
+// TestSweepResetsInProgressIssueToTodo verifies that when the sweeper
+// force-fails a stale task whose issue is still in_progress (the daemon
+// crashed mid-run), the issue goes back to todo instead of staying
+// in_progress forever.
+func TestSweepResetsInProgressIssueToTodo(t *testing.T) {
 	if testPool == nil {
 		t.Skip("no database connection")
 	}
@@ -913,28 +908,23 @@ func TestSweepParksInProgressIssueAfterFailure(t *testing.T) {
 		t.Fatalf("expected task %s to be in failed tasks, got %v", taskID, failedTasks)
 	}
 
-	// This is what we're testing: the issue must leave in_progress with a
-	// driver. Agent-owned, so it is parked blocked with a failure clock the
-	// patrol acts on (DENE-1342), not reset to todo with nothing driving it.
+	// This is what we're testing: the issue must leave in_progress.
 	// The production path: the sweeper always hands failures to a TaskService.
 	broadcastFailedTasks(ctx, queries, service.NewTaskService(queries, testPool, nil, bus), bus, failedTasks)
 
-	assertParkedAfterFailure(t, issueID)
+	assertResetToTodoAfterFailure(t, issueID)
 }
 
-// assertParkedAfterFailure checks the driver a failed run leaves on an
-// agent-owned issue: blocked, watched, and a clock the patrol will act on.
-func assertParkedAfterFailure(t *testing.T, issueID string) {
+// assertResetToTodoAfterFailure checks that a failed run drops a stuck
+// in_progress issue back to todo, as upstream does.
+func assertResetToTodoAfterFailure(t *testing.T, issueID string) {
 	t.Helper()
-	var status, watched, wakeAt string
-	if err := testPool.QueryRow(context.Background(), `
-		SELECT status, COALESCE(metadata->>'block.watched', ''), COALESCE(metadata->>'block.wake_at', '')
-		FROM issue WHERE id = $1
-	`, issueID).Scan(&status, &watched, &wakeAt); err != nil {
+	var status string
+	if err := testPool.QueryRow(context.Background(), `SELECT status FROM issue WHERE id = $1`, issueID).Scan(&status); err != nil {
 		t.Fatalf("read issue: %v", err)
 	}
-	if status != "blocked" || watched != "1" || wakeAt == "" {
-		t.Fatalf("issue = status %q watched %q wake_at %q, want blocked with a failure clock", status, watched, wakeAt)
+	if status != "todo" {
+		t.Fatalf("issue status = %q, want todo after the failed run", status)
 	}
 }
 

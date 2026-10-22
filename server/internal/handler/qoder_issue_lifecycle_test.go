@@ -86,11 +86,6 @@ func TestQoderIssueLifecycle(t *testing.T) {
 			if scenario == "success" || scenario == "claim replay" {
 				want = "in_review"
 			}
-			if scenario == "failed" {
-				// A failure with no retry parks the agent-owned issue so it
-				// keeps a driver (DENE-1342).
-				want = "blocked"
-			}
 			if issue.Status != want {
 				t.Fatalf("completion status = %s, want %s", issue.Status, want)
 			}

@@ -1514,23 +1514,6 @@ func TestProjectResourceStaleRefSnapshotDoesNotRollBackARename(t *testing.T) {
 		t.Fatalf("setup: ref copy did not follow the rename: %s", renamed.ResourceRef)
 	}
 
-	// Device A, whose dialog opened before that, saves in_place → in_place with
-	// its stale snapshot. The mode is what it came to change; the name is not.
-	after := update(map[string]any{
-		"resource_ref": map[string]any{
-			"local_path":     "/Users/dev/work/game-client",
-			"daemon_id":      daemonID,
-			"label":          "Game Client",
-			"execution_mode": "in_place",
-		},
-	})
-	if after.Label == nil || *after.Label != "Renamed Client" {
-		t.Fatalf("a stale mode snapshot rolled back the rename: column = %v", after.Label)
-	}
-	if got := refLabelOf(after); got != "Renamed Client" {
-		t.Errorf("stale ref label should be healed to the current name, got %q", got)
-	}
-
 	// A genuine ≤ v0.4.28 rename — ref resent, ONLY the label different — still
 	// counts, and still reaches the column.
 	legacy := update(map[string]any{

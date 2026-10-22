@@ -3386,7 +3386,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		updated, err = q.ClearAgentFallbackRuntime(r.Context(), updated.ID)
 		if err != nil {
 			slog.Warn("clear agent fallback_runtime_id failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
-			writeError(w, http.StatusInternalServerError, "failed to clear fallback_runtime_id: "+err.Error())
+			writeError(w, http.StatusInternalServerError, "failed to clear fallback_runtime_id")
 			return
 		}
 	}

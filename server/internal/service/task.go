@@ -9136,7 +9136,6 @@ func IssueToMap(issue db.Issue, issuePrefix string) map[string]any {
 		"duplicate_of": nil,
 		"project_id":   util.UUIDToPtr(issue.ProjectID),
 		// Mirrors handler.IssueResponse.DomainID: the id, or "" for generic.
-		"domain_id":        util.UUIDToString(issue.DomainID),
 		"position":         issue.Position,
 		"stage":            util.Int4ToPtr(issue.Stage),
 		"start_date":       util.DateToPtr(issue.StartDate),
