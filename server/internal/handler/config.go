@@ -70,33 +70,6 @@ type AppConfig struct {
 	// raw rules here: /api/config is public and may be called anonymously.
 	FeatureFlags map[string]bool `json:"feature_flags,omitempty"`
 
-	// LocalWorktreeSupported tells clients this server understands
-	// local_directory `execution_mode` and enforces the worktree capability
-	// gate when a resource is saved.
-	//
-	// Load-bearing for CLIENTS, not for this server. Releases before v0.4.25
-	// unmarshalled the ref into a struct without the field and re-marshalled
-	// it, so `execution_mode: "worktree"` was silently DROPPED and answered
-	// 201 — the resource then ran in_place, editing the working copy the user
-	// asked to isolate, with no gate anywhere to catch it. A new client cannot
-	// tell that from success, so it has to ask first, and absent has to read as
-	// "cannot honour it": every release that drops the field also omits this
-	// one. Releases between that fix and this signal do gate the save but say
-	// nothing, so they are treated the same way — the client cannot distinguish
-	// them, and only one of the two guesses is safe.
-	//
-	// This flag is worktree only. Shared mode has its own declaration below:
-	// official-cloud servers advertise worktree without accepting `shared`,
-	// and a client that used this flag to POST `execution_mode=shared` got 400.
-	LocalWorktreeSupported bool `json:"local_worktree_supported"`
-
-	// LocalSharedSupported tells clients this server accepts and persists
-	// local_directory `execution_mode=shared`. Official cloud rejects that
-	// enum (only in_place | worktree). Absent must fail closed: the client
-	// then stores in_place on the API and records a local daemon override
-	// so the folder still runs without the path mutex.
-	LocalSharedSupported bool `json:"local_shared_supported"`
-
 	// AgentConversationStartersSupported tells independently deployed clients
 	// that agent create/update persists conversation_starters. Older handlers
 	// ignored the unknown JSON field and still returned success, so clients
@@ -130,10 +103,6 @@ type AppConfig struct {
 // to anonymous callers — never user- or tenant-scoped data.
 func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	config := AppConfig{
-		// A property of this build, not of the deployment: if this code is
-		// running, the save gate is running with it.
-		LocalWorktreeSupported:             true,
-		LocalSharedSupported:               true,
 		AgentConversationStartersSupported: true,
 		IssueCreatePropertiesSupported:     true,
 		CommentDeleteKeepRepliesSupported:  true,

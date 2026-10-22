@@ -3,7 +3,6 @@ package handler
 import (
 	"encoding/json"
 	"net/http"
-	"strings"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/testutil"
@@ -125,31 +124,6 @@ func getProjectResource(t *testing.T, projectID, resourceID string) ProjectResou
 	}
 	t.Fatalf("resource %s not in project %s", resourceID, projectID)
 	return ProjectResourceResponse{}
-}
-
-func TestWorktreeRootConflictsWithAnExistingBinding(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-	project := createTestProjectForResources(t, "DENE-618 worktree_root conflict")
-	const daemonID = "daemon-worktree-root-conflict"
-	createLocalDirectoryResourceFor(t, project.ID, map[string]any{
-		"local_path": "/Users/me/code/app",
-		"daemon_id":  daemonID,
-		"real_path":  "/Users/me/code/app",
-	})
-	w := httptestRecorderCreate(t, project.ID, map[string]any{
-		"local_path":    "/Users/me/code/docs",
-		"daemon_id":     daemonID,
-		"real_path":     "/Users/me/code/docs",
-		"worktree_root": "/Users/me/code/app",
-	})
-	if w.Code != http.StatusConflict {
-		t.Fatalf("worktree_root pointing at an already-bound directory: expected 409, got %d: %s", w.Code, w.Body.String())
-	}
-	if !strings.Contains(w.Body.String(), "/Users/me/code/app") {
-		t.Errorf("409 body %q does not name the conflicting directory", w.Body.String())
-	}
 }
 
 func httptestRecorderCreate(t *testing.T, projectID string, ref map[string]any) *testutil.Response {

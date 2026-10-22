@@ -15,7 +15,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/repoident"
-	agentpkg "github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -73,10 +72,6 @@ type UpdateProjectResourceRequest struct {
 // at the API boundary so a typo can't slip through and produce a resource the
 // daemon/UI doesn't understand.
 func validateAndNormalizeResourceRef(resourceType string, ref json.RawMessage) (json.RawMessage, error) {
-	return validateAndNormalizeResourceRefWithOptions(resourceType, ref, false)
-}
-
-func validateAndNormalizeResourceRefWithOptions(resourceType string, ref json.RawMessage, allowLegacyWorktreeRename bool) (json.RawMessage, error) {
 	if len(ref) == 0 {
 		return nil, errors.New("resource_ref is required")
 	}
@@ -84,7 +79,7 @@ func validateAndNormalizeResourceRefWithOptions(resourceType string, ref json.Ra
 	case "github_repo":
 		return validateGithubRepoRef(ref)
 	case "local_directory":
-		return validateLocalDirectoryRefWithOptions(ref, allowLegacyWorktreeRename)
+		return validateLocalDirectoryRef(ref)
 	case "readonly_directory":
 		return validateReadonlyDirectoryRef(ref)
 	default:
@@ -95,14 +90,14 @@ func validateAndNormalizeResourceRefWithOptions(resourceType string, ref json.Ra
 // mergeOmittedLocalDirectoryIdentity keeps identity metadata written by newer
 // clients when an older client resends a partial ref during an edit. Older
 // clients only know the original four fields and would otherwise erase these
-// values before validation (and, for worktree rows, fail the git capability
-// check). Explicit values, including null, remain authoritative.
+// values before validation. Explicit values, including null, remain
+// authoritative.
 func mergeOmittedLocalDirectoryIdentity(existing, incoming json.RawMessage) json.RawMessage {
 	var stored, next map[string]json.RawMessage
 	if json.Unmarshal(existing, &stored) != nil || json.Unmarshal(incoming, &next) != nil {
 		return incoming
 	}
-	for _, key := range []string{"is_git_repo", "real_path", "repo_key", "worktree_root"} {
+	for _, key := range []string{"is_git_repo", "real_path", "repo_key"} {
 		if _, present := next[key]; !present {
 			if value, ok := stored[key]; ok {
 				next[key] = value
@@ -154,48 +149,6 @@ func validateGithubRepoRef(ref json.RawMessage) (json.RawMessage, error) {
 	return out, nil
 }
 
-// Execution modes for resource_type=local_directory. The zero value (absent
-// field) means in_place, so resources created before worktree mode existed keep
-// their original behavior without a data migration.
-const (
-	// localDirectoryModeInPlace runs the agent directly in the user's
-	// directory, serialised by the daemon's per-path mutex: one task at a
-	// time, edits land in the user's working tree.
-	localDirectoryModeInPlace = "in_place"
-	// localDirectoryModeWorktree runs each task in its own git worktree of
-	// the user's repo, created inside the daemon's env root. Tasks on the
-	// same directory run concurrently and deliver their work as a branch.
-	// Only valid when the directory is a git working tree — the daemon
-	// verifies that at task time, since the server can't see the filesystem.
-	localDirectoryModeWorktree = "worktree"
-	// localDirectoryModeShared runs the agent directly in the user's directory
-	// like in_place, but WITHOUT the per-path mutex: tasks on the directory run
-	// concurrently, and the daemon keeps its own per-task files (context
-	// marker, project resources, skills, runtime brief) in the task's env root
-	// instead of the user's tree. Meant for directories that are containers of
-	// several repositories rather than one working copy, where isolation is
-	// already handled by per-task branches and the mutex only serialised.
-	localDirectoryModeShared = "shared"
-)
-
-// localDirectoryModeCapability maps an execution_mode that a daemon has to
-// implement to the capability it advertises when it does. in_place is the
-// historical default every daemon implements and needs no entry.
-//
-// minVersion is display-only, the release shown in the 422 payload so a user
-// knows roughly what to update to; the gate itself reads the capability (see
-// protocol.DaemonCapabilityLocalWorktreeV1 for why versions cannot gate).
-func localDirectoryModeCapability(mode string) (capability, minVersion, humanMode string, gated bool) {
-	switch mode {
-	case localDirectoryModeWorktree:
-		return protocol.DaemonCapabilityLocalWorktreeV1, agentpkg.MinLocalWorktreeCLIVersion, "parallel (worktree)", true
-	case localDirectoryModeShared:
-		return protocol.DaemonCapabilityLocalSharedV1, agentpkg.MinLocalSharedCLIVersion, "shared workspace", true
-	default:
-		return "", "", "", false
-	}
-}
-
 // localDirectoryRef is the JSONB shape stored for resource_type=local_directory.
 // It pins a project to an existing directory on a specific user machine. The
 // daemon_id scopes the path to one daemon registration — the same string path
@@ -203,15 +156,12 @@ func localDirectoryModeCapability(mode string) (capability, minVersion, humanMod
 // human-readable hint used by the UI; the row-level project_resource.label
 // column remains the generic column for any resource type.
 //
-// execution_mode selects how tasks share that directory: in_place (default)
-// keeps the historical one-task-at-a-time behavior, worktree gives each task an
-// isolated git worktree so tasks run concurrently, and shared runs in the
-// user's directory without the path mutex.
+// Tasks always run in the bound directory itself. An execution_mode or
+// worktree_root sent by an older client is accepted and dropped on save.
 type localDirectoryRef struct {
-	LocalPath     string `json:"local_path"`
-	DaemonID      string `json:"daemon_id"`
-	Label         string `json:"label,omitempty"`
-	ExecutionMode string `json:"execution_mode,omitempty"`
+	LocalPath string `json:"local_path"`
+	DaemonID  string `json:"daemon_id"`
+	Label     string `json:"label,omitempty"`
 	// RealPath is the directory's IDENTITY: the symlink-resolved absolute
 	// path, as the machine holding it reported at pick time. It is what the
 	// (project, real_path) uniqueness rule keys on, so two routes to one
@@ -233,22 +183,10 @@ type localDirectoryRef struct {
 	// the same repository, and against a second checkout of that repository
 	// on the same machine.
 	RepoKey string `json:"repo_key,omitempty"`
-	// WorktreeRoot is where parallel mode puts its working copies. It exists
-	// so those copies land on the USER's disk, beside their repository,
-	// instead of inside the Multica workspace where a workspace GC would
-	// reclaim a directory the user still wanted to look at (DENE-617).
-	//
-	// Empty means "the daemon picks the default", which is the repository's
-	// sibling `<repo>.multica-worktrees`. Only parallel mode reads it.
-	WorktreeRoot string `json:"worktree_root,omitempty"`
-	// IsGitRepo is what the machine holding the directory saw at pick time.
-	// The server cannot look at a filesystem on someone else's laptop, so
-	// this is the only way it can refuse parallel mode on a folder that has
-	// no repository to branch from — a resource whose every task would fail.
-	//
-	// true means a git working tree with at least one commit. false and
-	// absent both refuse parallel mode: a client that cannot measure the
-	// disk (the web UI) must not save a mode every task would fail.
+	// IsGitRepo is what the machine holding the directory saw at pick time:
+	// true means a git working tree with at least one commit. Stored as
+	// reported; the server cannot look at a filesystem on someone else's
+	// laptop.
 	IsGitRepo *bool `json:"is_git_repo,omitempty"`
 }
 
@@ -263,153 +201,7 @@ func localDirectoryIdentity(ref localDirectoryRef) string {
 	return strings.TrimSpace(ref.LocalPath)
 }
 
-// requireModeCapableDaemon rejects saving a local_directory ref that asks for
-// an execution_mode (worktree, shared) while the daemon owning the path is too
-// old to implement the mode. An old daemon does not know the field exists: it
-// would json-skip it and run tasks IN PLACE — for worktree, editing the
-// working copy the user explicitly asked to isolate; for shared, taking the
-// mutex and silently re-serialising the directory the user asked to share —
-// and it predates the daemon-side unknown-mode refusal, so only the server can
-// stop it. Gating at save time surfaces the failure at the moment the user can
-// act on it (upgrade the daemon), instead of as a silently-wrong task later.
-//
-// Residual gap, accepted for now: a daemon downgraded AFTER the resource was
-// saved is not caught here; closing that needs a claim-time gate.
-//
-// Returns true to proceed; on false the 422 response has already been written,
-// using the same daemon_version_unsupported code as the quick-create gate so
-// clients can branch on it.
-func (h *Handler) requireModeCapableDaemon(w http.ResponseWriter, r *http.Request, workspaceID pgtype.UUID, resourceType string, normalizedRef json.RawMessage) bool {
-	if resourceType != "local_directory" {
-		return true
-	}
-	var ref localDirectoryRef
-	if err := json.Unmarshal(normalizedRef, &ref); err != nil {
-		return true
-	}
-	capability, minVersion, humanMode, gated := localDirectoryModeCapability(ref.ExecutionMode)
-	if !gated {
-		return true
-	}
-
-	// One machine hosts one runtime row per provider, all registered by the
-	// same daemon binary. A workspace has a handful of runtimes; the unfiltered
-	// list is a tiny read.
-	runtimes, err := h.Queries.ListAgentRuntimes(r.Context(), workspaceID)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to check runtime capabilities")
-		return false
-	}
-	// Same signal the claim gate uses: what the daemon advertised, recorded on
-	// its runtime row at registration. Version numbers cannot answer this — a
-	// dev-built daemon reports a git-describe string that the version floor
-	// deliberately exempts (MUL-5707).
-	if daemonAdvertisesCapability(runtimes, ref.DaemonID, capability) {
-		return true
-	}
-	// Fail closed when no runtime for this daemon advertises it — including a
-	// daemon_id with no registered runtime at all: a resource that can never
-	// dispatch correctly is worse than a save-time error.
-	writeJSON(w, http.StatusUnprocessableEntity, map[string]any{
-		"error": fmt.Sprintf(
-			"local_directory: %q is set to %s mode, but the Multica runtime on that machine does not support it. Update the Multica app on that machine to the latest version, or keep the resource on in_place.",
-			ref.LocalPath, humanMode),
-		"code":            "daemon_version_unsupported",
-		"current_version": latestDaemonCLIVersion(runtimes, ref.DaemonID),
-		"min_version":     minVersion,
-		"daemon_id":       ref.DaemonID,
-	})
-	return false
-}
-
-// daemonAdvertisesWorktree reports whether the daemon's MOST RECENTLY SEEN
-// runtime row advertised worktree support.
-func daemonAdvertisesWorktree(runtimes []db.AgentRuntime, daemonID string) bool {
-	return daemonAdvertisesCapability(runtimes, daemonID, protocol.DaemonCapabilityLocalWorktreeV1)
-}
-
-// daemonAdvertisesCapability reports whether the daemon's MOST RECENTLY SEEN
-// runtime row advertised capability.
-//
-// Deliberately not "any row advertised it". Deregistering a runtime only flips
-// the row to offline — its metadata survives — and ListAgentRuntimes returns
-// every row. So a machine that once ran a capable daemon, then downgraded,
-// still has an old capable row sitting next to the fresh incapable one, and an
-// any-match would keep saying yes forever. Newest-wins reads the machine's
-// CURRENT binary, which is the question being asked.
-//
-// A row missing the capability is never skipped: being the newest is what makes
-// it authoritative, not whether its answer is convenient.
-func daemonAdvertisesCapability(runtimes []db.AgentRuntime, daemonID, capability string) bool {
-	newest := newestRuntimeForDaemon(runtimes, daemonID)
-	if newest == nil {
-		return false
-	}
-	return runtimeHasCapability(newest.Metadata, capability)
-}
-
-// newestRuntimeForDaemon is the machine's current binary: the runtime row that
-// checked in last. A downgraded daemon leaves its old capable row beside the
-// new one, and "any row said yes" would keep saying yes forever.
-func newestRuntimeForDaemon(runtimes []db.AgentRuntime, daemonID string) *db.AgentRuntime {
-	if strings.TrimSpace(daemonID) == "" {
-		return nil
-	}
-	var newest *db.AgentRuntime
-	for i := range runtimes {
-		rt := &runtimes[i]
-		if !rt.DaemonID.Valid || rt.DaemonID.String != daemonID {
-			continue
-		}
-		if newest == nil || runtimeSeenAfter(rt, newest) {
-			newest = rt
-		}
-	}
-	return newest
-}
-
-// runtimeSeenAfter orders two rows of the same daemon by last_seen_at. A row
-// that never reported (NULL) sorts oldest, so a live row always wins over one
-// that never checked in.
-func runtimeSeenAfter(candidate, current *db.AgentRuntime) bool {
-	if !candidate.LastSeenAt.Valid {
-		return false
-	}
-	if !current.LastSeenAt.Valid {
-		return true
-	}
-	return candidate.LastSeenAt.Time.After(current.LastSeenAt.Time)
-}
-
-// latestDaemonCLIVersion returns the cli_version of the freshest runtime row
-// registered by daemonID, or "" when the daemon has no row carrying one. Rows
-// without a version are skipped rather than treated as authoritative: one
-// machine registers a row per provider, and only the freshest version-bearing
-// row reflects the binary currently running there.
-func latestDaemonCLIVersion(runtimes []db.AgentRuntime, daemonID string) string {
-	current := ""
-	var currentSeen pgtype.Timestamptz
-	for _, rt := range runtimes {
-		if !rt.DaemonID.Valid || rt.DaemonID.String != daemonID {
-			continue
-		}
-		v := readRuntimeCLIVersion(rt.Metadata)
-		if v == "" {
-			continue
-		}
-		if current == "" || (rt.LastSeenAt.Valid && rt.LastSeenAt.Time.After(currentSeen.Time)) {
-			current = v
-			currentSeen = rt.LastSeenAt
-		}
-	}
-	return current
-}
-
 func validateLocalDirectoryRef(ref json.RawMessage) (json.RawMessage, error) {
-	return validateLocalDirectoryRefWithOptions(ref, false)
-}
-
-func validateLocalDirectoryRefWithOptions(ref json.RawMessage, allowLegacyWorktreeRename bool) (json.RawMessage, error) {
 	var payload localDirectoryRef
 	if err := json.Unmarshal(ref, &payload); err != nil {
 		return nil, fmt.Errorf("invalid local_directory payload: %w", err)
@@ -426,13 +218,6 @@ func validateLocalDirectoryRefWithOptions(ref json.RawMessage, allowLegacyWorktr
 		return nil, errors.New("local_directory: daemon_id is required")
 	}
 	payload.Label = strings.TrimSpace(payload.Label)
-	payload.ExecutionMode = strings.TrimSpace(payload.ExecutionMode)
-	switch payload.ExecutionMode {
-	case "", localDirectoryModeInPlace, localDirectoryModeWorktree, localDirectoryModeShared:
-	default:
-		return nil, fmt.Errorf("local_directory: execution_mode must be %q, %q or %q, got %q",
-			localDirectoryModeInPlace, localDirectoryModeWorktree, localDirectoryModeShared, payload.ExecutionMode)
-	}
 	payload.RealPath = strings.TrimSpace(payload.RealPath)
 	if payload.RealPath != "" && !isAbsoluteLocalPath(payload.RealPath) {
 		return nil, errors.New("local_directory: real_path must be an absolute path")
@@ -443,42 +228,6 @@ func validateLocalDirectoryRefWithOptions(ref json.RawMessage, allowLegacyWorktr
 	// would make two unrelated directories compare equal under the
 	// (project, daemon, repo_key) rule.
 	payload.RepoKey = string(repoident.NormalizeURL(payload.RepoKey))
-	payload.WorktreeRoot = strings.TrimSpace(payload.WorktreeRoot)
-	if payload.WorktreeRoot != "" && !isAbsoluteLocalPath(payload.WorktreeRoot) {
-		return nil, errors.New("local_directory: worktree_root must be an absolute path")
-	}
-	if payload.WorktreeRoot != "" {
-		// The bound directory is the best git-root the server has. A client
-		// that can see the disk may send a subdirectory; refusing a root
-		// inside that path is still correct, and the daemon re-checks against
-		// the real git top-level at task time.
-		bound := localDirectoryIdentity(payload)
-		if bound != "" && pathContains(bound, payload.WorktreeRoot) {
-			return nil, fmt.Errorf(
-				"local_directory: worktree_root %q sits inside %q — working copies there would appear in the repository's own git status; put them beside the repository instead",
-				payload.WorktreeRoot, payload.LocalPath)
-		}
-	}
-	// Parallel mode branches from a repository with at least one commit.
-	// The server cannot see the user's disk, so it requires the client that
-	// can to say so. Absent used to be treated as "nobody looked, allow" —
-	// which let the web UI and an un-enriched CLI save worktree on a plain
-	// folder. Web cannot measure a filesystem, so missing is now a refusal
-	// (DENE-618).
-	if payload.ExecutionMode == localDirectoryModeWorktree &&
-		(payload.IsGitRepo == nil || !*payload.IsGitRepo) {
-		if allowLegacyWorktreeRename && payload.IsGitRepo == nil {
-			// A pre-identity client may resend an already-persisted worktree ref
-			// solely to rename it. Preserve that legacy edit without making the
-			// old row prove a capability it never stored.
-		} else {
-			return nil, fmt.Errorf(
-				"local_directory: %q cannot use parallel (worktree) mode — "+
-					"parallel mode delivers work as a branch and needs a git repository with at least one commit. "+
-					"Keep it on in_place, or bind it from the desktop app / CLI on the machine that holds the folder",
-				payload.LocalPath)
-		}
-	}
 	out, err := json.Marshal(payload)
 	if err != nil {
 		return nil, err
@@ -521,7 +270,9 @@ func localDirectoryRefDiffersOnlyByLabel(a, b json.RawMessage) bool {
 			return nil, false
 		}
 		delete(fields, "label")
-		for _, key := range []string{"real_path", "repo_key", "is_git_repo", "worktree_root"} {
+		// execution_mode and worktree_root are no longer meaningful; a stored
+		// row may still carry them.
+		for _, key := range []string{"real_path", "repo_key", "is_git_repo", "execution_mode", "worktree_root"} {
 			delete(fields, key)
 		}
 		return fields, true
@@ -766,10 +517,6 @@ func (h *Handler) CreateProjectResource(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if !h.requireModeCapableDaemon(w, r, project.WorkspaceID, req.ResourceType, normalizedRef) {
-		return
-	}
-
 	var label pgtype.Text
 	if req.Label != nil && strings.TrimSpace(*req.Label) != "" {
 		label = pgtype.Text{String: strings.TrimSpace(*req.Label), Valid: true}
@@ -858,12 +605,10 @@ func (h *Handler) UpdateProjectResource(w http.ResponseWriter, r *http.Request) 
 	nextRef := json.RawMessage(existing.ResourceRef)
 	rawRef, refProvided := raw["resource_ref"]
 	if refProvided {
-		allowLegacyWorktreeRename := false
 		if existing.ResourceType == "local_directory" {
 			rawRef = mergeOmittedLocalDirectoryIdentity(existing.ResourceRef, rawRef)
-			allowLegacyWorktreeRename = localDirectoryRefDiffersOnlyByLabel(rawRef, existing.ResourceRef)
 		}
-		normalized, err := validateAndNormalizeResourceRefWithOptions(existing.ResourceType, rawRef, allowLegacyWorktreeRename)
+		normalized, err := validateAndNormalizeResourceRef(existing.ResourceType, rawRef)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
@@ -880,22 +625,10 @@ func (h *Handler) UpdateProjectResource(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// A ≤ v0.4.28 client renames by resending the ref, so "the ref was sent"
-	// does not mean "the execution mode was touched". Anything else about the
-	// ref changing does mean it might have been.
+	// does not mean the ref changed.
 	refRenameOnly := refProvided &&
 		existing.ResourceType == "local_directory" &&
 		localDirectoryRefDiffersOnlyByLabel(nextRef, existing.ResourceRef)
-
-	// Gate only when the caller is actually changing what would run: a label or
-	// position update — including an old client's rename, which carries the ref
-	// along — must not start failing because the daemon's registration drifted
-	// after the mode was legitimately saved. The row already says worktree; the
-	// claim gate is what stops it from running somewhere that cannot.
-	if refProvided && !refRenameOnly {
-		if !h.requireModeCapableDaemon(w, r, project.WorkspaceID, existing.ResourceType, nextRef) {
-			return
-		}
-	}
 
 	nextLabel := existing.Label
 	// Tracks an explicit clear, as opposed to a column that was never set.
@@ -1076,39 +809,8 @@ func (h *Handler) findLocalDirectoryConflictReason(ctx context.Context, projectI
 				"this repository is already added on this machine as %q — a second checkout of it would be a second copy of the same code",
 				existing.LocalPath), nil
 		}
-		if incoming.WorktreeRoot != "" {
-			existingID := localDirectoryIdentity(existing)
-			if existingID != "" && (pathContains(existingID, incoming.WorktreeRoot) || pathContains(incoming.WorktreeRoot, existingID)) {
-				return true, fmt.Sprintf(
-					"worktree_root %q conflicts with the directory already bound as %q",
-					incoming.WorktreeRoot, existing.LocalPath), nil
-			}
-		}
 	}
 	return false, "", nil
-}
-
-// pathContains reports whether candidate is parent or lives under it, compared
-// segment-wise. `/repo-backup` is not inside `/repo`. Separators are folded so
-// a Windows path and a POSIX path can be compared as the strings the client
-// sent — the server has no filesystem to canonicalise them against.
-func pathContains(parent, candidate string) bool {
-	p := normalizePathForCompare(parent)
-	c := normalizePathForCompare(candidate)
-	if p == "" || c == "" {
-		return false
-	}
-	if p == c {
-		return true
-	}
-	return strings.HasPrefix(c, p+"/")
-}
-
-func normalizePathForCompare(s string) string {
-	s = strings.TrimSpace(s)
-	s = strings.ReplaceAll(s, "\\", "/")
-	s = strings.TrimRight(s, "/")
-	return s
 }
 
 func (h *Handler) writeProjectResourceUniqueConflict(w http.ResponseWriter, ctx context.Context, projectID pgtype.UUID, resourceType string, ref json.RawMessage, excludeID pgtype.UUID) {

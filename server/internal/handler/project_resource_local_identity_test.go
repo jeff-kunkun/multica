@@ -77,76 +77,25 @@ func TestLocalDirectoryRepoKeyIsNormalizedOnSave(t *testing.T) {
 	}
 }
 
-// Invariant 12: a folder the machine holding it proved has no repository
-// cannot be stored as parallel mode. Parallel mode delivers work as a branch;
-// without a repository every single task on it would fail.
-func TestWorktreeModeIsRefusedOnAProvenNonGitFolder(t *testing.T) {
-	_, err := validateAndNormalizeResourceRef("local_directory", localRef(t, map[string]any{
-		"local_path": "/Users/me/notes", "daemon_id": "d1",
-		"execution_mode": "worktree", "is_git_repo": false,
-	}))
-	if err == nil {
-		t.Fatal("parallel mode was accepted on a folder proven not to be a repository")
-	}
-	if !strings.Contains(err.Error(), "cannot use parallel") {
-		t.Fatalf("error = %v, want it to refuse parallel mode", err)
-	}
-
-	// Proven-a-repo is fine. Absent is not: a client that cannot look at the
-	// disk (the web UI) used to save worktree on a plain folder because the
-	// field was missing. Parallel mode now requires an explicit true.
-	if _, err := validateAndNormalizeResourceRef("local_directory", localRef(t, map[string]any{
-		"local_path": "/Users/me/code/app", "daemon_id": "d1",
-		"execution_mode": "worktree", "is_git_repo": true,
-	})); err != nil {
-		t.Errorf("a proven repo was refused parallel mode: %v", err)
-	}
-	if _, err := validateAndNormalizeResourceRef("local_directory", localRef(t, map[string]any{
-		"local_path": "/Users/me/code/app", "daemon_id": "d1",
-		"execution_mode": "worktree",
-	})); err == nil {
-		t.Fatal("parallel mode was accepted without is_git_repo; web and an un-enriched CLI would save a mode every task would fail")
-	}
-
-	// A plain folder stays perfectly legal in every other mode (form C).
-	if _, err := validateAndNormalizeResourceRef("local_directory", localRef(t, map[string]any{
-		"local_path": "/Users/me/notes", "daemon_id": "d1", "is_git_repo": false,
-	})); err != nil {
-		t.Errorf("a plain folder was refused in the default mode: %v", err)
-	}
-}
-
-func TestWorktreeRootRefusedInsideTheBoundDirectory(t *testing.T) {
-	_, err := validateAndNormalizeResourceRef("local_directory", localRef(t, map[string]any{
-		"local_path": "/Users/me/code/app", "daemon_id": "d1",
-		"real_path":     "/Users/me/code/app",
-		"worktree_root": "/Users/me/code/app/.worktrees",
-	}))
-	if err == nil {
-		t.Fatal("worktree_root inside the bound directory was accepted")
-	}
-	if !strings.Contains(err.Error(), "inside") {
-		t.Fatalf("error = %v, want it to say the root sits inside the repository", err)
-	}
-
-	// Sibling is the default shape and must stay legal.
-	if _, err := validateAndNormalizeResourceRef("local_directory", localRef(t, map[string]any{
-		"local_path": "/Users/me/code/app", "daemon_id": "d1",
-		"worktree_root": "/Users/me/code/app.multica-worktrees",
-	})); err != nil {
-		t.Errorf("a sibling worktree_root was refused: %v", err)
-	}
-}
-
-func TestPathContainsIsSegmentWise(t *testing.T) {
-	if !pathContains("/Users/me/repo", "/Users/me/repo/.worktrees") {
-		t.Error("a child should be inside its parent")
-	}
-	if pathContains("/Users/me/repo", "/Users/me/repo-backup") {
-		t.Error("/repo-backup is not inside /repo")
-	}
-	if !pathContains("/Users/me/repo", "/Users/me/repo") {
-		t.Error("a directory contains itself")
+// Older clients still send execution_mode and worktree_root. Every run goes
+// into the bound folder now, so both are accepted and dropped on save — any
+// value, including ones the old enum refused.
+func TestOldExecutionModeFieldsAreAcceptedAndDropped(t *testing.T) {
+	for _, fields := range []map[string]any{
+		{"execution_mode": "worktree", "is_git_repo": false},
+		{"execution_mode": "shared"},
+		{"execution_mode": "something-else"},
+		{"worktree_root": "relative/path"},
+	} {
+		fields["local_path"] = "/Users/me/code/app"
+		fields["daemon_id"] = "d1"
+		out, err := validateAndNormalizeResourceRef("local_directory", localRef(t, fields))
+		if err != nil {
+			t.Fatalf("%v refused: %v", fields, err)
+		}
+		if strings.Contains(string(out), "execution_mode") || strings.Contains(string(out), "worktree_root") {
+			t.Errorf("stored ref kept an old mode field: %s", out)
+		}
 	}
 }
 
@@ -167,7 +116,7 @@ func TestGithubRepoStoresNormalizedRepoKey(t *testing.T) {
 }
 
 func TestLocalDirectoryPathsMustBeAbsolute(t *testing.T) {
-	for _, field := range []string{"real_path", "worktree_root"} {
+	for _, field := range []string{"real_path"} {
 		_, err := validateAndNormalizeResourceRef("local_directory", localRef(t, map[string]any{
 			"local_path": "/Users/me/code/app", "daemon_id": "d1", field: "relative/path",
 		}))
@@ -180,13 +129,12 @@ func TestLocalDirectoryPathsMustBeAbsolute(t *testing.T) {
 // The capability-narrowing matrix is canonical in
 // internal/coderesolve/filter_test.go, where the rule lives. What is left here
 // is the handler's own contract: the conversion is faithful and the caller's
-// slice is not mutated, because the same response is built once and the claim
-// gates below read it.
+// slice is not mutated, because the same response is built once and read
+// again afterwards.
 func TestFilterForDaemonCapabilitiesConvertsWithoutMutatingTheCaller(t *testing.T) {
 	resources := []ProjectResourceData{
 		{ID: "r1", ResourceType: "local_directory", Label: "app", ResourceRef: localRef(t, map[string]any{
 			"local_path": "/Users/me/code/app", "daemon_id": "d1",
-			"execution_mode": "worktree", "worktree_root": "/Users/me/code/app.multica-worktrees",
 		})},
 		{ID: "r2", ResourceType: "github_repo", ResourceRef: localRef(t, map[string]any{"url": "https://github.com/o/r"})},
 		{ID: "r3", ResourceType: "local_directory", ResourceRef: localRef(t, map[string]any{
@@ -202,34 +150,26 @@ func TestFilterForDaemonCapabilitiesConvertsWithoutMutatingTheCaller(t *testing.
 	if narrowed[0].Label != "app" || narrowed[0].ResourceType != "local_directory" {
 		t.Errorf("conversion lost fields: %+v", narrowed[0])
 	}
-	if strings.Contains(string(narrowed[0].ResourceRef), "worktree_root") {
-		t.Error("worktree_root reached a daemon that cannot honour it")
-	}
 	if string(narrowed[1].ResourceRef) != string(resources[1].ResourceRef) {
 		t.Error("a github_repo resource was rewritten by the local_directory filter")
 	}
-
-	var original map[string]any
-	if err := json.Unmarshal(resources[0].ResourceRef, &original); err != nil {
-		t.Fatal(err)
-	}
-	if _, present := original["worktree_root"]; !present {
+	if len(resources) != 3 || resources[2].ID != "r3" {
 		t.Fatal("filtering mutated the caller's resource slice")
 	}
 
 	full := filterResourcesForDaemonCapabilities(resources, coderesolve.Daemon{
-		ID: "d1", MultiLocalDirectory: true, WorktreeUserRoot: true,
+		ID: "d1", MultiLocalDirectory: true,
 	})
 	if len(full) != len(resources) {
 		t.Errorf("a capable daemon received %d of %d resources", len(full), len(resources))
 	}
 }
 
-// The capability string is part of the wire contract in both directions:
-// renaming it on one side alone silently downgrades every daemon.
+// Shipped daemons declare several directories through this capability (see
+// daemonForRequest), so the literal string is a wire contract.
 func TestUserWorktreeRootCapabilityName(t *testing.T) {
 	if protocol.DaemonCapabilityLocalWorktreeUserRootV1 != "local-worktree-user-root-v1" {
-		t.Fatalf("capability = %q; daemons advertise the literal string, so renaming it strips worktree_root for every one of them",
+		t.Fatalf("capability = %q; daemons advertise the literal string, so renaming it narrows every one of them to a single directory",
 			protocol.DaemonCapabilityLocalWorktreeUserRootV1)
 	}
 }
