@@ -250,7 +250,6 @@ describe("SettingsPage information architecture", () => {
       "General",
       "Members",
       "Group chat & Bots",
-      "Agent permissions",
       "Issue Statuses",
       "Wakeups",
       "Labels",

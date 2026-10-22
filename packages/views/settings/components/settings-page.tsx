@@ -29,7 +29,6 @@ import {
   FolderKanban,
   Link2,
   Bot,
-  BotMessageSquare,
   Stamp,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
@@ -80,7 +79,6 @@ import { searchSettings } from "./settings-search";
 import { HighlightText } from "../../search/highlight-text";
 import { useSettingsSearchIndex } from "./use-settings-search-index";
 import { WakeupsTab } from "./wakeups-tab";
-import { AgentPermissionsTab } from "./agent-permissions-tab";
 import { CollapsedNavTrigger } from "../../layout/page-header";
 import { useT } from "../../i18n";
 
@@ -270,13 +268,6 @@ export function SettingsPage({ extraDeviceTabs: deviceTabs = [] }: SettingsPageP
                   ),
                 ]
               : []),
-            // Office: agent rules, run limits and the 接入 Magpie switch.
-            entry(
-              "agent-permissions",
-              t(($) => $.page.tabs.agent_permissions),
-              BotMessageSquare,
-              <AgentPermissionsTab />,
-            ),
           ],
         },
         {
