@@ -11,21 +11,17 @@ import {
   AGENT_ACCOUNT_CLIS,
   type AccountsViewState,
   type AgentAccount,
-  type AgentAccountBinding,
   accountLeverLabel,
   accountStatus,
   accountsViewState,
   accountSlotNumberOf,
   canManageAccounts,
   cliForProvider,
-  formatQuotaResetAt,
   groupAccountsByCli,
   isSwitchableLever,
-  nextQuotaResetMs,
   parseAccountLever,
   parseAgentAccounts,
   planAccountSwitch,
-  quotaSwitchCandidate,
   resolveCurrentAccount,
   boundDirectoryFor,
   nextSlotForGroup,
@@ -45,7 +41,6 @@ function account(
     key_ref: "",
     lever: "",
     signed_in: true,
-    quota_reset_at: 0,
     ...overrides,
   };
 }
@@ -92,12 +87,6 @@ const CODEX_DEFAULT = account({
   home: `${RUNTIME_HOME}/.codex`,
   lever: "",
 });
-const CODEX_ACCOUNT2 = account({
-  cli: "codex",
-  account: "account2",
-  home: `${RUNTIME_HOME}/.codex-account2`,
-  lever: "",
-});
 const CLAUDE_DEFAULT = account({
   cli: "claude",
   account: "default",
@@ -116,12 +105,6 @@ const CURSOR_DEFAULT = account({
   home: `${RUNTIME_HOME}/.cursor`,
   lever: "",
 });
-const CURSOR_ACCOUNT2 = account({
-  cli: "cursor",
-  account: "account2",
-  home: `${RUNTIME_HOME}/.cursor-account2`,
-  lever: "",
-});
 
 describe("parseAgentAccounts", () => {
   it("maps every reported field", () => {
@@ -134,7 +117,6 @@ describe("parseAgentAccounts", () => {
         key_ref: "dsh-default",
         lever: "env:DSH_HOME",
         signed_in: true,
-        quota_reset_at: 0,
       },
     ]);
 
@@ -148,7 +130,6 @@ describe("parseAgentAccounts", () => {
           key_ref: "dsh-default",
           lever: "env:DSH_HOME",
           signed_in: true,
-          quota_reset_at: 0,
         },
       ],
       error: "",
@@ -236,7 +217,6 @@ describe("parseAgentAccounts", () => {
           base_url: 42,
           lever: "env:CLAUDE_CONFIG_DIR",
           signed_in: "true",
-          quota_reset_at: "1700000000",
         },
       ]),
     );
@@ -248,10 +228,8 @@ describe("parseAgentAccounts", () => {
       base_url: "",
       key_ref: "",
       lever: "env:CLAUDE_CONFIG_DIR",
-      // Unknown booleans read as "not confirmed signed in"; a stringified unix
-      // timestamp is still a timestamp.
+      // Unknown booleans read as "not confirmed signed in".
       signed_in: false,
-      quota_reset_at: 1700000000,
     });
   });
 
@@ -375,7 +353,6 @@ describe("withAccountSlots", () => {
       key_ref: "",
       lever: "env:DSH_HOME",
       signed_in: false,
-      quota_reset_at: 0,
     });
   });
 
@@ -394,7 +371,6 @@ describe("withAccountSlots", () => {
       key_ref: "",
       lever: "env:DSH_HOME",
       signed_in: false,
-      quota_reset_at: 0,
     });
     expect(
       merged.find((entry) => entry.cli === "claude" && entry.account === "account3"),
@@ -655,103 +631,12 @@ describe("resolveCurrentAccount", () => {
 });
 
 describe("accountStatus", () => {
-  const resetAt = 1_700_000_000;
-
   it("maps signed-in and signed-out accounts", () => {
     expect(accountStatus(account({ cli: "dsh", account: "default", home: "/h", signed_in: true }))).toEqual(
       { kind: "signed_in" },
     );
     expect(accountStatus(account({ cli: "dsh", account: "default", home: "/h", signed_in: false }))).toEqual(
       { kind: "signed_out" },
-    );
-  });
-
-  it("carries the reset moment while a quota is exhausted", () => {
-    const exhausted = account({
-      cli: "agy",
-      account: "account2",
-      home: "/h",
-      signed_in: true,
-      quota_reset_at: resetAt,
-    });
-
-    expect(accountStatus(exhausted, resetAt * 1000 - 1)).toEqual({
-      kind: "quota_exhausted",
-      reset_at: resetAt,
-      reset_at_ms: resetAt * 1000,
-    });
-    // Once the reset moment has passed the account is usable again.
-    expect(accountStatus(exhausted, resetAt * 1000)).toEqual({ kind: "signed_in" });
-    expect(accountStatus(exhausted, resetAt * 1000 + 60_000)).toEqual({ kind: "signed_in" });
-  });
-
-  it("prefers signed_out over an exhausted quota: without credentials there is nothing to wait for", () => {
-    expect(
-      accountStatus(
-        account({ cli: "agy", account: "account2", home: "/h", signed_in: false, quota_reset_at: resetAt }),
-        resetAt * 1000 - 1,
-      ),
-    ).toEqual({ kind: "signed_out" });
-  });
-});
-
-describe("nextQuotaResetMs", () => {
-  const resetAt = 1_700_000_000;
-  const later = resetAt + 3_600;
-  const exhausted = (id: string, at: number) =>
-    account({
-      cli: "agy",
-      account: id,
-      home: `${RUNTIME_HOME}/.gemini`,
-      quota_reset_at: at,
-    });
-
-  it("returns the soonest deadline among the accounts still exhausted", () => {
-    const accounts = [
-      exhausted("default", later),
-      exhausted("account2", resetAt),
-      DSH_DEFAULT,
-    ];
-
-    expect(nextQuotaResetMs(accounts, resetAt * 1000 - 1)).toBe(resetAt * 1000);
-    // The first deadline passing promotes the next one, so the surfaces keep
-    // ticking until every spent quota is back.
-    expect(nextQuotaResetMs(accounts, resetAt * 1000)).toBe(later * 1000);
-    expect(nextQuotaResetMs(accounts, later * 1000)).toBeNull();
-  });
-
-  it("ignores accounts with nothing to wait for", () => {
-    expect(nextQuotaResetMs([], resetAt * 1000)).toBeNull();
-    // Signed in with an unspent quota, and signed out with a stale deadline.
-    expect(nextQuotaResetMs([DSH_DEFAULT], resetAt * 1000)).toBeNull();
-    expect(
-      nextQuotaResetMs(
-        [
-          account({
-            cli: "agy",
-            account: "account2",
-            home: `${RUNTIME_HOME}/.gemini-account2`,
-            signed_in: false,
-            quota_reset_at: later,
-          }),
-        ],
-        resetAt * 1000,
-      ),
-    ).toBeNull();
-  });
-});
-
-describe("formatQuotaResetAt", () => {
-  it("renders the deadline the same way for every surface that shows it", () => {
-    const at = 1_700_000_000_000;
-
-    expect(formatQuotaResetAt(at)).toBe(
-      new Date(at).toLocaleString(undefined, {
-        month: "short",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
     );
   });
 });
@@ -922,225 +807,5 @@ describe("planAccountSwitch", () => {
     const plan = planAccountSwitch({ custom_env: {} }, target, READY);
     expect(JSON.stringify(plan)).not.toContain("PRIVATE KEY");
     expect(JSON.stringify(plan)).not.toContain("key_ref");
-  });
-});
-
-// The one-click switch (DENE-468). This is the canonical matrix for "may the
-// summary bar offer it, and which account does it move to"; the component
-// suite only checks that the button renders and performs the write.
-describe("quotaSwitchCandidate", () => {
-  const resetAt = 1_700_000_000;
-  const nowMs = resetAt * 1000 - 60_000;
-  const spent = (account: AgentAccount): AgentAccount => ({
-    ...account,
-    quota_reset_at: resetAt,
-  });
-  const signedOut = (account: AgentAccount): AgentAccount => ({
-    ...account,
-    signed_in: false,
-  });
-  const pick = (input: {
-    binding?: AgentAccountBinding;
-    accounts: readonly AgentAccount[];
-    current: AgentAccount | null;
-    view?: AccountsViewState;
-  }) =>
-    quotaSwitchCandidate({
-      binding: input.binding ?? { custom_env: {} },
-      accounts: input.accounts,
-      current: input.current,
-      view: input.view ?? READY,
-      nowMs,
-    });
-
-  it("picks a signed-in sibling of the same CLI while the current one is spent", () => {
-    const candidate = pick({
-      accounts: [spent(CLAUDE_DEFAULT), CLAUDE_ACCOUNT2, DSH_DEFAULT],
-      current: spent(CLAUDE_DEFAULT),
-    });
-
-    expect(candidate).toEqual(CLAUDE_ACCOUNT2);
-    // The button is only worth rendering because this very plan writes: it is
-    // the same gate "save and switch" goes through.
-    expect(planAccountSwitch({ custom_env: {} }, candidate, READY)).toEqual({
-      kind: "env",
-      key: "CLAUDE_CONFIG_DIR",
-      value: CLAUDE_ACCOUNT2.home,
-    });
-  });
-
-  it("picks the single env-lever sibling the same way", () => {
-    const candidate = pick({
-      binding: { custom_env: {} },
-      accounts: [spent(DSH_DEFAULT), DSH_ACCOUNT2],
-      current: spent(DSH_DEFAULT),
-    });
-
-    expect(candidate).toEqual(DSH_ACCOUNT2);
-    expect(planAccountSwitch({ custom_env: {} }, candidate, READY)).toEqual({
-      kind: "env",
-      key: "DSH_HOME",
-      value: DSH_ACCOUNT2.home,
-    });
-  });
-
-  it("is deterministic and independent of the order the daemon reported", () => {
-    const accounts = [DSH_DEFAULT, DSH_ACCOUNT2, CLAUDE_DEFAULT];
-    const reversed = [...accounts].reverse();
-    const current = spent(DSH_DEFAULT);
-
-    // `default` leads the canonical group order, so account2 is the first
-    // eligible sibling under the CLI's own directory.
-    expect(pick({ accounts, current })?.account).toBe("account2");
-    expect(pick({ accounts: reversed, current })?.account).toBe("account2");
-  });
-
-  it("offers nothing while the account in effect has quota left", () => {
-    // The action exists for one situation only; anything else stays a
-    // deliberate choice made in the drawer.
-    expect(pick({ accounts: [DSH_DEFAULT, DSH_ACCOUNT2], current: DSH_DEFAULT })).toBeNull();
-    // Control: the same list does offer the switch while the quota is spent.
-    expect(
-      pick({ accounts: [spent(DSH_DEFAULT), DSH_ACCOUNT2], current: spent(DSH_DEFAULT) }),
-    ).toEqual(DSH_ACCOUNT2);
-  });
-
-  it("stops offering it once the deadline has passed", () => {
-    const accounts = [spent(DSH_DEFAULT), DSH_ACCOUNT2];
-
-    expect(pick({ accounts, current: spent(DSH_DEFAULT) })).toEqual(DSH_ACCOUNT2);
-    expect(
-      quotaSwitchCandidate({
-        binding: { custom_env: {} },
-        accounts,
-        current: spent(DSH_DEFAULT),
-        view: READY,
-        nowMs: resetAt * 1000,
-      }),
-    ).toBeNull();
-  });
-
-  it("offers nothing without a sibling to move to", () => {
-    expect(pick({ accounts: [spent(DSH_DEFAULT)], current: spent(DSH_DEFAULT) })).toBeNull();
-    // The other CLIs are not candidates: they are not accounts of this group.
-    expect(
-      pick({
-        accounts: [spent(DSH_DEFAULT), CLAUDE_DEFAULT, CLAUDE_ACCOUNT2],
-        current: spent(DSH_DEFAULT),
-      }),
-    ).toBeNull();
-  });
-
-  it("refuses a sibling that is signed out or spent as well", () => {
-    // Moving to another dead end is not a switch, it is the same problem one
-    // account further along.
-    expect(
-      pick({
-        accounts: [spent(DSH_DEFAULT), signedOut(DSH_ACCOUNT2)],
-        current: spent(DSH_DEFAULT),
-      }),
-    ).toBeNull();
-    expect(
-      pick({
-        accounts: [spent(DSH_DEFAULT), spent(DSH_ACCOUNT2)],
-        current: spent(DSH_DEFAULT),
-      }),
-    ).toBeNull();
-    // Control: a signed-in sibling with quota left is the one that qualifies.
-    expect(
-      pick({
-        accounts: [spent(DSH_DEFAULT), signedOut(DSH_ACCOUNT2), account({ ...DSH_ACCOUNT2, account: "account3", home: `${RUNTIME_HOME}/.dsh-account3` })],
-        current: spent(DSH_DEFAULT),
-      })?.account,
-    ).toBe("account3");
-  });
-
-  it("never flags a group whose lever cannot be written", () => {
-    // codex / cursor report an empty lever: the daemon gives the client no way
-    // to point them at another directory, so there is no one-click switch.
-    expect(
-      pick({
-        accounts: [spent(CODEX_DEFAULT), CODEX_ACCOUNT2, spent(CURSOR_DEFAULT), CURSOR_ACCOUNT2],
-        current: spent(CODEX_DEFAULT),
-      }),
-    ).toBeNull();
-    expect(
-      pick({
-        accounts: [spent(CURSOR_DEFAULT), CURSOR_ACCOUNT2],
-        current: spent(CURSOR_DEFAULT),
-      }),
-    ).toBeNull();
-    // agy is read-only too, including the retired lever an older daemon reports.
-    expect(
-      pick({
-        accounts: [spent(AGY_DEFAULT), AGY_LEGACY_ACCOUNT2],
-        current: spent(AGY_DEFAULT),
-      }),
-    ).toBeNull();
-  });
-
-  it("refuses a sibling whose lever shape this client cannot write", () => {
-    expect(
-      pick({
-        accounts: [
-          spent(DSH_DEFAULT),
-          account({
-            cli: "dsh",
-            account: "account2",
-            home: `${RUNTIME_HOME}/.dsh-account2`,
-            lever: "custom_args:--dsh_profile",
-          }),
-        ],
-        current: spent(DSH_DEFAULT),
-      }),
-    ).toBeNull();
-  });
-
-  it("refuses a sibling whose home cannot be bound", () => {
-    // A relative directory has no absolute path to write, so the button would
-    // be dead on click — the same rule `planAccountSwitch` enforces.
-    expect(
-      pick({
-        accounts: [
-          spent(DSH_DEFAULT),
-          account({
-            cli: "dsh",
-            account: "account2",
-            home: ".dsh-account2",
-            lever: "env:DSH_HOME",
-          }),
-        ],
-        current: spent(DSH_DEFAULT),
-      }),
-    ).toBeNull();
-  });
-
-  it("never offers a write from an untrusted list", () => {
-    const accounts = [spent(DSH_DEFAULT), DSH_ACCOUNT2];
-    const current = spent(DSH_DEFAULT);
-
-    for (const view of [
-      { kind: "loading" },
-      { kind: "empty" },
-      { kind: "error", message: "EACCES: permission denied" },
-    ] satisfies AccountsViewState[]) {
-      expect(pick({ accounts, current, view })).toBeNull();
-    }
-
-    // Control: the same list does offer it once the view is trustworthy.
-    expect(pick({ accounts, current, view: READY })).toEqual(DSH_ACCOUNT2);
-  });
-
-  it("offers nothing when no account is in effect", () => {
-    expect(pick({ accounts: [spent(DSH_DEFAULT), DSH_ACCOUNT2], current: null })).toBeNull();
-  });
-
-  it("picks a candidate that is not the account in effect even when it is reported twice", () => {
-    const candidate = pick({
-      accounts: [spent(DSH_DEFAULT), DSH_ACCOUNT2],
-      current: spent(DSH_DEFAULT),
-    });
-
-    expect(candidate?.account).not.toBe("default");
   });
 });

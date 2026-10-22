@@ -8,7 +8,6 @@ import { SourceBackfillModal } from "../onboarding";
 import { AppSidebar } from "./app-sidebar";
 import { DashboardGuard } from "./dashboard-guard";
 import { NavigationProgress } from "./navigation-progress";
-import { ProviderStatusBar } from "./provider-status-bar";
 import { WorkspacePresencePrefetch } from "./workspace-presence-prefetch";
 import { GlobalShortcuts } from "./global-shortcuts";
 import { GuestBanner, GuestReadOnlyProvider } from "./guest-readonly";
@@ -50,7 +49,7 @@ export function DashboardLayout({
         <WorkspacePresencePrefetch />
         <AppSidebar searchSlot={searchSlot} />
         {/* The page runs edge to edge (viewport-fit=cover), so the shell keeps
-            its content — lists, composers, the quota bar — above the Home bar.
+            its content — lists, composers — above the Home bar.
             On a phone the tab bar is the bottom edge and carries that inset. */}
         <SidebarInset
           className={cn(
@@ -63,7 +62,6 @@ export function DashboardLayout({
             <GuestBanner />
             {children}
           </div>
-          <ProviderStatusBar />
           {showTabBar && <MobileTabBar />}
           <ModalRegistry />
           <SourceBackfillModal />

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { Agent, AgentRuntime, MemberWithUser } from "@multica/core/types";
 import { providerSupportsMcpConfig } from "@multica/core/agents";
@@ -29,12 +29,6 @@ import { InstructionsTab } from "./tabs/instructions-tab";
 import { SkillsTab } from "./tabs/skills-tab";
 import { EnvTab } from "./tabs/env-tab";
 import { AgentAccountsTab } from "./tabs/agent-accounts-tab";
-import {
-  formatQuotaResetAt,
-  nextQuotaResetMs,
-  parseAgentAccounts,
-} from "./tabs/agent-accounts-model";
-import { useQuotaResetTick } from "./tabs/use-quota-reset-tick";
 import { CustomArgsTab } from "./tabs/custom-args-tab";
 import { McpConfigTab } from "./tabs/mcp-config-tab";
 import { AgentMcpTab } from "./tabs/agent-mcp-tab";
@@ -48,11 +42,6 @@ import { AgentOverviewSummary } from "./agent-overview-summary";
 import { ActorIssuesPanel } from "../../common/actor-issues-panel";
 import { useT } from "../../i18n";
 import { useNavigation } from "../../navigation";
-import {
-  followsBaseRoleExecutionConfig,
-  runtimeInheritanceState,
-  type InheritedPromptState,
-} from "../specialization";
 
 type DetailSection = "overview" | "work" | "capabilities" | "settings";
 
@@ -137,19 +126,6 @@ interface AgentOverviewPaneProps {
   onUpdate: (id: string, data: Record<string, unknown>) => Promise<void>;
   currentUserId?: string | null;
   canEdit: boolean;
-  /** Active specialisations of this agent (DENE-304); the Instructions tab
-   *  names them so an edit to a shared prompt is not a silent change. */
-  childAgents?: readonly Agent[];
-  /** Where the base role's prompt for a specialisation came from (DENE-384). */
-  inheritedPromptState?: InheritedPromptState;
-  /** Re-reads the detail payload that carries the base role's prompt. */
-  onRetryInheritedPrompt?: () => void;
-  /** Workspace agents, for the Instructions tab's base-role picker. */
-  agents?: readonly Agent[];
-  /** Attaches this agent to a base role by id (DENE-300 follow-up). */
-  onChangeBaseRole?: (parentAgentId: string) => Promise<void>;
-  /** Solidify-and-unbind, the non-lossy way back to an independent role. */
-  onDetachBaseRole?: () => Promise<void>;
   navIntent?: DetailTab | null;
   onNavIntentHandled?: () => void;
 }
@@ -170,12 +146,6 @@ export function AgentOverviewPane({
   onUpdate,
   currentUserId,
   canEdit,
-  childAgents = [],
-  inheritedPromptState = "ready",
-  onRetryInheritedPrompt,
-  agents,
-  onChangeBaseRole,
-  onDetachBaseRole,
   navIntent,
   onNavIntentHandled,
 }: AgentOverviewPaneProps) {
@@ -193,32 +163,6 @@ export function AgentOverviewPane({
   const [activeDirty, setActiveDirty] = useState(false);
   const [pendingView, setPendingView] = useState<DetailTab | null>(null);
   const lastUrlViewRef = useRef(urlView);
-
-  // A specialisation that follows its base role holds a copy of the base
-  // role's runtime config and — with the same owner — its env, custom args and
-  // MCP config (DENE-505 / DENE-854). The server refuses edits to that copy, so
-  // those editors render read-only with a pointer to where the value lives.
-  const baseRole = agent.parent_agent_id
-    ? agents?.find((a) => a.id === agent.parent_agent_id)
-    : undefined;
-  const baseRoleName = baseRole?.name ?? agent.parent_agent_name ?? "";
-  const runtimeConfigLocked = runtimeInheritanceState(agent) === "inherited";
-  const executionConfigLocked = followsBaseRoleExecutionConfig(agent, baseRole);
-  const lockedByBaseRole = (locked: boolean, editor: ReactNode) =>
-    locked ? (
-      <div className="space-y-4">
-        <p className="rounded-md border bg-muted/40 px-3 py-2 text-caption text-muted-foreground">
-          {t(($) => $.inspector.inherited_config_notice, {
-            name: baseRoleName,
-          })}
-        </p>
-        <fieldset disabled className="min-w-0">
-          {editor}
-        </fieldset>
-      </div>
-    ) : (
-      editor
-    );
 
   const { data: larkListing } = useQuery({
     ...larkInstallationsOptions(wsId),
@@ -246,28 +190,6 @@ export function AgentOverviewPane({
     dingtalkListing?.configured === true ||
     wecomListing?.configured === true ||
     telegramListing?.configured === true;
-
-  // A spent quota is the one account state that needs an action and that the
-  // tab rail cannot otherwise show. The daemon reports it on the runtime row,
-  // so the warning costs no request of its own — and it clears itself the
-  // moment the quota comes back (DENE-468).
-  const accountRows = useMemo(
-    () => parseAgentAccounts(runtime).accounts,
-    [runtime],
-  );
-  const accountNowMs = useQuotaResetTick(accountRows);
-  const quotaResetMs = useMemo(
-    () => nextQuotaResetMs(accountRows, accountNowMs),
-    [accountRows, accountNowMs],
-  );
-  // The accounts section only renders for an editor (see `visibleSettingsTabs`
-  // below), so a viewer must not be pointed at a dot with nothing behind it.
-  const quotaAlert =
-    quotaResetMs === null || !canEdit
-      ? ""
-      : t(($) => $.tab_body.accounts.status_quota_exhausted, {
-          time: formatQuotaResetAt(quotaResetMs),
-        });
 
   // The Qoder bridge fails every task carrying skills, MCP, connected apps,
   // env, args or a model override, and runs issues only (no chat). Those
@@ -523,9 +445,6 @@ export function AgentOverviewPane({
                       )}
                     >
                       {t(($) => $.tabs[tab.labelKey])}
-                      {tab.id === "general" && quotaAlert ? (
-                        <QuotaAlertDot label={quotaAlert} />
-                      ) : null}
                     </button>
                   );
                 })}
@@ -545,13 +464,6 @@ export function AgentOverviewPane({
                   <h2 className="text-title-sm font-medium text-balance">
                     {t(($) => $.tabs[activeSecondaryTab.labelKey])}
                   </h2>
-                  {/* The rail's dot has to be explainable where it is read:
-                      this is the one line that says why the tab is flagged. */}
-                  {activeSecondaryTab.id === "general" && quotaAlert ? (
-                    <p className="mt-1 text-caption text-destructive">
-                      {quotaAlert}
-                    </p>
-                  ) : null}
                 </header>
 
                 <div className="mt-6">
@@ -560,13 +472,6 @@ export function AgentOverviewPane({
                       agent={agent}
                       onSave={(updates) => onUpdate(agent.id, updates)}
                       onDirtyChange={setActiveDirty}
-                      childAgents={childAgents}
-                      inheritedPromptState={inheritedPromptState}
-                      onRetryInheritedPrompt={onRetryInheritedPrompt}
-                      agents={agents}
-                      canEdit={canEdit}
-                      onChangeBaseRole={onChangeBaseRole}
-                      onDetachBaseRole={onDetachBaseRole}
                     />
                   )}
                   {effectiveView === "skills" && (
@@ -578,17 +483,14 @@ export function AgentOverviewPane({
                     />
                   )}
                   {effectiveView === "mcp_config" && (
-                    lockedByBaseRole(
-                      executionConfigLocked,
-                      <McpConfigTab
-                        agent={agent}
-                        runtime={runtime}
-                        currentUserId={currentUserId}
-                        canEdit={canEdit && !executionConfigLocked}
-                        onSave={(updates) => onUpdate(agent.id, updates)}
-                        onDirtyChange={setActiveDirty}
-                      />,
-                    )
+                    <McpConfigTab
+                      agent={agent}
+                      runtime={runtime}
+                      currentUserId={currentUserId}
+                      canEdit={canEdit}
+                      onSave={(updates) => onUpdate(agent.id, updates)}
+                      onDirtyChange={setActiveDirty}
+                    />
                   )}
                   {effectiveView === "composio_mcp" && (
                     <AgentMcpTab agent={agent} />
@@ -627,15 +529,12 @@ export function AgentOverviewPane({
                             ($) => $.inspector.section_accounts_hint,
                           )}
                         >
-                          {lockedByBaseRole(
-                            executionConfigLocked,
-                            <AgentAccountsTab
-                              agent={agent}
-                              runtimeDevice={runtime ?? undefined}
-                              onSave={(updates) => onUpdate(agent.id, updates)}
-                              onDirtyChange={setActiveDirty}
-                            />,
-                          )}
+                          <AgentAccountsTab
+                            agent={agent}
+                            runtimeDevice={runtime ?? undefined}
+                            onSave={(updates) => onUpdate(agent.id, updates)}
+                            onDirtyChange={setActiveDirty}
+                          />
                         </SettingsSection>
                       ) : null}
                     </div>
@@ -650,21 +549,15 @@ export function AgentOverviewPane({
                     />
                   )}
                   {effectiveView === "env" && (
-                    lockedByBaseRole(
-                      executionConfigLocked,
-                      <EnvTab agent={agent} onDirtyChange={setActiveDirty} />,
-                    )
+                    <EnvTab agent={agent} onDirtyChange={setActiveDirty} />
                   )}
                   {effectiveView === "custom_args" && (
-                    lockedByBaseRole(
-                      executionConfigLocked,
-                      <CustomArgsTab
-                        agent={agent}
-                        runtimeDevice={runtime ?? undefined}
-                        onSave={(updates) => onUpdate(agent.id, updates)}
-                        onDirtyChange={setActiveDirty}
-                      />,
-                    )
+                    <CustomArgsTab
+                      agent={agent}
+                      runtimeDevice={runtime ?? undefined}
+                      onSave={(updates) => onUpdate(agent.id, updates)}
+                      onDirtyChange={setActiveDirty}
+                    />
                   )}
                   {effectiveView === "runtime_config" &&
                     (qoderRuntime ? (
@@ -675,13 +568,12 @@ export function AgentOverviewPane({
                         onSave={(updates) => onUpdate(agent.id, updates)}
                         onDirtyChange={setActiveDirty}
                       />
-                    ) : lockedByBaseRole(
-                      runtimeConfigLocked,
+                    ) : (
                       <RuntimeConfigTab
                         agent={agent}
                         onSave={(updates) => onUpdate(agent.id, updates)}
                         onDirtyChange={setActiveDirty}
-                      />,
+                      />
                     ))}
                 </div>
               </div>
@@ -721,24 +613,5 @@ export function AgentOverviewPane({
         </AlertDialog>
       )}
     </div>
-  );
-}
-
-/**
- * The accounts section's "a quota ran out" marker (DENE-468).
- *
- * The dot is what makes a spent quota reachable from the tab rail — the one
- * place the user passes through on the way to anything else in the agent. It
- * carries the deadline as a tooltip and as its accessible name, so the alert
- * is never colour-only.
- */
-function QuotaAlertDot({ label }: { label: string }) {
-  return (
-    <span
-      title={label}
-      className="ms-1.5 size-1.5 shrink-0 rounded-full bg-destructive"
-    >
-      <span className="sr-only">{label}</span>
-    </span>
   );
 }

@@ -10,11 +10,6 @@ import { qoderAgentId } from "@multica/core/agents";
 import { runtimeDisplayLabel } from "@multica/core/runtimes";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useT } from "../../i18n";
-import {
-  AgentQuotaCapsule,
-  AgentQuotaMeter,
-  useNowTick,
-} from "./agent-quota-meter";
 import { providerSeatModelDisplay } from "./provider-seat-model";
 import { VisibilityBadge } from "./visibility-badge";
 import { AgentPerformanceSummary } from "./tabs/activity-tab";
@@ -37,7 +32,6 @@ export function AgentOverviewSummary({
 }: AgentOverviewSummaryProps) {
   const { t } = useT("agents");
   const { t: tr } = useT("runtimes");
-  const now = useNowTick();
   const runtimeOnline = runtime?.status === "online";
   const qoderRuntime = runtime?.provider === "qoder_cloud";
 
@@ -64,29 +58,20 @@ export function AgentOverviewSummary({
             <VisibilityBadge value={agent.visibility} />
           </SummaryRow>
           <SummaryRow label={t(($) => $.inspector.prop_runtime)}>
-            <div className="flex min-w-0 flex-col gap-1">
-              <span className="flex min-w-0 items-center gap-1.5 text-foreground">
-                <span
-                  className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-                    runtimeOnline ? "bg-success" : "bg-muted-foreground/40"
-                  }`}
-                  aria-hidden="true"
-                />
-                <Server className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
-                <span className="truncate">
-                  {runtime
-                    ? runtimeDisplayLabel(runtime)
-                    : t(($) => $.pickers.runtime_none)}
-                </span>
-              </span>
-              <AgentQuotaCapsule
-                agentId={agent.id}
-                runtime={runtime}
-                planLimits={agent.plan_limits}
-                now={now}
-                labeled={false}
+            <span className="flex min-w-0 items-center gap-1.5 text-foreground">
+              <span
+                className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                  runtimeOnline ? "bg-success" : "bg-muted-foreground/40"
+                }`}
+                aria-hidden="true"
               />
-            </div>
+              <Server className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
+              <span className="truncate">
+                {runtime
+                  ? runtimeDisplayLabel(runtime)
+                  : t(($) => $.pickers.runtime_none)}
+              </span>
+            </span>
           </SummaryRow>
           {qoderRuntime ? (
             <SummaryRow label={tr(($) => $.qoder.agent)}>
@@ -143,12 +128,6 @@ export function AgentOverviewSummary({
       </section>
       )}
 
-      <AgentQuotaMeter
-        agentId={agent.id}
-        runtime={runtime}
-        planLimits={agent.plan_limits}
-        now={now}
-      />
       <AgentPerformanceSummary agent={agent} />
     </aside>
   );

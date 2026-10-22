@@ -190,7 +190,6 @@ interface HealthPayload {
   active_task_count?: number;
   agents?: string[];
   workspaces?: unknown[];
-  plan_limits?: DaemonStatus["planLimits"];
   /** Local annotation: the port this payload was fetched from. */
   port?: number;
 }
@@ -487,7 +486,6 @@ async function fetchHealth(): Promise<DaemonStatus> {
     profile: active.name,
     serverUrl: data.server_url,
     externallyManaged,
-    planLimits: data.plan_limits,
   };
 }
 

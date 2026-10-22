@@ -18,7 +18,6 @@ import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { AppLink } from "../../navigation";
 import { HealthIcon } from "../../runtimes/components/shared";
 import { availabilityConfig } from "../presence";
-import { AgentQuotaCapsule } from "./agent-quota-meter";
 import { providerSeatModelDisplay } from "./provider-seat-model";
 import { VisibilityBadge } from "./visibility-badge";
 import { useT } from "../../i18n";
@@ -124,11 +123,6 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
           agent running?" without opening the detail page. */}
       <div className="flex flex-col gap-1.5 text-caption">
         <RuntimeRow agent={agent} runtime={runtime} />
-        <AgentQuotaCapsule
-          agentId={agent.id}
-          runtime={runtime}
-          planLimits={agent.plan_limits}
-        />
         <ModelRow model={agent.model} thinkingLevel={agent.thinking_level} />
         {agent.skills.length > 0 && (
           <SkillsRow skills={agent.skills.map((s) => s.name)} />
