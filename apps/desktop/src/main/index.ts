@@ -7,8 +7,6 @@ import fixPath from "fix-path";
 import { setupAutoUpdater } from "./updater";
 import { setupDaemonManager } from "./daemon-manager";
 import { setupLocalDirectory } from "./local-directory";
-import { setupWorktreeCleanup } from "./worktree-cleanup";
-import { setupSharedScratch } from "./shared-scratch";
 import { setupLocalAttachments } from "./local-attachments";
 import { applyFallbackPathDirs } from "./path-fallback";
 import { setupWorkspaceTransfer } from "./workspace-transfer-ipc";
@@ -872,8 +870,6 @@ if (!gotTheLock) {
       runtimeConfigResult.ok ? runtimeConfigResult.config.apiUrl : undefined,
     );
     setupLocalDirectory(() => mainWindow);
-    setupWorktreeCleanup();
-    setupSharedScratch();
     setupLocalAttachments();
     setupWorkspaceTransfer(() => mainWindow);
     setupFullDiskAccess();

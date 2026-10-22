@@ -24,14 +24,6 @@ import type {
   UpdaterErrorPayload,
   UpdaterPreferences,
 } from "../shared/updater-types";
-import type {
-  WorktreeCleanupResult,
-  WorktreeCleanupSettings,
-} from "../main/worktree-cleanup";
-import type {
-  SharedScratchResult,
-  SharedScratchSettings,
-} from "../main/shared-scratch";
 import type { LocalAttachmentActionResult } from "../main/local-attachments";
 import type {
   DaemonStatus,
@@ -150,9 +142,6 @@ interface DesktopAPI {
     /** Normalized identity of the repository this directory holds, from its
      *  `origin` remote. Absent when there is none to identify. */
     repo_key?: string;
-    /** Where parallel mode would put working copies by default: the
-     *  repository's sibling. Previewed before the user picks that mode. */
-    default_worktree_root?: string;
     /** The repository root containing the directory, when there is one. */
     git_root?: string;
   }>;
@@ -178,9 +167,6 @@ interface DesktopAPI {
     root: string;
     path: string;
   }) => Promise<{ ok: boolean; reason?: string }>;
-  /** Whether `path` (or its nearest existing ancestor) is writable. Used for
-   *  worktree_root, which the first task often creates. */
-  validateWritablePath: (path: string) => Promise<{ ok: boolean }>;
   /** Copies of attachments an agent on this machine uploaded, by attachment
    *  id. The path stays in the main process (DENE-1549). */
   localAttachment: {
@@ -188,34 +174,6 @@ interface DesktopAPI {
     open: (attachmentId: string) => Promise<LocalAttachmentActionResult>;
     reveal: (attachmentId: string) => Promise<LocalAttachmentActionResult>;
   };
-  /** Report on this machine's parallel-mode working copies and the cleanup
-   *  policy in force. Served by the local daemon (DENE-617). */
-  worktreeCleanupReport: () => Promise<WorktreeCleanupResult>;
-  /** Save this machine's cleanup policy and return a fresh report. */
-  saveWorktreeCleanupSettings: (
-    settings: WorktreeCleanupSettings,
-  ) => Promise<WorktreeCleanupResult>;
-  /** Remove one working copy now. The daemon still applies every keep rule. */
-  removeWorktreeCopy: (path: string) => Promise<WorktreeCleanupResult>;
-  /** Where the shared session folder is, how big it is, and what is in it. */
-  sharedScratchReport: () => Promise<SharedScratchResult>;
-  saveSharedScratchSettings: (
-    settings: SharedScratchSettings,
-  ) => Promise<SharedScratchResult>;
-  /** Remove one idle session folder. The daemon still applies every keep rule. */
-  removeSharedSession: (path: string) => Promise<SharedScratchResult>;
-  /** Remove session folders the retention window already calls expired. */
-  cleanExpiredSharedSessions: () => Promise<SharedScratchResult>;
-  /** Local skip-mutex overrides for folders stored as in_place on a server
-   *  that does not accept execution_mode=shared. */
-  listLocalDirectorySharedOverrides: () => Promise<
-    Array<{ daemonId: string; localPath: string }>
-  >;
-  setLocalDirectorySharedOverride: (input: {
-    daemonId: string;
-    localPath: string;
-    enabled: boolean;
-  }) => Promise<{ ok: boolean; error?: string }>;
   /** Listen for Cmd/Ctrl+W tab-close requests from the main process.
    *  Returns an unsubscribe function. */
   onCloseActiveTab: (callback: () => void) => () => void;

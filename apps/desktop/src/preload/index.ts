@@ -264,15 +264,6 @@ const desktopAPI = {
     ipcRenderer.invoke("local-directory:provision-project", input),
   removeProvisionedDirectory: (input: { root: string; path: string }) =>
     ipcRenderer.invoke("local-directory:remove-provisioned", input),
-  validateWritablePath: (path: string) =>
-    ipcRenderer.invoke("local-directory:writable", path),
-  /** This machine's parallel-copy cleanup: report, policy, one-off removal.
-   *  Served by the local daemon — the paths and sizes exist only here. */
-  worktreeCleanupReport: () => ipcRenderer.invoke("worktree-cleanup:report"),
-  saveWorktreeCleanupSettings: (settings: unknown) =>
-    ipcRenderer.invoke("worktree-cleanup:save-settings", settings),
-  removeWorktreeCopy: (path: string) =>
-    ipcRenderer.invoke("worktree-cleanup:remove", path),
   /** Attachments an agent on this machine uploaded: the renderer passes an
    *  attachment id only, never a path (DENE-1549). */
   localAttachment: {
@@ -283,21 +274,6 @@ const desktopAPI = {
     reveal: (attachmentId: string) =>
       ipcRenderer.invoke("local-attachment:reveal", attachmentId),
   },
-  /** This machine's shared session folder: where questions with no code land. */
-  sharedScratchReport: () => ipcRenderer.invoke("shared-scratch:report"),
-  saveSharedScratchSettings: (settings: unknown) =>
-    ipcRenderer.invoke("shared-scratch:save-settings", settings),
-  removeSharedSession: (path: string) =>
-    ipcRenderer.invoke("shared-scratch:remove", path),
-  cleanExpiredSharedSessions: () =>
-    ipcRenderer.invoke("shared-scratch:clean-expired"),
-  listLocalDirectorySharedOverrides: () =>
-    ipcRenderer.invoke("local-directory:list-shared-overrides"),
-  setLocalDirectorySharedOverride: (input: {
-    daemonId: string;
-    localPath: string;
-    enabled: boolean;
-  }) => ipcRenderer.invoke("local-directory:set-shared-override", input),
   /** Listen for Cmd/Ctrl+W tab-close requests from the main process.
    *  The renderer should close the active tab; if it was the last tab,
    *  call `closeWindow()` to dismiss the window. Returns an unsubscribe fn. */

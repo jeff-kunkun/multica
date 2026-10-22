@@ -2,21 +2,15 @@ import { ipcMain, dialog, BrowserWindow } from "electron";
 import { execFile } from "child_process";
 import { access, realpath, stat } from "fs/promises";
 import { constants as fsConstants } from "fs";
-import { basename, dirname, isAbsolute, join } from "path";
+import { basename, isAbsolute } from "path";
 import { promisify } from "util";
 import { normalizeRepoUrl } from "@multica/core/projects/source-rule";
-import { activeDaemonProfileDir } from "./daemon-manager";
 import { initLocalGit, type InitLocalGitResult } from "./local-git";
 import {
   provisionProjectDirectory,
   removeProvisionedDirectory,
   type ProvisionProjectDirectoryResult,
 } from "./provision-project-dir";
-import {
-  localDirectoryOverridesPath,
-  readLocalDirectoryOverrides,
-  writeLocalDirectorySharedOverride,
-} from "./local-directory-overrides";
 
 export interface PickDirectoryResult {
   ok: boolean;
@@ -65,16 +59,8 @@ export interface ValidateLocalDirectoryResult {
    */
   repo_key?: string;
   /**
-   * Where parallel mode would put this directory's working copies by default:
-   * the repository's sibling. Shown in the picker BEFORE the user commits to
-   * parallel mode, because the cost of that mode is a copy per task on their
-   * own disk and they are entitled to see where it lands.
-   */
-  default_worktree_root?: string;
-  /**
    * The repository root containing the directory, when there is one. The
-   * picker needs it to tell the user that a worktree root they typed sits
-   * inside their own repository — the rule execenv enforces at task time.
+   * create flow uses it to tell a plain folder from a subdirectory of a repo.
    */
   git_root?: string;
 }
@@ -118,17 +104,6 @@ async function repoKeyOf(gitRoot: string): Promise<string> {
 /** One TypeScript copy: packages/core/projects/source-rule.ts. */
 export const normalizeRepoKey = normalizeRepoUrl;
 
-/**
- * The default landing place for parallel-mode working copies: the
- * repository's sibling `<repo>.multica-worktrees`. Mirrors
- * execenv.DefaultWorktreeRoot — the picker only PREVIEWS it, the daemon
- * decides, and the two must name the same directory or the preview lies.
- */
-export function defaultWorktreeRoot(gitRoot: string): string {
-  if (!gitRoot) return "";
-  return join(dirname(gitRoot), `${basename(gitRoot)}.multica-worktrees`);
-}
-
 async function validateLocalDirectory(
   path: string,
 ): Promise<ValidateLocalDirectoryResult> {
@@ -155,8 +130,7 @@ async function validateLocalDirectory(
   }
   const gitRoot = await gitTopLevel(path);
   const hasCommit = gitRoot ? await gitHasCommit(gitRoot) : false;
-  // Parallel mode needs a git working tree WITH at least one commit. An empty
-  // repository cannot produce a worktree, so it is reported as not-a-repo.
+  // An empty repository (no commit yet) is reported as not-a-repo.
   const result: ValidateLocalDirectoryResult = {
     ok: true,
     is_git_repo: hasCommit,
@@ -170,7 +144,6 @@ async function validateLocalDirectory(
   }
   if (gitRoot) {
     result.git_root = gitRoot;
-    result.default_worktree_root = defaultWorktreeRoot(gitRoot);
     const key = await repoKeyOf(gitRoot);
     if (key) result.repo_key = key;
   }
@@ -185,29 +158,6 @@ async function gitHasCommit(gitRoot: string): Promise<boolean> {
     return true;
   } catch {
     return false;
-  }
-}
-
-/** True when `path` exists and is writable, or (if it does not exist yet)
- *  the nearest existing ancestor is — worktree_root is often created by the
- *  first task, so "the parent can be written" is the check that matters. */
-async function pathIsWritableLocation(path: string): Promise<boolean> {
-  if (!path || !isAbsolute(path)) return false;
-  let current = path;
-  for (;;) {
-    try {
-      await access(current, fsConstants.W_OK);
-      return true;
-    } catch {
-      try {
-        await stat(current);
-        return false;
-      } catch {
-        const parent = dirname(current);
-        if (parent === current) return false;
-        current = parent;
-      }
-    }
   }
 }
 
@@ -269,43 +219,5 @@ export function setupLocalDirectory(
     "local-directory:remove-provisioned",
     (_event, input: { root?: string; path?: string }) =>
       removeProvisionedDirectory({ root: input?.root ?? "", path: input?.path ?? "" }),
-  );
-
-  ipcMain.handle(
-    "local-directory:writable",
-    async (_event, path: string): Promise<{ ok: boolean }> => ({
-      ok: await pathIsWritableLocation(path),
-    }),
-  );
-
-  ipcMain.handle("local-directory:list-shared-overrides", async () => {
-    const dir = await activeDaemonProfileDir();
-    if (!dir) return [];
-    try {
-      return await readLocalDirectoryOverrides(localDirectoryOverridesPath(dir));
-    } catch {
-      return [];
-    }
-  });
-
-  ipcMain.handle(
-    "local-directory:set-shared-override",
-    async (
-      _event,
-      input: { daemonId?: string; localPath?: string; enabled?: boolean },
-    ): Promise<{ ok: boolean; error?: string }> => {
-      const dir = await activeDaemonProfileDir();
-      if (!dir) return { ok: false, error: "daemon profile is unresolved" };
-      try {
-        await writeLocalDirectorySharedOverride(localDirectoryOverridesPath(dir), {
-          daemonId: input.daemonId ?? "",
-          localPath: input.localPath ?? "",
-          enabled: input.enabled === true,
-        });
-        return { ok: true };
-      } catch (err) {
-        return { ok: false, error: errorMessage(err) };
-      }
-    },
   );
 }
