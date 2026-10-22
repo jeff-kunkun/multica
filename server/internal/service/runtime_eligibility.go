@@ -18,7 +18,7 @@ import (
 // dispatched the row. Everything the standby relay must still refuse keeps
 // its own gate: a real rebind or a cleared standby makes this rule false; the
 // same-owner / same-provider pairing is enforced when the standby is
-// configured and when an urgent send picks it; a private runtime's owner
+// configured; a private runtime's owner
 // check stays beside the callers.
 func AgentMayRunOnRuntime(agent db.Agent, runtimeID pgtype.UUID) bool {
 	if !runtimeID.Valid {

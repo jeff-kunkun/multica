@@ -2115,7 +2115,6 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	if len(steerTaskIDs) > 0 {
 		applyCommentSupplements(&resp, h.listCommentSupplements(r.Context(), issue.WorkspaceID, []pgtype.UUID{comment.ID})[uuidToString(comment.ID)])
 	}
-	h.followIssueFromChatTask(r, authorType, authorID, issue)
 
 	writeJSON(w, http.StatusCreated, resp)
 }
@@ -2215,15 +2214,6 @@ func (h *Handler) triggerTasksForCommentReport(ctx context.Context, issue db.Iss
 		namedAgents[agentID] = true
 	}
 	woken := commentWokenRuns(resolved, enqueued)
-	// Summons (DENE-880) follow a new comment only; an edit neither answers
-	// a call nor makes a new one.
-	if len(forceFreshSession) == 0 || !forceFreshSession[0] {
-		h.recordMentionSummons(ctx, issue, comment, actorType, actorID)
-		summonWoke := h.answerSummons(ctx, issue, comment, actorType, actorID, triggerOutcomesStartedRun(outcomes))
-		if summonWoke.Valid {
-			woken = append(woken, h.summonAnswerWokenRun(ctx, summonWoke))
-		}
-	}
 	return outcomes, woken
 }
 

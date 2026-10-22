@@ -4,8 +4,6 @@ import (
 	"context"
 	"log/slog"
 
-	"github.com/jackc/pgx/v5/pgtype"
-
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -51,23 +49,6 @@ func commentWokenRuns(triggers []commentAgentTrigger, results map[string]comment
 		})
 	}
 	return woken
-}
-
-// commentWokenSourceSummonAnswer marks the run a member's reply started by
-// answering a call (needs_human / summon) that was waiting on it.
-const commentWokenSourceSummonAnswer = "summon_answer"
-
-// summonAnswerWokenRun reports the run answerSummons queued for agentID.
-func (h *Handler) summonAnswerWokenRun(ctx context.Context, agentID pgtype.UUID) CommentWokenRun {
-	run := CommentWokenRun{
-		AgentID: uuidToString(agentID),
-		Source:  commentWokenSourceSummonAnswer,
-		Status:  DispatchQueued,
-	}
-	if agent, err := h.Queries.GetAgent(ctx, agentID); err == nil {
-		run.AgentName = agent.Name
-	}
-	return run
 }
 
 // commentWake decides NoneWoken from the woken runs and the issue's state

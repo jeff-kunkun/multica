@@ -162,8 +162,7 @@ func TestBotWakeDirectChatBlockedVisibleAndReplyReset(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// The operational refusal must reach its sender even when normal wake
-	// notifications have no allowed events, no senders, and no hourly budget.
+	// Refusals are recorded for audit but never pushed to the sender.
 	dbfx.Exec(t, `UPDATE bot_wake SET webhook_secret=$2,events='{}',hourly_limit=0,wake_from='{"member":{"mode":"none","ids":[]},"agent":{"mode":"none","ids":[]},"bot":{"mode":"none","ids":[]}}' WHERE bot_id=$1`, f.bot.ID, sealed)
 	var tasks []string
 	for i := 1; i <= 6; i++ {
@@ -213,13 +212,8 @@ func TestBotWakeDirectChatBlockedVisibleAndReplyReset(t *testing.T) {
 		}
 	}
 	mu.Lock()
-	if len(deliveries) != 2 {
-		t.Fatalf("operational alerts delivered=%d want=2: %v", len(deliveries), deliveries)
-	}
-	for _, v := range deliveries {
-		if v["type"] != "wake_blocked" || v["reason_code"] != "bot_wake_chain_limit" || v["agent_id"] != f.agent || v["recovery"] == "" {
-			t.Fatalf("incomplete operational alert: %v", v)
-		}
+	if len(deliveries) != 0 {
+		t.Fatalf("refusal alerts pushed: %v", deliveries)
 	}
 	mu.Unlock()
 	// User inputs were not replies. Actual assistant output resets this root.
@@ -400,77 +394,6 @@ func TestBotWakeDirectChatCLIPreservesBlockedReceipt(t *testing.T) {
 	}
 	dbfx.Exec(t, `INSERT INTO chat_message(chat_session_id,role,content,task_id) VALUES($1,'assistant','ready',$2)`, f.session, first.TaskID)
 	callCLI(false)
-}
-
-func TestBotWakeWorkerDeliversOwnOperationalRefusal(t *testing.T) {
-	f := newBotChainChatFixture(t)
-	ctx := context.Background()
-	var first SendChatMessageResponse
-	for i := 0; i < 4; i++ {
-		out := f.send(t, f.botToken, "unanswered wake", "", 201)
-		requireBotChainAccepted(t, out)
-		if i == 0 {
-			first = out
-		}
-	}
-	oldBox := testHandler.BotWakeSecrets
-	testHandler.BotWakeSecrets, _ = NewBotWakeSecretBox("self-refusal fixture")
-	t.Cleanup(func() { testHandler.BotWakeSecrets = oldBox })
-	var mu sync.Mutex
-	var deliveries []map[string]any
-	receiver := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var payload map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
-			http.Error(w, "bad payload", 400)
-			return
-		}
-		mu.Lock()
-		deliveries = append(deliveries, payload)
-		mu.Unlock()
-		w.WriteHeader(200)
-	}))
-	t.Cleanup(receiver.Close)
-	t.Setenv("MULTICA_PLUGIN_DEV_ORIGINS", receiver.URL)
-	plain, _ := json.Marshal(botWakeSecrets{URL: receiver.URL, Key: "fixture"})
-	sealed, err := testHandler.BotWakeSecrets.Seal(plain)
-	if err != nil {
-		t.Fatal(err)
-	}
-	dbfx.Exec(t, `UPDATE bot_wake SET webhook_secret=$2,events=ARRAY['chat'],hourly_limit=120,quiet_hours=jsonb_set(quiet_hours,'{enabled}','false'),wake_from='{"member":{"mode":"all","ids":[]},"agent":{"mode":"none","ids":[]},"bot":{"mode":"none","ids":[]}}' WHERE bot_id=$1`, f.bot.ID, sealed)
-	// No initiating Bot: the receiver is also the recipient of its own
-	// operational alert when this independently-authored member event is capped.
-	var eventID string
-	if err := testPool.QueryRow(ctx, `INSERT INTO bot_wake_event(bot_id,workspace_id,event_type,chat_session_id,source_id,author_type,author_id,root_id)
-	SELECT $1,$2,'chat',$3,$4,'member',$5,root_id FROM bot_wake_cause WHERE bot_id=$1 RETURNING event_id::text`, f.bot.ID, testWorkspaceID, f.session, first.MessageID, testUserID).Scan(&eventID); err != nil {
-		t.Fatal(err)
-	}
-	worker := NewBotWakeWorker(testHandler)
-	worker.coalesceSeconds = 0
-	worker.client = func(*url.URL) *http.Client { return receiver.Client() }
-	if worked, err := worker.ProcessNext(ctx); err != nil || !worked {
-		t.Fatalf("process original event: worked=%v err=%v", worked, err)
-	}
-	var status, reason string
-	dbfx.QueryRow(t, `SELECT status,reason FROM bot_wake_event WHERE event_id=$1`, eventID).Scan(&status, &reason)
-	if status != "pending" || reason != "bot wake chain limit (4)" {
-		t.Fatalf("original event status=%s reason=%s", status, reason)
-	}
-	// Disable all ordinary notifications after the refusal was recorded.
-	dbfx.Exec(t, `UPDATE bot_wake SET events='{}',hourly_limit=0,quiet_hours='{"enabled":true,"start":"00:00","end":"23:59","timezone":"UTC"}' WHERE bot_id=$1`, f.bot.ID)
-	if worked, err := worker.ProcessNext(ctx); err != nil || !worked {
-		t.Fatalf("process operational alert: worked=%v err=%v", worked, err)
-	}
-	mu.Lock()
-	if len(deliveries) != 1 || deliveries[0]["type"] != "wake_blocked" || deliveries[0]["reason_code"] != "bot_wake_chain_limit" {
-		t.Fatalf("own operational refusal was suppressed: %v", deliveries)
-	}
-	mu.Unlock()
-	var authorType, authorID string
-	dbfx.QueryRow(t, `SELECT status,author_type,author_id::text FROM bot_wake_event WHERE bot_id=$1 AND event_type='wake_blocked'`, f.bot.ID).Scan(&status, &authorType, &authorID)
-	if status != "received" || authorType != "bot" || authorID != uuidToString(f.bot.ID) {
-		t.Fatalf("self alert status/author=%s/%s/%s", status, authorType, authorID)
-	}
-	assertBotChainHops(t, f, 4)
 }
 
 func TestBotWakeImplicitIssueCommentReportsRefusedAssignee(t *testing.T) {

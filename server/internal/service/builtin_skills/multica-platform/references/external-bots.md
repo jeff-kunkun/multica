@@ -63,15 +63,6 @@ not authority. Preserve any explicit draft-before-external-send convention the
 owner has established. Internal Multica messages are distinct from third-party
 posts, messages and purchases.
 
-Relaying something time-boxed into a chat — an SMS, a verification code, a
-one-time link — must use `multica chat send --session <id> --urgent`.
-Urgent is refused on the spot when the agent's runtime is offline (JSON
-`reason` + `next_steps`, nonzero exit, nothing saved); otherwise it jumps the
-queue and the command returns only with the pickup result: exit 0 once a daemon
-starts the turn, nonzero with `reason: pickup_timeout` if none does within 30 s.
-Treat a nonzero exit as "the code did not reach the agent": tell the person the
-reason instead of assuming it was queued; see `run-control.md` → "Urgent delivery".
-
 A same-power key writes as its owner: comments and chat messages show the
 owner's name, and agents may read them as the owner's own words. Start every
 comment or chat message the Bot writes with a line naming the Bot (for example
@@ -108,8 +99,7 @@ Use the relevant references in this skill and each command's `--help`:
 - Agent/settings commands supported by the installed CLI for administration.
 
 Command availability is not proof that a personal login can use the endpoint.
-In particular, `chat open` may be the agent-only chat-spawn API, and
-`attachment upload` may require a chat task. Check the command's actual
+In particular, `attachment upload` may require a chat task. Check the command's actual
 contract; report a missing personal-client entry point rather than inventing
 an agent identity to make it work.
 
@@ -133,8 +123,7 @@ an unverified stage is unknown, never a reason to automatically resend.
 
 ## Bot wake-chain guard
 
-The workspace's `bot_wake_chain_limit` defaults to 4 (valid values 1–100).
-It limits consecutive unacknowledged Bot wakes, including Bot-originated agent
+The wake-chain guard allows 4 consecutive unacknowledged Bot wakes. It limits consecutive unacknowledged Bot wakes, including Bot-originated agent
 continuations. A real agent reply or completed run resets the chain; work that
 never starts does not consume it. Human messages are exempt. To relay a human
 instruction, use `chat send --per-quote "<exact words>"` or
@@ -148,48 +137,35 @@ A saved comment remains a successful write, with stderr warnings and
 `trigger_outcomes[].reason_code: "bot_wake_chain_limit"` for each blocked target,
 including an implicitly routed assignee or thread owner.
 Do not repost either saved message. Wait for an agent reply/completed run, send
-as the person, relay a verified quote, or have an administrator adjust the limit:
-
-```sh
-multica settings get bot_wake_chain_limit
-multica settings set bot_wake_chain_limit --value-json '6'
-```
-
-Agent task tokens cannot change the guard. Every blocked attempt is recorded
-and emits `wake_blocked` to the originating Bot's webhook.
+as the person, or relay a verified quote. Every blocked attempt is recorded for
+audit; nothing is pushed to the originating Bot.
 
 ## Mention delivery and replying in place
 
-Ordinary notifications for one Bot and one issue/chat are grouped in a fixed
-30-second window from the first event, including explicit mentions. A standalone
-mention therefore waits about 30 seconds before its first push; the reply
-convention starts when the Bot receives it. `started` is excluded from new Bot
-subscriptions by default; the old untouched default selection is updated too. Custom selections stay unchanged.
-`wake_blocked` operational alerts remain immediate. This notification batching is
-separate from merging agent runs (DENE-1857).
+Only @-mentions of a Bot are pushed to its webhook. Issue status, assignment,
+chat replies and other activity are not; read them when a mention brings you
+in. Mentions for one Bot and one issue/chat are grouped in a fixed 30-second
+window from the first one, so a standalone mention waits about 30 seconds
+before its push; the reply convention starts when the Bot receives it. This
+notification batching is separate from merging agent runs (DENE-1857).
 
 `multica bot wake get <bot-id> --output json` includes `worker` health:
 `last_processed_at`, `last_error`, `head_sequence`, `stuck_seconds`, `blocked`.
-A queue older than five minutes logs one `wake_blocked` alert per head sequence.
+A queue older than five minutes logs one server alert per head sequence.
 Preparation errors are isolated after rollback, retried after 5/10 seconds and
 marked failed after three failures; `processing_attempts` is separate from HTTP
 `attempts`. Use the logged sequence to find the original error. Never replay
 `uncertain` events automatically. An old queue drains in batches of up to 100
 first-attempt events for the same Bot/workspace, including different sources;
 each event still passes current visibility, sender, event and chain checks.
-Completed assistant chat messages notify Bots watching that chat, including
-file-only replies once their attachments are bound. Empty placeholders, failed
-replies and `no_response` outcomes are skipped. Each reply emits at most one
-ordinary `chat` event; a later first explicit mention emits its own `mention`
-event, while repeated mentions remain deduplicated.
+Repeated mentions of the same Bot in one message remain deduplicated.
 
 Every webhook has `delivery_id` and an ordered `events` array, including a
 single-event delivery. The top-level legacy fields mirror the first admitted
 event; handle **each** element of `events`, deduplicating its `event_id`. Each
 keeps its own `ack_url`, `root_id`, `source_id`, author and time. Existing retry,
-receipt, visibility and chain-budget contracts still apply. One HTTP attempt containing non-mention events
-counts once toward the hourly limit; mention-only deliveries bypass it, while
-zero pauses all pushes. Execution receipts remain per event: use each event’s
+receipt, visibility and chain-budget contracts still apply. `hourly_limit: 0`
+pauses all pushes. Execution receipts remain per event: use each event’s
 `ack_body`/`woken_url`/`result_url`, not only the legacy top-level event. A retried batch keeps its membership and
 `delivery_id`; later events are delivered separately.
 
@@ -235,9 +211,9 @@ recheck recipient and caller visibility; they do not replay or acknowledge.
 
 A person can connect **their own** Bot as the place decisions go
 (`multica bot bind <bot>`, or the account settings row「把要我决定的事交给我的 Bot」).
-The Bot then owes that person everything that needs them: an @, an agent's
-`ask-human`, a ticket blocked on them, an approval, a needs_kun. HTTP 200 only
-means the Bot received it — **the Bot must tell the person**, then say so.
+The Bot then owes that person what needs them: an @, a ticket blocked on them,
+an approval. HTTP 200 only means the Bot received it — **the Bot must tell the
+person**.
 
 Binding handshake: the server sends `type: "binding.verify"`; answer with the
 usual `woken` receipt (`multica bot wake woken <bot-id> <event-id>`). Until then
@@ -245,49 +221,15 @@ decisions still go to the app. If the Bot is stopped, its key is invalid or the
 webhook is removed, decisions fall back to the app and `multica bot status`
 shows `broken`. People without a Bot are not affected.
 
-A decision arrives as `type: "human_needed"` (or `human_needed.escalation`) with
-a `human_needed` block: `kind` (mention, ask_human, needs_human, ...),
-`target_user_id`, `target_name`, `question`, `options[]` (`{id,label}`),
-`urgency` (`normal|urgent`), `deadline` (or null), `source_url`, `mode`,
-`escalation`. It bypasses the 30-second grouping and the hourly limit. Delivery
-is at-least-once with backoff (5s, 15s, 45s, 2m, 5m … 30m): dedupe on
-`event_id`. Night hours (default 23:00–08:00 America/Chicago) are the Bot's call:
-hold `normal` events until morning, never `urgent` ones — the server always
-pushes at once.
-
-State: `queued → sent → woken → relayed → answered | expired`. Report each step:
-
-```sh
-multica bot wake woken    <bot-id> <event-id>                       # received and understood
-multica bot wake relayed  <bot-id> <event-id> --channel telegram --message-ref <id>   # you TOLD the person
-multica bot wake answered <bot-id> <event-id> --answer "..."        # their answer
-multica bot wake human-needed <bot-id>                              # what you still owe (catch up after a restart)
-```
-
-`answered` posts the answer as a comment on the ticket as the person (your key
-acts as its owner), which is what wakes the asking agent and clears the block;
-`--comment-id` reuses a comment you already posted. When the event carries an
-`ask` block (a question card, `ask_id` in `human-needed`), answer it with
-`--answers 0=<option-id>[,1=...]` instead: the server fills the card, comments
-as the person, and wakes the asker once — do not comment yourself. A chat
-choice question is a card too (`ask` block): `--answers` fills it, the chosen
-option is written into the chat as the person's own message and the agent that
-asked is woken once. A free-text chat event (`chat_session_id`, no `ask`) takes
-`--answer`, written into the chat the same way. Not woken in 3 minutes: the
-event is sent again. Woken but not `relayed` in 5 minutes: you get a
-`human_needed.escalation`, the call returns to the app as unread, workspace
-owners are reminded, and the nudge repeats every 30 minutes. Receipts for the
-same call are shared by the original and its escalations.
-
-## Office events that need nobody
-
-`multica bot bind --activity everything` (`owner_visible_all`; a first
-connection starts on it, `--activity off` keeps it off) also pushes office
-events the person can see that need nobody — for their information. Events
-they must hear about arrive either way (see the office event stream below).
-The older full activity stream (`type: "activity"`, `bot wake activity`,
-`bot wake handled`) is retired: nothing new is queued, rows left from before
-the upgrade are cancelled, and its endpoints answer 404.
+A decision arrives as `type: "human_needed"` with a `human_needed` block:
+`kind`, `target_user_id`, `target_name`, `question`, `options[]` (`{id,label}`),
+`urgency` (`normal|urgent`), `deadline` (or null), `source_url`, `mode`. It
+bypasses the 30-second grouping and the hourly limit. Delivery is at-least-once
+with backoff (5s, 15s, 45s, 2m, 5m … 30m): dedupe on `event_id`, and confirm
+with `multica bot wake woken <bot-id> <event-id>`; not woken in 3 minutes, the
+event is sent again. Night hours (default 23:00–08:00 America/Chicago) are the
+Bot's call: hold `normal` events until morning, never `urgent` ones — the server
+always pushes at once. The person answers on the ticket or in the app.
 
 ## Acting with the owner's permission (DENE-1936)
 
@@ -307,50 +249,3 @@ value (another member, role or amount) is a new request and opens a new card.
 A body the server cannot read whole or unambiguously (not JSON, over 64 KB, or
 one key named twice in any letter case) is refused with
 `owner_confirmation_unscannable`: send plain JSON, each key once. `owner_confirmation_denied` means the owner said no: do not ask again.
-
-## Office event stream (DENE-1963)
-
-Results meant for your owner — chat replies, handoffs, finished or blocked
-tickets, delivered files, settings and member changes — also arrive one by one
-as `type: "office_event"` with an `event_id`, a gap-free `stream_seq`, a
-`meaning` (`round_done` one run ended / `handoff` / `task_done` the whole ticket
-/ `reply` / `blocked` / `failed` / `artifact` / `release_pending_approval` /
-`change`), the real `actor` (and `via_bot_id` + `on_behalf_of_user_id` when a
-Bot acted for someone) and an `artifacts` catalog (filename, size, sha256,
-authorized download). An HTTP 200 is not a receipt: the same `event_id` comes
-back, forever, until you post one. Dedupe on `event_id`.
-
-```bash
-multica events receipt <event-id> --bot <bot-id> --stage received
-multica events receipt <event-id> --bot <bot-id> --stage relayed --channel telegram --ref <msg-id> --file <attachment-id>=sent:<file-msg-id>
-multica events receipt <event-id> --bot <bot-id> --stage handled --reason "…"   # 409 must_relay if not relayed first
-multica events list --after <stream-seq> --output json      # catch up by cursor
-multica events deliveries --bot <bot-id> --status blocked   # what is stuck and why
-multica events retry --bot <bot-id> [--event <event-id>]
-multica events download <attachment-id>
-```
-
-`must_relay: true` means tell the person, even if a similar message went out
-(`bypass_semantic_dedupe`). `pending_approval: true` with the notice
-「系统改成完成，正式发布仍待批准」 means an agent, a review verdict or a
-Bot (not the person by hand) closed a release ticket: it is not a deploy
-permission. A must-relay result you do not relay reaches the person's
-inbox instead.
-
-Receiver rules the server holds you to:
-
-- Store the event (by `event_id`) in your own durable inbox **before** posting
-  `received`; read every member of a batch, not just the first.
-- `relayed` needs `--channel` and `--ref` (the message id where you told the
-  person); `relay_failed` needs `--error`. Per file: `=sent:<ref>`,
-  `=failed:<error>` or `=skipped`, only for files in that event's `artifacts`,
-  each file once per receipt; a file once sent stays sent.
-- `delivery.reconcile: true` (any resend of something already sent, also
-  after a server restart) means the previous push may already be in your
-  inbox: look the `event_id` up, re-send the receipt you have, and do only the
-  steps still missing (never tell the person twice).
-- After a restart, list `multica events deliveries --bot <bot-id> --status
-  sent,received` and finish what your inbox shows as not done.
-- `recipient_gap` on an event says an owner could not be reached through a
-  Bot; once they reconnect and verify, missed results (of any age) are
-  delivered to the new connection.

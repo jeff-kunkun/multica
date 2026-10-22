@@ -99,5 +99,5 @@ attempt to target another person's inbox. `--reason` is required and is saved
 as a visible issue comment authored by the clearing agent. The command closes
 that open summon and archives only its linked inbox row; it leaves issue status,
 assignee and other inbox rows alone, and does not wake anyone. If the person
-still needs to answer, use the ticket comment or the normal summon flow instead
-of dismissing the reminder.
+still needs to answer, use the ticket comment instead of dismissing the
+reminder.

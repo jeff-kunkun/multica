@@ -136,8 +136,7 @@ not injected into an already running prompt. Different threads queue independent
 
 A comment is not a dispatch. `trigger_outcomes` covers only explicit mentions;
 `wake` covers the whole comment. `wake.woken` lists every run it queued, folded
-into or steered (assignee, @agent, @squad, thread, conversation, or a reply
-answering a needs_human call — `summon_answer`), and the CLI
+into or steered (assignee, @agent, @squad, thread or conversation), and the CLI
 prints it as `Woke: ...`. `wake.none_woken: true` — printed as `Woke no one` —
 means no run started, nothing is running, and the issue is open: nobody will act
 on it. The assignee never wakes itself, so a seat that posts "please continue"
@@ -272,28 +271,24 @@ It does not dispatch an internal agent. Resolve identities with the member-visib
 `GET /api/workspaces/{id}/bots/mentions` directory (optionally `issue_id` or
 `chat_session_id`); administrators can also use `multica bot list --output json`.
 Mentioning a Bot grants no access. The Bot's PAT owner must already see the
-source. A mention starts following subsequent lifecycle events on that issue or
-messages in that chat. Owner member issue subscriptions/assignments are inherited
-only when `inherit_owner_follows` is explicitly enabled (default false).
+source. Only mentions are pushed to the Bot's webhook; issue lifecycle, chat
+replies and owner subscriptions are not.
 
 - `multica bot wake get <bot-id>` reads receiver rules; no URL or key is returned.
 - `multica bot wake set <bot-id> --config-file ./wake.json` or `--config-stdin`
   updates only supplied fields. Secrets never go in arguments, comments or logs.
-  Fields: `webhook_url`, `webhook_key` (write these together), `events` (array),
-  `inherit_owner_follows` (boolean, default false), `hourly_limit`, `quiet_hours: {enabled,start,end,timezone}`. The key is the
+  Fields: `webhook_url`, `webhook_key` (write these together), `events` (`["mention"]` or `[]`),
+  `hourly_limit`, `quiet_hours: {enabled,start,end,timezone}`. The key is the
   complete Authorization header value supplied by the receiver, including any
   scheme. Empty URL and key disconnect. Do not guess the receiver's scheme.
 - `multica bot wake events <bot-id> --limit 50 --before <next_cursor>` reads
   receipts. `pending` uses the same pagination for pending/failed/uncertain rows.
   Follow nonempty `next_cursor` even when a page has no visible events.
 
-Defaults: all seven event types, 6 attempts/hour and 23:00–08:00 Asia/Shanghai
-quiet hours. `events: []` disables pushes; `hourly_limit: 0` pauses all pushes.
-Quiet and hourly-limited unsent events remain pending and are automatically
-rechecked each second; saving settings releases eligible events immediately.
-Mentions bypass positive hourly limits without consuming quota; zero pauses all
-pushes, and quiet hours still apply. Disabled/unavailable events remain pending.
-`wake get` reports the saved `hourly_limit` and visible `limited_count`.
+Defaults: mentions on, 23:00–08:00 Asia/Shanghai quiet hours. `events: []`
+disables pushes; `hourly_limit: 0` pauses all pushes. Mentions held by quiet
+hours remain pending and are rechecked each second; saving settings releases
+eligible ones immediately. Disabled/unavailable events remain pending.
 Missing source attribution is noted with empty author fields, not held indefinitely. `received` means HTTP 200 only, never started or completed.
 An interrupted or timed-out send is `uncertain` and is not retried automatically.
 Only definite pre-send failures, HTTP 429 and HTTP 503 retry (5s, 10s, 3 attempts
@@ -335,23 +330,3 @@ unanswered wake budget; a missing/client-reset hop cannot bypass it. Real agent
 replies/completed runs reset that budget, and human writes are exempt. At the cap read pending or
 the cancelled run error. Do not repeatedly rerun a capped chain. Bot tombstones
 retain history but are absent from the mention directory.
-
-## Asking a person to decide: use ask-human, not an @ (DENE-1933)
-
-A `mention://member/<uid>` is an in-app notification. A person who connected a
-Bot gets their decisions pushed to that Bot instead, and an @ in a comment does
-not carry a question, options or an answer path. To get a decision from a
-person:
-
-```sh
-multica issue ask-human <issue> --to <member|owner> --question "..." --option "..." [--urgent] [--deadline <RFC3339>]
-multica chat ask-human --question "..." --option "..."   # in a chat; asks the chat's person
-```
-
-The server writes the structured comment, blocks the ticket on that person and
-pushes a `human_needed` event to their Bot when they have one (inbox and @
-otherwise). With two or more options the question is also a card (`ask_id`).
-Each @ added to a description is its own ask: the same edit never pushes twice,
-removing the @ and adding it back pushes again with the line that carries it. Their answer — in the app or through the Bot — wakes you and clears
-the block. As a backstop, an agent's @ of a person with a Bot is also pushed to
-that Bot, but it carries no question or options: do not rely on it.

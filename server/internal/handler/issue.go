@@ -46,11 +46,8 @@ type IssueResponse struct {
 	Identifier  string            `json:"identifier"`
 	Title       string            `json:"title"`
 	Progress    *ProgressResponse `json:"progress"`
-	// SourceChat is the chat this issue was opened from (DENE-1665); set on
-	// the single-issue read only.
-	SourceChat  *IssueSourceChat `json:"source_chat,omitempty"`
-	Description *string          `json:"description"`
-	Status      string           `json:"status"`
+	Description *string           `json:"description"`
+	Status      string            `json:"status"`
 	// StatusCategory encodes lifecycle using the legacy seven-value wire enum. It is
 	// omitted when an endpoint cannot resolve a custom status, so consumers must
 	// fall back to their catalog rather than treat a blank as "no category".
@@ -2618,7 +2615,6 @@ func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 	resp := issueToResponse(issue, prefix)
 	h.fillStatusCategory(r.Context(), issue.WorkspaceID, &resp)
-	resp.SourceChat = h.issueSourceChat(r.Context(), r, issue)
 	detailLabels := h.labelsByIssue(r.Context(), issue.WorkspaceID, []pgtype.UUID{issue.ID})[uuidToString(issue.ID)]
 	if detailLabels == nil {
 		detailLabels = []LabelResponse{}
@@ -3667,28 +3663,12 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 				if task, terr := h.Queries.GetAgentTask(r.Context(), taskUUID); terr == nil && uuidToString(task.AgentID) == actualCreatorID {
 					originType = pgtype.Text{String: "agent_create", Valid: true}
 					originID = taskUUID
-					// A chat run's issue points back at its chat (DENE-1665)
-					// and must carry what the chat aligned on.
+					// A chat run's issue points back at its chat (DENE-1665).
 					originChat = task.ChatSessionID
 				}
 			}
 		}
 	}
-
-	if originChat.Valid {
-		if msg := chatTicketDescriptionProblem(ptrToText(req.Description).String); msg != "" {
-			writeError(w, http.StatusBadRequest, msg)
-			return
-		}
-	}
-
-	// Agent permissions (DENE-1271): an agent run may only create an issue
-	// when the workspace table allows it for this kind of run.
-	spawnSlots, ok := h.gateAgentIssueSpawn(w, r, wsUUID, creatorType, actualCreatorID, 1)
-	if !ok {
-		return
-	}
-	defer spawnSlots.release()
 
 	// Prefix is workspace-level; pre-compute once so both the broadcast
 	// payload builder and the HTTP response share the same value.
@@ -3809,7 +3789,6 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	issue := res.Issue
-	spawnSlots.fill(r.Context(), issue.ID)
 	issue = h.syncBacklogWaitingFor(r.Context(), issue, req.WaitingFor)
 	slog.Info("issue created", append(logger.RequestAttrs(r), "issue_id", uuidToString(issue.ID), "title", issue.Title, "status", issue.Status, "workspace_id", workspaceID)...)
 
@@ -4657,20 +4636,11 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	if statusChanged && issue.Status == issuestatus.Blocked {
 		h.persistBlockAttribution(r.Context(), issue, req)
 	}
-	executorCleared := prevIssue.AssigneeID.Valid && !issue.AssigneeID.Valid
-	if statusChanged {
-		h.postSourceChatReceipt(r.Context(), prevIssue, issue)
-	}
 	// Sub-issue rules on the parent (the child_done system rule and sub-issue
 	// conditions): the write recorded the change; process it now. A failure
 	// is retried by the scheduler sweep.
 	if statusChanged || prevIssue.ParentIssueID != issue.ParentIssueID || prevIssue.Stage != issue.Stage {
 		h.processChildEvents(r.Context(), issue.ParentIssueID, prevIssue.ParentIssueID)
-	}
-	// A chat's run moving the issue or its executor follows it from that
-	// chat (DENE-1719).
-	if statusChanged || assigneeChanged || executorCleared {
-		h.followIssueFromChatTask(r, actorType, actorID, issue)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -5563,16 +5533,9 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		// No status change — not even → cancelled — cancels active tasks here,
 		// mirroring UpdateIssue (MUL-4465). See that handler for the rationale.
 
-		if statusChanged {
-			h.postSourceChatReceipt(r.Context(), prevIssue, issue)
-		}
 		if statusChanged || prevIssue.ParentIssueID != issue.ParentIssueID || prevIssue.Stage != issue.Stage {
 			changedParents = append(changedParents, issue.ParentIssueID, prevIssue.ParentIssueID)
 		}
-		if statusChanged || assigneeChanged || (prevIssue.AssigneeID.Valid && !issue.AssigneeID.Valid) {
-			h.followIssueFromChatTask(r, actorType, actorID, issue)
-		}
-
 		updated++
 	}
 

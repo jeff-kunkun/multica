@@ -20,10 +20,10 @@ combines the status and stop in one transaction.
 `--related` stays in the current workspace and follows the named root:
 
 - Issue root: the issue and its descendant issues, plus each selected issue's
-  source chat and visible chat ticket bindings.
+  source chat.
 - Chat root: the named chat's direct parent/children and sessions sharing its
-  exact external thread binding key; issues opened from or visibly bound to
-  the named chat and their descendants; those issues' source/bound chats.
+  exact external thread binding key; issues opened from the named chat and
+  their descendants; those issues' source chats.
 
 Only child-issue links recurse. Reached chats are endpoints: they never expand
 again to sibling issues, other followed tickets, more spawned chats or further
@@ -111,65 +111,6 @@ multica chat send --session <chat-id> --content-file ./msg.md --mode replace --w
   The source chat stops its remaining runs, refuses new sends and shows a link
   to the issue. Repeating conversion returns that same issue.
 
-## Urgent delivery (`chat send --urgent`)
-
-`--urgent` is for a message that is worthless late: a verification code, an
-SMS to relay, a "stop now". It changes three things and nothing else:
-
-- **Deliver now or fail now.** If the agent's runtime cannot claim (offline, or
-  no heartbeat in the last 150 s) and the agent has no online standby runtime,
-  the server refuses with HTTP 409 before anything is saved. The body carries
-  `code: "runtime_offline"`, a `reason` such as
-  `runtime_offline: Claude (MacBook-Pro.local) last_seen 2026-10-11T09:00:10Z`,
-  the `runtime` snapshot and `next_steps`. The CLI prints that JSON and exits
-  nonzero; there is nothing to resend.
-- **Head of the queue, 30 s to start.** An accepted urgent turn is created at
-  priority 4 with restart semantics (a reply in progress is stopped, the same
-  session resumes from this message) and a `pickup_deadline_at` 30 s out. If
-  no daemon has started it by then — whether it is still queued, dispatched,
-  or parked in `waiting_local_directory` behind another run — the server
-  fails it with `failure_reason: pickup_timeout`, posts one system note in
-  the chat saying which machine did not pick it up, and does not retry. A
-  daemon that asks to start an expired turn is refused in the same
-  transaction (HTTP 409, `code: pickup_timeout`): an expired code never runs.
-- **Standby runtime.** When the primary runtime is offline but the agent has
-  `fallback_runtime_id` set and that runtime is online, the task is dispatched
-  there instead; the response says `fallback_runtime: true`. A standby must
-  belong to the same owner and the same provider as the primary (server
-  enforced; see `agents.md`). The standby's daemon claims the turn through
-  the ordinary poll (single or batch) and starts it like any other task; the
-  same eligibility rule — the agent's bound runtime or its configured
-  standby — is applied at claim, at response build and in the delivery
-  transaction, so clearing the standby or rebinding the agent while the turn
-  is in flight fails it with `invalid_task_identity` instead of handing it
-  to a machine the agent no longer names.
-
-```bash
-multica chat send --session <id> --urgent "验证码 482913，请立刻填入" --output json
-```
-
-- `--urgent` implies `--mode restart` (an explicit `--mode replace` is kept);
-  combining it with `--mode steer` is a
-  400. Only the person who started the chat (or an agent run) may restart a
-  reply, so a shared-chat guest gets 403 as with any restart.
-- `--urgent` always waits for the **pickup** (task_status `running`), not the
-  full reply: exit 0 with `pickup_elapsed_ms` once a daemon starts the turn;
-  nonzero with `task_status`, `reason` (`pickup_timeout`) and `runtime` when
-  nobody starts it by `pickup_deadline_at`. The wait ends at that server
-  deadline and never later: every progress request and pause runs under it,
-  so a slow request or a late server sweep cannot stretch the command past
-  the 30 s. `--wait-timeout` does not apply; `--wait` adds nothing. When the
-  server has not judged the turn by the deadline, `task_status` is whatever
-  it last reported (it may still be `dispatched`) and `reason_source: sender`
-  says the sender stopped waiting; `reason_source: server` marks a verdict the
-  server wrote (`failed`/`cancelled`). Only the server decides the task's
-  fate. A zero exit means the message is being read now. Read the reply later
-  with `multica chat history`.
-- `--urgent` is not a flag of `chat new`; open the chat first, then send
-  urgent.
-- `multica chat progress --session <id> --history --output json` shows
-  `pickup_timeout` as the task reason once the deadline has passed.
-
 ## Hand work to another agent
 
 When agent A is running on an issue and the comment @-mentions a different
@@ -218,8 +159,8 @@ runtime last-seen time. An empty chat has no `task_status` or `reason` yet.
 
 ## Unanswered Bot wakes
 
-Separate from the halt guard above, `bot_wake_chain_limit` caps
-unanswered automatic Bot wakes across a trusted root (default 4, range 1–100).
+Separate from the halt guard above, a wake-chain guard caps
+unanswered automatic Bot wakes across a trusted root at 4.
 Queued wakes reserve a slot; terminal tasks that never ran release it. An actual
 agent reply or completed running task clears the count. Human sends bypass it;
 `chat send` and `issue comment add --per-quote` also bypass when the quote exactly
@@ -228,6 +169,4 @@ matches the caller's original human message in that same chat/issue.
 A capped `chat send` retains the message and receipt, reports `mode=blocked`
 and exits nonzero. Do not duplicate that message. A saved issue comment warns
 with each target's `bot_wake_chain_limit` outcome. Wait for a reply/completion or
-a human message; a workspace administrator can change the limit using
-`multica settings set bot_wake_chain_limit --value-json '6'`.
-The initiating Bot also receives a `wake_blocked` operational webhook event.
+a human message.

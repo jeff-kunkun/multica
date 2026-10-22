@@ -10,7 +10,6 @@ header). Report the progress line when the state changes, not on every step:
 | `multica issue progress <issue> --history --output json` | Earlier lines, newest first, with author, source and tone |
 | `multica chat progress "<line>" [--session <id>] [--tone T] --output json` | Report the current chat's progress line (`--session` defaults to `MULTICA_CHAT_SESSION_ID`) |
 | `multica chat progress --history --output json` | The chat's earlier lines |
-| `multica chat title "Project · topic" [--session <id>] --output json` | Report a validated title from the chat agent runtime; manual member renames are protected |
 
 `--tone` sets the dot colour: `working` (blue), `waiting` (yellow), `stuck`
 (red), `done` (green). Omitted, an issue line follows the issue status and a
@@ -20,9 +19,8 @@ Who writes the line, and who wins:
 
 - **Issue:** your report wins; between your report and a close summary the
   latest wins.
-- **Chat:** your report for the current turn wins. Otherwise the platform
-  writes one after each reply — a model summary, or the reply's first line
-  when the deployment has no model configured.
+- **Chat:** the line is whatever you last reported; the platform does not
+  write one for you.
 
 A progress write never bumps the issue's revision, so it cannot make a
 person's in-flight edit fail.

@@ -2,13 +2,11 @@ package handler
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
-	"net/http"
 	"strings"
+	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
@@ -16,100 +14,12 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
-// ChatTitleRequest is the small, server-validated contract behind
-// `multica chat title`. Runtime agents report a complete display title; the
-// server never lets that write turn into a manual lock.
-type ChatTitleRequest struct {
-	Title string `json:"title"`
-}
-
-func (h *Handler) recordChatNamingEvent(ctx context.Context, session db.ChatSession, source, status string) {
-	if h.DB == nil {
-		return
-	}
-	if _, err := h.DB.Exec(ctx, `INSERT INTO chat_naming_event (workspace_id, chat_session_id, source, status) VALUES ($1, $2, $3, $4)`, session.WorkspaceID, session.ID, source, status); err != nil {
-		slog.Warn("record chat naming event failed", "session_id", uuidToString(session.ID), "error", err)
-	}
-}
-
-// normalizeRuntimeChatTitle enforces the runtime title convention. The
-// separator makes the project/topic split visible in every client while the
-// existing model recap remains backwards compatible with older plain titles.
-func normalizeRuntimeChatTitle(raw string) (string, error) {
-	collapsed := strings.TrimSpace(strings.Join(strings.Fields(raw), " "))
-	if len([]rune(collapsed)) > chatSessionTitleMaxLen {
-		return "", errors.New("title is too long")
-	}
-	title := sanitizeChatTitle(raw)
-	if title == "" {
-		return "", errors.New("title is required")
-	}
-	parts := strings.SplitN(title, "·", 2)
-	if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" || strings.TrimSpace(parts[1]) == "" {
-		return "", errors.New("title must use the format Project · topic")
-	}
-	return strings.TrimSpace(parts[0]) + " · " + strings.TrimSpace(parts[1]), nil
-}
-
-// WriteChatTitle is POST /api/chat/sessions/{sessionId}/title. It is the
-// server-side command used by a chat agent at the beginning of a run.
-// Manual renames set title_locked and are reported as a conflict instead of
-// being silently overwritten.
-func (h *Handler) WriteChatTitle(w http.ResponseWriter, r *http.Request) {
-	userID, ok := requireUserID(w, r)
-	if !ok {
-		return
-	}
-	workspaceID := h.resolveWorkspaceID(r)
-	session, ok := h.gateChatSessionForUser(w, r, userID, workspaceID, chi.URLParam(r, "sessionId"))
-	if !ok {
-		return
-	}
-	actorType, actorID := h.resolveActor(r, userID, workspaceID)
-	if actorType != "agent" {
-		writeError(w, http.StatusForbidden, "chat title may only be reported by the chat agent runtime")
-		return
-	}
-	var req ChatTitleRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		h.recordChatNamingEvent(r.Context(), session, "runtime", "failure")
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	title, err := normalizeRuntimeChatTitle(req.Title)
-	if err != nil {
-		h.recordChatNamingEvent(r.Context(), session, "runtime", "failure")
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if session.TitleLocked {
-		h.recordChatNamingEvent(r.Context(), session, "runtime", "failure")
-		writeJSON(w, http.StatusConflict, map[string]any{
-			"error":  "chat title is locked",
-			"reason": "a member manually renamed this chat; runtime titles cannot replace it",
-		})
-		return
-	}
-	updated, err := h.Queries.UpdateChatSessionTitleIfCurrent(r.Context(), db.UpdateChatSessionTitleIfCurrentParams{
-		ID: session.ID, ExpectedTitle: session.Title, NewTitle: title,
-	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		h.recordChatNamingEvent(r.Context(), session, "runtime", "failure")
-		writeJSON(w, http.StatusConflict, map[string]any{
-			"error":  "chat title changed",
-			"reason": "the title was changed by another writer or locked by a member",
-		})
-		return
-	}
-	if err != nil {
-		h.recordChatNamingEvent(r.Context(), session, "runtime", "failure")
-		writeError(w, http.StatusInternalServerError, "failed to update chat title")
-		return
-	}
-	h.publishChatSessionState(workspaceID, actorType, actorID, updated)
-	h.recordChatNamingEvent(r.Context(), updated, "runtime", "success")
-	writeJSON(w, http.StatusOK, chatSessionToResponse(updated))
-}
+// chatTitleGenTimeout bounds the whole best-effort title generation (LLM call
+// + CAS write). It runs on a detached background context — decoupled from the
+// originating HTTP request, which returns immediately — so this is the only
+// thing keeping the goroutine from lingering if the upstream hangs. Kept short:
+// a chat title is a nicety, not worth pinning a goroutine for a minute.
+const chatTitleGenTimeout = 20 * time.Second
 
 // ChannelChatStarted publishes list invalidation metadata without changing any
 // client's current navigation. The explicit empty Chat is already committed.
@@ -134,40 +44,150 @@ func (h *Handler) ChannelChatTitleInitialized(workspaceID, creatorID, sessionID 
 	})
 }
 
-// GenerateChannelChatTitle is the channel engine's first-message naming
-// hook. Naming now waits for the agent's first reply (DENE-1037): the
-// chat:done recap in chat_recap.go names channel and first-party chats the
-// same way, so this hook has nothing left to do. It stays on the lifecycle
-// interface so the engine's call sites need no change.
-func (h *Handler) GenerateChannelChatTitle(_, _, _ pgtype.UUID, _, _ string) {}
+// GenerateChannelChatTitle reuses the existing LLM + CAS title path after the
+// shared engine has persisted its deterministic first-message fallback.
+func (h *Handler) GenerateChannelChatTitle(workspaceID, creatorID, sessionID pgtype.UUID, currentTitle, sourceText string) {
+	h.maybeGenerateChatTitleAsync(uuidToString(workspaceID), uuidToString(creatorID), sessionID, currentTitle, sourceText)
+}
 
-// chatTitleProjectNames loads the session's project display names for the
-// title prompt. A lookup failure leaves the title unscoped rather than
-// failing generation — the original title still stands if the model call
-// itself fails, and a missing project just omits that segment.
-func (h *Handler) chatTitleProjectNames(ctx context.Context, workspaceID string, sessionID pgtype.UUID) []string {
-	if h.Queries == nil || strings.TrimSpace(workspaceID) == "" {
-		return nil
+// chatTitleSystemPrompt instructs the model to condense the opening of a
+// conversation into a short, language-matched title. The rules mirror the
+// acceptance criteria in MUL-4295: no quotes, no trailing punctuation, no
+// label prefix, follow the conversation's language. sanitizeChatTitle re-applies
+// these rules defensively in case the model ignores them.
+//
+// This text names no language and contains no CJK, deliberately. A prompt that
+// spells out a specific language — even only as a formatting example — reads as
+// permission to answer in it, which is how quick actions ended up emitting
+// Chinese pills for English conversations (MUL-5689). The label prefixes this
+// used to enumerate are still stripped for real by chatTitleLabelPrefixes,
+// which is where that guarantee belongs.
+const chatTitleSystemPrompt = `You write a very short title that summarizes the topic of a chat conversation, given the user's opening message.
+
+Rules:
+- Output ONLY the title text — nothing else, no explanation.
+- Keep it short: a few words, ideally under 8, never a full sentence.
+- Write the title in the SAME language as the user's message, and in no other.
+- Do NOT wrap the title in quotes or brackets.
+- Do NOT prefix it with a label such as "Title:", in any language.
+- Do NOT end with a period or any trailing punctuation.`
+
+// maybeGenerateChatTitleAsync kicks off best-effort LLM title generation for a
+// chat session and returns immediately. It is the entry point wired into the
+// first-user-message path of SendChatMessage.
+//
+// Design constraints from MUL-4295:
+//   - Non-blocking: never delays the user's send / first response. The work
+//     runs in a detached goroutine on context.Background() (the request context
+//     is cancelled the moment SendChatMessage returns).
+//   - Silent fallback: when the LLM layer is not configured (self-hosted with
+//     no key) or the call fails, we do nothing and leave the original
+//     first-message-derived title untouched — no error surfaces to the user.
+//   - No clobber: the update is a compare-and-swap against currentTitle, so a
+//     manual rename that lands during generation is never overwritten.
+//
+// currentTitle is the session's title as observed at trigger time (the
+// default/original title). sourceText is the user's first message, which the
+// model condenses into a title.
+func (h *Handler) maybeGenerateChatTitleAsync(workspaceID, userID string, sessionID pgtype.UUID, currentTitle, sourceText string) {
+	// Short-circuit before spawning a goroutine when the LLM layer is disabled
+	// (self-hosted without MULTICA_LLM_API_KEY / MULTICA_LLM_BASE_URL): the
+	// original title is kept as-is, exactly matching pre-feature behavior.
+	if h.LLM == nil || !h.LLM.Enabled() {
+		return
 	}
-	projects, err := h.Queries.ListChatSessionProjectsInWorkspace(ctx, db.ListChatSessionProjectsInWorkspaceParams{
-		ChatSessionID: sessionID,
-		WorkspaceID:   parseUUID(workspaceID),
+	if strings.TrimSpace(sourceText) == "" {
+		return
+	}
+
+	go func() {
+		// Panic containment: this goroutine is detached from the HTTP request,
+		// so chi's Recoverer middleware is NOT in the call stack. A panic
+		// anywhere below (GenerateText, sanitizing, the DB write, publish)
+		// would otherwise crash the whole server process. This is a
+		// best-effort nicety — swallow the panic, log it, and leave the
+		// original title in place.
+		defer func() {
+			if rec := recover(); rec != nil {
+				slog.Error("chat title generation panicked; keeping original title",
+					"session_id", uuidToString(sessionID),
+					"panic", rec,
+				)
+			}
+		}()
+
+		ctx, cancel := context.WithTimeout(context.Background(), chatTitleGenTimeout)
+		defer cancel()
+
+		updated, applied, err := h.generateChatSessionTitle(ctx, sessionID, currentTitle, sourceText)
+		if err != nil {
+			// Timeout, upstream 4xx/5xx, empty choices, etc. Log-and-forget:
+			// the send already succeeded and the original title stands.
+			slog.Warn("chat title generation failed; keeping original title",
+				"session_id", uuidToString(sessionID),
+				"error", err,
+			)
+			return
+		}
+		if !applied {
+			// Either the model produced nothing usable, or the title changed
+			// under us (manual rename / already auto-titled). Nothing to push.
+			return
+		}
+
+		// Reuse the existing chat:session_updated realtime channel so the
+		// frontend refreshes the title in place, identical to a manual rename.
+		resolvedSessionID := uuidToString(updated.ID)
+		h.publishChat(protocol.EventChatSessionUpdated, workspaceID, "member", userID, resolvedSessionID, protocol.ChatSessionUpdatedPayload{
+			ChatSessionID: resolvedSessionID,
+			Title:         updated.Title,
+			UpdatedAt:     timestampToString(updated.UpdatedAt),
+		})
+	}()
+}
+
+// generateChatSessionTitle performs the synchronous core of title generation:
+// call the LLM, sanitize the output, and compare-and-swap it onto the session.
+// It is separated from the goroutine wrapper so it can be unit-tested directly.
+//
+// Return contract:
+//   - (session, true, nil):  a new title was generated and written.
+//   - (zero, false, nil):    generation produced nothing usable, OR the title
+//     had changed since currentTitle was observed (CAS miss / manual rename) —
+//     both are non-error "leave it alone" outcomes.
+//   - (zero, false, err):    the LLM layer is disabled or the call failed, OR
+//     the CAS write hit a real DB error. Callers treat this as best-effort and
+//     keep the original title.
+func (h *Handler) generateChatSessionTitle(ctx context.Context, sessionID pgtype.UUID, currentTitle, sourceText string) (db.ChatSession, bool, error) {
+	// DefaultModel() is used implicitly by GenerateText when model == "": a
+	// deployment configures MULTICA_LLM_DEFAULT_MODEL (or the built-in
+	// gpt-6-luna fallback) — no model is threaded through from the frontend.
+	raw, err := h.LLM.GenerateText(ctx, "", chatTitleSystemPrompt, sourceText)
+	if err != nil {
+		return db.ChatSession{}, false, err
+	}
+
+	title := sanitizeChatTitle(raw)
+	if title == "" {
+		// Model returned only quotes/punctuation/whitespace — treat as "no
+		// usable title" and fall back silently to the original.
+		return db.ChatSession{}, false, nil
+	}
+
+	updated, err := h.Queries.UpdateChatSessionTitleIfCurrent(ctx, db.UpdateChatSessionTitleIfCurrentParams{
+		ID:            sessionID,
+		ExpectedTitle: currentTitle,
+		NewTitle:      title,
 	})
 	if err != nil {
-		slog.Warn("chat title project lookup failed; titling without a project",
-			"session_id", uuidToString(sessionID),
-			"error", err,
-		)
-		return nil
-	}
-	names := make([]string, 0, len(projects))
-	for _, project := range projects {
-		name := strings.TrimSpace(project.Title)
-		if name != "" {
-			names = append(names, name)
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Title changed since we observed currentTitle — a manual rename or
+			// a competing writer won. Do not clobber it.
+			return db.ChatSession{}, false, nil
 		}
+		return db.ChatSession{}, false, err
 	}
-	return names
+	return updated, true, nil
 }
 
 // chatTitleLabelPrefixes are leading labels a model sometimes prepends despite
@@ -185,10 +205,6 @@ var chatTitleLabelPrefixes = []string{
 // pairs, drop trailing sentence punctuation, and hard-cap the length at
 // chatSessionTitleMaxLen runes (the same ceiling the manual rename endpoint
 // enforces). Returns "" when nothing meaningful remains.
-//
-// The "{project} · {topic}" shape survives this: the middle dot is not a
-// wrapper and not trailing punctuation. Label prefixes and trailing periods
-// are still removed.
 //
 // Prefix-stripping, wrapper-stripping, AND trailing-punctuation trimming all
 // run in a single loop until the string stops changing. They interact: a model

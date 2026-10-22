@@ -240,7 +240,6 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			resp = append(resp, chatSessionListResponse(s.ID, s.WorkspaceID, s.AgentID, s.CreatorID, s.ProjectID, s.Title, s.Status, s.Visibility, s.ViewerAccess, s.AgentName, s.Pinned, s.ProjectNudgeDismissedAt, s.CreatedAt, s.UpdatedAt, s.UnreadCount, s.ExtraCount, s.AgentRuntimeBound, s.AgentArchived, s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason, s.LastMessageKind, s.LastMessageSenderID, s.TitleLocked, s.ProgressText, s.ProgressSource, s.ProgressTone, s.ProgressAuthorType, s.ProgressAuthorID, s.ProgressUpdatedAt, s.ConvertedIssueID))
-			resp[len(resp)-1].OriginSessionID = uuidToPtr(s.OriginSessionID)
 		}
 	} else {
 		rows, err := h.Queries.ListChatSessionsByCreator(r.Context(), db.ListChatSessionsByCreatorParams{
@@ -260,7 +259,6 @@ func (h *Handler) ListChatSessions(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			resp = append(resp, chatSessionListResponse(s.ID, s.WorkspaceID, s.AgentID, s.CreatorID, s.ProjectID, s.Title, s.Status, s.Visibility, s.ViewerAccess, s.AgentName, s.Pinned, s.ProjectNudgeDismissedAt, s.CreatedAt, s.UpdatedAt, s.UnreadCount, s.ExtraCount, s.AgentRuntimeBound, s.AgentArchived, s.LastMessageAt, s.LastMessageContent, s.LastMessageRole, s.LastMessageFailureReason, s.LastMessageKind, s.LastMessageSenderID, s.TitleLocked, s.ProgressText, s.ProgressSource, s.ProgressTone, s.ProgressAuthorType, s.ProgressAuthorID, s.ProgressUpdatedAt, s.ConvertedIssueID))
-			resp[len(resp)-1].OriginSessionID = uuidToPtr(s.OriginSessionID)
 		}
 	}
 	if err := h.hydrateChatSessionChannelMetadata(r.Context(), resp); err != nil {
@@ -1013,12 +1011,6 @@ type SendChatMessageRequest struct {
 	// steer, queue and restart preserve their requested delivery behavior;
 	// replace also voids every older queued instruction (DENE-1932).
 	Mode string `json:"mode,omitempty"`
-	// Urgent (DENE-1844) refuses the send when the agent's runtime is offline
-	// and no online fallback runtime is configured, dispatches to the fallback
-	// otherwise, puts the turn at the head of the queue (restart semantics),
-	// and fails it with pickup_timeout when no daemon starts it within
-	// service.UrgentChatPickupDeadline.
-	Urgent bool `json:"urgent,omitempty"`
 }
 
 // ChatReplaceOutcome is what a replace send changed: the stopped and cancelled
@@ -1049,20 +1041,13 @@ func newChatReplaceOutcome(sent *service.DirectChatSendResult) *ChatReplaceOutco
 }
 
 type SendChatMessageResponse struct {
-	Runtime *ChatRuntimeResponse `json:"runtime"`
-	// Urgent echoes the request flag; PickupDeadlineAt is when the turn fails
-	// with pickup_timeout unless a daemon starts it first. FallbackRuntime is
-	// true when the turn went to the configured fallback because the primary
-	// runtime was offline.
-	Urgent           bool    `json:"urgent,omitempty"`
-	PickupDeadlineAt *string `json:"pickup_deadline_at,omitempty"`
-	FallbackRuntime  bool    `json:"fallback_runtime,omitempty"`
-	Warning          string  `json:"warning,omitempty"`
-	ReasonCode       string  `json:"reason_code,omitempty"`
-	MessageID        string  `json:"message_id"`
-	TaskID           string  `json:"task_id"`
-	SupportsQueue    bool    `json:"supports_queue"`
-	Queued           bool    `json:"queued"`
+	Runtime       *ChatRuntimeResponse `json:"runtime"`
+	Warning       string               `json:"warning,omitempty"`
+	ReasonCode    string               `json:"reason_code,omitempty"`
+	MessageID     string               `json:"message_id"`
+	TaskID        string               `json:"task_id"`
+	SupportsQueue bool                 `json:"supports_queue"`
+	Queued        bool                 `json:"queued"`
 	// Mode is what actually happened: steer, queue, restart, replace, or start
 	// when nothing was replying. A steer whose reply ended first reports queue.
 	Mode string `json:"mode"`
@@ -1107,21 +1092,6 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		writeError(w, http.StatusBadRequest, "mode must be steer, queue, restart or replace")
 		return
-	}
-	// An urgent turn must start within its pickup deadline, and the claim
-	// serialises turns per chat: while an earlier reply is still running the
-	// urgent one could not be picked up at all. Restart is the one mode that
-	// clears the way, so urgent implies it (DENE-1844); PrioritizeQueuedChatTask
-	// then gives the turn the same head-of-queue rank a restart already uses.
-	if req.Urgent {
-		if mode == sendModeSteer {
-			writeError(w, http.StatusBadRequest, "urgent cannot be combined with mode=steer; an urgent message restarts the reply")
-			return
-		}
-		// Replace already stops the reply and takes the head of the queue.
-		if mode != sendModeReplace {
-			mode = sendModeRestart
-		}
 	}
 
 	// Pre-validate attachment ids early so invalid input returns 400 before
@@ -1246,6 +1216,29 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Detect whether this is the very first human message in the session,
+	// BEFORE we insert the new row. This scopes LLM auto-titling (MUL-4295) to
+	// the opening turn: we upgrade the default/original title exactly once, off
+	// the first user message, and never re-run it on every subsequent send. A
+	// query error here is treated as "not first" so we simply skip generation
+	// (best-effort — never block the send).
+	hadUserMessage := true
+	if existed, err := h.Queries.ChatSessionHasPublicUserMessage(r.Context(), session.ID); err == nil {
+		hadUserMessage = existed
+	}
+	channelBacked := false
+	channelSourceKnown := true
+	if !hadUserMessage {
+		if _, err := h.Queries.GetChannelChatSessionBindingBySessionAny(r.Context(), session.ID); err == nil {
+			channelBacked = true
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			// Title generation is optional. If source authority is unavailable,
+			// skip it rather than risk treating a channel manual rename as an
+			// auto-generated fallback and overwriting it.
+			channelSourceKnown = false
+		}
+	}
+
 	// Persist the whole turn atomically (MUL-4351): the owning task, the user
 	// message bound to that task (so it belongs to the task's immutable input
 	// batch the instant it exists), attachment bindings, and the session touch
@@ -1253,33 +1246,14 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	// web chat the person who typed is actorID (attachment owner). The task
 	// itself is authorized as taskUserID — the creator, when somebody else
 	// is speaking in a shared chat — so the run uses the creator's quota.
-	// Urgent delivery decides the runtime before anything is persisted: an
-	// offline primary with no online fallback is a refusal with the reason and
-	// the next steps, and nothing is written (DENE-1844).
 	sendOpts := service.DirectChatSendOptions{Mode: req.Mode}
 	if mode == sendModeReplace {
 		sendOpts.Replace = true
 		sendOpts.CancelledBy = h.taskCancellationActor(r.Context(), actorType, actorID)
 	}
-	if req.Urgent {
-		opts, refusal, err := h.urgentChatDispatch(r.Context(), agent)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to check the agent's runtime")
-			return
-		}
-		if refusal != nil {
-			writeJSON(w, http.StatusConflict, refusal)
-			return
-		}
-		opts.Mode = mode
-		opts.Replace, opts.CancelledBy = sendOpts.Replace, sendOpts.CancelledBy
-		sendOpts = opts
-	}
 	sent, err := h.TaskService.SendDirectChatMessageWithOptions(r.Context(), session, agent, taskUserID, req.Content, attachmentIDs, actorType, parseUUID(actorID), sendOpts)
 	if err != nil {
 		switch {
-		case errors.Is(err, service.ErrChatFallbackRuntimeChanged):
-			writeError(w, http.StatusConflict, "the agent's fallback runtime changed while sending; send again")
 		case errors.Is(err, service.ErrChatMergeUnsupported):
 			writeSteerUnsupported(w, "the running reply cannot read this message; send with queue or restart")
 		case errors.Is(err, service.ErrChatSessionConverted):
@@ -1310,7 +1284,9 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		}
 		msg.SenderUserID = parseUUID(userID)
 	}
+	currentTitle := session.Title
 	if sent.InitialTitle != "" {
+		currentTitle = sent.InitialTitle
 		h.ChannelChatTitleInitialized(session.WorkspaceID, session.CreatorID, session.ID, sent.InitialTitle)
 	}
 
@@ -1349,22 +1325,16 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		SenderUserID:  uuidToString(msg.SenderUserID),
 	})
 
-	// The person wrote in the chat: any question their Bot was still chasing
-	// for this chat (DENE-1933) is answered.
-	if actorType != "agent" {
-		if err := h.Queries.SettleHumanNeededByChat(r.Context(), db.SettleHumanNeededByChatParams{ChatSessionID: session.ID, TargetUserID: parseUUID(userID)}); err != nil {
-			slog.Warn("human needed: settle by chat failed", "error", err, "chat_session_id", resolvedSessionID)
-		}
-		// Their typed reply is the answer: a choice card still open for this
-		// chat would otherwise stay in the inbox and answer a second time.
-		if _, err := h.DB.Exec(r.Context(), `UPDATE agent_ask SET status='cancelled' WHERE chat_session_id=$1 AND recipient_id=$2 AND status='open'`, session.ID, parseUUID(userID)); err != nil {
-			slog.Warn("human needed: close chat cards failed", "error", err, "chat_session_id", resolvedSessionID)
-		}
+	// First user message → kick off best-effort LLM auto-titling (MUL-4295).
+	// Fire-and-forget and non-blocking: the response below is written whether
+	// or not a title is ever generated, and a disabled/failing LLM layer
+	// silently keeps the original first-message-derived title. session.Title
+	// is the default/original title observed here and drives the CAS so a
+	// manual rename mid-generation is never clobbered.
+	shouldGenerateTitle := shouldGenerateFirstMessageTitle(hadUserMessage, currentTitle, sent.InitialTitle, channelBacked, channelSourceKnown)
+	if shouldGenerateTitle {
+		h.maybeGenerateChatTitleAsync(workspaceID, userID, session.ID, currentTitle, req.Content)
 	}
-
-	// Naming waits for the agent's first reply: the chat:done recap
-	// (chat_recap.go) titles the chat from the opening plus the reply
-	// (DENE-1037). Until then the first-message title stands.
 
 	applied := "start"
 	if sent.Merged {
@@ -1407,16 +1377,8 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	if mode == sendModeReplace && applied != "blocked" {
 		replaceOutcome = newChatReplaceOutcome(sent)
 	}
-	var pickupDeadline *string
-	if task.PickupDeadlineAt.Valid {
-		deadline := timestampToString(task.PickupDeadlineAt)
-		pickupDeadline = &deadline
-	}
 	writeJSON(w, http.StatusCreated, SendChatMessageResponse{
 		Runtime: diagnostics.Runtime, Warning: warning, ReasonCode: reason,
-		Urgent:             req.Urgent,
-		PickupDeadlineAt:   pickupDeadline,
-		FallbackRuntime:    sendOpts.RuntimeID.Valid,
 		MessageID:          uuidToString(msg.ID),
 		TaskID:             uuidToString(task.ID),
 		SupportsQueue:      true,
@@ -1426,6 +1388,19 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 		CreatedAt:          timestampToString(task.CreatedAt),
 		AttachmentIDs:      boundAttachmentIDs,
 	})
+}
+
+func shouldGenerateFirstMessageTitle(hadUserMessage bool, currentTitle, initializedTitle string, channelBacked, channelSourceKnown bool) bool {
+	if hadUserMessage || currentTitle == "" || !channelSourceKnown {
+		return false
+	}
+	if channelBacked {
+		// For an explicitly empty /new Chat, a pre-existing non-empty title is
+		// a manual rename. Only a title initialized by this send is eligible for
+		// the best-effort LLM replacement; otherwise manual naming always wins.
+		return initializedTitle != ""
+	}
+	return true
 }
 
 type ChatMessagesCursorResponse struct {
@@ -2427,14 +2402,9 @@ type ChatSessionResponse struct {
 	// older Chat that remains readable and writable in Multica.
 	ChannelSource         *ChatSessionChannelSourceResponse `json:"channel_source,omitempty"`
 	IsCurrentChannelRoute *bool                             `json:"is_current_channel_route,omitempty"`
-	// OriginSessionID names the chat an agent opened this one from
-	// (DENE-1271). OriginTitle is that chat's title, filled only on
-	// single-session reads and only when the viewer can open it.
-	OriginType      *string `json:"origin_type,omitempty"`
-	OriginSessionID *string `json:"origin_session_id,omitempty"`
-	OriginTitle     *string `json:"origin_title,omitempty"`
-	CreatedAt       string  `json:"created_at"`
-	UpdatedAt       string  `json:"updated_at"`
+	OriginType            *string                           `json:"origin_type,omitempty"`
+	CreatedAt             string                            `json:"created_at"`
+	UpdatedAt             string                            `json:"updated_at"`
 }
 
 // ProgressResponse is one goal/progress subtitle line (DENE-1037): what was
@@ -2791,7 +2761,6 @@ func chatSessionToResponse(s db.ChatSession) ChatSessionResponse {
 		// Pinned is per viewer (DENE-866); decorateChatSession fills it in.
 		Visibility:            s.Visibility,
 		OriginType:            textToPtr(s.OriginType),
-		OriginSessionID:       uuidToPtr(s.OriginSessionID),
 		ProjectNudgeDismissed: s.ProjectNudgeDismissedAt.Valid,
 		CreatedAt:             timestampToString(s.CreatedAt),
 		UpdatedAt:             timestampToString(s.UpdatedAt),

@@ -615,7 +615,6 @@ func main() {
 	registerSubscriberListeners(bus, pool)
 	registerActivityListeners(bus, queries)
 	registerNotificationListeners(bus, queries)
-	registerSummonListeners(bus, queries)
 
 	metricsConfig := obsmetrics.ConfigFromEnv()
 	var metricsServer *http.Server
@@ -763,7 +762,6 @@ func main() {
 		go telemetryWorker.Run(sweepCtx)
 	}
 	go runDelegatedFailureRecoverySweeper(sweepCtx, taskSvc)
-	go runPickupDeadlineSweeper(sweepCtx, taskSvc)
 	// Seven-day runtime retention does not share the 30-second liveness tick:
 	// its bounded transactions run independently once per hour, so a slow GC
 	// round cannot delay offline detection or task recovery.
@@ -788,9 +786,6 @@ func main() {
 	}
 	if h.HumanNeededWorker != nil {
 		go h.HumanNeededWorker.Run(sweepCtx)
-	}
-	if h.OfficeEventWorker != nil {
-		go h.OfficeEventWorker.Run(sweepCtx)
 	}
 	if h.SeatCapacityWorker != nil {
 		go h.SeatCapacityWorker.Run(sweepCtx)
@@ -950,9 +945,6 @@ func main() {
 			}
 			if h.HumanNeededWorker != nil && !h.HumanNeededWorker.WaitWithTimeout(5*time.Second) {
 				slog.Warn("human needed worker did not exit within shutdown timeout")
-			}
-			if h.OfficeEventWorker != nil && !h.OfficeEventWorker.WaitWithTimeout(5*time.Second) {
-				slog.Warn("office event worker did not exit within shutdown timeout")
 			}
 			if h.WebhookDeliveryWorker != nil && !h.WebhookDeliveryWorker.WaitWithTimeout(5*time.Second) {
 				slog.Warn("webhook delivery worker did not exit within shutdown timeout")

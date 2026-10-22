@@ -160,7 +160,6 @@ func (w *BotWakeWorker) ProcessNext(ctx context.Context) (worked bool, resultErr
 	if !w.h.wakeVisible(ctx, e, bot.UserID) {
 		return pending("access unavailable")
 	}
-	alert := e.EventType == "wake_blocked"
 	rules := wakeResponse(c)
 	e, err = w.restoreEventActor(ctx, q, e)
 	if err != nil {
@@ -175,7 +174,7 @@ func (w *BotWakeWorker) ProcessNext(ctx context.Context) (worked bool, resultErr
 	if err != nil {
 		return true, err
 	}
-	if !alert && rules.HourlyLimit == 0 {
+	if rules.HourlyLimit == 0 {
 		return pending("hourly limit")
 	}
 	target, why := w.h.openWakeTarget(ctx, c.WebhookSecret)
@@ -189,7 +188,7 @@ func (w *BotWakeWorker) ProcessNext(ctx context.Context) (worked bool, resultErr
 	// Pre-upgrade retries have no delivery_id. Keep those as single events
 	// so they cannot disappear from the first-attempt-only batch selector.
 	batch := []db.BotWakeEvent{e}
-	if !alert && e.Status == "queued" && (e.Attempts == 0 || e.DeliveryID.Valid) {
+	if e.Status == "queued" && (e.Attempts == 0 || e.DeliveryID.Valid) {
 		batch, err = q.ListBotWakeBatch(ctx, db.ListBotWakeBatchParams{BotID: e.BotID, WorkspaceID: e.WorkspaceID, IssueID: e.IssueID, ChatSessionID: e.ChatSessionID, DeliveryID: e.DeliveryID, WindowStart: e.CreatedAt, FirstSequence: e.Sequence, WindowSeconds: w.coalesceSeconds})
 		if err != nil {
 			return true, err
@@ -211,7 +210,7 @@ func (w *BotWakeWorker) ProcessNext(ctx context.Context) (worked bool, resultErr
 		if checkErr != nil {
 			return true, checkErr
 		}
-		if reason == "" && !alert && member.EventType != "mention" && count >= int64(rules.HourlyLimit) {
+		if reason == "" && member.EventType != "mention" && count >= int64(rules.HourlyLimit) {
 			reason = "hourly limit"
 		}
 		generation := member.WakeGeneration
@@ -249,10 +248,8 @@ func (w *BotWakeWorker) ProcessNext(ctx context.Context) (worked bool, resultErr
 	// Preserve the existing single current cause: a multi-root batch uses
 	// its first admitted event for subsequent Bot writes. Each event still
 	// retains its own root/hop and admission accounting in the payload.
-	if !alert {
-		if err := q.RememberBotWakeCause(ctx, db.RememberBotWakeCauseParams{BotID: e.BotID, RootID: e.RootID, Hop: e.Hop}); err != nil {
-			return true, err
-		}
+	if err := q.RememberBotWakeCause(ctx, db.RememberBotWakeCauseParams{BotID: e.BotID, RootID: e.RootID, Hop: e.Hop}); err != nil {
+		return true, err
 	}
 	for _, member := range admitted {
 		if member.EventType != "mention" {
@@ -295,7 +292,7 @@ func (w *BotWakeWorker) ProcessNext(ctx context.Context) (worked bool, resultErr
 	defer resultTx.Rollback(recordCtx)
 	resultQ := w.h.Queries.WithTx(resultTx)
 	for _, member := range admitted {
-		if !alert && status == "failed" && strings.HasPrefix(reason, "connection failed before send") {
+		if status == "failed" && strings.HasPrefix(reason, "connection failed before send") {
 			if err := resultQ.RefundBotWakeHop(recordCtx, db.RefundBotWakeHopParams{RootID: member.RootID, Generation: member.WakeGeneration}); err != nil {
 				return true, err
 			}
@@ -389,9 +386,6 @@ func (h *Handler) botWakePayloadFields(ctx context.Context, e db.BotWakeEvent) (
 	if err != nil {
 		return nil, err
 	}
-	if e.EventType == "wake_blocked" {
-		summary = fmt.Sprintf("%s: %s", summary, e.Reason)
-	}
 	if runes := []rune(summary); len(runes) > 180 {
 		summary = string(runes[:180])
 	}
@@ -407,17 +401,6 @@ func (h *Handler) botWakePayloadFields(ctx context.Context, e db.BotWakeEvent) (
 	}
 	receiptBase := base + "/api/workspaces/" + uuidToString(e.WorkspaceID) + "/bots/" + uuidToString(e.BotID) + "/wake"
 	payload := map[string]any{"workspace_id": uuidToString(e.WorkspaceID), "event_id": uuidToString(e.EventID), "sequence": e.Sequence, "source_id": uuidToString(e.SourceID), "parent_id": wakeParentID(e), "ack_url": receiptBase + "/pending/ack", "ack_body": map[string]any{"event_ids": []string{uuidToString(e.EventID)}}, "woken_url": receiptBase + "/events/" + uuidToString(e.EventID) + "/woken", "result_url": receiptBase + "/events/" + uuidToString(e.EventID) + "/result", "root_id": uuidToString(e.RootID), "hop": e.Hop, "source_task_id": uuidToString(e.SourceTaskID), "web_url": base + webPath, "type": e.EventType, "issue_id": uuidToString(e.IssueID), "chat_session_id": uuidToString(e.ChatSessionID), "author": h.wakeAuthor(ctx, e), "time": e.CreatedAt.Time, "summary": summary, "url": base + link, "attachments": attachments}
-	if e.EventType == "wake_blocked" {
-		payload["reason_code"] = "bot_wake_chain_limit"
-		payload["reason"] = e.Reason
-		payload["limit"] = e.Hop
-		if e.AuthorType == "bot" {
-			payload["target_bot_id"] = uuidToString(e.AuthorID)
-		} else {
-			payload["agent_id"] = uuidToString(e.AuthorID)
-		}
-		payload["recovery"] = "Wait for an agent reply or completed run, or send a human message. A workspace admin can change the limit."
-	}
 	if err := h.addBotWakeContent(ctx, e, payload); err != nil {
 		return nil, err
 	}
@@ -467,11 +450,10 @@ func (h *Handler) wakeAuthor(ctx context.Context, e db.BotWakeEvent) map[string]
 
 func (w *BotWakeWorker) admitEvent(ctx context.Context, q *db.Queries, e db.BotWakeEvent, workspace db.Workspace) (db.BotWakeEvent, int64, string, error) {
 	var err error
-	alert := e.EventType == "wake_blocked"
 	if !e.RootID.Valid {
 		return e, 0, "source lineage unavailable", nil
 	}
-	if e.Attempts == 0 && !alert {
+	if e.Attempts == 0 {
 		if err = q.EnsureBotWakeChain(ctx, db.EnsureBotWakeChainParams{RootID: e.RootID, WorkspaceID: e.WorkspaceID}); err != nil {
 			return e, 0, "", err
 		}
@@ -494,7 +476,7 @@ func (w *BotWakeWorker) admitEvent(ctx context.Context, q *db.Queries, e db.BotW
 		e.Hop = hop
 	}
 	generation := e.WakeGeneration
-	if e.Attempts == 0 && !alert {
+	if e.Attempts == 0 {
 		generation, err = q.GetBotWakeChainGeneration(ctx, e.RootID)
 		if err != nil {
 			return e, 0, "", err

@@ -115,148 +115,6 @@ type WorkspaceResponse struct {
 	UpdatedAt    string  `json:"updated_at"`
 }
 
-type workspaceNamingResponse struct {
-	Source  string           `json:"source"`
-	Options []map[string]any `json:"options"`
-	Stats   map[string]int   `json:"stats"`
-	// Health answers "is naming actually working" for the selected source:
-	// ok, degraded (the chosen source named nothing in 24h while chats still
-	// arrived, or it cannot run at all), or idle (no new chats to judge by).
-	Health string               `json:"health"`
-	Last   *workspaceNamingLast `json:"last"`
-}
-
-// workspaceNamingLast is the most recent successful naming in the workspace.
-type workspaceNamingLast struct {
-	Title     string `json:"title"`
-	Source    string `json:"source"`
-	CreatedAt string `json:"created_at"`
-}
-
-type updateWorkspaceNamingRequest struct {
-	Source string `json:"source"`
-}
-
-func (h *Handler) workspaceNamingOptions() []map[string]any {
-	serverReady := h.LLM != nil && h.LLM.Enabled()
-	return []map[string]any{
-		{"id": "server_llm", "label": "Server model key", "available": serverReady, "reason": func() string {
-			if serverReady {
-				return ""
-			}
-			return "this instance has no MULTICA_LLM_* key configured"
-		}()},
-		{"id": "runtime", "label": "Chat agent runtime", "available": true, "recommended": true},
-		{"id": "rules", "label": "Rules only", "available": true},
-	}
-}
-
-func (h *Handler) GetWorkspaceNaming(w http.ResponseWriter, r *http.Request) {
-	id, ok := parseUUIDOrBadRequest(w, workspaceIDFromURL(r, "id"), "workspace id")
-	if !ok {
-		return
-	}
-	ws, err := h.Queries.GetWorkspace(r.Context(), id)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "workspace not found")
-		return
-	}
-	var settings map[string]any
-	_ = json.Unmarshal(ws.Settings, &settings)
-	source := "runtime"
-	if h.LLM != nil && h.LLM.Enabled() {
-		source = "server_llm"
-	}
-	if naming, ok := settings["naming"].(map[string]any); ok {
-		if value, ok := naming["source"].(string); ok && value != "" {
-			source = value
-		}
-	}
-	writeJSON(w, http.StatusOK, h.workspaceNamingState(r.Context(), id, source))
-}
-
-// workspaceNamingState reads the last 24 hours of chat_naming_event for the
-// workspace and judges whether the selected source is doing its job.
-func (h *Handler) workspaceNamingState(ctx context.Context, id pgtype.UUID, source string) workspaceNamingResponse {
-	stats := map[string]int{"titled": 0, "server_llm": 0, "runtime": 0, "rules": 0, "failed": 0}
-	var last *workspaceNamingLast
-	if h.DB != nil {
-		var titled, serverLLM, runtime, rules, failed int
-		if err := h.DB.QueryRow(ctx, `SELECT count(*) FILTER (WHERE status = 'success'), count(*) FILTER (WHERE status = 'success' AND source = 'server_llm'), count(*) FILTER (WHERE status = 'success' AND source = 'runtime'), count(*) FILTER (WHERE status = 'success' AND source = 'rules'), count(*) FILTER (WHERE status = 'failure') FROM chat_naming_event WHERE workspace_id = $1 AND created_at >= now() - interval '24 hours'`, id).Scan(&titled, &serverLLM, &runtime, &rules, &failed); err == nil {
-			stats = map[string]int{"titled": titled, "server_llm": serverLLM, "runtime": runtime, "rules": rules, "failed": failed}
-		}
-		var item workspaceNamingLast
-		var at pgtype.Timestamptz
-		if err := h.DB.QueryRow(ctx, `SELECT s.title, e.source, e.created_at FROM chat_naming_event e JOIN chat_session s ON s.id = e.chat_session_id WHERE e.workspace_id = $1 AND e.status = 'success' AND s.title <> '' ORDER BY e.created_at DESC LIMIT 1`, id).Scan(&item.Title, &item.Source, &at); err == nil {
-			item.CreatedAt = timestampToString(at)
-			last = &item
-		}
-	}
-	return workspaceNamingResponse{
-		Source:  source,
-		Options: h.workspaceNamingOptions(),
-		Stats:   stats,
-		Health:  namingHealth(source, h.LLM != nil && h.LLM.Enabled(), stats),
-		Last:    last,
-	}
-}
-
-// namingHealth is "ok" when the selected source named at least one chat in
-// the window, "idle" when there was nothing to name, and "degraded" when
-// chats arrived but the selected source named none of them — the case where
-// rules quietly covered for a runtime that never took the job.
-func namingHealth(source string, serverReady bool, stats map[string]int) string {
-	if source == "server_llm" && !serverReady {
-		return "degraded"
-	}
-	if stats["titled"]+stats["failed"] == 0 {
-		return "idle"
-	}
-	if stats[source] > 0 {
-		return "ok"
-	}
-	return "degraded"
-}
-
-func (h *Handler) UpdateWorkspaceNaming(w http.ResponseWriter, r *http.Request) {
-	id, ok := parseUUIDOrBadRequest(w, workspaceIDFromURL(r, "id"), "workspace id")
-	if !ok {
-		return
-	}
-	var req updateWorkspaceNamingRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	if req.Source != "server_llm" && req.Source != "runtime" && req.Source != "rules" {
-		writeError(w, http.StatusBadRequest, "source must be server_llm, runtime, or rules")
-		return
-	}
-	ws, err := h.Queries.GetWorkspace(r.Context(), id)
-	if err != nil {
-		writeError(w, http.StatusNotFound, "workspace not found")
-		return
-	}
-	if req.Source == "server_llm" && (h.LLM == nil || !h.LLM.Enabled()) {
-		writeError(w, http.StatusBadRequest, "server model key is unavailable: this instance has no MULTICA_LLM_* key configured")
-		return
-	}
-	var settings map[string]any
-	_ = json.Unmarshal(ws.Settings, &settings)
-	if settings == nil {
-		settings = map[string]any{}
-	}
-	settings["naming"] = map[string]any{"source": req.Source}
-	raw, _ := json.Marshal(settings)
-	updated, err := h.Queries.UpdateWorkspace(r.Context(), db.UpdateWorkspaceParams{ID: id, Settings: raw})
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to update naming source")
-		return
-	}
-	h.publishWithSource(r.Context(), protocol.EventWorkspaceUpdated, uuidToString(updated.ID), "member", requestUserID(r), map[string]any{"workspace": h.workspaceToResponse(updated)})
-	writeJSON(w, http.StatusOK, h.workspaceNamingState(r.Context(), id, req.Source))
-}
-
 func (h *Handler) workspaceToResponse(w db.Workspace) WorkspaceResponse {
 	var settings any
 	if w.Settings != nil {
@@ -501,14 +359,13 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateWorkspaceRequest struct {
-	BotWakeChainLimit json.RawMessage `json:"bot_wake_chain_limit"`
-	Name              *string         `json:"name"`
-	Description       *string         `json:"description"`
-	Context           *string         `json:"context"`
-	Settings          any             `json:"settings"`
-	Repos             any             `json:"repos"`
-	IssuePrefix       *string         `json:"issue_prefix"`
-	AvatarURL         *string         `json:"avatar_url"`
+	Name        *string `json:"name"`
+	Description *string `json:"description"`
+	Context     *string `json:"context"`
+	Settings    any     `json:"settings"`
+	Repos       any     `json:"repos"`
+	IssuePrefix *string `json:"issue_prefix"`
+	AvatarURL   *string `json:"avatar_url"`
 }
 
 // workspaceRepoRef is one entry of workspace.repos. A repository has no table
@@ -638,41 +495,7 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 	if req.Context != nil {
 		params.Context = pgtype.Text{String: *req.Context, Valid: true}
 	}
-	if len(req.BotWakeChainLimit) > 0 {
-		var limit int
-		if err := json.Unmarshal(req.BotWakeChainLimit, &limit); err != nil || limit < 1 || limit > 100 {
-			writeError(w, http.StatusBadRequest, "bot_wake_chain_limit must be an integer from 1 to 100")
-			return
-		}
-		if r.Header.Get("X-Actor-Source") == "task_token" {
-			writeError(w, http.StatusForbidden, "agent runs cannot change bot_wake_chain_limit")
-			return
-		}
-		if req.Settings == nil {
-			existing, err := h.Queries.GetWorkspace(r.Context(), idUUID)
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "failed to load workspace settings")
-				return
-			}
-			values := map[string]any{}
-			_ = json.Unmarshal(existing.Settings, &values)
-			if values == nil {
-				values = map[string]any{}
-			}
-			req.Settings = values
-		}
-		if values, ok := req.Settings.(map[string]any); ok {
-			values["bot_wake_chain_limit"] = limit
-		} else {
-			writeError(w, http.StatusBadRequest, "settings must be a JSON object")
-			return
-		}
-	}
 	if req.Settings != nil {
-		if err := validateBotWakeChainSettings(req.Settings); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
 		// The client cannot echo back the log-export git token it was never
 		// sent, so the stored one is carried forward unless this write
 		// explicitly sets or clears it. Without this, any unrelated settings
@@ -696,12 +519,9 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 				"this deployment cannot store a log export git token (no MULTICA_LOG_EXPORT_SECRET_KEY or JWT_SECRET)")
 			return
 		}
-		// An agent run must not be able to raise its own limits through the
-		// generic settings write: agent_spawn is carried forward unchanged.
-		if r.Header.Get("X-Actor-Source") == "task_token" {
-			merged = keepStoredAgentSpawn(merged, stored)
-			merged = keepStoredBotWakeChainLimit(merged, stored)
-		}
+		// bot_wake_chain_limit is no longer a setting, but the database guard
+		// still reads the stored value, so no write may change it.
+		merged = keepStoredBotWakeChainLimit(merged, stored)
 		// The magpie mode switch is written only through its own endpoint.
 		merged = keepStoredMagpie(merged, stored)
 		s, _ := json.Marshal(merged)
@@ -1752,4 +1572,19 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	h.notifyDaemonWorkspacesChanged(affectedUserIDs...)
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func keepStoredBotWakeChainLimit(incoming any, stored []byte) any {
+	values, ok := incoming.(map[string]any)
+	if !ok {
+		return incoming
+	}
+	var old map[string]any
+	_ = json.Unmarshal(stored, &old)
+	if limit, present := old["bot_wake_chain_limit"]; present {
+		values["bot_wake_chain_limit"] = limit
+	} else {
+		delete(values, "bot_wake_chain_limit")
+	}
+	return values
 }

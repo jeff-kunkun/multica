@@ -28,13 +28,6 @@ const (
 	// latency-sensitive 30-second liveness path. GC remains independently
 	// bounded by runtimeGCTickTimeout once each hourly round begins.
 	runtimeGCSweepInterval = time.Hour
-	// pickupDeadlineSweepInterval is the cadence of the urgent-turn pickup
-	// check (DENE-1844). The deadline itself is 30 seconds, so a 30-second tick
-	// would report a miss up to a minute late; five seconds keeps the sender's
-	// wait close to the promised deadline and the query is a partial-index scan.
-	pickupDeadlineSweepInterval = 5 * time.Second
-	// pickupDeadlineFailBatchSize bounds one pickup tick.
-	pickupDeadlineFailBatchSize = 200
 	// delegatedFailureRecoverySweepInterval keeps the low-probability durable
 	// recovery scan off the latency-sensitive runtime liveness path.
 	delegatedFailureRecoverySweepInterval = 5 * time.Minute
@@ -185,31 +178,6 @@ func runRuntimeSweeper(ctx context.Context, queries *db.Queries, liveness handle
 		sweepExpiredQueuedTasks(ctx, queries, taskSvc, reconnectGrace)
 		sweepDeferredChatFinalizations(ctx, queries, taskSvc)
 	})
-}
-
-// runPickupDeadlineSweeper fails urgent chat turns nobody started before
-// their pickup deadline (DENE-1844). Its own loop: the runtime liveness tick is
-// too slow for a 30-second promise.
-func runPickupDeadlineSweeper(ctx context.Context, taskSvc *service.TaskService) {
-	runPeriodicSweep(ctx, pickupDeadlineSweepInterval, func() {
-		sweepPickupDeadlines(ctx, taskSvc)
-	})
-}
-
-func sweepPickupDeadlines(ctx context.Context, taskSvc *service.TaskService) {
-	if taskSvc == nil {
-		return
-	}
-	failed, err := taskSvc.FailTasksPastPickupDeadline(ctx, pickupDeadlineFailBatchSize)
-	if err != nil {
-		slog.Warn("pickup sweeper: failed to expire urgent tasks", "error", err)
-		return
-	}
-	if len(failed) == 0 {
-		return
-	}
-	slog.Info("pickup sweeper: urgent tasks missed their pickup deadline", "count", len(failed))
-	taskSvc.HandleFailedTasks(ctx, failed)
 }
 
 func runDelegatedFailureRecoverySweeper(ctx context.Context, taskSvc *service.TaskService) {

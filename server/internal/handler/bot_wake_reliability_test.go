@@ -105,17 +105,6 @@ func TestBotWakeReliableDelivery(t *testing.T) {
 			return nil
 		}
 	}
-	// Exercise the actual database capture paths without transaction actor metadata.
-	dbfx.Exec(t, `UPDATE issue SET assignee_type='member',assignee_id=$2 WHERE id=$1`, issue, testUserID)
-	task := take("task")
-	author := task["author"].(map[string]any)
-	if author["id"] != "" || author["type"] != "" || author["note"] != "source attribution unavailable" {
-		t.Fatalf("unknown actor fabricated: %v", author)
-	}
-	dbfx.Exec(t, `UPDATE issue SET status='done' WHERE id=$1`, issue)
-	take("done")
-	dbfx.Insert(t, "issue_summon", testutil.Cols{"workspace_id": testWorkspaceID, "issue_id": issue, "recipient_id": testUserID, "caller_type": "member", "caller_id": testUserID, "source": "test", "reason": "decision"})
-	take("needs_kun")
 	mention := func() {
 		dbfx.Insert(t, "comment", testutil.Cols{"issue_id": issue, "workspace_id": testWorkspaceID, "author_type": "member", "author_id": testUserID, "content": "[@Bot](mention://bot/" + uuidToString(bot.ID) + ")"})
 	}
@@ -138,79 +127,5 @@ func TestBotWakeReliableDelivery(t *testing.T) {
 	if !confirmed {
 		t.Fatal("execution not confirmed")
 	}
-	t.Log("task/done/needs_kun/mention delivered within 5s; unknown actor noted; payload ack/woken/result and old receipt URL return 200")
-
-	// A source run supplies an exact actor, including durable event-list metadata.
-	agentID := createHandlerTestAgent(t, "RecoveredWakeActor", []byte("[]"))
-	runID := dbfx.Task(t, agentID, testutil.Cols{"issue_id": issue, "status": "running", "runtime_id": testRuntimeID})
-	var recoveredID string
-	err = testPool.QueryRow(ctx, `INSERT INTO bot_wake_event(bot_id,workspace_id,event_type,issue_id,source_id,source_task_id,root_id) VALUES($1,$2,'task',$3,gen_random_uuid(),$4,gen_random_uuid()) RETURNING event_id::text`, bot.ID, testWorkspaceID, issue, runID).Scan(&recoveredID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	recovered := take("task")["author"].(map[string]any)
-	if recovered["type"] != "agent" || recovered["id"] != agentID {
-		t.Fatalf("actor recovery: %v", recovered)
-	}
-	var storedActor string
-	dbfx.QueryRow(t, `SELECT author_id::text FROM bot_wake_event WHERE bot_id=$1 AND event_id=$2`, bot.ID, recoveredID).Scan(&storedActor)
-	if storedActor != agentID {
-		t.Fatal("recovered actor not persisted")
-	}
-
-	// Make the first of three ordinary events fill the new quota.
-	dbfx.Exec(t, `DELETE FROM bot_wake_attempt WHERE bot_id=$1`, bot.ID)
-	request("PUT", base, map[string]any{"hourly_limit": 1})
-	enqueue := func(typ string) string {
-		t.Helper()
-		var id string
-		err := testPool.QueryRow(ctx, `INSERT INTO bot_wake_event(bot_id,workspace_id,event_type,issue_id,source_id,author_type,author_id,root_id) VALUES($1,$2,$3,$4,gen_random_uuid(),'member',$5,gen_random_uuid()) RETURNING event_id::text`, bot.ID, testWorkspaceID, typ, issue, testUserID).Scan(&id)
-		if err != nil {
-			t.Fatal(err)
-		}
-		return id
-	}
-	enqueue("task")
-	take("task")
-	second, third := enqueue("done"), enqueue("needs_kun")
-	process()
-	process()
-	var settings BotWakeResponse
-	if err := json.Unmarshal(request("GET", base, nil), &settings); err != nil {
-		t.Fatal(err)
-	}
-	if settings.HourlyLimit != 1 || settings.LimitedCount != 2 {
-		t.Fatalf("effective rules: %+v", settings)
-	}
-	mention()
-	take("mention")
-	count, err := testHandler.Queries.CountRecentBotWakeAttempts(ctx, bot.ID)
-	if err != nil || count != 1 {
-		t.Fatalf("mention consumed quota: count=%d err=%v", count, err)
-	}
-	// Advance the rolling window, without waiting one hour or manually requeuing.
-	dbfx.Exec(t, `UPDATE bot_wake_attempt SET attempted_at=now()-interval '61 minutes' WHERE bot_id=$1`, bot.ID)
-	dbfx.Exec(t, `UPDATE bot_wake_event SET next_attempt_at=now() WHERE bot_id=$1 AND status='pending'`, bot.ID)
-	if p := take("done"); p["event_id"] != second {
-		t.Fatal("deferred order changed")
-	}
-	dbfx.Exec(t, `UPDATE bot_wake_attempt SET attempted_at=now()-interval '61 minutes' WHERE bot_id=$1`, bot.ID)
-	if p := take("needs_kun"); p["event_id"] != third {
-		t.Fatal("deferred order changed")
-	}
-	var page struct {
-		Events []any `json:"events"`
-	}
-	json.Unmarshal(request("GET", base+"/pending", nil), &page)
-	if len(page.Events) != 0 {
-		t.Fatalf("pending did not clear: %v", page.Events)
-	}
-	t.Log("limit=1 holds exactly two; mention still delivers without consuming quota; both deferred events deliver FIFO after window expiry; pending clears")
-	// Saving a rule change rechecks held events immediately.
-	request("PUT", base, map[string]any{"quiet_hours": map[string]any{"enabled": true, "start": "00:00", "end": "00:00", "timezone": "UTC"}})
-	enqueue("task")
-	process()
-	request("PUT", base, map[string]any{"hourly_limit": 120, "quiet_hours": map[string]any{"enabled": false, "start": "00:00", "end": "00:00", "timezone": "UTC"}})
-	take("task")
-	t.Log("ending quiet hours and raising the saved limit immediately releases deferred events")
+	t.Log("mention delivered within 5s; payload ack/woken/result and old receipt URL return 200")
 }

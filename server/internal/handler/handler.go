@@ -224,7 +224,6 @@ type Handler struct {
 	BotWakeSecrets         *secretbox.Box
 	BotWakeWorker          *BotWakeWorker
 	HumanNeededWorker      *HumanNeededWorker
-	OfficeEventWorker      *OfficeEventWorker
 	Queries                *db.Queries
 	ReadSelector           *dbreader.Selector
 	DB                     dbExecutor
@@ -574,7 +573,6 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 	h.WebhookDeliveryWorker = NewWebhookDeliveryWorker(h)
 	h.BotWakeWorker = NewBotWakeWorker(h)
 	h.HumanNeededWorker = NewHumanNeededWorker(h, h.BotWakeWorker)
-	h.OfficeEventWorker = NewOfficeEventWorker(h, h.BotWakeWorker)
 	// The default passthrough scheduler reports sweeper-race recoveries so the
 	// daemon:register refresh fires even without the production batched wiring.
 	if passthrough, ok := h.HeartbeatScheduler.(*PassthroughHeartbeatScheduler); ok {

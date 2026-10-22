@@ -1334,13 +1334,6 @@ func runIssueGet(cmd *cobra.Command, args []string) error {
 			strVal(issue, "description"),
 		}}
 		cli.PrintTable(os.Stdout, headers, rows)
-		if chat, ok := issue["source_chat"].(map[string]any); ok {
-			if title := strVal(chat, "title"); title != "" {
-				fmt.Printf("\nFrom chat: %s (%s)\n", title, strVal(chat, "id"))
-			} else {
-				fmt.Printf("\nFrom chat: %s\n", strVal(chat, "id"))
-			}
-		}
 		return nil
 	}
 
@@ -2991,7 +2984,7 @@ func printBotWakeBlockedWarnings(w io.Writer, raw any) {
 		if outcome["reason_code"] != "bot_wake_chain_limit" {
 			continue
 		}
-		fmt.Fprintf(w, "Warning: comment saved, but %v %v was not woken: bot_wake_chain_limit. Wait for the agent to reply or complete a run, send as a human, or use a server-verified --per-quote. An administrator can change multica settings set bot_wake_chain_limit --value-json <1..100>. Do not repost the saved comment.\n", outcome["target_type"], outcome["target_id"])
+		fmt.Fprintf(w, "Warning: comment saved, but %v %v was not woken: bot_wake_chain_limit. Wait for the agent to reply or complete a run, send as a human, or use a server-verified --per-quote. Do not repost the saved comment.\n", outcome["target_type"], outcome["target_id"])
 	}
 }
 

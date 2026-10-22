@@ -63,7 +63,6 @@ ones. Distinct from archive — archive is the delete path. Disabled is
 orthogonal to unbound and archived.
 
 ```bash
-multica agent update <agent-id> --fallback-runtime <runtime-id> --output json      # standby for chat send --urgent (same owner + provider)
 multica agent update <agent-id> --fallback-runtime none --output json              # no standby
 ```
 

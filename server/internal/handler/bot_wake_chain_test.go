@@ -177,8 +177,8 @@ func TestBotWakeTrustedChainHTTP(t *testing.T) {
 	worker.client = func(*url.URL) *http.Client { return receiver.Client() }
 	comment(bToken, a)
 	drain()
-	if len(deliveries) != 7 || deliveries[6]["type"] != "wake_blocked" || deliveries[6]["reason_code"] != "bot_wake_chain_limit" {
-		t.Fatalf("fifth wake must send a refusal alert instead of another wake: %v", deliveries)
+	if len(deliveries) != 6 {
+		t.Fatalf("fifth wake must be refused without a push: %v", deliveries)
 	}
 	var reason string
 	dbfx.QueryRow(t, `SELECT reason FROM bot_wake_event WHERE bot_id=$1 ORDER BY sequence DESC LIMIT 1`, a.ID).Scan(&reason)

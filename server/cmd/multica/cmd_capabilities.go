@@ -175,7 +175,7 @@ func buildCapabilityMap(root *cobra.Command, cliVersion string) capabilityMap {
 			"machine_capacity": "runtime capacity <runtime-id> reads device-wide active runs and limit; --max-concurrent-runs 1..100 sets it via PATCH /api/runtimes/:id (owner only). Default 12, shared across providers/workspaces; overflow queues; lowering does not stop active runs. overview runtimes includes machine_capacity.",
 			"access":           "read = only reads; write = creates or changes something; local = acts on this machine",
 			"bot_key":          "yes = an external bot key can run it; no = agent run or human login only; local = no server call",
-			"bot_wake_chain":   "Bot wake-chain limit defaults to 4, configurable with settings get/set bot_wake_chain_limit (1..100); agent replies/completed runs reset it; human messages and server-verified --per-quote messages are exempt; blocked chat sends exit nonzero with a saved-message receipt; blocked comment wakes emit warnings; overview reports permitted block audit",
+			"bot_wake_chain":   "Bot wake-chain limit is 4; agent replies/completed runs reset it; human messages and server-verified --per-quote messages are exempt; blocked chat sends exit nonzero with a saved-message receipt; blocked comment wakes emit warnings",
 		},
 	}
 	placed := map[string]bool{}

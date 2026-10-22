@@ -137,7 +137,7 @@ func dispatchBlockedFallbackMessage(code DispatchReasonCode) string {
 	case ReasonAttributionBlocked:
 		return "the run couldn't be attributed to a responsible member"
 	case ReasonBotWakeChainLimit:
-		return "Bot wake-chain limit reached; wait for an agent reply or completed run, send as a human, or use a verified human quote; workspace administrators can change bot_wake_chain_limit"
+		return "Bot wake-chain limit reached; wait for an agent reply or completed run, send as a human, or use a verified human quote"
 	case ReasonAlreadyActive:
 		return "a run is already active for this target"
 	case ReasonIssueInTriage:

@@ -5,16 +5,18 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/events"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/llm"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // ---------------------------------------------------------------------------
-// Test helpers for LLM chat titling (MUL-4295; the recap since DENE-1037)
+// Test helpers for LLM chat auto-titling (MUL-4295)
 // ---------------------------------------------------------------------------
 
 // stubLLMCompletion returns an httptest server that mimics the OpenAI
@@ -123,6 +125,218 @@ func requireDB(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Case 1: LLM configured → first-round title becomes a concise semantic title.
+// ---------------------------------------------------------------------------
+
+func TestChatTitle_GeneratesSemanticTitleWhenConfigured(t *testing.T) {
+	requireDB(t)
+	withStubLLM(t, stubLLMCompletion(t, http.StatusOK, "修复登录跳转死循环"))
+
+	original := "帮我看下为什么登录之后一直在几个页面之间来回跳转根本进不去首页"
+	session := newChatTitleTestSession(t, original)
+
+	updated, applied, err := testHandler.generateChatSessionTitle(context.Background(), session.ID, session.Title, original)
+	if err != nil {
+		t.Fatalf("generateChatSessionTitle: unexpected error: %v", err)
+	}
+	if !applied {
+		t.Fatal("expected title to be applied")
+	}
+	if updated.Title != "修复登录跳转死循环" {
+		t.Fatalf("title = %q, want %q", updated.Title, "修复登录跳转死循环")
+	}
+	if got := chatSessionTitleFromDB(t, session.ID); got != "修复登录跳转死循环" {
+		t.Fatalf("DB title = %q, want %q", got, "修复登录跳转死循环")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Case 2: LLM disabled (self-hosted, no key) → silent fallback to original.
+// ---------------------------------------------------------------------------
+
+func TestChatTitle_FallsBackWhenLLMDisabled(t *testing.T) {
+	requireDB(t)
+	// Force a disabled client regardless of ambient config.
+	prev := testHandler.LLM
+	testHandler.LLM = llm.New(llm.Config{})
+	t.Cleanup(func() { testHandler.LLM = prev })
+
+	original := "please help debug my flaky test"
+	session := newChatTitleTestSession(t, original)
+
+	_, applied, err := testHandler.generateChatSessionTitle(context.Background(), session.ID, session.Title, original)
+	if err != llm.ErrNotConfigured {
+		t.Fatalf("expected ErrNotConfigured, got %v", err)
+	}
+	if applied {
+		t.Fatal("expected no title applied when LLM disabled")
+	}
+	if got := chatSessionTitleFromDB(t, session.ID); got != original {
+		t.Fatalf("DB title = %q, want original %q (must not change / blank)", got, original)
+	}
+
+	// The async entry point must be a no-op (no panic, no change) when disabled.
+	testHandler.maybeGenerateChatTitleAsync(testWorkspaceID, testUserID, session.ID, session.Title, original)
+	time.Sleep(50 * time.Millisecond)
+	if got := chatSessionTitleFromDB(t, session.ID); got != original {
+		t.Fatalf("DB title changed after disabled async call: %q", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Case 3: LLM call fails (upstream 5xx / timeout) → silent fallback, no change.
+// ---------------------------------------------------------------------------
+
+func TestChatTitle_SilentFallbackOnUpstreamError(t *testing.T) {
+	requireDB(t)
+	withStubLLM(t, stubLLMCompletion(t, http.StatusInternalServerError, ""))
+
+	original := "why does my query return duplicate rows"
+	session := newChatTitleTestSession(t, original)
+
+	_, applied, err := testHandler.generateChatSessionTitle(context.Background(), session.ID, session.Title, original)
+	if err == nil {
+		t.Fatal("expected an error from the failing upstream")
+	}
+	if applied {
+		t.Fatal("expected no title applied on upstream error")
+	}
+	if got := chatSessionTitleFromDB(t, session.ID); got != original {
+		t.Fatalf("DB title = %q, want unchanged original %q", got, original)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Case 4: user manually renamed the session → CAS miss, do not overwrite.
+// ---------------------------------------------------------------------------
+
+func TestChatTitle_DoesNotClobberManualRename(t *testing.T) {
+	requireDB(t)
+	withStubLLM(t, stubLLMCompletion(t, http.StatusOK, "Generated Title"))
+
+	original := "original auto title"
+	session := newChatTitleTestSession(t, original)
+
+	// Simulate a manual rename landing before the async generator writes: the
+	// generator still holds the stale observed title (session.Title), but the
+	// DB now says something else.
+	manual := "My Renamed Chat"
+	if _, err := testHandler.Queries.UpdateChatSessionTitle(context.Background(), db.UpdateChatSessionTitleParams{
+		ID:    session.ID,
+		Title: manual,
+	}); err != nil {
+		t.Fatalf("simulate manual rename: %v", err)
+	}
+
+	_, applied, err := testHandler.generateChatSessionTitle(context.Background(), session.ID, original, original)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if applied {
+		t.Fatal("expected CAS miss (applied=false) when title was manually renamed")
+	}
+	if got := chatSessionTitleFromDB(t, session.ID); got != manual {
+		t.Fatalf("DB title = %q, want manual rename %q preserved", got, manual)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Case 5: model returns empty / unusable output → fallback, no change.
+// ---------------------------------------------------------------------------
+
+func TestChatTitle_FallsBackOnEmptyModelOutput(t *testing.T) {
+	requireDB(t)
+	// Model replies with only quotes + punctuation → sanitizes to "".
+	withStubLLM(t, stubLLMCompletion(t, http.StatusOK, `"。"`))
+
+	original := "some opening message"
+	session := newChatTitleTestSession(t, original)
+
+	_, applied, err := testHandler.generateChatSessionTitle(context.Background(), session.ID, session.Title, original)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if applied {
+		t.Fatal("expected no title applied for empty/unusable model output")
+	}
+	if got := chatSessionTitleFromDB(t, session.ID); got != original {
+		t.Fatalf("DB title = %q, want unchanged original %q", got, original)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Case 6: auto-titling is idempotent — a second run does not re-title / clobber.
+// ---------------------------------------------------------------------------
+
+func TestChatTitle_AutoTitlesOnlyOnce(t *testing.T) {
+	requireDB(t)
+	withStubLLM(t, stubLLMCompletion(t, http.StatusOK, "First Generated Title"))
+
+	original := "original title text"
+	session := newChatTitleTestSession(t, original)
+
+	// First generation applies against the observed original title.
+	_, applied, err := testHandler.generateChatSessionTitle(context.Background(), session.ID, original, original)
+	if err != nil || !applied {
+		t.Fatalf("first generation: applied=%v err=%v", applied, err)
+	}
+	if got := chatSessionTitleFromDB(t, session.ID); got != "First Generated Title" {
+		t.Fatalf("after first generation title = %q", got)
+	}
+
+	// A second run still observing the ORIGINAL title (as the first-message
+	// trigger would) must be a no-op: the CAS no longer matches, so the
+	// already-generated title is left intact.
+	_, applied2, err2 := testHandler.generateChatSessionTitle(context.Background(), session.ID, original, original)
+	if err2 != nil {
+		t.Fatalf("second generation: unexpected error: %v", err2)
+	}
+	if applied2 {
+		t.Fatal("expected second generation to be a no-op (CAS miss)")
+	}
+	if got := chatSessionTitleFromDB(t, session.ID); got != "First Generated Title" {
+		t.Fatalf("second generation clobbered title: %q", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Async path: successful generation publishes chat:session_updated so the
+// frontend refreshes the title in place (reuses the manual-rename channel).
+// ---------------------------------------------------------------------------
+
+func TestChatTitle_AsyncPublishesSessionUpdated(t *testing.T) {
+	requireDB(t)
+	withStubLLM(t, stubLLMCompletion(t, http.StatusOK, "Async Semantic Title"))
+
+	original := "async trigger original title"
+	session := newChatTitleTestSession(t, original)
+
+	got := make(chan protocol.ChatSessionUpdatedPayload, 1)
+	testHandler.Bus.Subscribe(protocol.EventChatSessionUpdated, func(e events.Event) {
+		if p, ok := e.Payload.(protocol.ChatSessionUpdatedPayload); ok && p.ChatSessionID == uuidToString(session.ID) {
+			select {
+			case got <- p:
+			default:
+			}
+		}
+	})
+
+	testHandler.maybeGenerateChatTitleAsync(testWorkspaceID, testUserID, session.ID, session.Title, original)
+
+	select {
+	case p := <-got:
+		if p.Title != "Async Semantic Title" {
+			t.Fatalf("event title = %q, want %q", p.Title, "Async Semantic Title")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("did not receive chat:session_updated event for generated title")
+	}
+	if dbTitle := chatSessionTitleFromDB(t, session.ID); dbTitle != "Async Semantic Title" {
+		t.Fatalf("DB title = %q, want %q", dbTitle, "Async Semantic Title")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // sanitizeChatTitle unit tests: enforce the formatting rules regardless of how
 // the model formats its reply (no quotes / no trailing punctuation / no label
 // prefix / language-preserving / length cap).
@@ -140,8 +354,6 @@ func TestSanitizeChatTitle(t *testing.T) {
 		want string
 	}{
 		{"plain", "Fix login bug", "Fix login bug"},
-		{"project middle dot", "Billing · retry invoices", "Billing · retry invoices"},
-		{"project colon", "Billing: retry invoices", "Billing: retry invoices"},
 		{"surrounding double quotes", `"Fix login bug"`, "Fix login bug"},
 		{"surrounding single quotes", `'Fix login bug'`, "Fix login bug"},
 		{"smart quotes", "“修复登录问题”", "修复登录问题"},
@@ -170,83 +382,17 @@ func TestSanitizeChatTitle(t *testing.T) {
 	}
 }
 
-func TestNormalizeRuntimeChatTitle(t *testing.T) {
-	long := strings.Repeat("a", chatSessionTitleMaxLen+1)
-	for _, tc := range []struct {
-		name  string
-		input string
-		want  string
-	}{
-		{name: "normalizes project separator", input: "  Billing   ·   retry invoices ", want: "Billing · retry invoices"},
-		{name: "rejects missing topic", input: "Billing", want: ""},
-		{name: "rejects missing project", input: " · retry invoices", want: ""},
-		{name: "rejects overlong title", input: "Billing · " + long, want: ""},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := normalizeRuntimeChatTitle(tc.input)
-			if tc.want == "" {
-				if err == nil {
-					t.Fatalf("normalizeRuntimeChatTitle(%q) = %q, want an error", tc.input, got)
-				}
-				return
-			}
-			if err != nil || got != tc.want {
-				t.Fatalf("normalizeRuntimeChatTitle(%q) = %q, %v; want %q", tc.input, got, err, tc.want)
-			}
-		})
+func TestShouldGenerateFirstMessageTitlePreservesChannelManualRename(t *testing.T) {
+	if shouldGenerateFirstMessageTitle(false, "manual name", "", true, true) {
+		t.Fatal("channel manual rename was treated as an auto-generated title")
 	}
-}
-
-// WriteChatTitle is the `multica chat title` endpoint: only the chat agent's
-// task token may write, the shape is validated, and a member rename locks it.
-func TestWriteChatTitle(t *testing.T) {
-	requireDB(t)
-	call := func(session db.ChatSession, title string, asAgent bool) *httptest.ResponseRecorder {
-		w := httptest.NewRecorder()
-		req := newRequest(http.MethodPut, "/api/chat/sessions/"+uuidToString(session.ID)+"/title", map[string]any{"title": title})
-		if asAgent {
-			req.Header.Set("X-Actor-Source", "task_token")
-			req.Header.Set("X-Agent-ID", uuidToString(session.AgentID))
-		}
-		req = withURLParam(req, "sessionId", uuidToString(session.ID))
-		testHandler.WriteChatTitle(w, req)
-		return w
+	if !shouldGenerateFirstMessageTitle(false, "derived title", "derived title", true, true) {
+		t.Fatal("title initialized by the channel send should be eligible for refinement")
 	}
-
-	t.Run("member is forbidden", func(t *testing.T) {
-		session := newChatTitleTestSession(t, "um so the invoices")
-		if w := call(session, "Multica · invoice retry", false); w.Code != http.StatusForbidden {
-			t.Fatalf("expected 403, got %d: %s", w.Code, w.Body.String())
-		}
-	})
-	t.Run("agent writes a valid title", func(t *testing.T) {
-		session := newChatTitleTestSession(t, "um so the invoices")
-		if w := call(session, "Multica · invoice retry", true); w.Code != http.StatusOK {
-			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
-		}
-		if got := loadRecapSession(t, session.ID).Title; got != "Multica · invoice retry" {
-			t.Fatalf("title = %q", got)
-		}
-	})
-	t.Run("malformed title is rejected", func(t *testing.T) {
-		session := newChatTitleTestSession(t, "um so the invoices")
-		if w := call(session, "invoice retry", true); w.Code != http.StatusBadRequest {
-			t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
-		}
-	})
-	t.Run("member-renamed title is locked", func(t *testing.T) {
-		session := newChatTitleTestSession(t, "um so the invoices")
-		if _, err := testPool.Exec(context.Background(),
-			`UPDATE chat_session SET title = 'My own name', title_locked = TRUE WHERE id = $1`, uuidToString(session.ID),
-		); err != nil {
-			t.Fatalf("lock title: %v", err)
-		}
-		w := call(session, "Multica · invoice retry", true)
-		if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "manually renamed") {
-			t.Fatalf("expected 409 with reason, got %d: %s", w.Code, w.Body.String())
-		}
-		if got := loadRecapSession(t, session.ID).Title; got != "My own name" {
-			t.Fatalf("locked title overwritten: %q", got)
-		}
-	})
+	if shouldGenerateFirstMessageTitle(false, "unknown source", "", false, false) {
+		t.Fatal("source lookup failure must skip optional title generation")
+	}
+	if !shouldGenerateFirstMessageTitle(false, "first-party seed", "", false, true) {
+		t.Fatal("first-party Chat should retain the existing title refinement flow")
+	}
 }

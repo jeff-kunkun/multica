@@ -3875,10 +3875,6 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		}
 		resp.ChatSessionID = uuidToString(cs.ID)
 		resp.ThreadName = cs.Title
-		// Runtime naming only works if the run is told to name the chat; the
-		// cached brief merely lists the command, which agents never acted on.
-		resp.ChatTitleRequested = !cs.TitleLocked && h.chatNamingSource(r.Context(), cs) == "runtime" && !h.runtimeChatTitleReported(r.Context(), cs)
-		resp.ChatDispatchedIssues = h.chatDispatchedLines(r.Context(), cs)
 		// Legacy compatibility: agent creation no longer creates intro chats,
 		// but historical is_agent_intro sessions can still be resumed. Such a
 		// session carries no user message on its opening turn, so flag it for
@@ -5055,14 +5051,6 @@ func (h *Handler) StartTask(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		slog.Warn("start task failed", "task_id", taskID, "error", err)
 		switch {
-		case errors.Is(err, service.ErrTaskPickupExpired):
-			// The urgent turn was failed with pickup_timeout in the start
-			// transaction (DENE-1884). 409 makes the daemon discard the claim
-			// instead of reporting a second failure for the same task.
-			writeJSON(w, http.StatusConflict, map[string]string{
-				"error": "urgent task missed its pickup deadline; it was failed with pickup_timeout",
-				"code":  string(taskfailure.ReasonPickupTimeout),
-			})
 		case errors.Is(err, pgx.ErrNoRows):
 			status := http.StatusConflict
 			if legacy {

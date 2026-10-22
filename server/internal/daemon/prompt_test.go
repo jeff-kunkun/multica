@@ -579,17 +579,6 @@ func TestBuildChatPromptAttachmentIDsCanBeBoundToCreatedIssues(t *testing.T) {
 	}
 }
 
-func TestBuildChatPromptRequestsRuntimeTitleOnlyWhenAsked(t *testing.T) {
-	task := Task{ChatSessionID: "sess-1", ChatMessage: "fix login"}
-	if out := BuildPrompt(task, "claude"); strings.Contains(out, "multica chat title") {
-		t.Fatalf("chat prompt asked for a title without the server requesting one\n%s", out)
-	}
-	task.ChatTitleRequested = true
-	if out := BuildPrompt(task, "claude"); !strings.Contains(out, "multica chat title \"{Project} · {topic}\"") {
-		t.Fatalf("chat prompt missing the runtime naming directive\n%s", out)
-	}
-}
-
 func TestBuildChatPromptChannelAwareness(t *testing.T) {
 	t.Run("slack-backed prompt teaches both read commands", func(t *testing.T) {
 		out := buildChatPrompt(Task{
@@ -2491,19 +2480,5 @@ func TestPromptCarriesJoinedWakeups(t *testing.T) {
 	}
 	if out := BuildPrompt(Task{IssueID: "issue-1"}, "claude"); strings.Contains(out, "joined this run") {
 		t.Errorf("prompt without joined wakeups mentions them:\n%s", out)
-	}
-}
-
-func TestBuildChatPromptListsDispatchedIssues(t *testing.T) {
-	task := Task{ChatSessionID: "sess-1", ChatMessage: "进展如何"}
-	if out := BuildPrompt(task, "claude"); strings.Contains(out, "Tickets this chat opened") {
-		t.Fatalf("prompt lists dispatched tasks the server did not send\n%s", out)
-	}
-	task.ChatDispatchedIssues = []string{"DENE-9 修登录 — 已完成 · 登录改走新令牌"}
-	out := BuildPrompt(task, "claude")
-	for _, want := range []string{"Tickets this chat opened", "- DENE-9 修登录 — 已完成", "multica chat tickets"} {
-		if !strings.Contains(out, want) {
-			t.Fatalf("prompt misses %q\n%s", want, out)
-		}
 	}
 }

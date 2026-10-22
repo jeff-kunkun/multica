@@ -323,31 +323,6 @@ func (s *TaskService) summoner() Summoner {
 	return Summoner{Queries: s.Queries, TxStarter: s.TxStarter, Bus: s.Bus}
 }
 
-// remindSummonAnswerClose is the last half of the summon loop: a person
-// answered, their reply woke the executor, and that run ended with the ticket
-// still blocked — the executor read the answer but never closed again. It is
-// told once, with a fresh run, to carry on and close. Keyed on the answer
-// comment, so the reminder run (triggered by its own notice) never reminds.
-func (s *TaskService) remindSummonAnswerClose(ctx context.Context, task db.AgentTaskQueue) {
-	if !task.IssueID.Valid || !task.TriggerCommentID.Valid || !task.AgentID.Valid {
-		return
-	}
-	if _, err := s.Queries.ClaimIssueSummonReminder(ctx, task.TriggerCommentID); err != nil {
-		return
-	}
-	issue, err := s.Queries.GetIssue(ctx, task.IssueID)
-	if err != nil || issue.Status != "blocked" {
-		return
-	}
-	notice := s.createSystemNoticeComment(ctx, issue, "人已经回复，这次运行结束时票还停在 blocked。按回复继续推进，做完把状态改到实际所在的位置。")
-	if notice == nil {
-		return
-	}
-	if _, err := s.EnqueueTaskForMention(ctx, issue, task.AgentID, notice.ID, OriginDerived); err != nil {
-		slog.Warn("summon reminder: enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
-	}
-}
-
 // SettleSummonInbox reads the inbox rows the given calls hang on, once the
 // calls are answered or closed (DENE-901). Those rows are the ones the board's
 // mark-all and the ticket's mark-read leave alone; without this they would

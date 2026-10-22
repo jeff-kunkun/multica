@@ -458,9 +458,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		GitExtraCACerts:                gitca.Load(slog.Default()),
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
-	// Chat goal title + progress subtitle refresh after each agent reply
-	// (DENE-1037).
-	h.RegisterChatRecap(bus)
 	invitationRateLimits := handler.DefaultInvitationRateLimits()
 	invitationRateLimits.Actor.Limit = envNonNegativeInt("RATE_LIMIT_INVITATION_ACTOR_10M", invitationRateLimits.Actor.Limit)
 	invitationRateLimits.Workspace.Limit = envNonNegativeInt("RATE_LIMIT_INVITATION_WORKSPACE_24H", invitationRateLimits.Workspace.Limit)
@@ -1835,8 +1832,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
 					r.Get("/", h.GetWorkspace)
-					r.Get("/naming", h.GetWorkspaceNaming)
-					r.Get("/agent-spawn", h.GetWorkspaceAgentSpawn)
 					r.Get("/magpie", h.GetWorkspaceMagpie)
 					r.Get("/members", h.ListMembersWithUser)
 					r.Post("/leave", h.LeaveWorkspace)
@@ -1880,8 +1875,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// Admin-level access
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
-					r.Put("/naming", h.UpdateWorkspaceNaming)
-					r.Put("/agent-spawn", h.UpdateWorkspaceAgentSpawn)
 					r.Put("/magpie", h.UpdateWorkspaceMagpie)
 					r.Put("/", h.UpdateWorkspace)
 					r.Patch("/", h.UpdateWorkspace)
@@ -2063,19 +2056,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/bots/{botId}/wake/events/{eventId}", h.RecordBotWakeReceipt)
 					r.Post("/bots/{botId}/wake/events/{eventId}/ack", h.RecordBotWakeReceipt)
 					r.Post("/bots/{botId}/wake/events/{eventId}/result", h.RecordBotWakeReceipt)
-					// What a Bot owes its person (DENE-1933): receipts for the
-					// relay and the answer, and the open list to catch up on.
-					r.Post("/bots/{botId}/wake/events/{eventId}/relayed", h.RelayHumanNeeded)
-					r.Post("/bots/{botId}/wake/events/{eventId}/answered", h.AnswerHumanNeeded)
-					r.Get("/bots/{botId}/human-needed", h.ListHumanNeededForBot)
-					// The office event stream (DENE-1963): per-event receipts
-					// and the Bot's own delivery ledger.
-					r.Post("/bots/{botId}/office-events/{eventId}/receipt", h.OfficeEventReceipt)
-					r.Get("/bots/{botId}/office-deliveries", h.ListBotOfficeDeliveries)
-					r.Post("/bots/{botId}/office-deliveries/retry", h.RetryBotOfficeDeliveries)
-					// Pull by cursor; a Bot key reads as its owner.
-					r.Get("/office-events", h.ListOfficeEvents)
-					r.Get("/office-events/{eventId}", h.GetOfficeEvent)
 				})
 
 				// Your own Bot channel for decisions (DENE-1933): only the
@@ -2087,8 +2067,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/me/bot-binding", h.PutBotBinding)
 					r.Delete("/me/bot-binding", h.DeleteBotBinding)
 					r.Post("/me/bot-binding/verify", h.VerifyBotBinding)
-					r.Get("/me/office-deliveries", h.ListMyOfficeDeliveries)
-					r.Post("/me/office-deliveries/retry", h.RetryMyOfficeDeliveries)
 					// What Bots did in a person's name (DENE-1936).
 					r.Get("/bot-writes", h.ListBotWriteAudit)
 				})
@@ -2287,13 +2265,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/batch-delete", h.BatchDeleteIssues)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetIssue)
-					r.Get("/asks", func(w http.ResponseWriter, req *http.Request) {
-						q := req.URL.Query()
-						q.Set("issue_id", chi.URLParam(req, "id"))
-						req.URL.RawQuery = q.Encode()
-						h.ListAsks(w, req)
-					})
-					r.Post("/asks", h.CreateAsk)
 					r.Get("/work-thread", h.GetIssueWorkThread)
 					r.Post("/work-thread/action", h.WorkThreadAction)
 					r.Put("/", h.UpdateIssue)
@@ -2341,13 +2312,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// One-shot handoff (DENE-863): server checks the target and
 					// reports what actually landed — `multica issue handoff`.
 					r.Post("/handoff", h.HandoffIssue)
-					// One "叫人" entry (DENE-880): inbox, subscription, a
-					// visible @ and an open call the reply answers —
-					// `multica issue summon`.
-					r.Post("/summon", h.SummonIssue)
-					// A structured question to one person, pushed to their Bot
-					// when they have one (DENE-1933) — `multica issue ask-human`.
-					r.Post("/ask-human", h.AskHumanIssue)
 					r.Post("/quick-actions/{quickActionId}/run", h.RunQuickAction)
 					r.Post("/quick-actions/{quickActionId}/render", h.RenderQuickAction)
 					r.Get("/task-runs", h.ListTasksByIssue)
@@ -2371,11 +2335,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
-			// Generic agent questions. The same contract is used by the CLI and
-			// every UI surface (issue activity, chat and inbox).
+			// Owner-confirmation questions: read one and answer it.
 			r.Route("/api/asks", func(r chi.Router) {
-				r.Get("/", h.ListAsks)
-				r.Post("/", h.CreateAsk)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetAsk)
 					r.Post("/answer", h.AnswerAsk)
@@ -2795,15 +2756,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/", h.ListChatSessions)
 				// Registered before /{sessionId} so "make-private" is not captured as an id.
 				r.Post("/make-private", h.MakeChatSessionsPrivate)
-				// Agent-only: open a chat from the chat this run belongs to (DENE-1271).
-				r.Post("/spawn", h.SpawnChatSession)
 				r.Route("/{sessionId}", func(r chi.Router) {
 					r.Get("/", h.GetChatSession)
 					r.Post("/stop", h.StopChatSession)
-					r.Get("/tickets", h.ListChatSessionTickets)
-					// Pin / take down by hand (DENE-1719) — `multica chat tickets add|remove`.
-					r.Post("/tickets", h.AddChatSessionTicket)
-					r.Delete("/tickets/{issueId}", h.RemoveChatSessionTicket)
 					r.Get("/access", h.GetChatSessionAccess)
 					r.Put("/access", h.PutChatSessionAccess)
 					r.Get("/work-thread", h.GetChatWorkThread)
@@ -2814,9 +2769,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Patch("/archive", h.SetChatSessionArchived)
 					r.Delete("/", h.DeleteChatSession)
 					r.Post("/messages", h.SendChatMessage)
-					// `multica chat ask-human` (DENE-1933).
-					r.Post("/ask-human", h.AskHumanChat)
-					r.Post("/title", h.WriteChatTitle)
 					r.Post("/progress", h.WriteChatProgress)
 					r.Get("/progress", h.ListChatProgress)
 					r.Post("/onboarding", h.StartMikaOnboarding)
@@ -2859,8 +2811,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Get("/api/chat/thread", h.GetChatThread)
 
 			// Inbox
-			// Calls still waiting on the current user (DENE-880).
-			r.Get("/api/summons/waiting", h.ListWaitingSummons)
 			r.Route("/api/inbox", func(r chi.Router) {
 				r.Get("/", h.ListInbox)
 				// Archived notifications, for the inbox's "Archived" sub-view.

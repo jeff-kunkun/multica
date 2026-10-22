@@ -3,15 +3,11 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
-	"github.com/go-chi/chi/v5"
-	"github.com/multica-ai/multica/server/internal/middleware"
-	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
@@ -28,29 +24,6 @@ func setActivityScope(t *testing.T, f *humanNeededFixture, scope ...string) {
 		scope = []string{}
 	}
 	dbfx.Exec(t, `UPDATE member_bot_binding SET activity_scope=$2 WHERE id=$1`, f.binding, scope)
-}
-
-func humanNeededCaller(t *testing.T, f *humanNeededFixture) func(method, path string) (int, []byte) {
-	t.Helper()
-	router := chi.NewRouter()
-	router.Use(middleware.Auth(testHandler.Queries, nil, nil, nil))
-	router.Route("/api/workspaces/{id}", func(r chi.Router) {
-		r.Use(middleware.RequireWorkspaceMemberFromURL(testHandler.Queries, "id"))
-		r.Get("/bots/{botId}/human-needed", testHandler.ListHumanNeededForBot)
-	})
-	srv := httptest.NewServer(router)
-	t.Cleanup(srv.Close)
-	return func(method, path string) (int, []byte) {
-		req, _ := http.NewRequest(method, srv.URL+"/api/workspaces/"+testWorkspaceID+"/bots/"+uuidToString(f.bot.ID)+path, nil)
-		req.Header.Set("Authorization", "Bearer "+f.token)
-		res, err := srv.Client().Do(req)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer res.Body.Close()
-		data, _ := io.ReadAll(res.Body)
-		return res.StatusCode, data
-	}
 }
 
 func TestBotBindingActivityScopeRoundTrip(t *testing.T) {
@@ -123,7 +96,6 @@ func TestRetiredActivityRowsAreCancelledNotSent(t *testing.T) {
 // whichever field it rode in: question, summary, title, option labels.
 func TestWebhookBodiesAreMaskedWholeNotFieldByField(t *testing.T) {
 	f := newHumanNeededFixture(t, true)
-	call := humanNeededCaller(t, f)
 	leaks := []string{"review only secret", "ReviewOnlySecret123", `"password":"ab"`, `\"password\":\"ab\"`}
 
 	// human_needed: question, summary, option labels.
@@ -144,16 +116,6 @@ func TestWebhookBodiesAreMaskedWholeNotFieldByField(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), "ack_url") {
 		t.Fatalf("masking broke the receipt links: %s", raw)
-	}
-
-	code, data := call("GET", "/human-needed?status=sent,queued")
-	if code != 200 {
-		t.Fatalf("human-needed list: %d %s", code, data)
-	}
-	for _, leak := range leaks {
-		if strings.Contains(string(data), leak) {
-			t.Fatalf("human-needed list leaked %q: %s", leak, data)
-		}
 	}
 }
 
@@ -181,15 +143,4 @@ func TestWebhookMasksEscapedQuotePasswordsAndOptionIDs(t *testing.T) {
 		t.Fatalf("masking broke receipts or ordinary options: %s", raw)
 	}
 
-}
-
-func TestAskRefusesCredentialsInOptionIDs(t *testing.T) {
-	bad := AskHumanRequest{Question: "发布吗？", Options: []service.HumanNeededOption{{ID: "sk-ReviewOnlySyntheticKey1234567890", Label: "是"}}}
-	if _, _, _, problem := bad.validate(); problem == "" {
-		t.Fatal("an option id holding a key was accepted")
-	}
-	ok := AskHumanRequest{Question: "发布吗？", Options: []service.HumanNeededOption{{ID: "a", Label: "是"}, {ID: "no-go", Label: "否"}}}
-	if _, opts, _, problem := ok.validate(); problem != "" || len(opts) != 2 || opts[1].ID != "no-go" {
-		t.Fatalf("ordinary options broke: %q %v", problem, opts)
-	}
 }

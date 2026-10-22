@@ -189,11 +189,7 @@ Check in this order:
 1. Was a task supposed to be created? Inspect issue/comment/autopilot context.
 2. Is the assignee an agent or squad? A squad routes to its leader.
 3. Is the agent archived or bound to a runtime the actor cannot use?
-4. Is the runtime online? `multica runtime list --output json`. An urgent
-   chat turn (`chat send --urgent`) may be addressed to the agent's standby
-   runtime (`fallback_runtime_id`); the standby claims and starts it through
-   the normal daemon poll. Any other runtime, including one of the same owner
-   and provider, never receives it.
+4. Is the runtime online? `multica runtime list --output json`.
 5. Did the daemon heartbeat recently? Runtime `last_seen_at` is the visible clue.
 6. Did the task get claimed or is it stuck pending/running/waiting for local directory?
 7. If repo checkout failed, classify it after checking whether repo context was

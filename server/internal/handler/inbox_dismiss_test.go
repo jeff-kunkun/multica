@@ -92,12 +92,6 @@ func TestDismissInboxClearsOnlyTheOriginatorWaitingReminder(t *testing.T) {
 	if got := countActiveTasksForIssue(t, issue.ID); got != beforeTasks {
 		t.Fatalf("active tasks after dismiss = %d, want %d", got, beforeTasks)
 	}
-	waiting := waitingSummons(t, fixture.originator)
-	for _, row := range waiting {
-		if row.IssueID == issue.ID {
-			t.Fatalf("dismissed summon still waiting: %+v", row)
-		}
-	}
 }
 
 func TestDismissInboxRejectsAutomationRun(t *testing.T) {
