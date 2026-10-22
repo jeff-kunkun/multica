@@ -18,9 +18,10 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// HandoffIssueRequest is the server-owned handoff command. "reviewer" and
-// "dispatcher" deliberately go through the existing router; an agent name is
-// an explicit named handoff and uses the same mention queue as comments.
+// HandoffIssueRequest is the server-owned handoff command. "reviewer" moves
+// the issue to in_review and hands it to the issue's agent reviewer; an agent
+// name is an explicit named handoff. Both use the same mention queue as
+// comments.
 type HandoffIssueRequest struct {
 	To string `json:"to"`
 }
@@ -36,12 +37,8 @@ type HandoffIssueResponse struct {
 	Reason     string `json:"reason,omitempty"`
 }
 
-func handoffDuplicateReason(reason string) bool {
-	return strings.Contains(reason, "already") || strings.Contains(reason, "active")
-}
-
-// HandoffIssue performs routing and explicit agent handoff atomically from
-// the caller's point of view, and reports the writes that actually happened.
+// HandoffIssue performs an explicit agent handoff atomically from the
+// caller's point of view, and reports the writes that actually happened.
 func (h *Handler) HandoffIssue(w http.ResponseWriter, r *http.Request) {
 	issue, ok := h.loadIssueForUser(w, r, chi.URLParam(r, "id"))
 	if !ok {
@@ -62,19 +59,21 @@ func (h *Handler) HandoffIssue(w http.ResponseWriter, r *http.Request) {
 		h.followIssueFromChatTask(r, actorType, actorID, issue)
 		writeJSON(w, http.StatusOK, resp)
 	}
-	if target == "reviewer" || target == "dispatcher" {
-		if target == "reviewer" && issue.ReviewerType.Valid && issue.ReviewerType.String == "member" {
-			writeError(w, http.StatusConflict, "reviewer seat is filled by a person; handoff cannot replace a human reviewer")
+	var agent db.Agent
+	targetType := "agent"
+	if target == "reviewer" {
+		if !issue.ReviewerType.Valid || issue.ReviewerType.String != "agent" || !issue.ReviewerID.Valid {
+			writeError(w, http.StatusConflict, "this issue has no agent reviewer; set one or hand off to an agent by name")
 			return
 		}
-		if h.Routing == nil {
-			writeError(w, http.StatusConflict, "routing is unavailable")
+		reviewer, err := h.Queries.GetAgent(r.Context(), issue.ReviewerID)
+		if err != nil {
+			writeError(w, 500, "load reviewer failed")
 			return
 		}
 		// A reviewer handoff is a real status transition. Go through UpdateIssue
-		// so the review delivery gate and acceptance-seat guard run with the
-		// request's actor identity; calling Route alone bypasses both guards.
-		if target == "reviewer" && issue.Status != "in_review" {
+		// so the review delivery gate runs with the request's actor identity.
+		if issue.Status != "in_review" {
 			if !h.handoffSetInReview(w, r) {
 				return
 			}
@@ -83,57 +82,25 @@ func (h *Handler) HandoffIssue(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
-		out, err := h.Routing.Route(r.Context(), uuidToString(issue.WorkspaceID), uuidToString(issue.ID))
+		agent, targetType = reviewer, "reviewer"
+	} else {
+		agents, err := h.Queries.ListAgents(r.Context(), issue.WorkspaceID)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
+			writeError(w, 500, "load agents failed")
 			return
 		}
-		duplicate := handoffDuplicateReason(out.Reason)
-		resp := HandoffIssueResponse{Target: target, TargetType: target, Routed: out.ExecutorWritten != nil || !out.ReviewerWritten.Empty() || out.Mentioned, Duplicate: duplicate, Reason: out.Reason}
-		if target == "reviewer" {
-			resp.TargetID = uuidToString(issue.ReviewerID)
-			resp.TargetName = issue.ReviewerID.String()
-			if issue.ReviewerType.Valid && issue.ReviewerType.String == "agent" && issue.ReviewerID.Valid {
-				if a, e := h.Queries.GetAgent(r.Context(), issue.ReviewerID); e == nil {
-					resp.TargetName = a.Name
-				}
-			}
-			if resp.TargetID != "" {
-				active, e := h.Queries.HasActiveTaskForIssueAndAgent(r.Context(), db.HasActiveTaskForIssueAndAgentParams{IssueID: issue.ID, AgentID: issue.ReviewerID})
-				if e == nil {
-					resp.RunCreated = !duplicate && active
-				}
-			}
-		} else if out.ExecutorWritten != nil {
-			resp.TargetID = out.ExecutorWritten.ID
-			resp.TargetName = out.ExecutorWritten.Name
-			if agentID, e := util.ParseUUID(out.ExecutorWritten.ID); e == nil {
-				active, e := h.Queries.HasActiveTaskForIssueAndAgent(r.Context(), db.HasActiveTaskForIssueAndAgentParams{IssueID: issue.ID, AgentID: agentID})
-				if e == nil {
-					resp.RunCreated = !duplicate && active
-				}
+		for _, candidate := range agents {
+			if strings.EqualFold(candidate.Name, target) || uuidToString(candidate.ID) == target {
+				agent = candidate
+				break
 			}
 		}
-		finish(resp)
-		return
-	}
-	agents, err := h.Queries.ListAgents(r.Context(), issue.WorkspaceID)
-	if err != nil {
-		writeError(w, 500, "load agents failed")
-		return
-	}
-	var agent db.Agent
-	for _, candidate := range agents {
-		if strings.EqualFold(candidate.Name, target) || uuidToString(candidate.ID) == target {
-			agent = candidate
-			break
+		if !agent.ID.Valid {
+			writeError(w, http.StatusBadRequest, "target must be reviewer or an agent name")
+			return
 		}
 	}
-	if !agent.ID.Valid {
-		writeError(w, http.StatusBadRequest, "target must be reviewer, dispatcher, or an agent name")
-		return
-	}
-	resp := HandoffIssueResponse{Target: target, TargetType: "agent", TargetID: uuidToString(agent.ID), TargetName: agent.Name}
+	resp := HandoffIssueResponse{Target: target, TargetType: targetType, TargetID: uuidToString(agent.ID), TargetName: agent.Name}
 	pending, err := h.Queries.HasActiveTaskForIssueAndAgent(r.Context(), db.HasActiveTaskForIssueAndAgentParams{IssueID: issue.ID, AgentID: agent.ID})
 	if err != nil {
 		writeError(w, 500, "check existing run failed")
@@ -186,9 +153,9 @@ func (h *Handler) HandoffIssue(w http.ResponseWriter, r *http.Request) {
 }
 
 // handoffSetInReview reuses the canonical issue update path so reviewer
-// handoffs cannot skip the PR/no-code gate or acceptance-seat guard.
+// handoffs cannot skip the PR/no-code gate.
 func (h *Handler) handoffSetInReview(w http.ResponseWriter, r *http.Request) bool {
-	req := r.Clone(withSkipIssueRouting(r.Context()))
+	req := r.Clone(r.Context())
 	req.Method = http.MethodPut
 	req.Body = io.NopCloser(bytes.NewReader([]byte(`{"status":"in_review"}`)))
 	req.ContentLength = int64(len(`{"status":"in_review"}`))

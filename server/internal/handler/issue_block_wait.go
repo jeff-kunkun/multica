@@ -17,7 +17,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/closeprotocol"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
-	"github.com/multica-ai/multica/server/internal/routing"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -427,38 +426,27 @@ func (h *Handler) patrolOne(ctx context.Context, issue db.Issue) bool {
 		}
 	}
 	round, hasRound := parseMetaTime(blockwait.MetaString(meta, blockwait.KeyReviewRound))
-	reviewFailed, reviewFailures, reviewAsked := h.reviewRoundFailure(ctx, issue, round, hasRound)
-	var reviewSkip *service.ReviewSkip
-	if reviewFailed {
-		if skip, ok := h.findReviewSkip(ctx, issue, ""); ok {
-			reviewSkip = &skip
-		}
-	}
 	decision := blockwait.DecidePatrol(blockwait.PatrolInput{
-		Status:          issue.Status,
-		Quiet:           quiet,
-		Record:          rec,
-		Blockers:        blockers,
-		Now:             time.Now(),
-		LastPatrol:      last,
-		HasLastPatrol:   hasLast,
-		HasPassComment:  h.passInThisRound(ctx, issue, round, hasRound),
-		ReleasedPass:    hasRound && blockwait.MetaString(meta, blockwait.KeyReleased) == blockwait.ReleasedPass,
-		SegmentNudged:   blockwait.MetaString(meta, blockwait.KeySegmentNudged) == "1",
-		ReviewNudged:    blockwait.MetaString(meta, blockwait.KeyReviewNudged) == "1",
-		ReviewerHuman:   issue.ReviewerType.Valid && issue.ReviewerType.String == "member",
-		ReviewerEmpty:   reviewerSlotEmpty(issue),
-		ReviewRunFailed: reviewFailed,
-		ReviewFailures:  reviewFailures,
-		ReviewAsked:     reviewAsked,
-		ReviewSkip:      reviewSkipReason(reviewSkip),
-		Watched:         watched,
-		Undriven:        self.Kind == blockwait.DriverNone,
-		UndrivenWhy:     self.Reason,
-		UndrivenState:   blockwait.ParseUndriven(meta),
+		Status:         issue.Status,
+		Quiet:          quiet,
+		Record:         rec,
+		Blockers:       blockers,
+		Now:            time.Now(),
+		LastPatrol:     last,
+		HasLastPatrol:  hasLast,
+		HasPassComment: h.passInThisRound(ctx, issue, round, hasRound),
+		ReleasedPass:   hasRound && blockwait.MetaString(meta, blockwait.KeyReleased) == blockwait.ReleasedPass,
+		SegmentNudged:  blockwait.MetaString(meta, blockwait.KeySegmentNudged) == "1",
+		ReviewNudged:   blockwait.MetaString(meta, blockwait.KeyReviewNudged) == "1",
+		ReviewerHuman:  issue.ReviewerType.Valid && issue.ReviewerType.String == "member",
+		ReviewerEmpty:  reviewerSlotEmpty(issue),
+		Watched:        watched,
+		Undriven:       self.Kind == blockwait.DriverNone,
+		UndrivenWhy:    self.Reason,
+		UndrivenState:  blockwait.ParseUndriven(meta),
 	})
 	switch decision.Action {
-	case blockwait.ActionRelease, blockwait.ActionWake, blockwait.ActionSeat, blockwait.ActionRevive, blockwait.ActionEscalate, blockwait.ActionCoverReview:
+	case blockwait.ActionRelease, blockwait.ActionWake, blockwait.ActionRevive, blockwait.ActionEscalate:
 	default:
 		return false
 	}
@@ -467,27 +455,11 @@ func (h *Handler) patrolOne(ctx context.Context, issue db.Issue) bool {
 	case blockwait.ActionRevive, blockwait.ActionEscalate:
 		h.reviveOrEscalate(ctx, issue, decision)
 	case blockwait.ActionRelease:
-		out := h.finishAcceptedIssue(ctx, issue, decision.Reason)
-		if reviewSkip != nil && out.Status == issuestatus.Done {
-			if err := service.RecordReviewSkip(ctx, h.Queries, issue, *reviewSkip); err != nil {
-				slog.Warn("review skip: record failed", "issue_id", uuidToString(issue.ID), "error", err)
-			}
-		}
+		h.finishAcceptedIssue(ctx, issue, decision.Reason)
 	case blockwait.ActionWake:
 		h.wakeIssueOwner(ctx, issue, decision.Reason, decision.CommentOnly)
-	case blockwait.ActionSeat:
-		h.seatQuietReview(ctx, issue, decision.Reason)
-	case blockwait.ActionCoverReview:
-		h.coverFailedReview(ctx, issue, decision.Force)
 	}
 	return true
-}
-
-func reviewSkipReason(skip *service.ReviewSkip) string {
-	if skip == nil {
-		return ""
-	}
-	return skip.Reason()
 }
 
 // reviewerSlotEmpty reports an acceptance slot nobody has answered. "none" is
@@ -500,38 +472,6 @@ func reviewerSlotEmpty(issue db.Issue) bool {
 		return false
 	}
 	return !issue.ReviewerID.Valid
-}
-
-// seatQuietReview is the patrol's answer to an in_review issue whose
-// acceptance seat is empty (DENE-869). It fills the seat the same way the
-// status write does and starts it; when no seat can be picked the wait
-// becomes a structured block pointing at a workspace manager, so a person
-// sees it instead of two agents waiting on each other.
-func (h *Handler) seatQuietReview(ctx context.Context, issue db.Issue, reason string) {
-	var tr statusTransition
-	if issue.AssigneeType.Valid && issue.AssigneeType.String == "agent" && issue.AssigneeID.Valid {
-		tr = h.pickAcceptanceSeat(ctx, issue, issue.AssigneeID)
-	} else {
-		tr.refuse = "执行席不是 Agent，平台选不出与之不同的验收席"
-	}
-	if tr.refuse == "" && tr.setReviewer {
-		updated, err := h.Queries.SetIssueReviewerIfUnset(ctx, db.SetIssueReviewerIfUnsetParams{
-			ReviewerType: tr.reviewerType.String,
-			ReviewerID:   tr.reviewerID,
-			ID:           issue.ID,
-			WorkspaceID:  issue.WorkspaceID,
-		})
-		if err != nil {
-			slog.Warn("block wait: seat quiet review failed", "error", err, "issue_id", uuidToString(issue.ID))
-			tr.refuse = "验收席没能写进这张票"
-		} else {
-			h.publishBlockStatus(issue, updated)
-			tr.note = reason + tr.note
-			h.finishStatusTransition(ctx, updated, tr)
-			return
-		}
-	}
-	h.blockReviewNeedingHuman(ctx, issue, reason+tr.refuse+"。")
 }
 
 // blockReviewNeedingHuman turns a seatless review into a structured block
@@ -743,27 +683,10 @@ func (h *Handler) wakeIssueOwner(ctx context.Context, issue db.Issue, reason str
 	h.dispatchWaitingOnAssigneeTrigger(ctx, waker, comment.ID)
 }
 
-// seatBeforeWake asks routing to fill the empty executor slot of a ticket
-// whose wait just ended (DENE-1255). The seat is written parked; the wake
-// that follows starts it. The ticket is read again either way, so a slot a
-// person or another pass filled meanwhile counts too. why says, in words a
-// person can act on, why the slot is still empty.
+// seatBeforeWake re-reads a ticket whose wait just ended, so a slot a person
+// filled meanwhile counts. why says why the slot is still empty.
 func (h *Handler) seatBeforeWake(ctx context.Context, issue db.Issue) (db.Issue, string) {
-	why := "这个工作区没有开自动派单"
-	if h.Routing != nil {
-		rctx, cancel := context.WithTimeout(ctx, routeTimeout)
-		out, err := h.Routing.SeatExecutor(rctx, uuidToString(issue.WorkspaceID), uuidToString(issue.ID))
-		cancel()
-		switch {
-		case err != nil:
-			why = "路由这次出错了（" + err.Error() + "）"
-		case out.Action == routing.ActionSkipped && out.Reason == "routing not enabled":
-		case strings.TrimSpace(out.Reason) != "":
-			why = "路由没补上（" + out.Reason + "）"
-		default:
-			why = "路由没补上"
-		}
-	}
+	why := "执行人栏是空的"
 	fresh, err := h.Queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: issue.ID, WorkspaceID: issue.WorkspaceID})
 	if err != nil {
 		return issue, why
@@ -816,14 +739,8 @@ func (h *Handler) unseatedRecipient(ctx context.Context, issue db.Issue) pgtype.
 }
 
 // coverDisabledWakeTarget keeps the patrol from waking a seat that is not
-// taking work (DENE-870). Before this, a seat turned off after its account
-// ran out of money was @-mentioned every time the clock came due, failed
-// again, and was blocked again with a fresh clock. An executor seat that is
-// off hands the ticket to another house's seat, never the ticket's own
-// reviewer; the new seat carries on from the ticket's comments and branch.
-// With nobody to take it, or when the off seat is the reviewer, the wake
-// becomes a plain comment and nobody is dispatched. covered is false when
-// the wake must not dispatch.
+// taking work (DENE-870): the wake becomes a plain comment and nobody is
+// dispatched. covered is false when the wake must not dispatch.
 func (h *Handler) coverDisabledWakeTarget(ctx context.Context, issue db.Issue, targetID pgtype.UUID, reason string) (db.Issue, pgtype.UUID, string, bool) {
 	agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
 		ID: targetID, WorkspaceID: issue.WorkspaceID,
@@ -835,34 +752,7 @@ func (h *Handler) coverDisabledWakeTarget(ctx context.Context, issue db.Issue, t
 	if !isAssignee {
 		return issue, targetID, reason + fmt.Sprintf(" 验收人 %s 已停用，平台没有叫醒它，请重新启用或换一位验收人。", agent.Name), false
 	}
-	var avoid []string
-	if issue.ReviewerType.Valid && issue.ReviewerType.String == "agent" && issue.ReviewerID.Valid {
-		avoid = append(avoid, uuidToString(issue.ReviewerID))
-	}
-	replacement, _, ok := h.substituteAgent(ctx, issue.WorkspaceID, agent, avoid, issue)
-	if !ok {
-		return issue, targetID, reason + fmt.Sprintf(" 执行人 %s 已停用，暂时没有能接手的席位，平台没有叫醒它。重新启用或改派后再继续。", agent.Name), false
-	}
-	updated, err := h.Queries.ReassignIssueToAgentIfCurrent(ctx, db.ReassignIssueToAgentIfCurrentParams{
-		AssigneeID:        replacement.ID,
-		ID:                issue.ID,
-		WorkspaceID:       issue.WorkspaceID,
-		CurrentAssigneeID: agent.ID,
-	})
-	if err != nil {
-		if !errors.Is(err, pgx.ErrNoRows) {
-			slog.Warn("block wait: reassign off seat failed", "issue_id", uuidToString(issue.ID), "error", err)
-		}
-		return issue, targetID, reason + fmt.Sprintf(" 执行人 %s 已停用，平台没有叫醒它。", agent.Name), false
-	}
-	if _, err := h.Queries.CancelPendingTasksByIssueAndAgent(ctx, db.CancelPendingTasksByIssueAndAgentParams{
-		IssueID: issue.ID, AgentID: agent.ID,
-	}); err != nil {
-		slog.Warn("block wait: cancel off seat tasks failed", "issue_id", uuidToString(issue.ID), "error", err)
-	}
-	h.publishWithSource(ctx, protocol.EventIssueUpdated, uuidToString(updated.WorkspaceID), "system", "", RoutingIssueUpdatedPayload(issue, updated))
-	note := fmt.Sprintf(" 原执行人 %s 已停用，这张票改由 %s 接手：先读评论和原分支上的提交，接着做，别从头来。", agent.Name, replacement.Name)
-	return updated, replacement.ID, reason + note, true
+	return issue, targetID, reason + fmt.Sprintf(" 执行人 %s 已停用，平台没有叫醒它。重新启用或改派后再继续。", agent.Name), false
 }
 
 func (h *Handler) memberWakeMention(ctx context.Context, userID pgtype.UUID) string {

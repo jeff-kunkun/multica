@@ -235,127 +235,12 @@ func setIssueMetadataString(t *testing.T, issueID, key, value string) {
 	}
 }
 
-// TestPatrolSeatsEmptyReviewInsteadOfWakingExecutor is DENE-860 at 12:10: the
-// 30-minute reminder used to land on the executor because the acceptance seat
-// was empty. The patrol now fills the seat and starts it; the executor is not
-// asked to review its own work.
-func TestPatrolSeatsEmptyReviewInsteadOfWakingExecutor(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-	ctx := context.Background()
-	executor := ensureLadderAgent(t, "孙悟空")
-	ensureLadderAgent(t, "孙悟天")
-
-	ageIntoSeatlessReview := func(t *testing.T, issueID string) db.Issue {
-		t.Helper()
-		if _, err := testPool.Exec(ctx, `
-			UPDATE issue SET status = 'in_review', reviewer_type = NULL, reviewer_id = NULL,
-				metadata = COALESCE(metadata, '{}'::jsonb) || jsonb_build_object($2::text, '1'),
-				last_activity_at = now() - interval '2 hours', updated_at = now() - interval '2 hours'
-			WHERE id = $1`, issueID, blockwait.KeyWatched); err != nil {
-			t.Fatalf("age into seatless review: %v", err)
-		}
-		loaded, err := testHandler.Queries.GetIssue(ctx, parseUUID(issueID))
-		if err != nil {
-			t.Fatalf("reload: %v", err)
-		}
-		return loaded
-	}
-
-	t.Run("agent executor gets a seat, not a nudge", func(t *testing.T) {
-		issue := createIssueHTTP(t, "seatless review", "in_progress")
-		setIssueAssigneeDirect(t, issue.ID, "agent", executor)
-		loaded := ageIntoSeatlessReview(t, issue.ID)
-		if !testHandler.patrolOne(ctx, loaded) {
-			t.Fatal("seatless in_review was not acted on")
-		}
-		if got := countPendingTasksForAgent(t, issue.ID, executor); got != 0 {
-			t.Fatalf("executor tasks = %d, want 0: the patrol must not wake the executor", got)
-		}
-		var status, reviewerID string
-		if err := testPool.QueryRow(ctx, `
-			SELECT status, COALESCE(reviewer_id::text, '') FROM issue WHERE id = $1
-		`, issue.ID).Scan(&status, &reviewerID); err != nil {
-			t.Fatalf("read issue: %v", err)
-		}
-		if status != "in_review" || reviewerID == "" || reviewerID == executor {
-			t.Fatalf("status = %q reviewer = %q, want in_review with a seat other than %s", status, reviewerID, executor)
-		}
-		if got := countPendingTasksForAgent(t, issue.ID, reviewerID); got != 1 {
-			t.Fatalf("acceptance tasks = %d, want 1", got)
-		}
-		body, _, _, _ := systemCommentOn(t, issue.ID)
-		if !strings.Contains(body, "验收席") || !strings.Contains(body, "验收已经开始") {
-			t.Fatalf("comment = %s", body)
-		}
-	})
-
-	t.Run("no seat possible becomes a block a person can see", func(t *testing.T) {
-		issue := createIssueHTTP(t, "seatless review human executor", "in_progress")
-		setIssueAssigneeDirect(t, issue.ID, "member", testUserID)
-		loaded := ageIntoSeatlessReview(t, issue.ID)
-		if !testHandler.patrolOne(ctx, loaded) {
-			t.Fatal("seatless in_review was not acted on")
-		}
-		var status, needsHuman string
-		if err := testPool.QueryRow(ctx, `
-			SELECT status, COALESCE(metadata->>$2, '') FROM issue WHERE id = $1
-		`, issue.ID, blockwait.KeyNeedsHuman).Scan(&status, &needsHuman); err != nil {
-			t.Fatalf("read issue: %v", err)
-		}
-		if status != "blocked" || needsHuman != testUserID {
-			t.Fatalf("status = %q needs_human = %q, want blocked pointing at the workspace owner %s", status, needsHuman, testUserID)
-		}
-		body, _, _, _ := systemCommentOn(t, issue.ID)
-		if !strings.Contains(body, "补不上验收席") || !strings.Contains(body, "mention://member/"+testUserID) {
-			t.Fatalf("comment = %s", body)
-		}
-	})
-}
-
-// DENE-1255: the blocker ended but the waiter has no executor. Routing seats
-// one first, then the wake starts it as usual.
-func TestBlockedByWakeSeatsAnEmptyExecutorFirst(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-	waited := createIssueHTTP(t, "unseated upstream", "in_progress")
-	waiter := createIssueHTTP(t, "unseated waiter", "blocked")
-	setIssueMetadataString(t, waiter.ID, blockwait.KeyBlockedBy, waited.Identifier)
-	// Routing comes on only now, so the seat below is the wake's, not the
-	// create-time pass's.
-	agentID := createHandlerTestAgent(t, "Unseated Wake Medium Seat", []byte("[]"))
-	dbfx.Exec(t, `UPDATE agent SET routing_tier = 'medium' WHERE id = $1`, agentID)
-	enableTestRouting(t, tierJudge{tier: "medium", confidence: 0.95})
-	var before string
-	dbfx.QueryRow(t, `SELECT COALESCE(assignee_id::text, '') FROM issue WHERE id = $1`, waiter.ID).Scan(&before)
-	if before != "" {
-		t.Fatalf("waiter already seated before the wake: %s", before)
-	}
-
-	updateIssueStatusHTTP(t, waited.ID, "done")
-
-	var assigneeID string
-	dbfx.QueryRow(t, `SELECT COALESCE(assignee_id::text, '') FROM issue WHERE id = $1`, waiter.ID).Scan(&assigneeID)
-	if assigneeID == "" {
-		t.Fatal("the wake did not seat an executor")
-	}
-	if got := countPendingTasksForAgent(t, waiter.ID, assigneeID); got != 1 {
-		t.Fatalf("pending tasks for the seated executor = %d, want 1", got)
-	}
-}
-
-// When routing cannot seat anyone, the wake says why on the ticket and puts
+// When nobody holds the executor slot, the wake says why on the ticket and puts
 // a "缺执行人" card on a person's inbox instead of silently commenting.
 func TestBlockedByWakeWithoutExecutorSummonsAPerson(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
-	previousRouting := testHandler.Routing
-	testHandler.Routing = nil
-	t.Cleanup(func() { testHandler.Routing = previousRouting })
-
 	waited := createIssueHTTP(t, "unseatable upstream", "in_progress")
 	waiter := createIssueHTTP(t, "unseatable waiter", "blocked")
 	setIssueMetadataString(t, waiter.ID, blockwait.KeyBlockedBy, waited.Identifier)

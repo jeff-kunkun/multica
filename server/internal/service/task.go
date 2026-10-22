@@ -85,10 +85,6 @@ type TaskService struct {
 	// state for a self-hosted deployment with no MULTICA_LLM_* configuration.
 	// Wired in router.go from the same *llm.Client that backs chat auto-titling.
 	QuickActions ChatQuickActionsLLM
-	// ParkingSummarizer phrases the parking record's one sentence when the
-	// agent left none (DENE-881). Optional: nil keeps the fixed wording.
-	// Wired in router.go to the workspace routing model.
-	ParkingSummarizer ParkingSummarizer
 	// quickActionsInFlight (chat session id -> struct{}{}) and
 	// quickActionsRunning admit suggestion passes: one per session, and a
 	// process-wide ceiling. Both zero values are usable, so a TaskService built
@@ -1127,8 +1123,6 @@ func (s *TaskService) taskMetricsContext(ctx context.Context, task db.AgentTaskQ
 	default:
 		if _, ok := s.parseQuickCreateContext(task); ok {
 			source = "quick_create"
-		} else if _, ok := ParseConsultContext(task); ok {
-			source = "consult"
 		} else if tc.Source != "" {
 			source = tc.Source
 		}
@@ -1216,10 +1210,6 @@ func (s *TaskService) taskAnalyticsContext(ctx context.Context, task db.AgentTas
 		tc.WorkspaceID = qc.WorkspaceID
 		tc.UserID = qc.RequesterID
 		tc.Source = analytics.SourceManual
-	}
-	if cc, ok := ParseConsultContext(task); ok {
-		tc.WorkspaceID = cc.WorkspaceID
-		tc.UserID = util.UUIDToString(task.OriginatorUserID)
 	}
 	s.storeTaskAnalyticsContext(task, tc)
 	return tc
@@ -5490,12 +5480,6 @@ func (s *TaskService) CompleteTaskWithTransition(ctx context.Context, taskID pgt
 	if qc, ok := s.parseQuickCreateContext(task); ok {
 		s.notifyQuickCreateCompleted(ctx, task, qc, result)
 	}
-	// Consult runs (DENE-1721): the final output is the advice.
-	if cc, ok := ParseConsultContext(task); ok {
-		var payload protocol.TaskCompletedPayload
-		_ = json.Unmarshal(result, &payload)
-		s.finishConsult(ctx, task, cc, util.UnescapeBackslashEscapes(payload.Output), "")
-	}
 
 	// For chat tasks, broadcast chat:done AFTER commit. The single assistant
 	// outcome row (message or no_response) and the resume pointer were already
@@ -6163,40 +6147,28 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 		}
 	}
 
-	// A quota exhaustion takes the relay path the sweeper already uses. A
-	// hold means the issue was reassigned or blocked on purpose, so the
-	// provider's English sentence is not the last word.
-	capacityHeld := false
-	if retried == nil && task.IssueID.Valid {
-		capacityHeld = s.relayQuotaExhaustion(ctx, task, failureReason, errMsg)
-	}
-	if retried == nil && task.IssueID.Valid && !capacityHeld {
-		capacityHeld = s.relaySafetyRefusal(ctx, task, errMsg)
-	}
-
 	// A platform interrupt (daemon shutdown while the server still considered
 	// the run alive) always leaves a notice, including when a retry was just
 	// queued. Other failures stay quiet on the retry path so a flaky timeout
 	// does not post a comment on every attempt. Delegated failures keep this
 	// existing failed-issue comment in addition to the coordinator recovery
-	// signal. A capacity relay posts its own audit instead of the raw
-	// provider sentence.
+	// signal.
 	if isServerInterruptFailure(failureReason) && task.IssueID.Valid {
 		s.noteServerInterrupt(ctx, task, retried)
 	} else if deterministicEscalated && task.IssueID.Valid {
 		s.noteDeterministicFailure(ctx, task, failureReason)
-	} else if errMsg != "" && task.IssueID.Valid && retried == nil && !capacityHeld {
+	} else if errMsg != "" && task.IssueID.Valid && retried == nil {
 		s.createAgentComment(ctx, task.IssueID, task.AgentID, redact.Text(failureCommentBody(failureReason, errMsg)), "system", task.TriggerCommentID, task.ID)
 	}
 	// Every failure that ends here with no retry queued, delegated or not,
 	// leaves the issue with a driver (DENE-1339). Delegated recovery that
-	// found its coordinator already did both parts; a capacity relay and the
-	// two notices above write their own block. Everything else used to fall
+	// found its coordinator already did both parts; the two notices above
+	// write their own block. Everything else used to fall
 	// between the two paths: a run delegated from a chat has no coordinator
 	// issue to recover to, and the parent note skipped it for being delegated.
 	if retried == nil && task.IssueID.Valid && !delegatedHandled {
 		parked := false
-		if !capacityHeld && !deterministicEscalated && !isServerInterruptFailure(failureReason) {
+		if !deterministicEscalated && !isServerInterruptFailure(failureReason) {
 			parked = s.parkFailedIssue(ctx, task)
 		}
 		s.noteParentOfChildRunFailure(ctx, task, parked)
@@ -6207,13 +6179,6 @@ func (s *TaskService) FailTaskWithTransition(ctx context.Context, taskID pgtype.
 	// without losing their original prompt. Skipped when an auto-retry is
 	// pending — the new attempt will write its own outcome.
 	if retried == nil {
-		if cc, ok := ParseConsultContext(task); ok {
-			reason := strings.TrimSpace(errMsg)
-			if reason == "" {
-				reason = failureReason
-			}
-			s.finishConsult(ctx, task, cc, "", reason)
-		}
 		if qc, ok := s.parseQuickCreateContext(task); ok {
 			attached, attachedErr := s.sourceContextAttachedByTask(ctx, task, qc)
 			switch {
@@ -8056,7 +8021,6 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 	affectedAgents := make(map[string]pgtype.UUID)
 	processedIssues := make(map[string]bool)
 	retriedIssues := make(map[string]bool)
-	quotaHeldIssues := make(map[string]bool)
 	timeLimitHeld := make(map[string]bool)
 	delegatedHandled := make(map[string]bool)
 	retried := 0
@@ -8098,21 +8062,6 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 			}
 		}
 		if !retryPending {
-			// Quota exhaustion is not retried (DENE-675). A capacity miss
-			// reaches this call only because MaybeRetryFailedTask just
-			// declined it. Break the spent seat and hand the unfinished
-			// issue to another seat before the in_progress → todo reset
-			// below looks for an active task.
-			hold, err := s.RelayQuotaFailure(ctx, t)
-			if err != nil {
-				slog.Warn("handle failed tasks: quota relay failed",
-					"task_id", util.UUIDToString(t.ID),
-					"error", err,
-				)
-			}
-			if hold && t.IssueID.Valid {
-				quotaHeldIssues[util.UUIDToString(t.IssueID)] = true
-			}
 			handled, err := s.recoverDelegatedTaskFailure(ctx, t)
 			if err != nil {
 				slog.Warn("handle failed tasks: delegated failure recovery failed",
@@ -8125,9 +8074,9 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 				delegatedHandled[util.UUIDToString(t.IssueID)] = true
 			}
 			// Same terminal-failure comment FailTaskWithTransition posts, so
-			// swept tasks are not silent on their issue. A quota relay and the
-			// time-limit give-up notice already wrote their own.
-			if t.IssueID.Valid && t.Error.String != "" && !hold && failureReason != string(taskfailure.ReasonTaskTimeLimit) {
+			// swept tasks are not silent on their issue. The time-limit
+			// give-up notice already wrote its own.
+			if t.IssueID.Valid && t.Error.String != "" && failureReason != string(taskfailure.ReasonTaskTimeLimit) {
 				s.createAgentComment(ctx, t.IssueID, t.AgentID, redact.Text(failureCommentBody(failureReason, t.Error.String)), "system", t.TriggerCommentID, t.ID)
 			}
 		}
@@ -8155,7 +8104,7 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 				// FailTask leaves (DENE-1339). Only an issue the park declines
 				// — a person's, or nobody's — still goes back to todo.
 				effectiveStatus := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status)
-				if effectiveStatus == "in_progress" && !processedIssues[issueKey] && !retriedIssues[issueKey] && !quotaHeldIssues[issueKey] && !timeLimitHeld[issueKey] {
+				if effectiveStatus == "in_progress" && !processedIssues[issueKey] && !retriedIssues[issueKey] && !timeLimitHeld[issueKey] {
 					processedIssues[issueKey] = true
 					parked := false
 					if !delegatedHandled[issueKey] {
@@ -9630,9 +9579,6 @@ func (s *TaskService) ResolveTaskWorkspaceIDChecked(ctx context.Context, task db
 	// broadcasts, which is why quick-create tasks appeared stuck queued.
 	if qc, ok := s.parseQuickCreateContext(task); ok {
 		return qc.WorkspaceID, nil
-	}
-	if cc, ok := ParseConsultContext(task); ok {
-		return cc.WorkspaceID, nil
 	}
 	if lookupErr != nil {
 		return "", fmt.Errorf("resolve task workspace: %w", lookupErr)

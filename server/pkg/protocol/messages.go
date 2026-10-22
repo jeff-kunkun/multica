@@ -102,11 +102,6 @@ const (
 	// along the inputs of wakeup rules that waited for this run; for any other
 	// daemon those rules keep their inputs and start a run of their own.
 	DaemonCapabilityJoinedWakeupsV1 = "joined-wakeups-v1"
-	// DaemonCapabilityConsultV1 advertises that the daemon runs a consult
-	// claim (DENE-1721): it sends the claim's consult_prompt as the whole
-	// prompt in an empty workdir. Only such a daemon's seats are offered as
-	// advisors; any other daemon would run the advisor as a blank task.
-	DaemonCapabilityConsultV1 = "consult-v1"
 	// DaemonCapabilityTaskSupplementV1 advertises that this provider run can accept
 	// an additional text instruction without cancelling or starting a task.
 	// It is persisted when this exact task enters running; absence always means
@@ -223,7 +218,6 @@ type WorkspacesChangedPayload struct{}
 // newer server stays safe on an older daemon.
 const (
 	PendingWorkKindModelList        = "model_list"
-	PendingWorkKindRoutingAnalysis  = "routing_analysis"
 	PendingWorkKindLocalSkills      = "local_skills"
 	PendingWorkKindLocalSkillImport = "local_skill_import"
 	PendingWorkKindAgentCLI         = "agent_cli"
@@ -513,20 +507,8 @@ type ProgressPayload struct {
 // Mirrors the body of POST /api/daemon/heartbeat so both transports share
 // identical semantics.
 type DaemonHeartbeatRequestPayload struct {
-	RuntimeID           string              `json:"runtime_id"`
-	SupportsBatchImport bool                `json:"supports_batch_import,omitempty"`
-	PlanLimits          *PlanLimitsSnapshot `json:"plan_limits,omitempty"`
-	// AgentPlanLimits carries one snapshot per AGENT whose CLI account is not
-	// the daemon-default one, keyed by agent id (DENE-715).
-	//
-	// It exists because agent_runtime.plan_limits is one row per
-	// (workspace, daemon, provider) while a single Claude runtime serves every
-	// Claude seat on that machine: an agent switched to a numbered account
-	// (custom_env CLAUDE_CONFIG_DIR) cannot be told apart from its unbound
-	// siblings by the runtime row alone. PlanLimits stays the runtime's default
-	// account snapshot, so a daemon that never fills this map — or an agent it
-	// has not run yet — keeps exactly the previous behavior.
-	AgentPlanLimits map[string]PlanLimitsSnapshot `json:"agent_plan_limits,omitempty"`
+	RuntimeID           string `json:"runtime_id"`
+	SupportsBatchImport bool   `json:"supports_batch_import,omitempty"`
 }
 
 const (
@@ -578,7 +560,6 @@ type DaemonHeartbeatAckPayload struct {
 	PendingUpdate           *DaemonHeartbeatPendingUpdate           `json:"pending_update,omitempty"`
 	PendingAgentCLI         *DaemonHeartbeatPendingAgentCLI         `json:"pending_agent_cli,omitempty"`
 	PendingModelList        *DaemonHeartbeatPendingModelList        `json:"pending_model_list,omitempty"`
-	PendingRoutingAnalysis  *DaemonHeartbeatPendingRoutingAnalysis  `json:"pending_routing_analysis,omitempty"`
 	PendingLocalSkills      *DaemonHeartbeatPendingLocalSkills      `json:"pending_local_skills,omitempty"`
 	PendingLocalSkillImport *DaemonHeartbeatPendingLocalSkillImport `json:"pending_local_skill_import,omitempty"`
 	// PendingLocalSkillImports carries multiple import requests in a single
@@ -620,16 +601,6 @@ type DaemonHeartbeatPendingAgentCLI struct {
 type DaemonHeartbeatPendingModelList struct {
 	ID         string            `json:"id"`
 	EnvOverlay map[string]string `json:"env_overlay,omitempty"`
-}
-
-// DaemonHeartbeatPendingRoutingAnalysis is a lightweight, no-tools analysis
-// request. It is kept separate from task dispatch so it never consumes a
-// runtime's work concurrency slot.
-type DaemonHeartbeatPendingRoutingAnalysis struct {
-	ID            string `json:"id"`
-	Model         string `json:"model"`
-	ThinkingLevel string `json:"thinking_level,omitempty"`
-	Prompt        string `json:"prompt"`
 }
 
 // DaemonHeartbeatPendingLocalSkills describes a request for the runtime's

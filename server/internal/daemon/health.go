@@ -15,7 +15,6 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/internal/util"
-	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // HealthResponse is returned by the daemon's local health endpoint.
@@ -91,11 +90,6 @@ type HealthResponse struct {
 	// claiming new tasks ahead of a restart.
 	Draining   bool              `json:"draining,omitempty"`
 	Workspaces []healthWorkspace `json:"workspaces"`
-	// PlanLimits is a credential-free per-provider overlay for Desktop. Official
-	// cloud backends do not persist heartbeat snapshots, so the renderer merges
-	// this map onto local runtime rows. Omitted when empty so older clients
-	// keep parsing /health.
-	PlanLimits map[string]protocol.PlanLimitsSnapshot `json:"plan_limits,omitempty"`
 	// AgentAccounts is the live multi-CLI account overlay: every existing
 	// account directory of every CLI this daemon knows how to probe, with its
 	// binding lever and credential-existence status. Always present, possibly
@@ -418,7 +412,6 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 			ReloadPendingReason: d.reloadPending(),
 			Draining:            d.draining(),
 			Workspaces:          wsList,
-			PlanLimits:          d.planLimitsByProvider(),
 			AgentAccounts:       agentAccounts,
 			AgentAccountsError:  agentAccountsErr,
 		}

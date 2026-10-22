@@ -637,10 +637,8 @@ type Daemon struct {
 	// login-shell probe + version detection instead of one per task (MUL-4486).
 	healGroup singleflight.Group
 
-	wsHBMu       sync.RWMutex         // guards wsHBLastAck
-	wsHBLastAck  map[string]time.Time // runtime_id -> last successful WS heartbeat ack timestamp
-	planLimitsMu sync.RWMutex
-	planLimits   map[string]protocol.PlanLimitsSnapshot // runtime_id -> latest credential-free provider snapshot
+	wsHBMu      sync.RWMutex         // guards wsHBLastAck
+	wsHBLastAck map[string]time.Time // runtime_id -> last successful WS heartbeat ack timestamp
 	// accountQuota tracks per-directory CLI account quota exhaustion: which
 	// account directory is out of quota, and until when. AGY reads it to fail
 	// over to another isolation slot; every other CLI reads it through the
@@ -649,24 +647,6 @@ type Daemon struct {
 	// persisted under ~/.multica so a daemon restart keeps the X.
 	accountQuotaMu sync.Mutex
 	accountQuota   map[string]time.Time // account dir -> reset_at
-	// Live Claude/Codex/Gemini/Grok/Kimi/GLM/MiniMax/DeepSeek usage probes
-	// (cc-switch style). Throttled
-	// separately from the 15s heartbeat so we do not hammer unofficial APIs.
-	planQuotaMu        sync.Mutex
-	lastPlanQuotaProbe time.Time
-	planQuotaInflight  atomic.Bool
-	planQuotaClient    *http.Client
-	planQuotaHome      string
-	planQuotaClaudeURL string
-	planQuotaCodexURL  string
-	planQuotaProbeFn   func() agent.PlanQuotaProbe
-	// planAgentQuota tracks the per-seat account binding behind the runtime
-	// snapshot above: which account directory each agent's task environment
-	// binds, and the newest windows observed for it (DENE-715). Guarded by
-	// planAgentMu. See plan_limits_agent.go for why the runtime row is not
-	// enough on its own.
-	planAgentMu    sync.Mutex
-	planAgentQuota map[string]*agentPlanQuota
 
 	// reconcile fans out a "re-check server state now" signal to subscribers
 	// (watchTaskCancellation, workspaceSyncLoop) so the WS connect/reconnect
@@ -899,7 +879,6 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		skippedAgents:               make(map[string]string),
 		resolvedPaths:               make(map[string]healedAgent),
 		wsHBLastAck:                 make(map[string]time.Time),
-		planLimits:                  make(map[string]protocol.PlanLimitsSnapshot),
 		activeEnvRoots:              make(map[string]int),
 		deletingEnvRoots:            make(map[string]bool),
 		activeStores:                make(map[string]int),
@@ -4781,8 +4760,7 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) bool {
 		return false
 	}
 	d.logger.Debug("heartbeat: HTTP tick", "runtime_id", rid)
-	d.maybeRefreshPlanQuota()
-	resp, err := d.client.SendHeartbeat(ctx, rid, d.planLimitsForRuntime(rid), d.agentPlanLimitsForRuntime(rid))
+	resp, err := d.client.SendHeartbeat(ctx, rid)
 	if err != nil {
 		if ctx.Err() == nil {
 			if isRuntimeNotFoundError(err) {
@@ -4817,12 +4795,11 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 	if resp == nil {
 		return
 	}
-	if resp.PendingUpdate != nil || resp.PendingModelList != nil || resp.PendingRoutingAnalysis != nil || resp.PendingLocalSkills != nil || resp.PendingLocalSkillImport != nil {
+	if resp.PendingUpdate != nil || resp.PendingModelList != nil || resp.PendingLocalSkills != nil || resp.PendingLocalSkillImport != nil {
 		d.logger.Debug("heartbeat: pending actions",
 			"runtime_id", runtimeID,
 			"update", resp.PendingUpdate != nil,
 			"model_list", resp.PendingModelList != nil,
-			"routing_analysis", resp.PendingRoutingAnalysis != nil,
 			"local_skills", resp.PendingLocalSkills != nil,
 			"local_skill_import", resp.PendingLocalSkillImport != nil,
 		)
@@ -4839,11 +4816,6 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 			// win over the machine config. It is not logged.
 			listCtx := agent.WithModelEnvOverlay(ctx, resp.PendingModelList.EnvOverlay)
 			go d.handleModelList(listCtx, *rt, resp.PendingModelList.ID)
-		}
-	}
-	if resp.PendingRoutingAnalysis != nil {
-		if rt := d.findRuntime(runtimeID); rt != nil {
-			go d.handleRoutingAnalysis(ctx, *rt, *resp.PendingRoutingAnalysis)
 		}
 	}
 	if resp.PendingLocalSkills != nil {
@@ -4939,7 +4911,7 @@ func (d *Daemon) handlePendingWorkHint(runtimeID, kind string) {
 		return
 	}
 	hbCtx, cancel := context.WithTimeout(ctx, pendingWorkHeartbeatTimeout)
-	resp, err := d.client.SendHeartbeat(hbCtx, runtimeID, d.planLimitsForRuntime(runtimeID), d.agentPlanLimitsForRuntime(runtimeID))
+	resp, err := d.client.SendHeartbeat(hbCtx, runtimeID)
 	cancel()
 	if err != nil {
 		if isRuntimeNotFoundError(err) {
@@ -5188,11 +5160,6 @@ func (d *Daemon) handleLocalSkillImport(ctx context.Context, rt Runtime, pending
 // Overridable for tests to avoid real sleeps.
 var runtimeReportBackoffs = []time.Duration{0, 500 * time.Millisecond, 2 * time.Second, 4 * time.Second}
 
-// The server's routing waiter gives up after 20s so dispatch is never held up
-// by a slow subscription model. The daemon keeps the CLI alive longer so a
-// successful late result can still be returned and cached for the next pass.
-const routingAnalysisTimeout = 2 * time.Minute
-
 // reportLocalSkillListResult delivers a list-report to the server with retry
 // on transient failures. See reportRuntimeResultWithRetry for semantics.
 func (d *Daemon) reportLocalSkillListResult(ctx context.Context, rt Runtime, requestID string, payload map[string]any) {
@@ -5216,58 +5183,6 @@ func (d *Daemon) reportLocalSkillImportResult(ctx context.Context, rt Runtime, r
 func (d *Daemon) reportModelListResult(ctx context.Context, rt Runtime, requestID string, payload map[string]any) {
 	d.reportRuntimeResultWithRetry(ctx, "model_list", rt.ID, requestID, func(ctx context.Context) error {
 		return d.client.ReportModelListResult(ctx, rt.ID, requestID, payload)
-	})
-}
-
-// handleRoutingAnalysis executes one bounded, read-only prompt outside the
-// task worker pool. Runtime CLIs differ, so keep the invocation deliberately
-// small and provider-specific; the server validates the returned JSON.
-func (d *Daemon) handleRoutingAnalysis(ctx context.Context, rt Runtime, pending PendingRoutingAnalysis) {
-	var execPath string
-	var prefix []string
-	if spec, ok := d.customProfileLaunchForRuntime(rt.ID); ok {
-		execPath, prefix = spec.path, agent.FilterLaunchPrefix(rt.Provider, spec.fixedArgs, d.logger)
-	} else if entry, ok := d.agents()[rt.Provider]; ok {
-		entry, _ = d.resolveAgentEntry(ctx, rt.Provider, entry)
-		execPath = entry.Path
-	}
-	if execPath == "" {
-		d.reportRoutingAnalysisResult(ctx, rt, pending.ID, map[string]any{"status": "failed", "error": "runtime executable unavailable"})
-		return
-	}
-	args := append([]string{}, prefix...)
-	switch rt.Provider {
-	case "claude":
-		// Claude Code uses --effort for the thinking selector. Empty tools
-		// keeps this probe read-only and outside the task tool surface.
-		args = append(args, "-p", pending.Prompt, "--output-format", "json", "--tools", "", "--model", pending.Model)
-		if pending.ThinkingLevel != "" {
-			args = append(args, "--effort", pending.ThinkingLevel)
-		}
-	case "codex":
-		// Codex carries effort in model_reasoning_effort config; it has no
-		// --thinking flag. Keep the execution sandbox read-only.
-		args = append(args, "exec", "--json", "--sandbox", "read-only", "--model", pending.Model)
-		if pending.ThinkingLevel != "" {
-			args = append(args, "--config", "model_reasoning_effort="+pending.ThinkingLevel)
-		}
-		args = append(args, pending.Prompt)
-	default:
-		args = append(args, pending.Prompt)
-	}
-	runCtx, cancel := context.WithTimeout(ctx, routingAnalysisTimeout)
-	defer cancel()
-	out, err := exec.CommandContext(runCtx, execPath, args...).Output()
-	if err != nil {
-		d.reportRoutingAnalysisResult(ctx, rt, pending.ID, map[string]any{"status": "failed", "error": string(out)})
-		return
-	}
-	d.reportRoutingAnalysisResult(ctx, rt, pending.ID, map[string]any{"status": "completed", "result": string(out)})
-}
-
-func (d *Daemon) reportRoutingAnalysisResult(ctx context.Context, rt Runtime, requestID string, payload map[string]any) {
-	d.reportRuntimeResultWithRetry(ctx, "routing_analysis", rt.ID, requestID, func(ctx context.Context) error {
-		return d.client.ReportRoutingAnalysisResult(ctx, rt.ID, requestID, payload)
 	})
 }
 
@@ -7001,11 +6916,6 @@ func gcMetaForTask(task Task) (execenv.GCMeta, bool) {
 		// LinkTaskToIssue, so IssueID is always empty here. Persist the
 		// task ID instead and let the GC loop ask the server for terminal
 		// state via the task gc-check endpoint.
-		meta.Kind = execenv.GCKindQuickCreate
-		meta.TaskID = task.ID
-	case task.ConsultPrompt != "":
-		// A consult run (DENE-1721) has no parent record either; the same
-		// task gc-check decides when its directory can go.
 		meta.Kind = execenv.GCKindQuickCreate
 		meta.TaskID = task.ID
 	default:
@@ -8802,7 +8712,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		AutopilotSource:                  task.AutopilotSource,
 		AutopilotTriggerPayload:          strings.TrimSpace(string(task.AutopilotTriggerPayload)),
 		QuickCreatePrompt:                task.QuickCreatePrompt,
-		IsConsult:                        task.ConsultPrompt != "",
 		IsSquadLeader:                    taskIsSquadLeader(task),
 		PlanFlow:                         task.PlanFlow,
 		RequestingUserName:               task.RequestingUserName,
@@ -9855,12 +9764,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		agentCustomEnv = task.Agent.CustomEnv
 	}
 	layerCustomEnvAndHermesHome(agentEnv, agentCustomEnv, env.HermesHome, d.logger)
-	// Remember which CLI account this agent's child will run as, read from the
-	// environment we just layered (DENE-715). The plan-quota probe is per
-	// runtime, and one runtime serves every seat on this machine, so without
-	// this the quota panel of an agent switched to a numbered account would
-	// keep naming the daemon's own account.
-	d.recordAgentAccountBinding(task.RuntimeID, task.AgentID, provider, agentCustomEnv, agentEnv)
 	// Shared-mode OpenCode: the sidecar is an additive config directory, not
 	// a replacement for the user's global config. Set this after custom_env
 	// so a user OPENCODE_CONFIG_DIR cannot point the child away from the
@@ -10227,7 +10130,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// than being relabeled resumable by a benign-looking second error.
 		result, tools = reconcileFreshRetryResult(firstResult, firstUsage, firstTools, retryResult, retryTools, retryErr)
 	}
-	d.recordPlanLimits(task.RuntimeID, result.PlanLimits)
 	// Record the account-level quota hit on the SAME terminal result, and only
 	// here: the AGY path above already accounts for antigravity while it fails
 	// over, and every other CLI would otherwise have no way to learn that one of

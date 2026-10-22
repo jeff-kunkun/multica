@@ -246,7 +246,6 @@ func daemonCommonCapabilities() []string {
 		protocol.DaemonCapabilityPlatformSkillV1,
 		protocol.DaemonCapabilityCheckoutKeepsWorkV1,
 		protocol.DaemonCapabilityJoinedWakeupsV1,
-		protocol.DaemonCapabilityConsultV1,
 	}
 }
 
@@ -831,20 +830,15 @@ type (
 	PendingUpdate           = protocol.DaemonHeartbeatPendingUpdate
 	PendingAgentCLI         = protocol.DaemonHeartbeatPendingAgentCLI
 	PendingModelList        = protocol.DaemonHeartbeatPendingModelList
-	PendingRoutingAnalysis  = protocol.DaemonHeartbeatPendingRoutingAnalysis
 	PendingLocalSkills      = protocol.DaemonHeartbeatPendingLocalSkills
 	PendingLocalSkillImport = protocol.DaemonHeartbeatPendingLocalSkillImport
 )
 
-// agentPlanLimits carries the per-seat snapshots of this runtime's
-// account-bound agents, keyed by agent id; nil when there are none (DENE-715).
-func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string, planLimits *protocol.PlanLimitsSnapshot, agentPlanLimits map[string]protocol.PlanLimitsSnapshot) (*HeartbeatResponse, error) {
+func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string) (*HeartbeatResponse, error) {
 	var resp HeartbeatResponse
 	if err := c.postJSON(ctx, "/api/daemon/heartbeat", map[string]any{
 		"runtime_id":            runtimeID,
 		"supports_batch_import": true,
-		"plan_limits":           planLimits,
-		"agent_plan_limits":     agentPlanLimits,
 	}, &resp); err != nil {
 		return nil, err
 	}
@@ -914,13 +908,6 @@ func (c *Client) RefreshModelCatalog(ctx context.Context, runtimeID string) erro
 // ReportModelListResult sends the model-discovery result back to the server.
 func (c *Client) ReportModelListResult(ctx context.Context, runtimeID, requestID string, result map[string]any) error {
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/models/%s/result", runtimeID, requestID), result, nil)
-}
-
-// ReportRoutingAnalysisResult sends a no-tools runtime analysis response back
-// to the server. It uses a dedicated endpoint so task reports and analysis
-// cannot contend for the same request lifecycle.
-func (c *Client) ReportRoutingAnalysisResult(ctx context.Context, runtimeID, requestID string, result map[string]any) error {
-	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/routing-analysis/%s/result", runtimeID, requestID), result, nil)
 }
 
 // ReportLocalSkillListResult sends the runtime-local-skill inventory back to the server.

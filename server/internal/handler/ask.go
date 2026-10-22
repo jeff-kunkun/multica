@@ -548,9 +548,6 @@ func (h *Handler) answerAskCore(ctx context.Context, in askAnswer) (map[string]s
 			h.publishWithSource(ctx, protocol.EventInboxNew, workspaceID, "member", answererID, map[string]any{"item": inboxToResponse(item)})
 		}
 	}
-	// A platform ask with its own effect (DENE-1647): the answer is carried
-	// out here, so the CLI, the issue card and the inbox all act the same.
-	h.applyReviewStuckAnswer(ctx, in.Workspace, issueID, answererID, answers["0"])
 	return answers, nil
 }
 

@@ -17,7 +17,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/permission"
-	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -50,13 +49,6 @@ type ProjectResponse struct {
 	// value new resources joining this project inherit.
 	Visibility string `json:"visibility"`
 	CreatedBy  string `json:"created_by,omitempty"`
-	// DomainIDs are the workspace domains this project works in (DENE-1451).
-	// Empty means generic. Its issues each pick one of them.
-	DomainIDs []string `json:"domain_ids"`
-	// ExecutorAgentIDs is the project's executor allowlist (DENE-1959):
-	// automatic dispatch picks only these agents for its work. Empty means
-	// every seat may be picked.
-	ExecutorAgentIDs []string `json:"executor_agent_ids"`
 	// WorkflowID is the workflow this project uses; null means the workspace
 	// Default workflow. (MUL-7420)
 	WorkflowID *string `json:"workflow_id"`
@@ -64,33 +56,23 @@ type ProjectResponse struct {
 
 func projectToResponse(p db.Project) ProjectResponse {
 	return ProjectResponse{
-		ID:               uuidToString(p.ID),
-		WorkspaceID:      uuidToString(p.WorkspaceID),
-		Title:            p.Title,
-		Description:      textToPtr(p.Description),
-		Icon:             textToPtr(p.Icon),
-		Status:           p.Status,
-		Priority:         p.Priority,
-		LeadType:         textToPtr(p.LeadType),
-		LeadID:           uuidToPtr(p.LeadID),
-		StartDate:        dateToPtr(p.StartDate),
-		DueDate:          dateToPtr(p.DueDate),
-		CreatedAt:        timestampToString(p.CreatedAt),
-		UpdatedAt:        timestampToString(p.UpdatedAt),
-		Visibility:       p.Visibility,
-		CreatedBy:        uuidToString(p.CreatedBy),
-		DomainIDs:        domainIDStrings(p.DomainIds),
-		ExecutorAgentIDs: executorAgentIDsOrEmpty(p),
-		WorkflowID:       uuidToPtr(p.WorkflowID),
+		ID:          uuidToString(p.ID),
+		WorkspaceID: uuidToString(p.WorkspaceID),
+		Title:       p.Title,
+		Description: textToPtr(p.Description),
+		Icon:        textToPtr(p.Icon),
+		Status:      p.Status,
+		Priority:    p.Priority,
+		LeadType:    textToPtr(p.LeadType),
+		LeadID:      uuidToPtr(p.LeadID),
+		StartDate:   dateToPtr(p.StartDate),
+		DueDate:     dateToPtr(p.DueDate),
+		CreatedAt:   timestampToString(p.CreatedAt),
+		UpdatedAt:   timestampToString(p.UpdatedAt),
+		Visibility:  p.Visibility,
+		CreatedBy:   uuidToString(p.CreatedBy),
+		WorkflowID:  uuidToPtr(p.WorkflowID),
 	}
-}
-
-// executorAgentIDsOrEmpty is the allowlist for the API: always a list.
-func executorAgentIDsOrEmpty(p db.Project) []string {
-	if ids := service.ProjectExecutorSeats(p); ids != nil {
-		return ids
-	}
-	return []string{}
 }
 
 func (h *Handler) loadProjectIssueStats(ctx context.Context, workspaceID, projectID pgtype.UUID) (int64, int64) {
@@ -138,8 +120,6 @@ type CreateProjectRequest struct {
 	StartDate   *string                               `json:"start_date"`
 	DueDate     *string                               `json:"due_date"`
 	Resources   []CreateProjectResourceRequestPayload `json:"resources,omitempty"`
-	// DomainIDs takes domain ids or names; empty or 通用 means generic.
-	DomainIDs []string `json:"domain_ids,omitempty"`
 	// WorkflowID picks the project's workflow at creation; omitted or null
 	// uses the workspace Default workflow. A new project has no issues, so no
 	// status mapping is involved. (MUL-7420)
@@ -166,12 +146,6 @@ type UpdateProjectRequest struct {
 	LeadID      *string `json:"lead_id"`
 	StartDate   *string `json:"start_date"`
 	DueDate     *string `json:"due_date"`
-	// DomainIDs replaces the project's domains when present (ids or names);
-	// an empty list makes the project generic.
-	DomainIDs *[]string `json:"domain_ids"`
-	// ExecutorAgentIDs replaces the executor allowlist when present (agent
-	// ids); an empty list lifts it. Workspace owner/admin only.
-	ExecutorAgentIDs *[]string `json:"executor_agent_ids"`
 }
 
 func (h *Handler) ListProjects(w http.ResponseWriter, r *http.Request) {
@@ -462,21 +436,8 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var domainIDs []pgtype.UUID
-	if len(req.DomainIDs) > 0 {
-		idx, err := h.loadDomainIndex(r.Context(), wsUUID)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to load domains")
-			return
-		}
-		if domainIDs, err = idx.resolveRefs(req.DomainIDs); err != nil {
-			writeError(w, http.StatusBadRequest, "domain_ids: "+err.Error())
-			return
-		}
-	}
-
 	createParams := db.CreateProjectParams{
-		DomainIds:   domainIDs,
+		DomainIds:   []pgtype.UUID{},
 		WorkspaceID: wsUUID,
 		Title:       req.Title,
 		Description: ptrToText(req.Description),
@@ -725,60 +686,9 @@ func (h *Handler) UpdateProject(w http.ResponseWriter, r *http.Request) {
 			params.DueDate = pgtype.Date{Valid: false} // explicit null = clear date
 		}
 	}
-	var domainIDs []pgtype.UUID
-	if req.DomainIDs != nil {
-		idx, err := h.loadDomainIndex(r.Context(), wsUUID)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to load domains")
-			return
-		}
-		if domainIDs, err = idx.resolveRefs(*req.DomainIDs); err != nil {
-			writeError(w, http.StatusBadRequest, "domain_ids: "+err.Error())
-			return
-		}
-	}
-	var executorIDs []pgtype.UUID
-	if req.ExecutorAgentIDs != nil {
-		// Who may be picked automatically is routing configuration, not
-		// project content: the same owner/admin gate as the routing settings.
-		if _, ok := h.requireWorkspaceRole(w, r, workspaceID, "project not found", "owner", "admin"); !ok {
-			return
-		}
-		ids, msg := h.resolveProjectExecutors(r.Context(), wsUUID, *req.ExecutorAgentIDs)
-		if msg != "" {
-			writeError(w, http.StatusBadRequest, msg)
-			return
-		}
-		executorIDs = ids
-	}
-	tx, err := h.TxStarter.Begin(r.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to update project")
-		return
-	}
-	defer tx.Rollback(r.Context())
-	qtx := h.Queries.WithTx(tx)
-	project, err := qtx.UpdateProject(r.Context(), params)
+	project, err := h.Queries.UpdateProject(r.Context(), params)
 	if err != nil {
 		h.writeProjectWriteError(w, r, err, "update")
-		return
-	}
-	if req.DomainIDs != nil {
-		if project, err = h.setProjectDomains(r.Context(), qtx, project, domainIDs); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to update project domains")
-			return
-		}
-	}
-	if req.ExecutorAgentIDs != nil {
-		if project, err = qtx.SetProjectExecutorAgents(r.Context(), db.SetProjectExecutorAgentsParams{
-			ID: project.ID, WorkspaceID: project.WorkspaceID, ExecutorAgentIds: executorIDs,
-		}); err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to update project executors")
-			return
-		}
-	}
-	if err := tx.Commit(r.Context()); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to update project")
 		return
 	}
 	resp := projectToResponse(project)
@@ -1202,34 +1112,4 @@ func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"projects": resp,
 	})
-}
-
-// resolveProjectExecutors validates an executor allowlist (DENE-1959): each
-// entry is an agent id in this workspace that is not archived; duplicates
-// collapse, and an empty list lifts the limit. The second value is the 400
-// message.
-func (h *Handler) resolveProjectExecutors(ctx context.Context, workspaceID pgtype.UUID, raw []string) ([]pgtype.UUID, string) {
-	out := make([]pgtype.UUID, 0, len(raw))
-	seen := make(map[string]bool, len(raw))
-	for _, value := range raw {
-		value = strings.TrimSpace(value)
-		id, err := util.ParseUUID(value)
-		if err != nil {
-			return nil, fmt.Sprintf("executor_agent_ids: %q is not an agent id", value)
-		}
-		key := util.UUIDToString(id)
-		if seen[key] {
-			continue
-		}
-		agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{ID: id, WorkspaceID: workspaceID})
-		if err != nil {
-			return nil, fmt.Sprintf("executor_agent_ids: %s is not an agent in this workspace", value)
-		}
-		if agent.ArchivedAt.Valid {
-			return nil, fmt.Sprintf("executor_agent_ids: %s (%s) is archived", value, agent.Name)
-		}
-		seen[key] = true
-		out = append(out, id)
-	}
-	return out, ""
 }

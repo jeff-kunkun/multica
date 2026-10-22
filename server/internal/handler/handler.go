@@ -41,7 +41,6 @@ import (
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
-	"github.com/multica-ai/multica/server/internal/routing"
 	"github.com/multica-ai/multica/server/internal/seatcapacity"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/storage"
@@ -240,13 +239,6 @@ type Handler struct {
 	PluginService          *service.PluginService
 	IssueService           *service.IssueService
 	AutopilotService       *service.AutopilotService
-	// Routing decides who should hold an issue after it is created or changes
-	// status (DENE-633). One instance per process, because its circuit breaker
-	// is the only thing keeping a broken routing model from being dialled once
-	// per ticket — a per-request router would have nothing to remember. Always
-	// non-nil; whether it does anything is a per-workspace setting it reads
-	// for itself.
-	Routing *routing.Router
 	// Entitlements supplies workspace-scoped commercial gates. A nil provider
 	// preserves self-hosted behavior without extra reads.
 	Entitlements entitlement.Provider
@@ -259,7 +251,6 @@ type Handler struct {
 	UpdateStore           UpdateStore
 	AgentCLICommands      AgentCLICommandStore
 	ModelListStore        ModelListStore
-	RoutingAnalysisStore  *RoutingAnalysisStore
 	LocalSkillListStore   LocalSkillListStore
 	LocalSkillImportStore LocalSkillImportStore
 	FeatureFlags          *featureflag.Service
@@ -451,11 +442,6 @@ type Handler struct {
 	// PluginSurfaceTokens seal short-lived launch claims. Nil disables surface
 	// launches; wired from a domain-separated MULTICA_PLUGIN_SECRET_KEY at boot.
 	PluginSurfaceTokens *secretbox.Box
-	// RoutingSecrets seals the per-workspace routing gateway key. Nil means
-	// this deployment cannot store one, and the settings write REFUSES a key
-	// rather than dropping it; routing then uses the deployment gateway, which
-	// is what it did before workspaces could bring their own.
-	RoutingSecrets *secretbox.Box
 	// LogExportSecrets seals the per-workspace log-export git token. Nil means
 	// this deployment cannot store one: the settings write REFUSES a token
 	// rather than dropping it, and a push against a repo whose token was
@@ -565,7 +551,6 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		UpdateStore:                  NewInMemoryUpdateStore(),
 		AgentCLICommands:             NewInMemoryAgentCLICommandStore(),
 		ModelListStore:               NewInMemoryModelListStore(),
-		RoutingAnalysisStore:         NewRoutingAnalysisStore(),
 		ModelCatalogCache:            NewInMemoryModelCatalogCache(),
 		LocalSkillListStore:          NewInMemoryLocalSkillListStore(),
 		LocalSkillImportStore:        NewInMemoryLocalSkillImportStore(),
@@ -586,35 +571,6 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		LLM: llmClient,
 		cfg: cfg,
 	}
-	// Built after the literal because the store it reads through is a view of
-	// the finished handler. The judge runs on the same internal LLM layer as
-	// chat titling; an unconfigured deployment gets a disabled client, which
-	// makes every routing call take the else branch instead of failing.
-	// Two protocols, one judge interface. A workspace that pointed routing at
-	// a TypeSafe System One endpoint (Jev) is answered by the judge that
-	// speaks that wire format; everything else — including the deployment
-	// gateway — stays on the OpenAI-compatible path it was born on.
-	// A workspace that supplies its own endpoint and key gets its own client.
-	// The retry budget is the deployment's, because it is a property of how
-	// long this server is willing to hold a goroutine, not of whose endpoint
-	// is on the other end.
-	dialRouting := func(baseURL, apiKey string) routing.TextGenerator {
-		return llm.New(llm.Config{
-			APIKey:     apiKey,
-			BaseURL:    baseURL,
-			MaxRetries: cfg.LLMMaxRetries,
-		})
-	}
-	h.Routing = routing.New(h.RoutingStore(), routing.ProviderJudge{
-		SystemOne: routing.SystemOneJudge{},
-		Chat:      routing.LLMJudge{Gen: llmClient, Dial: dialRouting},
-	})
-	// The analysis role reads the whole ticket and reduces it to facts
-	// (DENE-923). It is always a general chat model.
-	h.Routing.Analyst = routing.LLMAnalyst{Gen: llmClient, Dial: dialRouting, Runtime: runtimeRoutingPromptRunner{h: h}}
-	// The parking record's one sentence comes from the same routing model,
-	// under the same switch and breaker (DENE-881).
-	taskSvc.ParkingSummarizer = h.Routing
 	h.WebhookDeliveryWorker = NewWebhookDeliveryWorker(h)
 	h.BotWakeWorker = NewBotWakeWorker(h)
 	h.HumanNeededWorker = NewHumanNeededWorker(h, h.BotWakeWorker)

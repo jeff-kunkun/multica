@@ -1356,39 +1356,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// VCS and channel secrets gives operators an isolated rotation and blast
 	// radius; without it, saving a `secret` config field fails closed rather
 	// than storing plaintext.
-	// The routing gateway key is derived, not configured: a self-hosted
-	// instance that already boots has JWT_SECRET, and asking an operator for a
-	// second env var before a workspace can save its own routing key would
-	// reintroduce exactly the "go SSH into the server" step that workspace
-	// configuration exists to remove. MULTICA_ROUTING_SECRET_KEY still wins
-	// when set, for a deployment that wants this credential on its own key.
-	if routingKey, err := secretbox.LoadKey("MULTICA_ROUTING_SECRET_KEY"); err == nil {
-		box, err := secretbox.New(routingKey)
-		if err != nil {
-			slog.Error("routing: secretbox.New failed; workspace routing keys cannot be stored", "error", err)
-		} else {
-			h.RoutingSecrets = box
-		}
-	} else if jwtSecret := strings.TrimSpace(os.Getenv("JWT_SECRET")); jwtSecret != "" {
-		box, err := handler.NewRoutingSecretBox(jwtSecret)
-		if err != nil {
-			slog.Error("routing: derived secretbox failed; workspace routing keys cannot be stored", "error", err)
-		} else {
-			h.RoutingSecrets = box
-		}
-	} else {
-		slog.Info("Workspace routing keys disabled (no MULTICA_ROUTING_SECRET_KEY and no JWT_SECRET)")
-	}
-
 	if key, err := secretbox.LoadKey("MULTICA_BOT_WAKE_SECRET_KEY"); err == nil {
 		h.BotWakeSecrets, _ = secretbox.New(key)
 	} else if os.Getenv("MULTICA_BOT_WAKE_SECRET_KEY") == "" && strings.TrimSpace(os.Getenv("JWT_SECRET")) != "" {
 		h.BotWakeSecrets, _ = handler.NewBotWakeSecretBox(os.Getenv("JWT_SECRET"))
 	}
 
-	// The log-export git token follows the routing key's derivation for the
-	// same reason and with its own HMAC domain, so the two ciphertexts can
-	// never be confused. MULTICA_LOG_EXPORT_SECRET_KEY still wins when set,
+	// The log-export git token is derived from JWT_SECRET with its own HMAC
+	// domain, so a self-hosted instance needs no second env var for it.
+	// MULTICA_LOG_EXPORT_SECRET_KEY still wins when set,
 	// for a deployment that wants this credential on its own key.
 	if logExportKey, err := secretbox.LoadKey("MULTICA_LOG_EXPORT_SECRET_KEY"); err == nil {
 		box, err := secretbox.New(logExportKey)
@@ -1715,7 +1691,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/runtimes/{runtimeId}/agent-cli/status", h.ReportAgentCLIStatus)
 		r.Post("/runtimes/{runtimeId}/model-catalog/refresh", h.RefreshRuntimeModelCatalog)
 		r.Post("/runtimes/{runtimeId}/models/{requestId}/result", h.ReportModelListResult)
-		r.Post("/runtimes/{runtimeId}/routing-analysis/{requestId}/result", h.ReportRoutingAnalysisResult)
 		r.Post("/runtimes/{runtimeId}/local-skills/{requestId}/result", h.ReportLocalSkillListResult)
 		r.Post("/runtimes/{runtimeId}/local-skills/import/{requestId}/result", h.ReportLocalSkillImportResult)
 
@@ -1903,15 +1878,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// because opening an issue is what asks for it; executable
 					// bytes stay off the authenticated app/API origin.
 					r.Get("/plugins/{installationId}/surfaces/{surfaceKey}/launch", h.GetPluginSurfaceLaunch)
-					// Routing health is member-visible for the same reason the
-					// settings section is: everyone in the workspace can see
-					// that routing is on, so everyone should be able to see
-					// that it is currently broken. Only admins can change it.
-					r.Get("/routing/health", h.GetRoutingHealth)
-					// The division of labour in force (DENE-1834). Reading
-					// it is member-visible like the health report; an agent
-					// run reads the rules it works under the same way.
-					r.Get("/routing/dispatch", h.GetRoutingDispatch)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {
@@ -1921,18 +1887,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Put("/magpie", h.UpdateWorkspaceMagpie)
 					r.Put("/", h.UpdateWorkspace)
 					r.Patch("/", h.UpdateWorkspace)
-					// The re-check button. It makes an outbound request, so it
-					// sits with the other admin actions rather than with the
-					// read above.
-					r.Post("/routing/health/check", h.CheckRoutingHealth)
-					// Model discovery also makes an outbound request with the
-					// workspace/deployment credential, so keep it admin-only.
-					r.Post("/routing/models", h.ListRoutingModels)
-					// Plain-language 分工规则: preview dials the model, the
-					// PUT is the confirmation that makes the rows take
-					// effect (DENE-1834 part 4).
-					r.Post("/routing/dispatch/preview", h.PreviewRoutingDispatch)
-					r.Put("/routing/dispatch", h.UpdateRoutingDispatch)
 					r.Get("/config/export", h.ExportWorkspaceConfig)
 					r.Post("/config/import", h.ImportWorkspaceConfig)
 					r.Post("/transfer/config", h.ImportWorkspaceTransferConfig)
@@ -2391,22 +2345,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.With(handler.RequireHumanActor).Post("/tasks/{taskId}/supplements", h.CreateTaskSupplement)
 					r.With(handler.RequireHumanActor).Post("/tasks/{taskId}/supplements/{commentId}/retry", h.RetryTaskSupplement)
 					r.Post("/rerun", h.RerunIssue)
-					// Manual re-run of the routing pass (DENE-633). Same
-					// module the create/status hooks call, just synchronous
-					// and with the outcome in the response — `multica issue
-					// route` is this endpoint.
-					r.Post("/route", h.RouteIssue)
-					// "Too hard" mid-flight: a reason only, routing re-judges
-					// (DENE-1033) — `multica issue escalate`.
-					r.Post("/escalate", h.EscalateIssue)
-					// Ask a strong-tier seat one question mid-run (DENE-1721)
-					// — `multica issue consult`.
-					r.Post("/consults", h.CreateIssueConsult)
-					r.Get("/consults", h.ListIssueConsults)
-					r.Get("/consults/{consultId}", h.GetIssueConsult)
 					r.Post("/progress", h.WriteIssueProgress)
 					r.Get("/progress", h.ListIssueProgress)
-					// One-shot handoff (DENE-863): server routes, dedupes and
+					// One-shot handoff (DENE-863): server checks the target and
 					// reports what actually landed — `multica issue handoff`.
 					r.Post("/handoff", h.HandoffIssue)
 					// What to do with a child nobody drives (DENE-1342): rerun,
@@ -2504,18 +2445,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/", h.GetLabel)
 					r.Put("/", h.UpdateLabel)
 					r.Delete("/", h.DeleteLabel)
-				})
-			})
-
-			// Workspace domains (DENE-1451). Reads are open to any member —
-			// project, issue and agent pickers all need the list. Writes are
-			// gated to workspace owner/admin inside the handlers.
-			r.Route("/api/domains", func(r chi.Router) {
-				r.Get("/", h.ListDomains)
-				r.Post("/", h.CreateDomain)
-				r.Route("/{id}", func(r chi.Router) {
-					r.Patch("/", h.RenameDomain)
-					r.Delete("/", h.DeleteDomain)
 				})
 			})
 
@@ -2701,9 +2630,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// cannot mint an agent carrying `system_key` and thereby claim
 				// the system instruction layer. Idempotent per workspace.
 				r.Post("/mika", h.CreateMikaAgent)
-				// Batch edit of tier and usage from the routing seats table
-				// (DENE-922). One request, applied whole or not at all.
-				r.Put("/routing", h.BulkUpdateAgentRouting)
 				r.Route("/{id}", func(r chi.Router) {
 					// Timed access passes (DENE-808), owner-only.
 					r.Get("/access-passes", h.ListAgentAccessPasses)

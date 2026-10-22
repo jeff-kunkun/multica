@@ -212,43 +212,44 @@ func TestLogExportGarbageStoredSettingsCannotSmuggleAValue(t *testing.T) {
 	}
 }
 
-// TestLogExportMergeChainsWithRouting is the UpdateWorkspace contract: both
-// blocks live in one column, and carrying one forward must not discard the
-// other.
-func TestLogExportMergeChainsWithRouting(t *testing.T) {
+// TestLogExportMergeDropsLegacyRoutingKey is the UpdateWorkspace contract:
+// the retired routing block's gateway key is stripped on write, and the
+// log-export token in the same column is still carried forward.
+func TestLogExportMergeDropsLegacyRoutingKey(t *testing.T) {
 	h := &Handler{}
-	routingBox, err := NewRoutingSecretBox("deployment-jwt-secret")
-	if err != nil {
-		t.Fatalf("NewRoutingSecretBox: %v", err)
-	}
-	h.RoutingSecrets = routingBox
+	var err error
 	h.LogExportSecrets, err = NewLogExportSecretBox("deployment-jwt-secret")
 	if err != nil {
 		t.Fatalf("NewLogExportSecretBox: %v", err)
 	}
 
-	routingSealed, _ := h.sealRoutingKey("sk-live")
 	logExportSealed, _ := h.sealLogExportToken("ghp-live")
 	stored, _ := json.Marshal(map[string]any{
-		"routing":   map[string]any{"enabled": true, "api_key_enc": routingSealed},
+		"routing":   map[string]any{"enabled": true, "api_key_enc": "sealed"},
 		"logExport": map[string]any{"gitRepo": map[string]any{"enabled": true, "url": "u", "token_enc": logExportSealed}},
 	})
 
 	incoming := map[string]any{
-		"routing":   map[string]any{"enabled": true},
+		"routing": map[string]any{
+			"enabled":  true,
+			"api_key":  "sk-live",
+			"analysis": map[string]any{"api_key_enc": "sealed"},
+		},
 		"logExport": map[string]any{"gitRepo": map[string]any{"enabled": true, "url": "u"}},
 	}
-	merged, ok := h.applyRoutingSecret(incoming, stored)
-	if !ok {
-		t.Fatal("applyRoutingSecret refused")
-	}
-	merged, ok = h.applyLogExportToken(merged, stored)
+	merged, ok := h.applyLogExportToken(redactRoutingSettings(incoming), stored)
 	if !ok {
 		t.Fatal("applyLogExportToken refused")
 	}
-	root := merged.(map[string]any)
-	if got := root["routing"].(map[string]any)["api_key_enc"]; got != routingSealed {
-		t.Fatalf("routing key was dropped by the chain: %v", got)
+	routingBlock := merged.(map[string]any)["routing"].(map[string]any)
+	if _, has := routingBlock["api_key"]; has {
+		t.Fatalf("legacy routing key survived the write: %v", routingBlock)
+	}
+	if _, has := routingBlock["analysis"].(map[string]any)["api_key_enc"]; has {
+		t.Fatalf("legacy analysis key survived the write: %v", routingBlock)
+	}
+	if _, has := incoming["routing"].(map[string]any)["api_key"]; !has {
+		t.Fatal("redaction mutated the caller's map")
 	}
 	if got := logExportRepoBlock(t, merged)["token_enc"]; got != logExportSealed {
 		t.Fatalf("log-export token was dropped by the chain: %v", got)

@@ -14,19 +14,11 @@ import (
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/parking"
 	"github.com/multica-ai/multica/server/internal/progress"
-	"github.com/multica-ai/multica/server/internal/routing"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
-
-// ParkingSummarizer phrases the one-sentence summary of a parking record when
-// the agent left no words of its own. *routing.Router satisfies it. Nil, or
-// any error, means the fixed wording is used.
-type ParkingSummarizer interface {
-	Summarize(ctx context.Context, workspaceID string, f routing.SummaryFacts) (string, error)
-}
 
 // ParkingInboxType is the inbox item a person gets when a ticket stops
 // without saying why.
@@ -213,20 +205,6 @@ func (s *TaskService) parkingSummary(ctx context.Context, issue db.Issue, in par
 	}
 	if !parking.ErrorOnly(said, runErr) {
 		return parking.Clip(said, maxRunes), "agent"
-	}
-
-	if s.ParkingSummarizer != nil {
-		sentence, err := s.ParkingSummarizer.Summarize(ctx, util.UUIDToString(issue.WorkspaceID), routing.SummaryFacts{
-			Title:     issue.Title,
-			Status:    in.Status,
-			Category:  rec.Category,
-			Reasons:   rec.Reasons,
-			AgentSaid: parking.Clip(said, 400),
-			RunError:  parking.Clip(runErr, 400),
-		})
-		if err == nil && sentence != "" {
-			return sentence, "model"
-		}
 	}
 	return parking.FallbackSummary(rec), "template"
 }

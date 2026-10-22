@@ -1571,13 +1571,8 @@ func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 }
 
 type DaemonHeartbeatRequest struct {
-	RuntimeID           string                       `json:"runtime_id"`
-	SupportsBatchImport bool                         `json:"supports_batch_import,omitempty"`
-	PlanLimits          *protocol.PlanLimitsSnapshot `json:"plan_limits,omitempty"`
-	// AgentPlanLimits is the per-agent counterpart of PlanLimits (DENE-715),
-	// keyed by agent id. Optional: a daemon that predates it, or one that has
-	// never run an account-bound agent, simply omits it.
-	AgentPlanLimits map[string]protocol.PlanLimitsSnapshot `json:"agent_plan_limits,omitempty"`
+	RuntimeID           string `json:"runtime_id"`
+	SupportsBatchImport bool   `json:"supports_batch_import,omitempty"`
 }
 
 // heartbeatHasPendingTimeout bounds the cheap HasPending probe on the
@@ -1710,35 +1705,8 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 	authMs = time.Since(start).Milliseconds()
 
-	planLimitsJSON, validationErr := validatePlanLimitsSnapshot(req.PlanLimits, rt.Provider)
-	if validationErr != nil {
-		outcome = "invalid_plan_limits"
-		writeError(w, http.StatusBadRequest, "invalid plan_limits")
-		return
-	}
-	// Per-agent snapshots are best-effort: a malformed entry is dropped rather
-	// than failing the heartbeat, because the same request is also how this
-	// machine's runtimes stay online (DENE-715).
-	agentPlanLimitsJSON, agentPlanLimitsErr := validateAgentPlanLimits(req.AgentPlanLimits, rt.Provider)
-	if agentPlanLimitsErr != nil {
-		slog.Warn("dropping unusable agent plan limits",
-			"runtime_id", req.RuntimeID, "error", agentPlanLimitsErr)
-	}
-
 	updateStart := time.Now()
 	if err := h.recordHeartbeat(r.Context(), rt); err != nil {
-		updateMs = time.Since(updateStart).Milliseconds()
-		outcome = "error_update"
-		writeError(w, http.StatusInternalServerError, "heartbeat failed")
-		return
-	}
-	if err := h.applyStoredPlanLimits(r.Context(), rt.ID, uuidToString(rt.WorkspaceID), planLimitsJSON); err != nil {
-		updateMs = time.Since(updateStart).Milliseconds()
-		outcome = "error_update"
-		writeError(w, http.StatusInternalServerError, "heartbeat failed")
-		return
-	}
-	if err := h.applyStoredAgentPlanLimits(r.Context(), uuidToString(rt.WorkspaceID), agentPlanLimitsJSON); err != nil {
 		updateMs = time.Since(updateStart).Milliseconds()
 		outcome = "error_update"
 		writeError(w, http.StatusInternalServerError, "heartbeat failed")
@@ -1776,9 +1744,6 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	if ack.PendingModelList != nil {
 		resp["pending_model_list"] = ack.PendingModelList
 	}
-	if ack.PendingRoutingAnalysis != nil {
-		resp["pending_routing_analysis"] = ack.PendingRoutingAnalysis
-	}
 	if ack.PendingLocalSkills != nil {
 		resp["pending_local_skills"] = ack.PendingLocalSkills
 	}
@@ -1796,27 +1761,15 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 // captured each runtime's liveness state in a connection lease, so the hot
 // path never reads agent_runtime. HTTP heartbeat remains the stateless lookup
 // fallback for a daemon that stops receiving WebSocket acknowledgements.
-func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws.ClientIdentity, runtimeID string, supportsBatchImport bool, planLimits *protocol.PlanLimitsSnapshot, agentPlanLimits map[string]protocol.PlanLimitsSnapshot) (*protocol.DaemonHeartbeatAckPayload, error) {
+func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws.ClientIdentity, runtimeID string, supportsBatchImport bool) (*protocol.DaemonHeartbeatAckPayload, error) {
 	lease := identity.RuntimeLeases[runtimeID]
 	if lease == nil {
 		return nil, fmt.Errorf("runtime not in connection lease")
 	}
-	state := lease.Snapshot()
 	// Defensive consistency assertion only: the workspace scope and lease came
 	// from the same connection-time query. This does not re-authorize against DB.
-	if !identity.AllowsWorkspace(state.WorkspaceID) {
+	if !identity.AllowsWorkspace(lease.Snapshot().WorkspaceID) {
 		return nil, fmt.Errorf("runtime not in connection workspace")
-	}
-	planLimitsJSON, err := validatePlanLimitsSnapshot(planLimits, state.Provider)
-	if err != nil {
-		return nil, fmt.Errorf("invalid plan_limits: %w", err)
-	}
-	// Same best-effort rule as the HTTP path: a per-agent entry that fails
-	// validation is dropped, never a reason to tear down the connection.
-	agentPlanLimitsJSON, agentPlanLimitsErr := validateAgentPlanLimits(agentPlanLimits, state.Provider)
-	if agentPlanLimitsErr != nil {
-		slog.Warn("dropping unusable agent plan limits",
-			"runtime_id", runtimeID, "error", agentPlanLimitsErr)
 	}
 	if err := h.recordHeartbeatLease(ctx, runtimeID, lease); err != nil {
 		if isNotFound(err) {
@@ -1826,16 +1779,6 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 			}
 			return runtimeGoneHeartbeatAck(runtimeID), nil
 		}
-		return nil, err
-	}
-	runtimeUUID, err := util.ParseUUID(runtimeID)
-	if err != nil {
-		return nil, fmt.Errorf("invalid runtime_id: %w", err)
-	}
-	if err := h.applyStoredPlanLimits(ctx, runtimeUUID, state.WorkspaceID, planLimitsJSON); err != nil {
-		return nil, err
-	}
-	if err := h.applyStoredAgentPlanLimits(ctx, state.WorkspaceID, agentPlanLimitsJSON); err != nil {
 		return nil, err
 	}
 	ack, _, err := h.processHeartbeat(ctx, runtimeID, supportsBatchImport)
@@ -1863,62 +1806,6 @@ func runtimeGoneHeartbeatAck(runtimeID string) *protocol.DaemonHeartbeatAckPaylo
 // The actual DB write is delegated to h.HeartbeatScheduler so production can
 // coalesce many runtimes' bumps into one bulk UPDATE per tick. See
 // heartbeat_scheduler.go for the two implementations.
-func (h *Handler) applyStoredPlanLimits(ctx context.Context, runtimeUUID pgtype.UUID, workspaceID string, planLimitsJSON []byte) error {
-	if len(planLimitsJSON) == 0 {
-		return nil
-	}
-	updated, err := h.Queries.UpdateAgentRuntimePlanLimits(ctx, db.UpdateAgentRuntimePlanLimitsParams{
-		ID:         runtimeUUID,
-		PlanLimits: planLimitsJSON,
-	})
-	if err != nil {
-		return fmt.Errorf("update runtime plan limits: %w", err)
-	}
-	if updated > 0 && workspaceID != "" {
-		h.publishWithSource(ctx, protocol.EventDaemonHeartbeat, workspaceID, "system", "", map[string]any{
-			"runtime_id":          uuidToString(runtimeUUID),
-			"plan_limits_updated": true,
-		})
-	}
-	return nil
-}
-
-// applyStoredAgentPlanLimits persists the per-agent snapshots of one heartbeat
-// and asks clients to refetch only the agents whose row actually changed
-// (DENE-715).
-//
-// The workspace predicate is what keeps a daemon from writing a seat outside
-// the workspaces it is authorized for: the runtime already passed the workspace
-// check, and an agent running on it belongs to that same workspace. A row count
-// of zero therefore means "nothing to say" — either unchanged or not this
-// workspace's — and neither is worth a broadcast.
-func (h *Handler) applyStoredAgentPlanLimits(ctx context.Context, workspaceID string, snapshots map[pgtype.UUID][]byte) error {
-	if len(snapshots) == 0 {
-		return nil
-	}
-	workspaceUUID, err := util.ParseUUID(workspaceID)
-	if err != nil {
-		return fmt.Errorf("invalid workspace id: %w", err)
-	}
-	for agentUUID, snapshot := range snapshots {
-		updated, err := h.Queries.UpdateAgentPlanLimits(ctx, db.UpdateAgentPlanLimitsParams{
-			ID:          agentUUID,
-			WorkspaceID: workspaceUUID,
-			PlanLimits:  snapshot,
-		})
-		if err != nil {
-			return fmt.Errorf("update agent plan limits: %w", err)
-		}
-		if updated > 0 && workspaceID != "" {
-			h.publishWithSource(ctx, protocol.EventDaemonHeartbeat, workspaceID, "system", "", map[string]any{
-				"agent_id":            uuidToString(agentUUID),
-				"plan_limits_updated": true,
-			})
-		}
-	}
-	return nil
-}
-
 func (h *Handler) recordHeartbeat(ctx context.Context, rt db.AgentRuntime) error {
 	return h.recordHeartbeatState(ctx, rt.ID, uuidToString(rt.ID), heartbeatLivenessState{
 		Status:          rt.Status,
@@ -2099,14 +1986,6 @@ func (h *Handler) processHeartbeat(ctx context.Context, runtimeID string, suppor
 			slog.Warn("model list HasPending timed out", "runtime_id", runtimeID, "elapsed_ms", m.ProbeModelMs)
 		} else {
 			slog.Warn("model list HasPending failed", "error", probeModelErr, "runtime_id", runtimeID)
-		}
-	}
-
-	// Routing analysis is a separate lightweight queue. Claiming it here keeps
-	// it off the task/concurrency path while preserving the heartbeat transport.
-	if h.RoutingAnalysisStore != nil {
-		if pending := h.RoutingAnalysisStore.PopPending(ctx, runtimeID); pending != nil {
-			ack.PendingRoutingAnalysis = pending
 		}
 	}
 
@@ -4324,26 +4203,6 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	}
 
 	hasQuickCreate := false
-	// Consult run (DENE-1721): an issue-less advisor run. The server renders
-	// the whole prompt — ticket background plus the question — so the daemon
-	// only runs it.
-	if cc, ok := service.ParseConsultContext(*task); ok {
-		hasQuickCreate = true
-		resp.WorkspaceID = cc.WorkspaceID
-		if failure := h.rejectClaimOnWorkspaceMismatch(r.Context(), task, resp.WorkspaceID, runtimeID, runtimeWorkspaceID, true); failure != nil {
-			return resp, deliveredCommentIDs, issueSnapshot, agentSkillCount, builtinSkillCount, failure
-		}
-		prompt, thread, err := h.renderConsultPrompt(r.Context(), cc)
-		if err != nil {
-			return resp, nil, nil, 0, 0, h.failClaimedTaskBeforeLaunch(
-				r.Context(), task, "The ticket this consult was about is no longer available.",
-				taskfailure.ReasonAgentUnknown, "error_consult_unavailable", http.StatusConflict, "consult is unavailable",
-			)
-		}
-		resp.ConsultPrompt = prompt
-		resp.ThreadName = thread
-	}
-
 	// Quick-create task: no issue / chat / autopilot link — workspace and
 	// prompt come from the task's context JSONB. Resolve workspace from
 	// there so the isolation check below has something to compare.
@@ -5480,16 +5339,6 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	// running rather than as a stop.
 	h.TaskService.HandleCompletedTasks(r.Context(), []db.AgentTaskQueue{*task})
 
-	// The executor's status write to in_review usually lands while this run
-	// is still open, and the in-review row waits for the run to end before
-	// it wakes the reviewer. Ask again now that the run is gone. A follow-up
-	// queued by reconcile above still counts as an active run, so this does
-	// not start the reviewer on top of it. No-op unless the ticket is
-	// actually waiting on acceptance.
-	if task.IssueID.Valid {
-		h.routeIssueDetached(logger.RequestAttrs(r), workspaceID, uuidToString(task.IssueID))
-	}
-
 	// Best-effort revoke of any agent task token minted at claim time.
 	// The token would naturally expire at the 24h watermark and is also
 	// cascaded on agent_task deletion, but eagerly deleting it on
@@ -6200,14 +6049,6 @@ func (h *Handler) failTask(w http.ResponseWriter, r *http.Request, taskID, works
 	}
 	h.TaskService.NotifyTaskFinished(*task)
 
-	// Same acceptance retry as CompleteTask. A run that fails after the
-	// executor has already moved the ticket to in_review must not swallow
-	// the handoff; if a retry was queued, the active-run guard defers until
-	// that retry ends.
-	if task.IssueID.Valid {
-		h.routeIssueDetached(logger.RequestAttrs(r), workspaceID, uuidToString(task.IssueID))
-	}
-
 	// Best-effort revoke of the mat_ task token minted at claim. Same
 	// rationale as CompleteTask — eager deletion shrinks the post-
 	// terminal window. The 24h expiry / cascade are the durable guards.
@@ -6851,34 +6692,9 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 	if !activeOnly {
 		h.hydrateTaskUsage(r.Context(), issue.ID, resp)
 		h.hydrateTaskSkills(r.Context(), issue.ID, resp)
-		h.hydrateTaskRelays(r.Context(), issue.ID, resp)
 	}
 
 	writeJSON(w, http.StatusOK, resp)
-}
-
-// hydrateTaskRelays attaches the relay record of each failed run (DENE-1647)
-// so the log and `multica issue runs` say where the work went. Display
-// metadata: an error leaves the rows without it.
-func (h *Handler) hydrateTaskRelays(ctx context.Context, issueID pgtype.UUID, resp []AgentTaskResponse) {
-	if len(resp) == 0 {
-		return
-	}
-	rows, err := h.Queries.ListIssueQuotaRelays(ctx, issueID)
-	if err != nil || len(rows) == 0 {
-		return
-	}
-	byTask := make(map[string]*TaskRelayData, len(rows))
-	for _, row := range rows {
-		relay := &TaskRelayData{Outcome: row.Outcome, Reason: row.Reason, WaitReason: row.WaitReason, ToAgentName: row.ToAgentName}
-		if row.ToAgentID.Valid {
-			relay.ToAgentID = uuidToString(row.ToAgentID)
-		}
-		byTask[uuidToString(row.SourceTaskID)] = relay
-	}
-	for i := range resp {
-		resp[i].Relay = byTask[resp[i].ID]
-	}
 }
 
 // hydrateTaskSkills attaches the skills each run used (DENE-1573), read from
