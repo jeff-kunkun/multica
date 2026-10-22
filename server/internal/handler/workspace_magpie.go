@@ -12,17 +12,59 @@ import (
 
 // workspaceMagpieSettingsKey holds the per-workspace MAGPIE mode switch in
 // workspace.settings. Off (the default, and any workspace without the key)
-// keeps the old behaviour: editable agents page, archive only, no magpie
-// routes stored and no magpie group pinning. On turns on the magpie group
-// selection, the read-only agents mirror and real delete with backup.
+// keeps the official behaviour: editable agents page, archive only and no
+// magpie group pinning. On turns on the magpie group selection, the
+// read-only agents mirror and real delete with backup for agents whose
+// runtime magpie routes.
 const workspaceMagpieSettingsKey = "magpie"
 
 type workspaceMagpieSettings struct {
 	Enabled bool `json:"enabled"`
 }
 
+// workspaceMagpieResponse is the switch plus whether it can matter: Available
+// is true when a daemon reported a magpie route for one of the workspace's
+// runtimes. The UI offers the switch only then.
+type workspaceMagpieResponse struct {
+	Enabled   bool `json:"enabled"`
+	Available bool `json:"available"`
+}
+
 type updateWorkspaceMagpieRequest struct {
 	Enabled *bool `json:"enabled"`
+}
+
+// runtimeHasMagpieRoute reports whether a runtime's metadata carries a magpie
+// route that serves its CLI through a group. A route with an empty group
+// (magpie installed but not routing this CLI) does not count.
+func runtimeHasMagpieRoute(metadata []byte) bool {
+	if len(metadata) == 0 {
+		return false
+	}
+	var parsed struct {
+		Magpie *struct {
+			Group string `json:"group"`
+		} `json:"magpie"`
+	}
+	if err := json.Unmarshal(metadata, &parsed); err != nil || parsed.Magpie == nil {
+		return false
+	}
+	return parsed.Magpie.Group != ""
+}
+
+// workspaceMagpieAvailable reports whether any runtime of the workspace has a
+// magpie route. A runtime list that cannot be loaded counts as none.
+func (h *Handler) workspaceMagpieAvailable(ctx context.Context, workspaceID pgtype.UUID) bool {
+	runtimes, err := h.Queries.ListAgentRuntimes(ctx, workspaceID)
+	if err != nil {
+		return false
+	}
+	for _, rt := range runtimes {
+		if runtimeHasMagpieRoute(rt.Metadata) {
+			return true
+		}
+	}
+	return false
 }
 
 // workspaceMagpieEnabled reads the switch from a workspace.settings blob.
@@ -60,16 +102,29 @@ func (h *Handler) GetWorkspaceMagpie(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "workspace not found")
 		return
 	}
-	writeJSON(w, http.StatusOK, workspaceMagpieSettings{Enabled: workspaceMagpieEnabled(ws.Settings)})
+	writeJSON(w, http.StatusOK, workspaceMagpieResponse{
+		Enabled:   workspaceMagpieEnabled(ws.Settings),
+		Available: h.workspaceMagpieAvailable(r.Context(), id),
+	})
 }
 
+// UpdateWorkspaceMagpie flips the switch. Only the workspace owner may; the
+// router lets admins through to this group, so the owner check lives here.
 func (h *Handler) UpdateWorkspaceMagpie(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("X-Actor-Source") == "task_token" {
-		writeError(w, http.StatusForbidden, "agents cannot connect or disconnect Magpie; ask a workspace admin")
+		writeError(w, http.StatusForbidden, "agents cannot connect or disconnect Magpie; ask the workspace owner")
 		return
 	}
 	id, ok := parseUUIDOrBadRequest(w, workspaceIDFromURL(r, "id"), "workspace id")
 	if !ok {
+		return
+	}
+	member, ok := h.workspaceMember(w, r, uuidToString(id))
+	if !ok {
+		return
+	}
+	if member.Role != "owner" {
+		writeError(w, http.StatusForbidden, "only the workspace owner can connect or disconnect Magpie")
 		return
 	}
 	var req updateWorkspaceMagpieRequest
@@ -99,7 +154,10 @@ func (h *Handler) UpdateWorkspaceMagpie(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	h.publishWithSource(r.Context(), protocol.EventWorkspaceUpdated, uuidToString(updated.ID), "member", requestUserID(r), map[string]any{"workspace": h.workspaceToResponse(updated)})
-	writeJSON(w, http.StatusOK, workspaceMagpieSettings{Enabled: *req.Enabled})
+	writeJSON(w, http.StatusOK, workspaceMagpieResponse{
+		Enabled:   *req.Enabled,
+		Available: h.workspaceMagpieAvailable(r.Context(), id),
+	})
 }
 
 // keepStoredMagpie replaces whatever magpie block an incoming settings write

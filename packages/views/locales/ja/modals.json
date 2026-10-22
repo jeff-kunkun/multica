@@ -111,8 +111,6 @@
     "title_breadcrumb": "新規プロジェクト",
     "icon_tooltip": "アイコンを選択",
     "title_placeholder": "プロジェクトのタイトル",
-    "description_placeholder": "説明を追加...",
-    "description_hint": "このプロジェクトのすべての実行で、コンテキストとしてエージェントに共有されます。",
     "lead": "リード",
     "no_lead": "リードなし",
     "set_start_date": "開始日を設定...",

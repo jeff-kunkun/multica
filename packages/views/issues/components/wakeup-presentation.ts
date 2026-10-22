@@ -98,10 +98,6 @@ export function useWakeupText() {
     "task.dispatched": t(($) => $.wakeups.conditions.run_dispatched, { agent }),
     "task.started": t(($) => $.wakeups.conditions.run_started, { agent }),
     "task.deferred": t(($) => $.wakeups.conditions.run_deferred, { agent }),
-    "task.waiting_local_directory": t(
-      ($) => $.wakeups.conditions.run_waiting_local_directory,
-      { agent },
-    ),
     "issue.updated": t(($) => $.wakeups.conditions.issue_updated, { agent }),
     "issue.assignee_changed": t(($) => $.wakeups.conditions.assignee_changed, {
       agent,
@@ -276,9 +272,7 @@ export function useWakeupText() {
     deferred: t(($) => $.wakeups.run_states.deferred),
     dispatched: t(($) => $.wakeups.run_states.dispatched),
     running: t(($) => $.wakeups.run_states.running),
-    waiting_local_directory: t(
-      ($) => $.wakeups.run_states.waiting_local_directory,
-    ),
+    waiting_local_directory: t(($) => $.wakeups.run_states.queued),
     completed: t(($) => $.wakeups.run_states.completed),
     failed: t(($) => $.wakeups.run_states.failed),
     cancelled: t(($) => $.wakeups.run_states.cancelled),

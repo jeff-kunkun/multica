@@ -11,6 +11,7 @@ import {
   agentMagpieGroups,
   canPinMagpieGroup,
   ISSUE_MAGPIE_GROUP_KEY,
+  readRuntimeMagpieGroupRoute,
   runtimeListOptions,
 } from "@multica/core/runtimes";
 import { agentListOptions } from "@multica/core/workspace/queries";
@@ -19,9 +20,9 @@ import { useWorkspaceMagpieEnabled } from "../../../workspace/use-magpie-mode";
 import { PropertyPicker, PickerItem } from "./property-picker";
 
 /**
- * The magpie groups an issue's agent assignee can run on, when it has more
- * than one and the workspace is in magpie mode. `null` otherwise, so the
- * sidebar shows no row.
+ * The magpie groups an issue's agent assignee can run on, when it is a magpie
+ * agent (workspace in magpie mode, runtime routed through a magpie group) with
+ * more than one. `null` otherwise, so the sidebar shows no row.
  */
 export function useIssueMagpieGroups(issue: Pick<Issue, "assignee_type" | "assignee_id">): string[] | null {
   const wsId = useWorkspaceId();
@@ -32,7 +33,7 @@ export function useIssueMagpieGroups(issue: Pick<Issue, "assignee_type" | "assig
   if (issue.assignee_type !== "agent" || !issue.assignee_id) return null;
   const agent = agents.find((a) => a.id === issue.assignee_id);
   const runtime = agent ? runtimes.find((r) => r.id === agent.runtime_id) : undefined;
-  if (!agent || !canPinMagpieGroup(runtime?.provider)) return null;
+  if (!agent || !readRuntimeMagpieGroupRoute(runtime?.metadata) || !canPinMagpieGroup(runtime?.provider)) return null;
   const groups = agentMagpieGroups(agent.runtime_config);
   return groups.length > 1 ? groups : null;
 }

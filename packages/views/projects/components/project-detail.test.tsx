@@ -236,10 +236,6 @@ vi.mock("./project-code-section", () => ({
   ProjectCodeSection: () => null,
 }));
 
-vi.mock("./project-resources-section", () => ({
-  ProjectResourcesSection: () => null,
-}));
-
 vi.mock("../../common/share-scope-dialog", () => ({
   ShareScopeDialog: () => null,
   ShareScopeTrigger: () => null,

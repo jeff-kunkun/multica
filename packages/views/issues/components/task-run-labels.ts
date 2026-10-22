@@ -88,10 +88,10 @@ export function plainTriggerSummary(raw: string, imageLabel: string): string {
 export function useStatusLabel(status: AgentTask["status"]): string {
   const { t } = useT("issues");
   switch (status) {
-    case "queued": return t(($) => $.execution_log.status_queued);
-    case "dispatched": return t(($) => $.execution_log.status_dispatched);
+    case "queued":
     case "waiting_local_directory":
-      return t(($) => $.execution_log.status_waiting_local_directory);
+      return t(($) => $.execution_log.status_queued);
+    case "dispatched": return t(($) => $.execution_log.status_dispatched);
     case "deferred": return t(($) => $.execution_log.status_deferred);
     case "running": return t(($) => $.execution_log.status_running);
     case "completed": return t(($) => $.execution_log.status_completed);

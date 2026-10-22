@@ -12,16 +12,6 @@ export type PickDirectoryResult = {
   error?: string;
 };
 
-export type LocalDirectorySharedOverride = {
-  daemonId: string;
-  localPath: string;
-};
-
-export type SetLocalDirectorySharedOverrideResult = {
-  ok: boolean;
-  error?: string;
-};
-
 export type ValidateLocalDirectoryResult = {
   ok: boolean;
   reason?:
@@ -49,11 +39,8 @@ export type ValidateLocalDirectoryResult = {
   /** Normalized identity of the repository the directory holds, or absent
    *  when there is none to identify. Drives duplicate detection only. */
   repo_key?: string;
-  /** Where parallel mode would put working copies by default: the
-   *  repository's sibling. A preview — the daemon decides. */
-  default_worktree_root?: string;
   /** The repository root containing the directory, when there is one. Lets
-   *  the picker refuse a worktree root inside the user's own repository. */
+   *  the create flow tell a plain folder from a subdirectory of a repo. */
   git_root?: string;
 };
 
@@ -75,7 +62,6 @@ interface DesktopLocalDirectoryAPI {
   validateLocalDirectory?: (
     path: string,
   ) => Promise<ValidateLocalDirectoryResult>;
-  validateWritablePath?: (path: string) => Promise<{ ok: boolean }>;
   initLocalGit?: (path: string) => Promise<InitLocalGitResult>;
   provisionProjectDirectory?: (input: {
     root: string;
@@ -86,14 +72,6 @@ interface DesktopLocalDirectoryAPI {
     root: string;
     path: string;
   }) => Promise<{ ok: boolean; reason?: string }>;
-  listLocalDirectorySharedOverrides?: () => Promise<
-    LocalDirectorySharedOverride[]
-  >;
-  setLocalDirectorySharedOverride?: (input: {
-    daemonId: string;
-    localPath: string;
-    enabled: boolean;
-  }) => Promise<SetLocalDirectorySharedOverrideResult>;
 }
 
 function readDesktopAPI(): DesktopLocalDirectoryAPI | undefined {
@@ -127,9 +105,6 @@ export async function validateLocalDirectory(
   return api.validateLocalDirectory(path);
 }
 
-/** Whether `path` (or its nearest existing ancestor) is writable. Web and
- *  older desktop builds return true: they cannot check, and the daemon
- *  still refuses an unwritable root at task time. */
 /** Create a local Git repository in a plain folder. Web and older desktop
  *  builds report unsupported — they cannot touch the disk. */
 export async function initLocalGit(path: string): Promise<InitLocalGitResult> {
@@ -157,57 +132,4 @@ export async function removeProvisionedDirectory(input: {
   const api = readDesktopAPI();
   if (!api?.removeProvisionedDirectory) return { ok: false, reason: "unsupported" };
   return api.removeProvisionedDirectory(input);
-}
-
-export async function validateWritablePath(path: string): Promise<boolean> {
-  const api = readDesktopAPI();
-  if (!api?.validateWritablePath) return true;
-  try {
-    const result = await api.validateWritablePath(path);
-    return result.ok === true;
-  } catch {
-    return true;
-  }
-}
-
-/** True when this desktop build can persist a skip-mutex override locally. */
-export function canSetLocalDirectorySharedOverride(): boolean {
-  const api = readDesktopAPI();
-  return typeof api?.setLocalDirectorySharedOverride === "function";
-}
-
-export async function listLocalDirectorySharedOverrides(): Promise<
-  LocalDirectorySharedOverride[]
-> {
-  const api = readDesktopAPI();
-  if (!api?.listLocalDirectorySharedOverrides) return [];
-  try {
-    const rows = await api.listLocalDirectorySharedOverrides();
-    return Array.isArray(rows) ? rows : [];
-  } catch {
-    return [];
-  }
-}
-
-export async function setLocalDirectorySharedOverride(input: {
-  daemonId: string;
-  localPath: string;
-  enabled: boolean;
-}): Promise<SetLocalDirectorySharedOverrideResult> {
-  const api = readDesktopAPI();
-  if (!api?.setLocalDirectorySharedOverride) {
-    return { ok: false, error: "unsupported" };
-  }
-  return api.setLocalDirectorySharedOverride(input);
-}
-
-export function localDirectoryOverrideKey(
-  daemonId: string,
-  localPath: string,
-): string {
-  return `${daemonId}\n${normalizeLocalDirectoryOverridePath(localPath)}`;
-}
-
-export function normalizeLocalDirectoryOverridePath(path: string): string {
-  return path.replace(/[\\/]+$/, "") || path;
 }

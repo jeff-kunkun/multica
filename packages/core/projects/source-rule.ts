@@ -1,6 +1,5 @@
 import type {
   GithubRepoResourceRef,
-  LocalDirectoryExecutionMode,
   LocalDirectoryResourceRef,
   ProjectResource,
 } from "../types";
@@ -92,79 +91,6 @@ export function localDirectoryRef(r: ProjectResource): LocalDirectoryResourceRef
     : null;
 }
 
-/** Absent `execution_mode` means `in_place`; unknown values are NOT invented. */
-export function executionModeOfResource(r: ProjectResource): LocalDirectoryExecutionMode {
-  const mode = localDirectoryRef(r)?.execution_mode;
-  return mode === "worktree" || mode === "shared" || mode === "in_place" ? mode : "in_place";
-}
-
-/**
- * A repository configured twice: once as a remote URL, once as a directory on
- * some machine. `local` is what tasks on that machine will actually use;
- * `remotes` are the now-redundant `github_repo` rows.
- */
-export interface DuplicateSourceGroup {
-  /** Lowercased repository name the two sources agree on. */
-  repoName: string;
-  local: ProjectResource;
-  remotes: ProjectResource[];
-}
-
-function repoKeyOfGithub(r: ProjectResource): string {
-  const ref = githubRef(r);
-  if (!ref) return "";
-  const stored = (ref.repo_key ?? "").trim();
-  if (stored) return stored;
-  return normalizeRepoUrl(ref.url ?? "");
-}
-
-function repoKeyOfLocal(r: ProjectResource): string {
-  return (localDirectoryRef(r)?.repo_key ?? "").trim();
-}
-
-/**
- * Find repositories configured both ways.
- *
- * Prefer `repo_key`: a local checkout and a github_repo that normalize to the
- * same host/owner/name ARE the same repository, even when the folder is named
- * something else. A name match is the fallback for rows written before
- * `repo_key` existed, and is only strong enough to ASK ("these look like the
- * same repository — merge them?") — never strong enough to remove a resource
- * on the user's behalf.
- *
- * A group holds EVERY `github_repo` row whose key (or name) matches, including
- * two rows spelling one URL differently, so merging a group clears that
- * repository completely — and touches nothing outside it.
- */
-export function findDuplicateSources(resources: ProjectResource[]): DuplicateSourceGroup[] {
-  const locals = resources.filter((r) => r.resource_type === "local_directory");
-  const remotes = resources.filter((r) => r.resource_type === "github_repo");
-  const groups: DuplicateSourceGroup[] = [];
-  for (const local of locals) {
-    const key = repoKeyOfLocal(local);
-    if (key) {
-      const matched = remotes.filter((r) => repoKeyOfGithub(r) === key);
-      if (matched.length > 0) {
-        groups.push({
-          repoName: key.slice(key.lastIndexOf("/") + 1) || key,
-          local,
-          remotes: matched,
-        });
-      }
-      continue;
-    }
-    const path = localDirectoryRef(local)?.local_path ?? "";
-    const name = repoNameFromLocalPath(path);
-    if (!name) continue;
-    const matched = remotes.filter((r) => {
-      const remoteName = repoNameFromUrl(githubRef(r)?.url ?? "");
-      return remoteName !== "" && remoteName === name;
-    });
-    if (matched.length > 0) groups.push({ repoName: name, local, remotes: matched });
-  }
-  return groups;
-}
-
 /** Where a task's code comes from, and which resource decided it. */
 export interface TaskCodeSource {
   kind: "local_directory" | "remote_checkout";
@@ -172,7 +98,6 @@ export interface TaskCodeSource {
   resource: ProjectResource | null;
   /** Absolute path of the pinned directory, when kind is local_directory. */
   localPath: string;
-  executionMode: LocalDirectoryExecutionMode;
   /** True while the task has not reported a work dir yet — a prediction. */
   predicted: boolean;
 }
@@ -205,7 +130,6 @@ export function resolveTaskCodeSource(params: {
       kind: "remote_checkout",
       resource: null,
       localPath: "",
-      executionMode: "in_place",
       predicted: hasReportedWorkDir !== true,
     };
   }
@@ -213,7 +137,6 @@ export function resolveTaskCodeSource(params: {
     kind: "local_directory",
     resource,
     localPath: localDirectoryRef(resource)?.local_path ?? "",
-    executionMode: executionModeOfResource(resource),
     predicted: hasReportedWorkDir !== true,
   };
 }

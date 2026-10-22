@@ -36,6 +36,7 @@ vi.mock("../../../workspace/use-magpie-mode", () => ({ useWorkspaceMagpieEnabled
 import { MagpieGroupPicker, useIssueMagpieGroups } from "./magpie-group-picker";
 
 const GROUPS = ["office-opencode", "office-pojia"];
+const ROUTED = { magpie: { group: "office-opencode", models: [{ id: "nexus/coder" }] } };
 
 function issue(metadata: Record<string, unknown>): Issue {
   return { id: "issue-1", assignee_type: "agent", assignee_id: "agent-1", metadata } as unknown as Issue;
@@ -46,7 +47,7 @@ beforeEach(() => {
   mocks.setKey.mockResolvedValue(undefined);
   mocks.deleteKey.mockResolvedValue(undefined);
   mocks.magpie = true;
-  mocks.runtimes = [{ id: "rt-1", provider: "opencode" }];
+  mocks.runtimes = [{ id: "rt-1", provider: "opencode", metadata: ROUTED }];
   mocks.agents = [{ id: "agent-1", runtime_id: "rt-1", runtime_config: { magpie_groups: GROUPS } }];
 });
 
@@ -62,8 +63,17 @@ describe("useIssueMagpieGroups", () => {
     expect(groups({ assignee_type: "agent", assignee_id: "agent-1" })).toBeNull();
 
     mocks.agents = [{ id: "agent-1", runtime_id: "rt-1", runtime_config: { magpie_groups: GROUPS } }];
-    mocks.runtimes = [{ id: "rt-1", provider: "claude" }];
+    mocks.runtimes = [{ id: "rt-1", provider: "claude", metadata: ROUTED }];
     expect(groups({ assignee_type: "agent", assignee_id: "agent-1" })).toBeNull();
+  });
+
+  it("offers nothing for a native agent, whose runtime magpie does not route", () => {
+    const groups = () =>
+      renderHook(() => useIssueMagpieGroups({ assignee_type: "agent", assignee_id: "agent-1" })).result.current;
+    mocks.runtimes = [{ id: "rt-1", provider: "opencode", metadata: { magpie: { group: "", models: [] } } }];
+    expect(groups()).toBeNull();
+    mocks.runtimes = [{ id: "rt-1", provider: "opencode", metadata: {} }];
+    expect(groups()).toBeNull();
   });
 
   it("offers nothing while the workspace is not in magpie mode", () => {

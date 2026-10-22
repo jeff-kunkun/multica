@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useMemo, useState, type ReactNode } from "react";
-import { AlertCircle, BookOpen, Brain, Check, ChevronRight, CirclePause, Clock3, CornerDownRight, ExternalLink, Loader2, MessageSquare, RotateCcw, ScrollText, Square, Terminal } from "lucide-react";
+import { AlertCircle, BookOpen, Brain, Check, ChevronRight, Clock3, CornerDownRight, ExternalLink, Loader2, MessageSquare, RotateCcw, ScrollText, Square, Terminal } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -184,9 +184,8 @@ export function InlineCommentRun({ run, className, viewState, showIdentity = fal
     : t(($) => $.inline_run.waiting_response);
   const machineQueueReason = task.status === "queued" ? task.queue_reason : undefined;
   const summary = runtimeOffline ? t(($) => $.inline_run.runtime_offline_hint)
-    : task.status === "queued" ? t(($) => $.inline_run.queued)
+    : task.status === "queued" || task.status === "waiting_local_directory" ? t(($) => $.inline_run.queued)
     : task.status === "dispatched" ? t(($) => $.inline_run.starting)
-    : task.status === "waiting_local_directory" ? t(($) => $.inline_run.waiting_directory)
     : task.status === "deferred" ? t(($) => $.inline_run.retrying)
     : activitySummary;
   const skillsUsed = useMemo(() => runSkillsUsed(task.skills_used, items), [task.skills_used, items]);
@@ -450,9 +449,6 @@ function RunActivityIndicator({ status, animate }: { status: AgentTask["status"]
       "size-3.5 shrink-0 stroke-[2.25] text-info",
       animate && "motion-safe:animate-spin motion-safe:[animation-duration:900ms]",
     )} />;
-  }
-  if (status === "waiting_local_directory") {
-    return <CirclePause aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />;
   }
   if (status === "deferred") {
     return <RotateCcw aria-hidden className="size-3.5 shrink-0 text-warning" />;

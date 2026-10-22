@@ -871,7 +871,6 @@
       "status": {
         "queued": "En file d'attente",
         "dispatched": "Envoyée",
-        "waiting_local_directory": "En attente du répertoire",
         "running": "En cours",
         "completed": "Réussie",
         "failed": "En échec",
@@ -1100,7 +1099,6 @@
     "status_queued": "En file d'attente",
     "status_dispatched": "Envoyée",
     "status_cancelled": "Annulée",
-    "status_waiting": "En attente",
     "trigger_initial": "Exécution initiale",
     "trigger_text": "Déclencheur",
     "trigger_comment": "Depuis un commentaire",
@@ -1170,13 +1168,9 @@
     "details_source": "Origine du code",
     "details_source_path": "Répertoire",
     "details_source_path_planned": "Sera utilisé",
-    "details_source_mode": "Mode d'exécution",
     "details_source_resource": "Depuis la ressource",
     "source_local_directory": "Répertoire local sur cette machine",
     "source_remote_checkout": "Récupération distante",
-    "source_mode_in_place": "Une exécution à la fois, dans votre copie de travail",
-    "source_mode_worktree": "Un git worktree dédié par exécution",
-    "source_mode_shared": "Répertoire partagé, exécutions en parallèle",
     "kind_skill": "Skill"
   },
   "task_failure": {
@@ -1337,12 +1331,13 @@
     "current_work": "En cours"
   },
   "magpie": {
-    "unrouted": "Contourne Magpie",
-    "cli_models": "Modèles propres au CLI",
     "edit_hint": "À modifier dans Magpie",
     "group_label": "Groupes Magpie",
     "save_failed": "Impossible de changer les groupes Magpie",
     "default": "Par défaut",
-    "make_default": "Définir par défaut"
+    "make_default": "Définir par défaut",
+    "switch_label": "Se connecter à Magpie",
+    "switch_description": "Activé, les agents sur un groupe Magpie peuvent choisir leurs groupes et sont sauvegardés avant suppression ; désactivé, comme Multica officiel.",
+    "switch_failed": "Impossible de modifier le réglage Magpie"
   }
 }

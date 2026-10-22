@@ -60,7 +60,6 @@ import {
   type SettingsSaveStatus,
 } from "./settings-layout";
 import { useAutoSave } from "./use-auto-save";
-import { settingsHref } from "./settings-navigation";
 
 interface WorkspaceDetailsDraft {
   name: string;
@@ -501,28 +500,6 @@ export function WorkspaceTab() {
         description={t(($) => $.workspace.naming_description)}
       >
         <ChatNamingCard naming={naming} canManage={canManageWorkspace} onChange={handleNamingChange} />
-      </SettingsSection>
-
-      <SettingsSection>
-        <SettingsCard>
-          <SettingsRow
-            anchor="automation-limits"
-            label={t(($) => $.workspace.automation_limits_title)}
-            description={t(($) => $.workspace.automation_limits_moved)}
-          >
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() =>
-                navigation.push(
-                  settingsHref(navigation.pathname, navigation.searchParams, "agent-permissions"),
-                )
-              }
-            >
-              {t(($) => $.workspace.automation_limits_open)}
-            </Button>
-          </SettingsRow>
-        </SettingsCard>
       </SettingsSection>
 
       {/* Danger Zone — gated on the member query settling so the owner-only

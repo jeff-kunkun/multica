@@ -72,7 +72,9 @@ func validMagpieModels(models []magpieModel) bool {
 
 // ReportRuntimeMagpie stores the magpie route a daemon read for one of its
 // runtimes; a null route removes it. Clients are notified only when the
-// stored route changed. Only workspaces with magpie mode on keep routes.
+// stored route changed. Routes are kept whether or not the workspace switch is
+// on: they are how the server knows the workspace has magpie at all (the
+// switch's `available`), and every magpie behaviour checks the switch itself.
 func (h *Handler) ReportRuntimeMagpie(w http.ResponseWriter, r *http.Request) {
 	rt, ok := h.requireDaemonRuntimeAccess(w, r, chi.URLParam(r, "runtimeId"))
 	if !ok {
@@ -87,16 +89,11 @@ func (h *Handler) ReportRuntimeMagpie(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Magpie mode off: the route is not stored, and one left over from when
-	// the workspace had it on is dropped, so the runtime reads as it did
-	// before magpie mode existed.
-	enabled := h.workspaceMagpieEnabledByID(r.Context(), rt.WorkspaceID)
-
 	var (
 		changed int64
 		err     error
 	)
-	if req.Magpie == nil || !enabled {
+	if req.Magpie == nil {
 		changed, err = h.Queries.ClearAgentRuntimeMagpie(r.Context(), rt.ID)
 	} else {
 		if req.Magpie.Models == nil {

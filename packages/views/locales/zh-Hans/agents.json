@@ -953,7 +953,6 @@
       "status": {
         "queued": "排队中",
         "dispatched": "已派发",
-        "waiting_local_directory": "等待目录",
         "deferred": "重试中",
         "running": "进行中",
         "completed": "成功",
@@ -1139,7 +1138,6 @@
     "status_queued": "排队中",
     "status_dispatched": "已派发",
     "status_cancelled": "已取消",
-    "status_waiting": "等待中",
     "status_deferred": "重试中",
     "trigger_initial": "初次运行",
     "trigger_text": "触发内容",
@@ -1205,13 +1203,9 @@
     "details_source": "代码来源",
     "details_source_path": "目录",
     "details_source_path_planned": "将使用",
-    "details_source_mode": "执行模式",
     "details_source_resource": "命中的来源配置",
     "source_local_directory": "本机本地目录",
     "source_remote_checkout": "远端拉取",
-    "source_mode_in_place": "一次一个任务，在你的工作副本中修改",
-    "source_mode_worktree": "每个任务独立 git worktree",
-    "source_mode_shared": "共享目录，任务并发运行",
     "kind_skill": "skill"
   },
   "task_failure": {
@@ -1300,12 +1294,13 @@
     "current_work": "在做"
   },
   "magpie": {
-    "unrouted": "不走 Magpie",
-    "cli_models": "CLI 自带模型",
     "edit_hint": "在 Magpie 里修改",
     "group_label": "Magpie 组",
     "save_failed": "Magpie 组没改成",
     "default": "默认",
-    "make_default": "设为默认"
+    "make_default": "设为默认",
+    "switch_label": "接入 Magpie",
+    "switch_description": "打开后，走 Magpie 组的智能体可选组、删除前先备份；关闭时与官方一致。",
+    "switch_failed": "Magpie 开关没改成"
   }
 }

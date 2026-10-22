@@ -29,7 +29,7 @@ func TestRunWorkspaceMagpieSetOnPutsSwitch(t *testing.T) {
 		}
 		gotMethod = r.Method
 		_ = json.NewDecoder(r.Body).Decode(&gotBody)
-		json.NewEncoder(w).Encode(map[string]any{"enabled": true})
+		json.NewEncoder(w).Encode(map[string]any{"enabled": true, "available": true})
 	}))
 	defer srv.Close()
 
@@ -52,8 +52,8 @@ func TestRunWorkspaceMagpieSetOnPutsSwitch(t *testing.T) {
 	if gotBody["enabled"] != true {
 		t.Fatalf("body = %v, want enabled=true", gotBody)
 	}
-	if !strings.Contains(out, `"enabled": true`) {
-		t.Fatalf("output %q does not report enabled", out)
+	if !strings.Contains(out, `"enabled": true`) || !strings.Contains(out, `"available": true`) {
+		t.Fatalf("output %q does not report enabled and available", out)
 	}
 }
 
@@ -63,7 +63,7 @@ func TestRunWorkspaceMagpieShowsSwitch(t *testing.T) {
 			http.NotFound(w, r)
 			return
 		}
-		json.NewEncoder(w).Encode(map[string]any{"enabled": false})
+		json.NewEncoder(w).Encode(map[string]any{"enabled": false, "available": true})
 	}))
 	defer srv.Close()
 
@@ -79,6 +79,9 @@ func TestRunWorkspaceMagpieShowsSwitch(t *testing.T) {
 	}
 	if !strings.Contains(out, "MAGPIE") || !strings.Contains(out, "off") {
 		t.Fatalf("table output %q does not show the switch as off", out)
+	}
+	if !strings.Contains(out, "AVAILABLE") || !strings.Contains(out, "yes") {
+		t.Fatalf("table output %q does not show the workspace has Magpie", out)
 	}
 }
 

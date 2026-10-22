@@ -800,7 +800,6 @@
       "status": {
         "queued": "대기 중",
         "dispatched": "디스패치됨",
-        "waiting_local_directory": "디렉터리 대기 중",
         "deferred": "재시도 중",
         "running": "실행 중",
         "completed": "성공",
@@ -986,7 +985,6 @@
     "status_queued": "대기열",
     "status_dispatched": "디스패치됨",
     "status_cancelled": "취소됨",
-    "status_waiting": "대기 중",
     "status_deferred": "재시도 중",
     "trigger_initial": "최초 실행",
     "trigger_text": "트리거",
@@ -1052,13 +1050,9 @@
     "details_source": "코드 출처",
     "details_source_path": "디렉터리",
     "details_source_path_planned": "사용 예정",
-    "details_source_mode": "실행 모드",
     "details_source_resource": "적용된 소스 설정",
     "source_local_directory": "이 컴퓨터의 로컬 디렉터리",
     "source_remote_checkout": "원격에서 체크아웃",
-    "source_mode_in_place": "한 번에 하나씩, 작업 사본을 직접 수정",
-    "source_mode_worktree": "실행마다 전용 git worktree",
-    "source_mode_shared": "공유 디렉터리, 병렬 실행",
     "kind_skill": "skill"
   },
   "task_failure": {
@@ -1300,12 +1294,13 @@
     "current_work": "작업 중"
   },
   "magpie": {
-    "unrouted": "Magpie 미경유",
-    "cli_models": "CLI 기본 모델",
     "edit_hint": "Magpie에서 변경",
     "group_label": "Magpie 그룹",
     "save_failed": "Magpie 그룹을 바꾸지 못했습니다",
     "default": "기본",
-    "make_default": "기본으로 설정"
+    "make_default": "기본으로 설정",
+    "switch_label": "Magpie 연결",
+    "switch_description": "켜면 Magpie 그룹의 에이전트가 그룹을 고를 수 있고 삭제 전에 백업됩니다. 끄면 공식과 같습니다.",
+    "switch_failed": "Magpie 설정을 바꾸지 못했습니다"
   }
 }

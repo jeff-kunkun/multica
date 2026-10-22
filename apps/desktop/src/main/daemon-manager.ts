@@ -349,7 +349,7 @@ function invalidateActiveProfile(): void {
 
 /** Loopback health port of the current Desktop daemon, or null while the
  *  target API URL is still unknown. The daemon serves its machine-local
- *  endpoints (repo checkout, worktree cleanup) there. */
+ *  endpoints (repo checkout) there. */
 export async function activeDaemonHealthPort(): Promise<number | null> {
   const profile = await ensureActiveProfile();
   if (!profile) return null;
@@ -357,14 +357,6 @@ export async function activeDaemonHealthPort(): Promise<number | null> {
   // fallback when no record exists yet.
   const record = await readDaemonPortRecord(profile.name);
   return record?.port ?? healthPortForProfile(profile.name);
-}
-
-/** Profile directory the current Desktop daemon reads and writes. Null until
- *  the target API URL is known — callers must not fall back to ~/.multica. */
-export async function activeDaemonProfileDir(): Promise<string | null> {
-  const profile = await ensureActiveProfile();
-  if (!profile) return null;
-  return profileDir(profile.name);
 }
 
 function setDesiredDaemonRunning(desired: boolean, explicit = false): void {

@@ -1,14 +1,11 @@
 "use client";
 
 import { useState } from "react";
-import type { LocalDirectoryExecutionMode } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { useT } from "../../i18n";
 import type { NewProjectDirectoryDraft } from "../new-project-directory";
 import { patchDirectoryDraft } from "../new-project-directory";
-
-const MODES: LocalDirectoryExecutionMode[] = ["worktree", "shared", "in_place"];
 
 /**
  * The few fields a project needs at the moment it is created: a name, an
@@ -19,9 +16,6 @@ export function NewProjectFields({
   onNameChange,
   icon,
   onIconChange,
-  description,
-  onDescriptionChange,
-  showDescription = false,
   directory,
   onDirectoryChange,
   directoryAvailable,
@@ -31,9 +25,6 @@ export function NewProjectFields({
   onNameChange: (name: string) => void;
   icon: string;
   onIconChange: (icon: string) => void;
-  description?: string;
-  onDescriptionChange?: (description: string) => void;
-  showDescription?: boolean;
   directory: NewProjectDirectoryDraft;
   onDirectoryChange: (next: NewProjectDirectoryDraft) => void;
   directoryAvailable: boolean;
@@ -43,16 +34,6 @@ export function NewProjectFields({
   const [showIcon, setShowIcon] = useState(false);
   const patch = (next: Partial<NewProjectDirectoryDraft>) =>
     onDirectoryChange(patchDirectoryDraft(directory, next));
-  const modeLabel = (mode: LocalDirectoryExecutionMode) => {
-    switch (mode) {
-      case "worktree":
-        return t(($) => $.new_project.mode.worktree);
-      case "shared":
-        return t(($) => $.new_project.mode.shared);
-      case "in_place":
-        return t(($) => $.new_project.mode.in_place);
-    }
-  };
 
   return (
     <div className="flex flex-col gap-2 px-1 py-1">
@@ -80,17 +61,6 @@ export function NewProjectFields({
           placeholder={t(($) => $.new_project.icon_placeholder)}
           aria-label={t(($) => $.new_project.icon)}
           onChange={(event) => onIconChange(event.target.value)}
-        />
-      ) : null}
-      {showDescription ? (
-        <textarea
-          value={description ?? ""}
-          disabled={disabled}
-          rows={3}
-          aria-label={t(($) => $.new_project.positioning)}
-          placeholder={t(($) => $.new_project.positioning_placeholder)}
-          className="w-full resize-none rounded-md border bg-background px-2 py-1.5 text-caption outline-none"
-          onChange={(event) => onDescriptionChange?.(event.target.value)}
         />
       ) : null}
 
@@ -148,31 +118,6 @@ export function NewProjectFields({
               </label>
             </>
           )}
-          <label className="flex flex-col gap-1 text-caption text-muted-foreground">
-            {directory.modeTouched
-              ? t(($) => $.new_project.directory_mode)
-              : t(($) => $.new_project.directory_mode_auto, {
-                  mode: modeLabel(directory.mode),
-                })}
-            <select
-              className="rounded-md border bg-background px-2 py-1 text-caption text-foreground"
-              value={directory.mode}
-              disabled={disabled}
-              aria-label={t(($) => $.new_project.directory_mode)}
-              onChange={(event) =>
-                patch({
-                  mode: event.target.value as LocalDirectoryExecutionMode,
-                  modeTouched: true,
-                })
-              }
-            >
-              {MODES.map((mode) => (
-                <option key={mode} value={mode}>
-                  {modeLabel(mode)}
-                </option>
-              ))}
-            </select>
-          </label>
         </div>
       ) : null}
     </div>

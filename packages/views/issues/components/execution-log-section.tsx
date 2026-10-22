@@ -537,8 +537,7 @@ export function IssueRunsTotal({
 const STATUS_TONE: Record<AgentTask["status"], string> = {
   queued: "text-warning",
   dispatched: "text-warning",
-  // Same tone as queued/dispatched — visually "stopped" so users see the
-  // task is parked, but distinguished by the status label.
+  // Older daemons' local-directory hold; shown as queued.
   waiting_local_directory: "text-warning",
   // Same parked tone: backoff is a wait, not live model work.
   deferred: "text-warning",

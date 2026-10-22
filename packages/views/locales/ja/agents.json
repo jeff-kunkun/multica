@@ -792,7 +792,6 @@
       "status": {
         "queued": "待機中",
         "dispatched": "ディスパッチ済み",
-        "waiting_local_directory": "ディレクトリ待機中",
         "deferred": "再試行中",
         "running": "実行中",
         "completed": "成功",
@@ -978,7 +977,6 @@
     "status_queued": "待機列",
     "status_dispatched": "ディスパッチ済み",
     "status_cancelled": "キャンセル",
-    "status_waiting": "待機中",
     "status_deferred": "再試行中",
     "trigger_initial": "初回実行",
     "trigger_text": "トリガー",
@@ -1044,13 +1042,9 @@
     "details_source": "コードの取得元",
     "details_source_path": "ディレクトリ",
     "details_source_path_planned": "使用予定",
-    "details_source_mode": "実行モード",
     "details_source_resource": "該当するリソース設定",
     "source_local_directory": "このマシンのローカルディレクトリ",
     "source_remote_checkout": "リモートから取得",
-    "source_mode_in_place": "1 回に 1 タスク、作業コピーを直接編集",
-    "source_mode_worktree": "タスクごとに専用の git worktree",
-    "source_mode_shared": "共有ディレクトリ、タスクは並行実行",
     "kind_skill": "skill"
   },
   "task_failure": {
@@ -1300,12 +1294,13 @@
     "current_work": "作業中の課題"
   },
   "magpie": {
-    "unrouted": "Magpie を経由しない",
-    "cli_models": "CLI 標準のモデル",
     "edit_hint": "Magpie で変更",
     "group_label": "Magpie グループ",
     "save_failed": "Magpie グループを変更できませんでした",
     "default": "既定",
-    "make_default": "既定にする"
+    "make_default": "既定にする",
+    "switch_label": "Magpie に接続",
+    "switch_description": "オンにすると、Magpie グループのエージェントはグループを選べ、削除前にバックアップされます。オフでは公式と同じです。",
+    "switch_failed": "Magpie の切り替えに失敗しました"
   }
 }

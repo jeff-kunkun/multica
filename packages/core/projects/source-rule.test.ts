@@ -2,7 +2,6 @@
 import { describe, expect, it } from "vitest";
 import type { ProjectResource } from "../types";
 import {
-  findDuplicateSources,
   normalizeRepoUrl,
   repoNameFromLocalPath,
   repoNameFromUrl,
@@ -68,11 +67,8 @@ describe("normalizeRepoUrl", () => {
 
   it("does not make two unidentifiable inputs equal", () => {
     expect(normalizeRepoUrl("nonsense")).toBe(normalizeRepoUrl("other"));
-    // ...which is why callers must check for "" before comparing; the
-    // duplicate finder below is what actually enforces that.
-    expect(
-      findDuplicateSources([remote("a", "nonsense"), remote("b", "other")]),
-    ).toEqual([]);
+    // ...which is why callers must check for "" before comparing.
+    expect(normalizeRepoUrl("nonsense")).toBe("");
   });
 });
 
@@ -83,96 +79,12 @@ describe("repo names", () => {
   });
 });
 
-describe("findDuplicateSources", () => {
-  it("flags one repository configured both remotely and locally", () => {
-    const resources = [
-      remote("r1", "https://github.com/jeff-kunkun/multica"),
-      local("l1", "/Users/kunkun/.agents/multica"),
-    ];
-    const groups = findDuplicateSources(resources);
-    expect(groups).toHaveLength(1);
-    expect(groups[0]!.repoName).toBe("multica");
-    expect(groups[0]!.local.id).toBe("l1");
-    expect(groups[0]!.remotes.map((r) => r.id)).toEqual(["r1"]);
-  });
-
-  it("groups every remote row that names the same repository", () => {
-    // The real workspace had multica configured as github_repo twice plus a
-    // local directory; a merge that only removed one row would leave the bug.
-    const groups = findDuplicateSources([
-      remote("r1", "https://github.com/jeff-kunkun/multica"),
-      remote("r2", "git@github.com:jeff-kunkun/multica.git"),
-      local("l1", "/Users/kunkun/.agents/multica"),
-    ]);
-    expect(groups[0]!.remotes.map((r) => r.id)).toEqual(["r1", "r2"]);
-  });
-
-  it("leaves unrelated sources alone", () => {
-    expect(
-      findDuplicateSources([
-        remote("r1", "https://github.com/front/game_web_all"),
-        local("l1", "/Users/kunkun/.agents/multica"),
-      ]),
-    ).toEqual([]);
-  });
-
-  it("never puts another repository's rows in a group", () => {
-    // The merge button is labelled with one repository's name and deletes
-    // exactly the rows in its group, so a row from elsewhere in the group is
-    // a deletion the user was never shown. A second repository with its own
-    // duplicate rows must stay untouched by the first one's merge.
-    const groups = findDuplicateSources([
-      local("l1", "/Users/kunkun/.agents/multica"),
-      remote("r1", "https://github.com/jeff-kunkun/multica"),
-      remote("t1", "https://github.com/kun/online-tarot"),
-      remote("t2", "git@github.com:kun/online-tarot.git"),
-    ]);
-    expect(groups).toHaveLength(1);
-    expect(groups[0]!.repoName).toBe("multica");
-    expect(groups[0]!.remotes.map((r) => r.id)).toEqual(["r1"]);
-  });
-
-  it("does not flag a directory whose name cannot be read", () => {
-    expect(findDuplicateSources([remote("r1", "https://github.com/o/r"), local("l1", "")])).toEqual([]);
-  });
-
-  it("matches by repo_key even when the folder name differs", () => {
-    const groups = findDuplicateSources([
-      remote("r1", "https://github.com/jeff-kunkun/multica"),
-      local("l1", "/Users/me/code/app", { repo_key: "github.com/jeff-kunkun/multica" }),
-    ]);
-    expect(groups).toHaveLength(1);
-    expect(groups[0]!.local.id).toBe("l1");
-    expect(groups[0]!.remotes.map((r) => r.id)).toEqual(["r1"]);
-  });
-
-  it("does not name-match when repo_key proves they are different repositories", () => {
-    expect(
-      findDuplicateSources([
-        remote("r1", "https://github.com/jeff-kunkun/multica"),
-        local("l1", "/Users/me/code/multica", { repo_key: "github.com/other/tool" }),
-      ]),
-    ).toEqual([]);
-  });
-
-  it("uses a stored github_repo repo_key without re-reading the URL", () => {
-    const stored = remote("r1", "https://github.com/unrelated/name");
-    (stored.resource_ref as { repo_key?: string }).repo_key = "github.com/jeff-kunkun/multica";
-    const groups = findDuplicateSources([
-      stored,
-      local("l1", "/Users/me/code/app", { repo_key: "github.com/jeff-kunkun/multica" }),
-    ]);
-    expect(groups).toHaveLength(1);
-    expect(groups[0]!.remotes.map((r) => r.id)).toEqual(["r1"]);
-  });
-});
-
 describe("resolveTaskCodeSource", () => {
   it("uses the local directory pinned for the task's machine", () => {
     const src = resolveTaskCodeSource({
       resources: [
         remote("r1", "https://github.com/jeff-kunkun/multica"),
-        local("l1", "/Users/kunkun/.agents/multica", { daemon_id: "d1", execution_mode: "worktree" }),
+        local("l1", "/Users/kunkun/.agents/multica", { daemon_id: "d1" }),
         local("l2", "/other/machine/multica", { daemon_id: "d2" }),
       ],
       daemonId: "d1",
@@ -181,7 +93,6 @@ describe("resolveTaskCodeSource", () => {
     expect(src.kind).toBe("local_directory");
     expect(src.resource?.id).toBe("l1");
     expect(src.localPath).toBe("/Users/kunkun/.agents/multica");
-    expect(src.executionMode).toBe("worktree");
     expect(src.predicted).toBe(false);
   });
 
@@ -217,13 +128,5 @@ describe("resolveTaskCodeSource", () => {
     });
     expect(src.predicted).toBe(true);
     expect(src.localPath).toBe("/a/multica");
-  });
-
-  it("defaults an absent execution_mode to in_place rather than claiming isolation", () => {
-    const src = resolveTaskCodeSource({
-      resources: [local("l1", "/a/multica", { daemon_id: "d1" })],
-      daemonId: "d1",
-    });
-    expect(src.executionMode).toBe("in_place");
   });
 });

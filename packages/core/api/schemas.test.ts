@@ -1106,6 +1106,15 @@ describe("WorkspaceMagpieSchema", () => {
       EMPTY_WORKSPACE_MAGPIE,
     );
   });
+
+  it("reads availability, unavailable from servers that predate it", () => {
+    expect(
+      parseWithFallback({ enabled: false, available: true }, WorkspaceMagpieSchema, EMPTY_WORKSPACE_MAGPIE, ENDPOINT),
+    ).toMatchObject({ enabled: false, available: true });
+    expect(
+      parseWithFallback({ enabled: true }, WorkspaceMagpieSchema, EMPTY_WORKSPACE_MAGPIE, ENDPOINT),
+    ).toMatchObject({ available: false });
+  });
 });
 
 describe("DeleteAgentResponseSchema", () => {
@@ -1603,37 +1612,6 @@ describe("AppConfigSchema local_worktree_supported drift", () => {
       local_worktree_supported: true,
     });
     expect(parsed.local_worktree_supported).toBe(true);
-  });
-});
-
-describe("AppConfigSchema local_shared_supported drift", () => {
-  it("defaults to false when the server predates the signal", () => {
-    const parsed = AppConfigSchema.parse({ cdn_domain: "cdn.example.com" });
-    expect(parsed.local_shared_supported).toBe(false);
-  });
-
-  it("stays false when the server only advertises worktree", () => {
-    const parsed = AppConfigSchema.parse({
-      cdn_domain: "cdn.example.com",
-      local_worktree_supported: true,
-    });
-    expect(parsed.local_shared_supported).toBe(false);
-  });
-
-  it("coerces a malformed value to false rather than trusting it", () => {
-    const parsed = AppConfigSchema.parse({
-      cdn_domain: "cdn.example.com",
-      local_shared_supported: "yes",
-    });
-    expect(parsed.local_shared_supported).toBe(false);
-  });
-
-  it("carries a genuine true through", () => {
-    const parsed = AppConfigSchema.parse({
-      cdn_domain: "cdn.example.com",
-      local_shared_supported: true,
-    });
-    expect(parsed.local_shared_supported).toBe(true);
   });
 });
 

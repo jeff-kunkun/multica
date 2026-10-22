@@ -3,10 +3,10 @@ import { api } from "../api";
 import { workspaceKeys } from "./queries";
 
 /**
- * The workspace's magpie mode switch. Off (the default) keeps the old
- * behaviour: editable agents page, archive only, routing groups pick the
- * model. On adds magpie group selection, the read-only agents mirror and
- * real delete with backup.
+ * The workspace's magpie mode switch. Off (the default) keeps the official
+ * behaviour for every agent. On, agents whose runtime magpie routes through
+ * a group get group selection, the magpie detail page and real delete with
+ * backup; the rest stay native.
  */
 export function isWorkspaceMagpieEnabled(settings: unknown): boolean {
   if (!settings || typeof settings !== "object") return false;

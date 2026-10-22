@@ -1,5 +1,4 @@
 import { parseFastAccess, type FastAccessRequest } from "./fast-access";
-import type { AgentSpawnPolicy, AgentSpawnPolicyPatch } from "../workspace/agent-spawn";
 import type { ZodType } from "zod";
 import type { IssueWakeup, IssueWakeupInput, IssueWakeupSummaryRow, PausedWakeup, SystemWakeup, WakeupRun, WorkspaceSystemWakeup } from "../types/issue-wakeup";
 import type { WorkspaceWakeupPage, WorkspaceWakeupFilters } from "../types/issue-wakeup";
@@ -3657,19 +3656,9 @@ export class ApiClient {
       method: "PUT",
       body: JSON.stringify({ enabled }),
     });
-    return parseWithFallback(raw, WorkspaceMagpieSchema, { enabled }, {
+    // The switch is only offered where magpie is available.
+    return parseWithFallback(raw, WorkspaceMagpieSchema, { enabled, available: true }, {
       endpoint: "PUT /api/workspaces/{id}/magpie",
-    });
-  }
-
-  async getAgentSpawn(workspaceId: string): Promise<AgentSpawnPolicy> {
-    return this.fetch(`/api/workspaces/${workspaceId}/agent-spawn`);
-  }
-
-  async updateAgentSpawn(workspaceId: string, patch: AgentSpawnPolicyPatch): Promise<AgentSpawnPolicy> {
-    return this.fetch(`/api/workspaces/${workspaceId}/agent-spawn`, {
-      method: "PUT",
-      body: JSON.stringify(patch),
     });
   }
 

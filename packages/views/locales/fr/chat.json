@@ -318,8 +318,6 @@
       "reconnecting": "Reconnexion",
       "retrying": "Nouvelle tentative",
       "queued": "En file d'attente",
-      "waiting_local_directory": "En attente du répertoire local",
-      "waiting_local_directory_reason": "En attente de {{reason}}",
       "starting_up": "Démarrage",
       "thinking": "Réflexion",
       "typing": "Rédaction"

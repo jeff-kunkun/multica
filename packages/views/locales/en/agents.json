@@ -979,7 +979,6 @@
       "status": {
         "queued": "Queued",
         "dispatched": "Dispatched",
-        "waiting_local_directory": "Waiting for directory",
         "deferred": "Retrying",
         "running": "Running",
         "completed": "Succeeded",
@@ -1168,7 +1167,6 @@
     "status_queued": "Queued",
     "status_dispatched": "Dispatched",
     "status_cancelled": "Cancelled",
-    "status_waiting": "Waiting",
     "status_deferred": "Retrying",
     "trigger_initial": "Initial run",
     "trigger_text": "Trigger",
@@ -1238,13 +1236,9 @@
     "details_source": "Code source",
     "details_source_path": "Directory",
     "details_source_path_planned": "Will use",
-    "details_source_mode": "Execution mode",
     "details_source_resource": "From resource",
     "source_local_directory": "Local directory on this machine",
     "source_remote_checkout": "Remote checkout",
-    "source_mode_in_place": "One run at a time, in your working copy",
-    "source_mode_worktree": "Own git worktree per run",
-    "source_mode_shared": "Shared directory, runs in parallel",
     "kind_skill": "Skill"
   },
   "task_failure": {
@@ -1337,12 +1331,13 @@
     "current_work": "Working on"
   },
   "magpie": {
-    "unrouted": "Bypasses Magpie",
-    "cli_models": "CLI's own models",
     "edit_hint": "Change it in Magpie",
     "group_label": "Magpie groups",
     "save_failed": "Couldn't change the Magpie groups",
     "default": "Default",
-    "make_default": "Make default"
+    "make_default": "Make default",
+    "switch_label": "Connect to Magpie",
+    "switch_description": "When on, agents on a Magpie group can pick groups and are backed up before delete; off works like official Multica.",
+    "switch_failed": "Couldn't change the Magpie switch"
   }
 }
