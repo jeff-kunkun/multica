@@ -742,10 +742,10 @@ func ResolveAutopilotTriggerPrincipal(ctx context.Context, q *db.Queries, trigge
 // run never starts.
 var ErrAttributionFailClosed = errors.New("attribution: no precise accountable human and enqueue refused (fail-closed policy, policy read failed, or no agent owner)")
 
-// ErrAgentChainBudgetExceeded is returned when an agent-originated enqueue is
-// refused by the per-issue delegation budget. Human-originated enqueues never
-// return this error.
-var ErrAgentChainBudgetExceeded = errors.New("agent delegation chain budget exceeded")
+// ErrAgentChainBudgetExceeded is returned when an agent-originated enqueue
+// targets an issue a person halted. Human-originated enqueues never return
+// it. The wire reason stays chain_budget_exceeded for existing clients.
+var ErrAgentChainBudgetExceeded = errors.New("agents are halted on this issue")
 
 // ErrDuplicatePendingTask means a fresh enqueue lost the race to a concurrent
 // one: a queued/dispatched task for the same (issue, agent) already exists, so
@@ -758,19 +758,12 @@ var ErrAgentChainBudgetExceeded = errors.New("agent delegation chain budget exce
 // upper-layer log or response can leak the constraint name (#5914, Elon review).
 var ErrDuplicatePendingTask = errors.New("a pending task for this issue and agent already exists")
 
-const (
-	agentHaltedMetadataKey      = "agent_halted"
-	agentChainBudgetNotifiedKey = "agent_chain_budget_notified"
-	// DefaultAgentChainBudget is the per-issue agent-to-agent @-relay cap when
-	// workspace.settings.agent_chain_budget is absent or invalid. Keep in
-	// sync with GetWorkspaceAgentChainBudget's SQL ELSE branch.
-	DefaultAgentChainBudget int32 = 30
-)
+const agentHaltedMetadataKey = "agent_halted"
 
 // admitAgentChain is the single admission gate shared by issue-assignee,
 // mention, thread-parent, and child-done wakeups. It intentionally sits after
 // attribution resolution: a member's own action is always direct_human and is
-// never consumed by the chain budget, while agent/system-triggered work is.
+// never refused by a halt, while agent/system-triggered work is.
 func (s *TaskService) admitAgentChain(ctx context.Context, issue db.Issue, triggerCommentID, actorUserID pgtype.UUID, attr attribution.Result) error {
 	if actorUserID.Valid {
 		return nil
@@ -798,80 +791,7 @@ func (s *TaskService) admitAgentChain(ctx context.Context, issue db.Issue, trigg
 	if halted, ok := metadata[agentHaltedMetadataKey].(bool); ok && halted {
 		return ErrAgentChainBudgetExceeded
 	}
-
-	budget, err := s.Queries.GetWorkspaceAgentChainBudget(ctx, issue.WorkspaceID)
-	if err != nil {
-		budget = DefaultAgentChainBudget
-	}
-	// Zero is the explicit "unlimited" setting. Keep the server-side guard
-	// disabled for this issue while retaining the default for absent/invalid
-	// settings.
-	if budget == 0 {
-		return nil
-	}
-	count, err := s.Queries.CountDelegatedTasksSinceHumanComment(ctx, issue.ID)
-	if err != nil || count < int64(budget) {
-		return nil
-	}
-
-	// Set the notice marker first. The metadata mutation is conditional, so
-	// concurrent agents create at most one explanatory system comment.
-	_, markErr := s.Queries.SetIssueMetadataKey(ctx, db.SetIssueMetadataKeyParams{
-		ID: issue.ID, WorkspaceID: issue.WorkspaceID,
-		Key: agentChainBudgetNotifiedKey, Value: []byte("true"),
-	})
-	if markErr == nil {
-		s.createAgentChainBudgetNotice(ctx, issue, budget, triggerCommentID)
-	}
-	return ErrAgentChainBudgetExceeded
-}
-
-func (s *TaskService) createAgentChainBudgetNotice(ctx context.Context, issue db.Issue, budget int32, triggerCommentID pgtype.UUID) {
-	creator := "the issue creator"
-	mention := ""
-	if issue.CreatorType == "member" && issue.CreatorID.Valid {
-		if user, err := s.Queries.GetUser(ctx, issue.CreatorID); err == nil {
-			creator = user.Name
-			creator = strings.ReplaceAll(strings.ReplaceAll(creator, "[", ""), "]", "")
-			mention = fmt.Sprintf("[@%s](mention://member/%s) ", creator, util.UUIDToString(issue.CreatorID))
-		}
-	}
-	parentID := pgtype.UUID{}
-	var rootComment *db.Comment
-	if triggerCommentID.Valid {
-		if comment, err := s.Queries.GetCommentInWorkspace(ctx, db.GetCommentInWorkspaceParams{
-			ID: triggerCommentID, WorkspaceID: issue.WorkspaceID,
-		}); err == nil && comment.IssueID == issue.ID {
-			parentID = triggerCommentID
-			if root, rootErr := s.Queries.GetThreadRoot(ctx, db.GetThreadRootParams{
-				CommentID: triggerCommentID, WorkspaceID: issue.WorkspaceID,
-			}); rootErr == nil {
-				rootComment = &root
-			} else {
-				rootComment = &comment
-			}
-		}
-	}
-	created, err := s.Queries.CreateComment(ctx, db.CreateCommentParams{
-		ViaBotID:   botsource.FromContext(ctx).ID,
-		ViaBotName: botName(ctx),
-		ID:         dbid.NewV7(), IssueID: issue.ID, WorkspaceID: issue.WorkspaceID,
-		AuthorType: "system", AuthorID: pgtype.UUID{Valid: true},
-		Content: fmt.Sprintf("%sAgent delegation chain reached the limit of %d runs. Add a human comment to reset the budget and continue, or raise the limit in workspace settings.", mention, budget),
-		Type:    "system", ParentID: parentID,
-	})
-	if err != nil {
-		slog.Warn("agent chain budget notice: create system comment failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
-		return
-	}
-	if s.Bus != nil {
-		s.Bus.Publish(events.Event{
-			Type:        protocol.EventCommentCreated,
-			WorkspaceID: util.UUIDToString(issue.WorkspaceID), ActorType: "system",
-			Payload: map[string]any{"comment": created.Comment(), "issue_title": issue.Title, "issue_revision": created.IssueRevision},
-		})
-	}
-	s.AutoUnresolveThreadOnReply(ctx, rootComment, util.UUIDToString(issue.WorkspaceID), "system", "", pgtype.UUID{})
+	return nil
 }
 
 // isDuplicatePendingTaskErr reports whether err is the pending-task unique-index

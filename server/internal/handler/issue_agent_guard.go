@@ -30,9 +30,7 @@ func (h *Handler) HaltIssue(w http.ResponseWriter, r *http.Request) {
 	h.stopRelatedWork(w, r, "issue", issue.ID, issue.WorkspaceID, req.Related)
 }
 
-// ResumeIssue clears the issue-level halt. The delegation-chain budget is
-// intentionally reset only by a human comment, so resume cannot silently
-// re-trigger the same one-shot notice while the count is still over budget.
+// ResumeIssue clears the issue-level halt.
 func (h *Handler) ResumeIssue(w http.ResponseWriter, r *http.Request) {
 	issueID := chi.URLParam(r, "id")
 	issue, ok := h.loadIssueForUser(w, r, issueID)

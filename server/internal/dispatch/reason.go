@@ -95,8 +95,8 @@ const (
 	// ReasonIssueLimitReached means a create_issue Autopilot was admitted for a
 	// run, but Cloud's effective workspace issue-count limit blocked the issue.
 	ReasonIssueLimitReached ReasonCode = "issue_limit_reached"
-	// ReasonChainBudgetExceeded means an agent-originated delegation chain hit
-	// the workspace budget and needs a human comment or explicit resume.
+	// ReasonChainBudgetExceeded means an agent-originated wake hit an issue a
+	// person halted; a human comment or explicit resume releases it.
 	ReasonChainBudgetExceeded ReasonCode = "chain_budget_exceeded"
 	// ReasonBotWakeChainLimit: a Bot has exhausted unacknowledged wake admissions.
 	ReasonBotWakeChainLimit ReasonCode = "bot_wake_chain_limit"

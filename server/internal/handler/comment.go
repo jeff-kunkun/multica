@@ -2086,10 +2086,9 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// must keep the resolved root in sync.
 	h.TaskService.AutoUnresolveThreadOnReply(r.Context(), rootComment, uuidToString(issue.WorkspaceID), authorType, authorID, h.wakeupSourceTaskID(r))
 	if authorType == "member" {
-		// Any human comment is an explicit acknowledgement / release of the
-		// chain guard. Clear both the halt latch and the one-shot notice marker
+		// Any human comment is an explicit release of the halt latch. Clear it
 		// before resolving this comment's own agent triggers.
-		for _, key := range []string{"agent_halted", "agent_chain_budget_notified"} {
+		for _, key := range []string{"agent_halted"} {
 			if _, clearErr := h.Queries.DeleteIssueMetadataKey(r.Context(), db.DeleteIssueMetadataKeyParams{
 				ID: issue.ID, WorkspaceID: issue.WorkspaceID, Key: key,
 			}); clearErr != nil && !errors.Is(clearErr, pgx.ErrNoRows) {
