@@ -186,7 +186,6 @@ func init() {
 	projectResourceAddCmd.Flags().String("local-path", "", "Shortcut: absolute path to the working directory (only used when --type local_directory)")
 	projectResourceAddCmd.Flags().String("daemon-id", "", "Shortcut: id of the daemon that owns the local path (only used when --type local_directory)")
 	projectResourceAddCmd.Flags().String("ref-label", "", "Shortcut: optional label embedded in resource_ref (only used when --type local_directory)")
-	projectResourceAddCmd.Flags().String("execution-mode", "", "Shortcut: how runs share the directory — in_place (default, one run at a time) or worktree (each run gets its own git worktree; requires a git repo) (only used when --type local_directory)")
 	projectResourceAddCmd.Flags().String("ref", "", "Generic JSON resource_ref payload, or a github_repo checkout ref when used with --url")
 	projectResourceAddCmd.Flags().String("label", "", "Optional human-readable label")
 	projectResourceAddCmd.Flags().String("output", "json", "Output format: table or json")
@@ -198,7 +197,6 @@ func init() {
 	projectResourceUpdateCmd.Flags().String("local-path", "", "Shortcut: new absolute local path (local_directory)")
 	projectResourceUpdateCmd.Flags().String("daemon-id", "", "Shortcut: new daemon id (local_directory)")
 	projectResourceUpdateCmd.Flags().String("ref-label", "", "Shortcut: new label embedded in resource_ref (local_directory)")
-	projectResourceUpdateCmd.Flags().String("execution-mode", "", "Shortcut: new execution mode — in_place or worktree (local_directory)")
 	projectResourceUpdateCmd.Flags().String("ref", "", "Generic JSON resource_ref payload, or a github_repo checkout ref")
 	projectResourceUpdateCmd.Flags().String("label", "", "New human-readable label; pass an empty string to clear")
 	projectResourceUpdateCmd.Flags().Bool("clear-label", false, "Clear the human-readable label")
@@ -689,9 +687,7 @@ func runProjectResourceAdd(cmd *cobra.Command, args []string) error {
 	if ref, ok, err := buildResourceRefFromRefFlag(cmd, resourceType, nil); err != nil {
 		return err
 	} else if ok {
-		if err := enrichLocalDirectoryRef(resourceType, ref); err != nil {
-			return err
-		}
+		enrichLocalDirectoryRef(resourceType, ref)
 		body["resource_ref"] = ref
 	} else {
 		switch resourceType {
@@ -716,13 +712,7 @@ func runProjectResourceAdd(cmd *cobra.Command, args []string) error {
 			if refLabel, _ := cmd.Flags().GetString("ref-label"); strings.TrimSpace(refLabel) != "" {
 				ref["label"] = strings.TrimSpace(refLabel)
 			}
-			if mode, _ := cmd.Flags().GetString("execution-mode"); strings.TrimSpace(mode) != "" {
-				ref["execution_mode"] = strings.TrimSpace(mode)
-			}
 			fillLocalDirectoryIdentity(ref, pathVal)
-			if err := rejectUnwritableWorktreeRoot(ref); err != nil {
-				return err
-			}
 			body["resource_ref"] = ref
 		default:
 			return fmt.Errorf("type %q has no built-in CLI shortcut; pass the payload via --ref '<json>'", resourceType)
@@ -815,9 +805,7 @@ func runProjectResourceUpdate(cmd *cobra.Command, args []string) error {
 	if ref, ok, err := buildResourceRefFromRefFlag(cmd, resourceType, existingRef); err != nil {
 		return err
 	} else if ok {
-		if err := enrichLocalDirectoryRef(resourceType, ref); err != nil {
-			return err
-		}
+		enrichLocalDirectoryRef(resourceType, ref)
 		body["resource_ref"] = ref
 	} else {
 		ref, has, err := buildResourceRefFromFlags(cmd, resourceType, existingRef)
@@ -825,9 +813,7 @@ func runProjectResourceUpdate(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		if has {
-			if err := enrichLocalDirectoryRef(resourceType, ref); err != nil {
-				return err
-			}
+			enrichLocalDirectoryRef(resourceType, ref)
 			body["resource_ref"] = ref
 		}
 	}
@@ -963,14 +949,13 @@ func buildResourceRefFromFlags(cmd *cobra.Command, resourceType string, existing
 		pathSet := cmd.Flags().Changed("local-path")
 		daemonSet := cmd.Flags().Changed("daemon-id")
 		labelSet := cmd.Flags().Changed("ref-label")
-		modeSet := cmd.Flags().Changed("execution-mode")
-		if !pathSet && !daemonSet && !labelSet && !modeSet {
+		if !pathSet && !daemonSet && !labelSet {
 			return nil, false, nil
 		}
 		ref := map[string]any{}
 		// Copy every stored key first. The server replaces resource_ref
-		// wholesale, so rebuilding from four fields was wiping real_path /
-		// repo_key / worktree_root on a mode or label edit (DENE-618).
+		// wholesale, so rebuilding from a few fields was wiping real_path /
+		// repo_key on a label edit (DENE-618).
 		if existingRef != nil {
 			for k, v := range existingRef {
 				ref[k] = v
@@ -983,13 +968,12 @@ func buildResourceRefFromFlags(cmd *cobra.Command, resourceType string, existing
 			}
 			ref["local_path"] = pathVal
 			// Identity belongs to the directory. A new path invalidates the
-			// previous real_path / repo_key / worktree_root; re-measure when
-			// the path exists on this machine, otherwise drop them so a
-			// stale identity cannot follow a moved folder.
+			// previous real_path / repo_key; re-measure when the path exists
+			// on this machine, otherwise drop them so a stale identity cannot
+			// follow a moved folder.
 			delete(ref, "real_path")
 			delete(ref, "repo_key")
 			delete(ref, "is_git_repo")
-			delete(ref, "worktree_root")
 			fillLocalDirectoryIdentity(ref, pathVal)
 		}
 		if daemonSet {
@@ -1007,16 +991,6 @@ func buildResourceRefFromFlags(cmd *cobra.Command, resourceType string, existing
 				ref["label"] = refLabel
 			}
 		}
-		if modeSet {
-			// An empty value clears the field back to the in_place default,
-			// mirroring how --ref-label clears a label.
-			mode := strings.TrimSpace(mustString(cmd, "execution-mode"))
-			if mode == "" {
-				delete(ref, "execution_mode")
-			} else {
-				ref["execution_mode"] = mode
-			}
-		}
 		if v, ok := ref["local_path"].(string); !ok || v == "" {
 			return nil, false, fmt.Errorf("local_directory: --local-path is required (no existing local_path to merge with)")
 		}
@@ -1024,7 +998,7 @@ func buildResourceRefFromFlags(cmd *cobra.Command, resourceType string, existing
 			return nil, false, fmt.Errorf("local_directory: --daemon-id is required (no existing daemon_id to merge with)")
 		}
 		if path, ok := ref["local_path"].(string); ok && !pathSet {
-			// A mode/label edit of a row that never received identity fields
+			// A label edit of a row that never received identity fields
 			// can fill them now, without changing the path.
 			fillLocalDirectoryIdentity(ref, path)
 		}
@@ -1033,7 +1007,7 @@ func buildResourceRefFromFlags(cmd *cobra.Command, resourceType string, existing
 		// Unknown type or empty (resource not found) — caller must use --ref.
 		if cmd.Flags().Changed("url") || cmd.Flags().Changed("default-branch-hint") ||
 			cmd.Flags().Changed("local-path") || cmd.Flags().Changed("daemon-id") ||
-			cmd.Flags().Changed("ref-label") || cmd.Flags().Changed("execution-mode") {
+			cmd.Flags().Changed("ref-label") {
 			return nil, false, fmt.Errorf("no built-in shortcut for resource type %q; pass the full payload via --ref '<json>'", resourceType)
 		}
 		return nil, false, nil
@@ -1069,38 +1043,16 @@ func fillLocalDirectoryIdentity(ref map[string]any, path string) {
 	}
 }
 
-func rejectUnwritableWorktreeRoot(ref map[string]any) error {
-	raw, ok := ref["worktree_root"].(string)
-	if !ok {
-		return nil
-	}
-	root := strings.TrimSpace(raw)
-	if root == "" {
-		return nil
-	}
-	path, _ := ref["local_path"].(string)
-	// A path that does not exist here belongs to another machine — this
-	// process cannot speak to that disk, so it must not fail the save.
-	if !localdir.Probe(path).Exists {
-		return nil
-	}
-	if !localdir.WritableLocation(root) {
-		return fmt.Errorf("local_directory: worktree_root %q is not writable", root)
-	}
-	return nil
-}
-
-func enrichLocalDirectoryRef(resourceType string, ref any) error {
+func enrichLocalDirectoryRef(resourceType string, ref any) {
 	if resourceType != "local_directory" {
-		return nil
+		return
 	}
 	m, ok := ref.(map[string]any)
 	if !ok {
-		return nil
+		return
 	}
 	path, _ := m["local_path"].(string)
 	fillLocalDirectoryIdentity(m, path)
-	return rejectUnwritableWorktreeRoot(m)
 }
 
 func runProjectResourceRemove(cmd *cobra.Command, args []string) error {

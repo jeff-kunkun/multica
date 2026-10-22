@@ -36,7 +36,6 @@ func newProjectResourceUpdateTestCmd() *cobra.Command {
 	c.Flags().String("local-path", "", "")
 	c.Flags().String("daemon-id", "", "")
 	c.Flags().String("ref-label", "", "")
-	c.Flags().String("execution-mode", "", "")
 	c.Flags().String("ref", "", "")
 	c.Flags().String("label", "", "")
 	c.Flags().Bool("clear-label", false, "")
@@ -328,81 +327,21 @@ func TestBuildResourceRefFromFlagsLocalDirectoryMerges(t *testing.T) {
 	})
 }
 
-// Switching an existing resource between in_place and worktree is a one-flag
-// edit, and an unrelated edit must not silently reset the mode — that would
-// drop a user back to serialised tasks without telling them.
-func TestBuildResourceRefFromFlagsLocalDirectoryExecutionMode(t *testing.T) {
-	t.Run("sets worktree mode", func(t *testing.T) {
-		cmd := newProjectResourceUpdateTestCmd()
-		_ = cmd.Flags().Set("execution-mode", "worktree")
-		existing := map[string]any{"local_path": "/Users/foo/work/a", "daemon_id": "d1"}
-		ref, has, err := buildResourceRefFromFlags(cmd, "local_directory", existing)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !has {
-			t.Fatal("expected has=true")
-		}
-		if ref["execution_mode"] != "worktree" {
-			t.Errorf("execution_mode = %v, want worktree", ref["execution_mode"])
-		}
-	})
-
-	t.Run("unrelated edit preserves existing mode", func(t *testing.T) {
-		cmd := newProjectResourceUpdateTestCmd()
-		_ = cmd.Flags().Set("ref-label", "renamed")
-		existing := map[string]any{
-			"local_path":     "/Users/foo/work/a",
-			"daemon_id":      "d1",
-			"execution_mode": "worktree",
-		}
-		ref, _, err := buildResourceRefFromFlags(cmd, "local_directory", existing)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if ref["execution_mode"] != "worktree" {
-			t.Errorf("execution_mode lost on an unrelated edit: %v", ref["execution_mode"])
-		}
-	})
-
-	t.Run("empty value clears back to the default", func(t *testing.T) {
-		cmd := newProjectResourceUpdateTestCmd()
-		_ = cmd.Flags().Set("execution-mode", "")
-		existing := map[string]any{
-			"local_path":     "/Users/foo/work/a",
-			"daemon_id":      "d1",
-			"execution_mode": "worktree",
-		}
-		ref, has, err := buildResourceRefFromFlags(cmd, "local_directory", existing)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !has {
-			t.Fatal("expected has=true")
-		}
-		if _, ok := ref["execution_mode"]; ok {
-			t.Errorf("expected execution_mode cleared, got %v", ref["execution_mode"])
-		}
-	})
-}
-
-// A mode or label edit used to rebuild the ref from four fields and PUT the
-// whole thing, which wiped real_path / repo_key / worktree_root the server
+// A label edit used to rebuild the ref from four fields and PUT the
+// whole thing, which wiped real_path / repo_key the server
 // already stored (DENE-618). Those keys are identity; dropping them lets
 // /tmp/x and /private/tmp/x both bind, and drops the row out of the
 // same-repository rule.
 func TestBuildResourceRefFromFlagsLocalDirectoryPreservesIdentityFields(t *testing.T) {
 	cmd := newProjectResourceUpdateTestCmd()
-	_ = cmd.Flags().Set("execution-mode", "in_place")
+	_ = cmd.Flags().Set("ref-label", "app")
 	existing := map[string]any{
-		"local_path":     "/Users/foo/work/a",
-		"daemon_id":      "d1",
-		"execution_mode": "worktree",
-		"real_path":      "/private/tmp/a",
-		"repo_key":       "github.com/acme/a",
-		"worktree_root":  "/Volumes/Fast/copies",
-		"is_git_repo":    true,
-		"label":          "app",
+		"local_path":  "/Users/foo/work/a",
+		"daemon_id":   "d1",
+		"real_path":   "/private/tmp/a",
+		"repo_key":    "github.com/acme/a",
+		"is_git_repo": true,
+		"label":       "old",
 	}
 	ref, has, err := buildResourceRefFromFlags(cmd, "local_directory", existing)
 	if err != nil {
@@ -411,20 +350,16 @@ func TestBuildResourceRefFromFlagsLocalDirectoryPreservesIdentityFields(t *testi
 	if !has {
 		t.Fatal("expected has=true")
 	}
-	if ref["execution_mode"] != "in_place" {
-		t.Errorf("execution_mode = %v, want in_place", ref["execution_mode"])
-	}
 	for key, want := range map[string]any{
-		"real_path":     "/private/tmp/a",
-		"repo_key":      "github.com/acme/a",
-		"worktree_root": "/Volumes/Fast/copies",
-		"is_git_repo":   true,
-		"label":         "app",
-		"local_path":    "/Users/foo/work/a",
-		"daemon_id":     "d1",
+		"real_path":   "/private/tmp/a",
+		"repo_key":    "github.com/acme/a",
+		"is_git_repo": true,
+		"label":       "app",
+		"local_path":  "/Users/foo/work/a",
+		"daemon_id":   "d1",
 	} {
 		if ref[key] != want {
-			t.Errorf("%s = %v, want %v (an unrelated mode edit must not drop identity)", key, ref[key], want)
+			t.Errorf("%s = %v, want %v (a label edit must not drop identity)", key, ref[key], want)
 		}
 	}
 }
