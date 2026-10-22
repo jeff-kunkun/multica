@@ -219,40 +219,14 @@ beforeEach(() => {
   telegramListingRef.current = { installations: [], configured: false };
 });
 
-describe("AgentOverviewPane MCP tab visibility", () => {
-  it.each([
-    ["Claude", "claude"],
-    ["Codex", "codex"],
-    ["Cursor", "cursor"],
-    ["Hermes", "hermes"],
-    ["Kimi", "kimi"],
-    ["Kiro", "kiro"],
-    ["OpenCode", "opencode"],
-    ["OpenClaw", "openclaw"],
-    ["Oh My Pi", "omp"],
-  ])("renders the MCP tab when the agent runs on the %s runtime", (_label, provider) => {
+describe("AgentOverviewPane skills and MCP", () => {
+  // Each runtime's own agent installs its skills and MCP servers; the office
+  // offers no editor for them (DENE-2386).
+  it.each([["claude"], ["codex"], ["opencode"]])("offers no Skills or MCP tab on %s", (provider) => {
     renderPane([makeRuntime(provider)]);
     openCapabilities();
-    expect(screen.getByRole("tab", { name: /^MCP$/i })).toBeInTheDocument();
-  });
-
-  it("hides the MCP tab for providers whose backend does not read mcp_config", () => {
-    // Saving an MCP config on e.g. Gemini would be a silent no-op at run
-    // time — that's the bug this hiding logic is meant to prevent.
-    renderPane([makeRuntime("gemini")]);
-    openCapabilities();
-    expect(
-      screen.queryByRole("tab", { name: /^MCP$/i }),
-    ).not.toBeInTheDocument();
-  });
-
-  it("keeps the MCP tab visible when the runtime row hasn't loaded yet", () => {
-    // Empty runtimes[] mimics the brief window between the page mounting and
-    // the runtimes query resolving. Hiding the tab would flicker it off and
-    // then back on, which reads as a bug.
-    renderPane([]);
-    openCapabilities();
-    expect(screen.getByRole("tab", { name: /^MCP$/i })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: /^MCP$/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: /^Skills$/i })).not.toBeInTheDocument();
   });
 });
 

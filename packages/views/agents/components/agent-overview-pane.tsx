@@ -86,11 +86,10 @@ type SecondaryTab = {
     | "qoder_agent";
 };
 
+// Skills and MCP are installed by each runtime's own agent, not configured
+// here (Kun, DENE-2386); stored values stay untouched.
 const CAPABILITY_TABS: SecondaryTab[] = [
   { id: "instructions", labelKey: "instructions" },
-  { id: "skills", labelKey: "skills" },
-  { id: "mcp_config", labelKey: "mcp_config" },
-  { id: "composio_mcp", labelKey: "composio_mcp" },
   { id: "integrations", labelKey: "integrations" },
 ];
 

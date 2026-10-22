@@ -17,7 +17,6 @@ import {
   MessagesSquare,
   Plug,
   Search,
-  Server,
   Route,
   Settings,
   SlidersHorizontal,
@@ -72,7 +71,6 @@ import { QuickActionsTab } from "./quick-actions-tab";
 import { RoutingTab } from "./routing-tab";
 import { KeyboardShortcutsTab } from "./keyboard-shortcuts-tab";
 import { PluginsTab } from "./plugins-tab";
-import { McpTab } from "./mcp-tab";
 import { BillingTab } from "./billing-tab";
 import { ConfigTransferTab } from "./config-transfer-tab";
 import { ProjectSharingTab } from "./project-sharing-tab";
@@ -344,9 +342,6 @@ export function SettingsPage({ extraDeviceTabs: deviceTabs = [] }: SettingsPageP
               MessagesSquare,
               <ChannelsTab />,
             ),
-            entry("mcp", t(($) => $.page.tabs.mcp), Server, <McpTab />, {
-              adminOnly: true,
-            }),
             ...(pluginsEnabled
               ? [
                   entry("plugins", t(($) => $.page.tabs.plugins), Blocks, <PluginsTab />, {

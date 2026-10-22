@@ -439,7 +439,9 @@ describe("SearchCommand", () => {
     // the sidebar and the desktop tab bar read — so searching a page by the
     // exact name the sidebar shows must always reach it. The hand-written
     // list this replaced had gone stale by four pages (MUL-6272).
-    for (const page of Object.values(WORKSPACE_PAGES)) {
+    // Skills is the one page the office leaves out of navigation (DENE-2386).
+    for (const [key, page] of Object.entries(WORKSPACE_PAGES)) {
+      if (key === "skills") continue;
       const label = enLayout.nav[page.navKey];
       await user.clear(input);
       await user.type(input, label);

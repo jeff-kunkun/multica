@@ -110,7 +110,10 @@ const PAGE_KEYWORDS: Record<WorkspacePageKey, string[]> = {
   settings: ["settings", "config", "preferences", "设置", "配置"],
 };
 
-const NAV_PAGE_KEYS = Object.keys(WORKSPACE_PAGES) as WorkspacePageKey[];
+// Skills are installed by each runtime's own agent, not by the office.
+const NAV_PAGE_KEYS = (Object.keys(WORKSPACE_PAGES) as WorkspacePageKey[]).filter(
+  (key) => key !== "skills",
+);
 
 // No `icon` field: like the sidebar nav, a page's icon is derived from its
 // destination path via routeIconForPath, so all navigation surfaces show the

@@ -31,7 +31,6 @@ vi.mock("./properties-tab", stub("PropertiesTab"));
 vi.mock("./quick-actions-tab", stub("QuickActionsTab"));
 vi.mock("./keyboard-shortcuts-tab", stub("KeyboardShortcutsTab"));
 vi.mock("./plugins-tab", stub("PluginsTab"));
-vi.mock("./mcp-tab", stub("McpTab"));
 vi.mock("./billing-tab", stub("BillingTab"));
 vi.mock("./config-transfer-tab", stub("ConfigTransferTab"));
 
@@ -260,9 +259,8 @@ describe("SettingsPage information architecture", () => {
       "Code",
       "Connections",
       "Messaging",
-      "MCP servers",
     ]);
-    for (const name of ["Export & import", "Routing", "Permissions & sharing", "Approval rights"]) {
+    for (const name of ["MCP servers", "Export & import", "Routing", "Permissions & sharing", "Approval rights"]) {
       expect(within(nav()).queryByRole("link", { name })).not.toBeInTheDocument();
     }
   });

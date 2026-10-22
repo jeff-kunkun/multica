@@ -7,7 +7,6 @@ import { ModelDropdown } from "./model-dropdown";
 import { RuntimePicker } from "./runtime-picker";
 import { isRuntimeUsableForUser } from "@multica/core/runtimes";
 import { InstructionsEditor } from "./instructions-editor";
-import { SkillMultiSelect } from "./skill-multi-select";
 import { AvatarUploadControl } from "../../common/avatar-upload-control";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -168,7 +167,8 @@ export function CreateAgentDialog({
       ? sourceParent
       : NO_BASE_ROLE;
   });
-  const [selectedSkillIds, setSelectedSkillIds] = useState<Set<string>>(
+  // A duplicate keeps the source agent's stored skills; there is no picker.
+  const [selectedSkillIds] = useState<Set<string>>(
     () => new Set(template?.skills.map((s) => s.id) ?? []),
   );
   const [creating, setCreating] = useState(false);
@@ -493,11 +493,6 @@ export function CreateAgentDialog({
                   ? t(($) => $.create_dialog.instructions.placeholder_duplicate)
                   : t(($) => $.create_dialog.instructions.placeholder_blank)
               }
-            />
-
-            <SkillMultiSelect
-              selectedIds={selectedSkillIds}
-              onChange={setSelectedSkillIds}
             />
           </div>
         </div>

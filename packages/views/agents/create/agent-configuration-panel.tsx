@@ -27,7 +27,6 @@ import { ThinkingSettingField } from "../components/inspector/thinking-prop-row"
 import { ModelDropdown } from "../components/model-dropdown";
 import { QoderAgentSelect } from "../components/qoder-agent-select";
 import { RuntimePicker } from "../components/runtime-picker";
-import { SkillMultiSelect } from "../components/skill-multi-select";
 import { ConversationStartersEditor } from "../components/conversation-starters-editor";
 
 const PERMISSION_SCOPES: AgentPermissionScope[] = [
@@ -206,14 +205,7 @@ export function AgentConfigurationPanel({
             <p className="px-4 py-3 text-caption text-muted-foreground">
               {t(($) => $.creation_studio.cloud_fields_note)}
             </p>
-          ) : (
-            <div className="px-4 py-4">
-              <SkillMultiSelect
-                selectedIds={draft.skillIds}
-                onChange={(ids) => set("skillIds", ids)}
-              />
-            </div>
-          )}
+          ) : null}
         </SettingsCard>
       </SettingsSection>
 
