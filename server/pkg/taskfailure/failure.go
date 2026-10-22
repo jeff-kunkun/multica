@@ -80,6 +80,9 @@ const (
 	// expired claim (DENE-1884). Non-retryable: the sender was told in the chat
 	// and decides whether to resend or switch agents.
 	ReasonPickupTimeout Reason = "pickup_timeout"
+	// ReasonRuntimeAccessRevoked: the runtime owner withdrew workspace access.
+	// This is a cancellation, not a runner failure or a retryable outage.
+	ReasonRuntimeAccessRevoked Reason = "runtime_access_revoked"
 
 	// ReasonRuntimeReconnectTimeout: a retry waiting for an offline runtime
 	// remained deferred for the full reconnect grace. Non-retryable: the
@@ -309,6 +312,7 @@ var allReasons = []Reason{
 	ReasonQueuedExpired,
 	ReasonRuntimeOffline,
 	ReasonPickupTimeout,
+	ReasonRuntimeAccessRevoked,
 	ReasonRuntimeReconnectTimeout,
 	ReasonRuntimeRecovery,
 	ReasonTimeout,

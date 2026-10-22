@@ -2,11 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
-import type {
-  Agent,
-  AgentRuntime,
-  MemberWithUser,
-} from "@multica/core/types";
+import type { Agent, AgentRuntime, MemberWithUser } from "@multica/core/types";
 import { providerSupportsMcpConfig } from "@multica/core/agents";
 import { useFeatureEnabled } from "@multica/core/config";
 import { COMPOSIO_MCP_APPS_FLAG } from "@multica/core/feature-flags";
@@ -43,6 +39,7 @@ import { CustomArgsTab } from "./tabs/custom-args-tab";
 import { McpConfigTab } from "./tabs/mcp-config-tab";
 import { AgentMcpTab } from "./tabs/agent-mcp-tab";
 import { IntegrationsTab } from "./tabs/integrations-tab";
+import { QoderAgentTab } from "./tabs/qoder-agent-tab";
 import { RuntimeConfigTab } from "./tabs/runtime-config-tab";
 import { AgentDetailInspector } from "./agent-detail-inspector";
 import { SettingsSection } from "../../settings/components/settings-layout";
@@ -85,7 +82,8 @@ type SecondaryTab = {
     | "access"
     | "environment"
     | "custom_args"
-    | "runtime_config";
+    | "runtime_config"
+    | "qoder_agent";
 };
 
 const CAPABILITY_TABS: SecondaryTab[] = [
@@ -104,17 +102,6 @@ const SETTINGS_TABS: SecondaryTab[] = [
   { id: "runtime_config", labelKey: "runtime_config" },
 ];
 
-// DENE-2009: settings keep only what a person must decide. These run on
-// system defaults (or whatever is already saved) and stay changeable through
-// `multica agent update / env / mcp`, so Bots and agents can still adjust them.
-const CLI_ONLY_TABS = new Set<DetailTab>([
-  "mcp_config",
-  "composio_mcp",
-  "env",
-  "custom_args",
-  "runtime_config",
-]);
-
 const TOP_TABS: { id: DetailSection; labelKey: DetailSection }[] = [
   { id: "overview", labelKey: "overview" },
   { id: "work", labelKey: "work" },
@@ -122,9 +109,7 @@ const TOP_TABS: { id: DetailSection; labelKey: DetailSection }[] = [
   { id: "settings", labelKey: "settings" },
 ];
 
-const CAPABILITY_IDS = new Set<DetailTab>(
-  CAPABILITY_TABS.map((tab) => tab.id),
-);
+const CAPABILITY_IDS = new Set<DetailTab>(CAPABILITY_TABS.map((tab) => tab.id));
 const SETTINGS_IDS = new Set<DetailTab>(SETTINGS_TABS.map((tab) => tab.id));
 const DETAIL_VIEWS = new Set<DetailTab>([
   "overview",
@@ -285,7 +270,15 @@ export function AgentOverviewPane({
           time: formatQuotaResetAt(quotaResetMs),
         });
 
+  // The Qoder bridge fails every task carrying skills, MCP, connected apps,
+  // env, args or a model override, and runs issues only (no chat). Those
+  // editors are not offered; the QCA agent in Qoder owns that configuration.
+  const qoderRuntime = runtime?.provider === "qoder_cloud";
+
   const visibleCapabilityTabs = useMemo(() => {
+    if (qoderRuntime) {
+      return CAPABILITY_TABS.filter((tab) => tab.id === "instructions");
+    }
     const showMcp = runtime
       ? providerSupportsMcpConfig(runtime.provider)
       : true;
@@ -296,7 +289,6 @@ export function AgentOverviewPane({
       agent.owner_id === currentUserId;
 
     return CAPABILITY_TABS.filter((tab) => {
-      if (CLI_ONLY_TABS.has(tab.id)) return false;
       if (tab.id === "mcp_config") return showMcp;
       if (tab.id === "composio_mcp") return showComposioMcp;
       if (tab.id === "integrations") return integrationsConfigured;
@@ -307,13 +299,14 @@ export function AgentOverviewPane({
     composioMCPAppsEnabled,
     currentUserId,
     integrationsConfigured,
+    qoderRuntime,
     runtime,
   ]);
 
   const visibleSettingsTabs = useMemo(
     () =>
       SETTINGS_TABS.filter((tab) => {
-        if (CLI_ONLY_TABS.has(tab.id)) return false;
+        if (qoderRuntime) return tab.id !== "env" && tab.id !== "custom_args";
         // Env is the only settings tab backed by a secret-bearing endpoint.
         // GET/PUT /api/agents/{id}/env admits the agent owner or a workspace
         // owner/admin (MUL-5438) — the same rule `canEdit` encodes — so
@@ -322,8 +315,12 @@ export function AgentOverviewPane({
         if (tab.id === "env") return canEdit;
         if (tab.id === "runtime_config") return runtime?.provider === "openclaw";
         return true;
-      }),
-    [canEdit, runtime?.provider],
+      }).map((tab) =>
+        qoderRuntime && tab.id === "runtime_config"
+          ? { ...tab, labelKey: "qoder_agent" as const }
+          : tab,
+      ),
+    [canEdit, qoderRuntime, runtime?.provider],
   );
 
   const visibleViews = useMemo(
@@ -416,7 +413,8 @@ export function AgentOverviewPane({
   const activeSecondaryTab = secondaryTabs.find(
     (tab) => tab.id === effectiveView,
   );
-  const isSecondaryLayout = secondaryTabs.length > 0 && activeSecondaryTab != null;
+  const isSecondaryLayout =
+    secondaryTabs.length > 0 && activeSecondaryTab != null;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background">
@@ -536,7 +534,14 @@ export function AgentOverviewPane({
             </aside>
 
             <section className="min-w-0 flex-1 md:overflow-y-auto">
-              <div className="w-full max-w-3xl p-4 sm:p-6 md:p-8">
+              {/* General is wider: its profile sits beside a preview of the
+                  new chat it produces. */}
+              <div
+                className={cn(
+                  "w-full p-4 sm:p-6 md:p-8",
+                  effectiveView === "general" ? "max-w-5xl" : "max-w-3xl",
+                )}
+              >
                 <header>
                   <h2 className="text-title-sm font-medium text-balance">
                     {t(($) => $.tabs[activeSecondaryTab.labelKey])}
@@ -662,16 +667,23 @@ export function AgentOverviewPane({
                       />,
                     )
                   )}
-                  {effectiveView === "runtime_config" && (
-                    lockedByBaseRole(
+                  {effectiveView === "runtime_config" &&
+                    (qoderRuntime ? (
+                      <QoderAgentTab
+                        canEdit={canEdit}
+                        key={agent.id}
+                        agent={agent}
+                        onSave={(updates) => onUpdate(agent.id, updates)}
+                        onDirtyChange={setActiveDirty}
+                      />
+                    ) : lockedByBaseRole(
                       runtimeConfigLocked,
                       <RuntimeConfigTab
                         agent={agent}
                         onSave={(updates) => onUpdate(agent.id, updates)}
                         onDirtyChange={setActiveDirty}
                       />,
-                    )
-                  )}
+                    ))}
                 </div>
               </div>
             </section>

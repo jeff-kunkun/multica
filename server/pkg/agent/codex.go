@@ -1921,28 +1921,16 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		u := c.usage
 		c.usageMu.Unlock()
 
-		// Read the rollout once for plan limits and as a token-usage fallback.
+		// Read the rollout once for plan limits and as a fallback for what the
+		// JSON-RPC notifications left out: Codex sometimes omits usage, and also
+		// omits the configured model when the agent relies on Codex's default.
 		// Codex writes token_count events to $CODEX_HOME/sessions/YYYY/MM/DD/*.jsonl;
 		// scan this backend's per-task CODEX_HOME, since sessions are isolated
-		// there rather than in the shared ~/.codex/sessions (MUL-4424).
+		// there rather than in the shared ~/.codex/sessions (MUL-4424). Session
+		// usage is only a fallback, so it never replaces a JSON-RPC usage sample.
 		taskCodexHome := strings.TrimSpace(b.cfg.Env["CODEX_HOME"])
 		scanned := scanCodexSessionUsage(startTime, taskCodexHome, threadID, resumed)
-		if u.InputTokens == 0 && u.OutputTokens == 0 {
-			if scanned != nil {
-				u = scanned.usage
-				if scanned.model != "" && opts.Model == "" {
-					opts.Model = scanned.model
-				}
-			}
-		}
-
-		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0 {
-			model := opts.Model
-			if model == "" {
-				model = "unknown"
-			}
-			usageMap = map[string]TokenUsage{model: u}
-		}
+		usageMap = codexUsageMapFromSession(scanned, opts.Model, u)
 
 		resCh <- Result{
 			Status:                       finalStatus,
@@ -4074,10 +4062,45 @@ func scanCodexSessionUsage(startTime time.Time, codexHome, threadID string, resu
 	result := parseCodexSessionFileSince(files[len(files)-1].path, startTime, resumed)
 	if result == nil || (result.planLimits == nil && result.usage.InputTokens == 0 &&
 		result.usage.OutputTokens == 0 && result.usage.CacheReadTokens == 0 &&
-		result.usage.CacheWriteTokens == 0) {
+		result.usage.CacheWriteTokens == 0 && result.model == "") {
 		return nil
 	}
 	return result
+}
+
+// codexResultUsageMap resolves a Codex result's model and usage without trading
+// one provider signal for another. JSON-RPC usage is authoritative when present;
+// the session log fills only a missing model. Session usage is used only when the
+// JSON-RPC path reported no tokens. A default-model run therefore remains
+// attributable instead of being stored as "unknown".
+func codexResultUsageMap(startTime time.Time, codexHome, threadID string, resumed bool, model string, usage TokenUsage) map[string]TokenUsage {
+	usageEmpty := usage.InputTokens == 0 && usage.OutputTokens == 0 &&
+		usage.CacheReadTokens == 0 && usage.CacheWriteTokens == 0
+	var scanned *codexSessionUsage
+	if usageEmpty || model == "" {
+		scanned = scanCodexSessionUsage(startTime, codexHome, threadID, resumed)
+	}
+	return codexUsageMapFromSession(scanned, model, usage)
+}
+
+// codexUsageMapFromSession fills the usage and model a run's notifications
+// left out from its already scanned rollout (nil when none was read).
+func codexUsageMapFromSession(scanned *codexSessionUsage, model string, usage TokenUsage) map[string]TokenUsage {
+	usageEmpty := usage.InputTokens == 0 && usage.OutputTokens == 0 &&
+		usage.CacheReadTokens == 0 && usage.CacheWriteTokens == 0
+	if usageEmpty && scanned != nil {
+		usage = scanned.usage
+	}
+	if model == "" && scanned != nil {
+		model = scanned.model
+	}
+	if usage.InputTokens == 0 && usage.OutputTokens == 0 && usage.CacheReadTokens == 0 && usage.CacheWriteTokens == 0 {
+		return nil
+	}
+	if model == "" {
+		model = "unknown"
+	}
+	return map[string]TokenUsage{model: usage}
 }
 
 // findCodexSessionRollouts returns uncompressed rollout files owned by threadID
@@ -4338,10 +4361,12 @@ func parseCodexSessionFileSince(path string, startTime time.Time, resumed bool) 
 			result.planLimits.ObservedAt = info.ModTime().Unix()
 		}
 	}
-	if !finalUsageFound && result.planLimits == nil {
+	if !finalUsageFound && result.planLimits == nil && result.model == "" {
 		return nil
 	}
-	result.usage = codexTokenUsage(finalUsage)
+	if finalUsageFound {
+		result.usage = codexTokenUsage(finalUsage)
+	}
 	return &result
 }
 

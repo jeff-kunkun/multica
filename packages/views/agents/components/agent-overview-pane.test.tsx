@@ -219,23 +219,40 @@ beforeEach(() => {
   telegramListingRef.current = { installations: [], configured: false };
 });
 
-// DENE-2009: MCP, environment, custom args and runtime config run on what is
-// saved and are changed through `multica agent update / env / mcp`.
-describe("AgentOverviewPane settings kept to what a person decides", () => {
-  it.each([["claude"], ["openclaw"]])("offers no MCP or execution-config tabs on %s", (provider) => {
+describe("AgentOverviewPane MCP tab visibility", () => {
+  it.each([
+    ["Claude", "claude"],
+    ["Codex", "codex"],
+    ["Cursor", "cursor"],
+    ["Hermes", "hermes"],
+    ["Kimi", "kimi"],
+    ["Kiro", "kiro"],
+    ["OpenCode", "opencode"],
+    ["OpenClaw", "openclaw"],
+    ["Oh My Pi", "omp"],
+  ])("renders the MCP tab when the agent runs on the %s runtime", (_label, provider) => {
     renderPane([makeRuntime(provider)]);
     openCapabilities();
-    expect(screen.getByRole("tab", { name: /^Skills$/i })).toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: /MCP/i })).not.toBeInTheDocument();
-    openSettings();
-    for (const name of [/^Environment$/i, /^Custom args$/i, /^Routing$/i]) {
-      expect(screen.queryByRole("tab", { name })).not.toBeInTheDocument();
-    }
+    expect(screen.getByRole("tab", { name: /^MCP$/i })).toBeInTheDocument();
   });
 
-  it("falls back to Overview for a stale link to a hidden tab", () => {
-    renderPane([makeRuntime("claude")], { view: "env" });
-    expect(screen.queryByText("env-tab")).toBeNull();
+  it("hides the MCP tab for providers whose backend does not read mcp_config", () => {
+    // Saving an MCP config on e.g. Gemini would be a silent no-op at run
+    // time — that's the bug this hiding logic is meant to prevent.
+    renderPane([makeRuntime("gemini")]);
+    openCapabilities();
+    expect(
+      screen.queryByRole("tab", { name: /^MCP$/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("keeps the MCP tab visible when the runtime row hasn't loaded yet", () => {
+    // Empty runtimes[] mimics the brief window between the page mounting and
+    // the runtimes query resolving. Hiding the tab would flicker it off and
+    // then back on, which reads as a bug.
+    renderPane([]);
+    openCapabilities();
+    expect(screen.getByRole("tab", { name: /^MCP$/i })).toBeInTheDocument();
   });
 });
 
@@ -404,6 +421,38 @@ describe("AgentOverviewPane accounts quota warning", () => {
     expect(
       screen.queryByRole("tab", { name: /Quota used up/i }),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("AgentOverviewPane on a Qoder Cloud Agents runtime", () => {
+  const tabNames = () =>
+    screen
+      .getAllByRole("tab")
+      .filter((tab) => tab.closest("aside"))
+      .map((tab) => tab.textContent);
+
+  it("offers only Instructions under Capabilities", () => {
+    larkListingRef.current = { installations: [], configured: true };
+    renderPane([makeRuntime("qoder_cloud")]);
+    openCapabilities();
+    expect(tabNames()).toEqual(["Instructions"]);
+  });
+
+  it("drops Environment and Custom Args and names the QCA agent tab", () => {
+    renderPane([makeRuntime("qoder_cloud")]);
+    openSettings();
+    expect(tabNames()).toEqual(["General", "Access", "QCA Agent"]);
+  });
+
+  it("keeps Routing off for other runtimes", () => {
+    renderPane([makeRuntime("claude")]);
+    openSettings();
+    expect(tabNames()).toEqual([
+      "General",
+      "Access",
+      "Environment",
+      "Custom Args",
+    ]);
   });
 });
 

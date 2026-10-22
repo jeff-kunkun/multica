@@ -34,6 +34,7 @@ import type { Agent, ChatSession, PendingChatTasksResponse } from "@multica/core
 import { ChatAccessDialog } from "./chat-access-dialog";
 import { ChatVisibilityNotice } from "./chat-visibility-notice";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { DeferredTooltip } from "../../common/deferred-tooltip";
 import {
   RowActionsMenu,
   handleRowActivationKey,
@@ -691,28 +692,32 @@ function RowAction({
   danger?: boolean;
 }) {
   return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      onPointerDown={(e) => {
-        e.preventDefault();
-        e.stopPropagation();
-      }}
-      onClick={(e) => {
-        e.stopPropagation();
-        e.preventDefault();
-        onClick();
-      }}
-      className={cn(
-        "inline-flex size-7 items-center justify-center rounded-xs text-muted-foreground transition-colors focus-visible:outline-none",
-        danger
-          ? "hover:bg-destructive/10 hover:text-destructive focus-visible:bg-destructive/10 focus-visible:text-destructive"
-          : "hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground",
-      )}
-    >
-      {icon}
-    </button>
+    <DeferredTooltip
+      content={label}
+      trigger={
+        <button
+          type="button"
+          aria-label={label}
+          onPointerDown={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
+          onClick={(e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            onClick();
+          }}
+          className={cn(
+            "inline-flex size-7 items-center justify-center rounded-xs text-muted-foreground transition-colors focus-visible:outline-none",
+            danger
+              ? "hover:bg-destructive/10 hover:text-destructive focus-visible:bg-destructive/10 focus-visible:text-destructive"
+              : "hover:bg-accent hover:text-foreground focus-visible:bg-accent focus-visible:text-foreground",
+          )}
+        >
+          {icon}
+        </button>
+      }
+    />
   );
 }
 

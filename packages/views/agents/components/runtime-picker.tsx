@@ -34,6 +34,7 @@ export function RuntimePicker({
   onSelect,
   disabled = false,
   variant = "field",
+  autoSelect = true,
 }: {
   runtimes: RuntimeDevice[];
   runtimesLoading?: boolean;
@@ -54,6 +55,8 @@ export function RuntimePicker({
    * of the machine rows is how two pickers drift apart (DENE-443).
    */
   variant?: "field" | "pill";
+  /** False when selecting also changes a live session's server-side binding. */
+  autoSelect?: boolean;
 }) {
   const { t } = useT("agents");
   const [open, setOpen] = useState(false);
@@ -97,7 +100,8 @@ export function RuntimePicker({
     onSelectRef.current = onSelect;
   });
 
-  // Sole source of truth for seeding the parent's selection when it's empty
+  // With autoSelect, this is the sole source of truth for seeding the
+  // parent's selection when it's empty
   // — first mount with no template runtime, runtimes arriving later over
   // WS, or filter toggle clearing to a set with no usable item. Only fires
   // when `selectedRuntimeId === ""` so a duplicate-mode pre-fill (template
@@ -105,16 +109,17 @@ export function RuntimePicker({
   // (there is nothing on the server to rebind) is not asked again on every
   // render.
   useEffect(() => {
-    if (selectedRuntimeId !== "") return;
+    if (!autoSelect || selectedRuntimeId !== "") return;
     if (seedRuntimeId) onSelectRef.current(seedRuntimeId);
-  }, [seedRuntimeId, selectedRuntimeId]);
+  }, [autoSelect, seedRuntimeId, selectedRuntimeId]);
 
-  // On filter toggle, recompute the picker's selection to a usable item
+  // With autoSelect, a filter toggle recomputes the selection to a usable item
   // in the new filter set. Pushes `""` when nothing matches; the seeding
   // effect above is a no-op in that case (correct: no usable item to pick).
   const handleFilterChange = (next: RuntimeFilter) => {
     if (next === filter) return;
     setFilter(next);
+    if (!autoSelect) return;
     const nextList = computeFilteredRuntimes(runtimes, next, currentUserId);
     const firstUsable = nextList.find((r) =>
       isRuntimeUsableForUser(r, currentUserId),
@@ -203,7 +208,9 @@ export function RuntimePicker({
                   ? t(($) => $.create_dialog.runtime_loading)
                   : selectedRuntime
                     ? runtimeDisplayName(selectedRuntime)
-                    : t(($) => $.create_dialog.runtime_none)}
+                    : !autoSelect && runtimes.length > 0
+                      ? t(($) => $.model_dropdown.select_runtime_first)
+                      : t(($) => $.create_dialog.runtime_none)}
               </span>
               {selectedRuntime?.runtime_mode === "cloud" && (
                 <span className="shrink-0 rounded-xs bg-info/10 px-1.5 py-0.5 text-caption font-medium text-info">

@@ -93,7 +93,7 @@ describe("ProjectResourcesSection — renaming a worktree local directory", () =
   it("sends only the label, never a ref the server could strip", async () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
-    fireEvent.click(screen.getByTitle(/rename/i));
+    fireEvent.click(screen.getByRole("button", { name: /rename/i }));
     const input = screen.getByRole("textbox");
     fireEvent.change(input, { target: { value: "Client Worktree" } });
     fireEvent.keyDown(input, { key: "Enter" });
@@ -119,7 +119,7 @@ describe("ProjectResourcesSection — renaming a worktree local directory", () =
   it("sends a label-only clear when the input is emptied", async () => {
     renderWithI18n(<ProjectResourcesSection projectId="p1" />);
 
-    fireEvent.click(screen.getByTitle(/rename/i));
+    fireEvent.click(screen.getByRole("button", { name: /rename/i }));
     const input = screen.getByRole("textbox");
     fireEvent.change(input, { target: { value: "   " } });
     fireEvent.keyDown(input, { key: "Enter" });

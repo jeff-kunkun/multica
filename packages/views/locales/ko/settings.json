@@ -711,9 +711,7 @@
     },
     "system": {
       "title": "시스템 알림",
-      "description": "Multica가 백그라운드에 있을 때 시스템 알림을 표시합니다.",
-      "label": "시스템 알림 표시",
-      "hint": "앱이 포커스되지 않았을 때 새 받은 편지함 항목을 시스템 알림으로 알립니다."
+      "label": "Multica가 백그라운드에 있을 때 시스템 알림 표시"
     },
     "browser": {
       "label": "브라우저 알림",
@@ -1206,6 +1204,15 @@
       "restart_description": "저장했습니다. {{shortcut}}로 종료한 뒤 Multica Desktop을 다시 열면 적용됩니다.",
       "invalid_url": "유효한 http 또는 https URL을 입력하세요.",
       "switch_failed": "서버를 전환할 수 없습니다"
+    },
+    "tab_bar": {
+      "pin": "탭 고정",
+      "unpin": "탭 고정 해제",
+      "close": "탭 닫기",
+      "close_others": "다른 탭 닫기",
+      "open_window": "새 창에서 열기",
+      "new": "새 탭",
+      "pinned_name": "{{title}} (고정됨)"
     },
     "updates": {
       "title": "업데이트",

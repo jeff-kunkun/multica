@@ -50,6 +50,8 @@ import { useIsPhone } from "../../layout/use-is-phone";
 import { ResourceNotFound, WriteAction, useGuestReadOnly } from "../../layout/guest-readonly";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
+import { TooltipHint } from "@multica/ui/components/common/tooltip-hint";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
 import { Sheet, SheetContent } from "@multica/ui/components/ui/sheet";
 import { useIsCompact, useIsMobile } from "@multica/ui/hooks/use-mobile";
@@ -80,6 +82,7 @@ import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Command, CommandInput, CommandList, CommandEmpty, CommandGroup, CommandItem } from "@multica/ui/components/ui/command";
 import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { PropRow } from "../../common/prop-row";
 import { TimelineHandoff } from "../../workflows/timeline-handoff";
 import { PropertyIcon } from "../../common/property-icon";
@@ -3206,15 +3209,16 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 <span className="text-muted-foreground shrink-0">{parentIssue.identifier}</span>
                 <span className="truncate group-hover:text-foreground">{parentIssue.title}</span>
               </AppLink>
-              <button
-                type="button"
-                title={t(($) => $.actions.remove_parent_issue)}
-                aria-label={t(($) => $.actions.remove_parent_issue)}
-                onClick={() => actions.removeParent()}
-                className="shrink-0 rounded-xs p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
-              >
-                <Unlink className="h-3.5 w-3.5" />
-              </button>
+              <TooltipHint label={t(($) => $.actions.remove_parent_issue)}>
+                <button
+                  type="button"
+                  aria-label={t(($) => $.actions.remove_parent_issue)}
+                  onClick={() => actions.removeParent()}
+                  className="shrink-0 rounded-xs p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100"
+                >
+                  <Unlink className="h-3.5 w-3.5" />
+                </button>
+              </TooltipHint>
             </div>
           </div>}
         </div>
@@ -3517,21 +3521,16 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // both keep what fits and hand the rest to the "⋯" menu.
   const compactHeader = isPeek || isMobile;
   const sidebarToggle = (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            variant={sidebarOpen ? "secondary" : "ghost"}
-            size="icon-sm"
-            className={sidebarOpen ? "" : "text-muted-foreground"}
-            onClick={handleToggleSidebar}
-          >
-            <PanelRight />
-          </Button>
-        }
-      />
-      <TooltipContent side="bottom">{t(($) => $.detail.sidebar_tooltip)}</TooltipContent>
-    </Tooltip>
+    <IconButton
+      label={t(($) => $.detail.sidebar_tooltip)}
+      shortcut={<ActionShortcutKeycaps action="toggleRightSidebar" />}
+      tooltipSide="bottom"
+      variant={sidebarOpen ? "secondary" : "ghost"}
+      className={sidebarOpen ? "" : "text-muted-foreground"}
+      onClick={handleToggleSidebar}
+    >
+      <PanelRight />
+    </IconButton>
   );
   // On a phone the header always offers a way back. It steps back through
   // history (Chat → issue → Chat), and only a cold open falls back — to the
@@ -3562,9 +3561,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       onDeletedFallbackPath={onDelete ? undefined : paths.issues()}
       menuHeader={menuHeader}
       trigger={
-        <Button variant="ghost" size="icon-sm" className="text-muted-foreground">
+        <IconButton
+          label={tCommon(($) => $.more_actions)}
+          tooltipSide="bottom"
+          className="text-muted-foreground"
+        >
           <MoreHorizontal />
-        </Button>
+        </IconButton>
       }
     />
   );

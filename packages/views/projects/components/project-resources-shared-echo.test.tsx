@@ -86,7 +86,7 @@ function setResource(mode: "in_place" | "worktree" | "shared") {
 }
 
 function openModeEditor() {
-  fireEvent.click(screen.getByTitle(/change how runs use this folder/i));
+  fireEvent.click(screen.getByRole("button", { name: /change how runs use this folder/i }));
 }
 
 function modeRadios(): HTMLElement[] {

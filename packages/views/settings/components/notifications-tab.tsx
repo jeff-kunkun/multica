@@ -90,7 +90,6 @@ export function NotificationsTab() {
 
       <SettingsSection
         title={t(($) => $.notifications.system.title)}
-        description={t(($) => $.notifications.system.description)}
       >
         <SettingsCard>
           <SettingsRow

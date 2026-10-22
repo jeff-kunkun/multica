@@ -589,7 +589,7 @@ type runtimeProfileClaim struct {
 func claimRuntimeProfile(t *testing.T, runtimeID string) runtimeProfileClaim {
 	t.Helper()
 
-	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil, testWorkspaceID, "dene-505-daemon")
+	req := newOwnerDaemonRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil)
 	req = withURLParam(req, "runtimeId", runtimeID)
 
 	var resp struct {

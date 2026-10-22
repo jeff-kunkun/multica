@@ -72,7 +72,7 @@ func chatPending(t *testing.T, sessionID string) PendingChatTaskResponse {
 
 func daemonClaimSupplement(t *testing.T, taskID string) map[string]any {
 	t.Helper()
-	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/tasks/"+taskID+"/supplements/claim", nil, testWorkspaceID, "legit-daemon")
+	req := newOwnerDaemonRequest(http.MethodPost, "/api/daemon/tasks/"+taskID+"/supplements/claim", nil)
 	var out map[string]any
 	testutil.Call(t, testHandler.ClaimTaskSupplement, withURLParam(req, "taskId", taskID)).Want(http.StatusOK).JSON(&out)
 	return out
@@ -84,7 +84,7 @@ func daemonAckSupplement(t *testing.T, taskID, messageID string, delivered bool)
 	if !delivered {
 		body["error"] = protocol.TaskSupplementFailureTurnEnded
 	}
-	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/tasks/"+taskID+"/supplements/"+messageID+"/ack", body, testWorkspaceID, "legit-daemon")
+	req := newOwnerDaemonRequest(http.MethodPost, "/api/daemon/tasks/"+taskID+"/supplements/"+messageID+"/ack", body)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("taskId", taskID)
 	rctx.URLParams.Add("commentId", messageID)
@@ -421,7 +421,7 @@ func TestChatReplaceTellsTheClaimedRunTheOldInstructionsAreVoid(t *testing.T) {
 	sendChatWithMode(t, sessionID, "old ask", sendModeQueue).Want(http.StatusCreated)
 	sendChatWithMode(t, sessionID, "new ask", sendModeReplace).Want(http.StatusCreated)
 
-	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/claim", nil, testWorkspaceID, "chat-replace-claim-test")
+	req := newOwnerDaemonRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/claim", nil)
 	var response struct {
 		Task *struct {
 			ChatMessage string `json:"chat_message"`

@@ -53,6 +53,7 @@ import {
 import { boardLaneByIssue, useBoardProject, useInboxBoard, type BoardLane } from "@multica/core/home";
 
 import { IssueDetail, issueHighlightMementoKey } from "../../issues/components/issue-detail";
+import { ActionShortcutKeycaps } from "../../common/shortcut-keycaps";
 import { IssuePeekHost } from "../../issues/components/issue-peek";
 import { useIssueSurfaceActivity } from "../../issues/surface/activity";
 import { useViewStateWriter } from "../../platform";
@@ -72,6 +73,12 @@ import {
 } from "lucide-react";
 import type { InboxItem } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
+import { IconButton } from "@multica/ui/components/common/icon-button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@multica/ui/components/ui/tooltip";
 import {
   ResizablePanelGroup,
   ResizablePanel,
@@ -127,6 +134,7 @@ const INBOX_LIST_MAX_SIZE = 400;
 function InboxActivityPageContent({ merged = false }: { merged?: boolean } = {}) {
   const queryClient = useQueryClient();
   const { t } = useT("inbox");
+  const { t: tCommon } = useT("common");
   const showIssueLimitUpgradePrompt = useIssueLimitUpgradePrompt();
   const showAutopilotQuotaRecoveryPrompt = useIssueLimitUpgradePrompt(
     "autopilot_quota",
@@ -681,9 +689,9 @@ function InboxActivityPageContent({ merged = false }: { merged?: boolean } = {})
       <DropdownMenu>
         <DropdownMenuTrigger
           render={
-            <Button
-              variant="ghost"
-              size="icon-sm"
+            <IconButton
+              label={tCommon(($) => $.more_actions)}
+              tooltipSide="bottom"
               className="text-muted-foreground"
             />
           }
@@ -997,25 +1005,35 @@ function InboxActivityPageContent({ merged = false }: { merged?: boolean } = {})
         )}
         {/* Mirrors the row action: the button always reverses the view the
             item is being read in. */}
-        {isArchivedView ? (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => handleUnarchive(detailItem.id)}
-          >
-            <ArchiveRestore className="mr-1.5 h-3.5 w-3.5" />
-            {t(($) => $.detail.unarchive)}
-          </Button>
-        ) : (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => handleArchive(detailItem.id)}
-          >
-            <Archive className="mr-1.5 h-3.5 w-3.5" />
-            {t(($) => $.detail.archive)}
-          </Button>
-        )}
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              isArchivedView ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleUnarchive(detailItem.id)}
+                >
+                  <ArchiveRestore className="mr-1.5 h-3.5 w-3.5" />
+                  {t(($) => $.detail.unarchive)}
+                </Button>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleArchive(detailItem.id)}
+                >
+                  <Archive className="mr-1.5 h-3.5 w-3.5" />
+                  {t(($) => $.detail.archive)}
+                </Button>
+              )
+            }
+          />
+          <TooltipContent side="bottom">
+            {isArchivedView ? t(($) => $.detail.unarchive) : t(($) => $.detail.archive)}
+            <ActionShortcutKeycaps action="archiveInboxItem" />
+          </TooltipContent>
+        </Tooltip>
       </div>
     </div>
   ) : null;

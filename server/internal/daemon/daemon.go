@@ -377,7 +377,6 @@ type workspaceState struct {
 	taskRepoURLs    map[string]struct{}
 	taskRepoRefs    map[string]map[string]string // taskID -> repo URL -> checkout ref
 	settings        json.RawMessage              // workspace settings (JSONB)
-	lastRepoSyncErr string
 	repoRefreshMu   contextLock
 	// coAuthorPublishMu serializes publication of the Co-authored-by verdict
 	// for this workspace. Unlike the fields above it is NOT guarded by
@@ -472,6 +471,9 @@ type Daemon struct {
 	// conversations a task is in, and how long an idle one stays (DENE-622).
 	// Nil on a Daemon built field-by-field in a test.
 	sharedScratch *sharedScratchState
+	// gitCALastErr is the last applyGitCACerts failure, so a persistent one
+	// (e.g. on Windows) is logged once rather than on every repo refresh.
+	gitCALastErr atomic.Pointer[string]
 
 	// terminalReports is the durable outbox for complete/fail callbacks. The
 	// sender hook is production-wired through Client and overridable in focused
@@ -820,6 +822,10 @@ type Daemon struct {
 	// repoDownloads holds the first-time downloads ensureRepoReady started and
 	// that are still running, keyed by repoDownloadKey. Guarded by mu.
 	repoDownloads map[string]chan struct{}
+	// repoDownloadErrs is the last failure of each repository's first-time
+	// download, kept per repository so a concurrent sync of another one cannot
+	// erase it before the waiting checkout reports it. Guarded by mu.
+	repoDownloadErrs map[string]error
 
 	runner             taskRunner    // executes agent tasks; set to d.runTask by New(), overridable in tests
 	cancelPollInterval time.Duration // how often handleTask polls for server-side cancellation; overridable in tests
@@ -3384,14 +3390,6 @@ func repoAllowlist(repos []RepoData) map[string]struct{} {
 	return allowed
 }
 
-func (d *Daemon) setWorkspaceRepoSyncError(workspaceID, syncErr string) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if ws, ok := d.workspaces[workspaceID]; ok {
-		ws.lastRepoSyncErr = syncErr
-	}
-}
-
 func (d *Daemon) workspaceRepoAllowed(workspaceID, repoURL string) bool {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -3445,16 +3443,6 @@ func (d *Daemon) repoBarePathIsLive(barePath string) bool {
 		}
 	}
 	return false
-}
-
-func (d *Daemon) workspaceLastRepoSyncErr(workspaceID string) string {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	ws, ok := d.workspaces[workspaceID]
-	if !ok {
-		return ""
-	}
-	return ws.lastRepoSyncErr
 }
 
 // workspaceCoAuthoredByEnabled returns whether the Co-authored-by hook should
@@ -3602,12 +3590,16 @@ func (d *Daemon) waitBackgroundSyncs() {
 }
 
 func (d *Daemon) syncWorkspaceRepos(workspaceID string, repos []RepoData) {
-	d.syncWorkspaceReposContext(context.Background(), workspaceID, repos)
+	_ = d.syncWorkspaceReposContext(context.Background(), workspaceID, repos)
 }
 
-func (d *Daemon) syncWorkspaceReposContext(ctx context.Context, workspaceID string, repos []RepoData) {
+// syncWorkspaceReposContext returns the sync error to its caller rather than
+// recording it per workspace: background syncs of other repos run
+// concurrently, and a shared slot let a later successful sync erase the
+// failure before a checkout could report it.
+func (d *Daemon) syncWorkspaceReposContext(ctx context.Context, workspaceID string, repos []RepoData) error {
 	if d.repoCache == nil {
-		return
+		return nil
 	}
 	var err error
 	if cache, ok := d.repoCache.(interface {
@@ -3618,11 +3610,9 @@ func (d *Daemon) syncWorkspaceReposContext(ctx context.Context, workspaceID stri
 		err = d.repoCache.Sync(workspaceID, repoDataToInfo(repos))
 	}
 	if err != nil {
-		d.setWorkspaceRepoSyncError(workspaceID, err.Error())
 		d.logger.Warn("repo cache sync failed", "workspace_id", workspaceID, "error", err)
-		return
 	}
-	d.setWorkspaceRepoSyncError(workspaceID, "")
+	return err
 }
 
 func (d *Daemon) refreshWorkspaceRepos(ctx context.Context, workspaceID string) (*WorkspaceReposResponse, error) {
@@ -3633,6 +3623,7 @@ func (d *Daemon) refreshWorkspaceRepos(ctx context.Context, workspaceID string) 
 	if err != nil {
 		return nil, err
 	}
+	d.applyGitCACerts(resp.CACerts)
 
 	d.mu.Lock()
 	if ws, ok := d.workspaces[workspaceID]; ok {
@@ -4129,8 +4120,8 @@ func (d *Daemon) ensureRepoReady(ctx context.Context, workspaceID, repoURL strin
 		}
 	}
 
-	if syncErr := d.workspaceLastRepoSyncErr(workspaceID); syncErr != "" {
-		return fmt.Errorf("repo is configured but not synced: %s", syncErr)
+	if syncErr := d.repoDownloadErr(workspaceID, repoURL); syncErr != nil {
+		return fmt.Errorf("repo is configured but not synced: %w", syncErr)
 	}
 
 	return fmt.Errorf("repo is configured but not synced")
@@ -4223,17 +4214,34 @@ func (d *Daemon) startRepoDownload(ctx context.Context, workspaceID, repoURL str
 	d.bgSyncs.Add(1)
 	go func() {
 		defer d.bgSyncs.Done()
+		var syncErr error
 		defer func() {
 			d.mu.Lock()
 			delete(d.repoDownloads, key)
+			if syncErr != nil {
+				if d.repoDownloadErrs == nil {
+					d.repoDownloadErrs = make(map[string]error)
+				}
+				d.repoDownloadErrs[key] = syncErr
+			} else {
+				delete(d.repoDownloadErrs, key)
+			}
 			d.mu.Unlock()
 			close(syncDone)
 		}()
 		// Only the requested repo: the rest are covered by the registration-time
 		// and task-registration background syncs.
-		d.syncWorkspaceReposContext(context.WithoutCancel(ctx), workspaceID, []RepoData{{URL: repoURL}})
+		syncErr = d.syncWorkspaceReposContext(context.WithoutCancel(ctx), workspaceID, []RepoData{{URL: repoURL}})
 	}()
 	return syncDone
+}
+
+// repoDownloadErr is the failure of the repository's last first-time download,
+// or nil when it succeeded or has not run.
+func (d *Daemon) repoDownloadErr(workspaceID, repoURL string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.repoDownloadErrs[repoDownloadKey(workspaceID, repoURL)]
 }
 
 // DefaultTokenRenewalInterval is how often the daemon asks the server to
@@ -4612,6 +4620,7 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 			continue
 		}
 
+		d.applyGitCACerts(resp.CACerts)
 		if d.repoCache != nil && len(resp.Repos) > 0 {
 			go d.syncWorkspaceRepos(id, resp.Repos)
 		}
@@ -8348,9 +8357,10 @@ func skillRefFromBundle(bundle SkillData) SkillRefData {
 // taskModelSelection is what a task actually launches with: the model
 // selector plus the capability overrides that survived validation.
 type taskModelSelection struct {
-	Model         string
-	ThinkingLevel string
-	ServiceTier   string
+	Model                string
+	ThinkingLevel        string
+	ServiceTier          string
+	ThinkingLevelWarning string
 	// ThinkingRefusal is set when the saved thinking_level must not be
 	// dropped quietly and the run must not start (DENE-1950): the level of a
 	// per-model declared provider (Qwen Code) that the verified catalog no
@@ -8451,7 +8461,7 @@ func resolveTaskModelSelection(
 	// persisted level and let the CLI object, unless the binary itself has no
 	// such effort flag (MUL-7691).
 	if sel.ThinkingLevel != "" {
-		ok, err := agent.ValidateThinkingLevelWith(loadCatalog, provider, sel.Model, sel.ThinkingLevel)
+		check, err := agent.CheckThinkingLevelWith(loadCatalog, provider, sel.Model, sel.ThinkingLevel)
 		if err != nil {
 			taskLog.Warn("thinking_level: catalog cannot validate; passing through",
 				"provider", provider,
@@ -8459,7 +8469,7 @@ func resolveTaskModelSelection(
 				"thinking_level", sel.ThinkingLevel,
 				"error", err,
 			)
-		} else if !ok && agent.ThinkingDeclaredPerModel(provider) {
+		} else if !check.Valid && agent.ThinkingDeclaredPerModel(provider) {
 			// A declared level was accepted at save time against the catalog of
 			// that moment. If the declaration has since gone (removed from the
 			// settings, another endpoint, another model), clearing it here would
@@ -8472,12 +8482,14 @@ func resolveTaskModelSelection(
 				"model", sel.Model,
 				"thinking_level", sel.ThinkingLevel,
 			)
-		} else if !ok {
+		} else if !check.Valid {
 			taskLog.Warn("thinking_level: not valid for this (provider, model); skipping injection",
 				"provider", provider,
 				"model", sel.Model,
 				"thinking_level", sel.ThinkingLevel,
+				"reason", check.Reason,
 			)
+			sel.ThinkingLevelWarning = fmt.Sprintf("Thinking level %q was not applied: %s. The runtime will use its default thinking level.", sel.ThinkingLevel, check.Reason)
 			sel.ThinkingLevel = ""
 		}
 	}
@@ -8517,6 +8529,23 @@ func declaredThinkingRefusal(catalog agent.Catalog, provider, model, level strin
 		"The run did not start, so the saved level is not silently ignored: pick a declared level, "+
 		"or set thinking back to follow default (thinking_level=\"\"), or restore the model's declaration",
 		level, provider, name, offered)
+}
+
+func (d *Daemon) reportThinkingLevelWarning(ctx context.Context, taskID, warning string, msgSeq *atomic.Int32, taskLog *slog.Logger) {
+	if warning == "" {
+		return
+	}
+	message := TaskMessageData{
+		Seq:       int(msgSeq.Add(1)),
+		Type:      "text",
+		Content:   redact.Text(warning) + "\n\n",
+		CreatedAt: time.Now(),
+	}
+	reportCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	if err := d.client.ReportTaskMessages(reportCtx, taskID, []TaskMessageData{message}); err != nil {
+		taskLog.Warn("failed to report thinking-level warning", "error", err)
+	}
 }
 
 // qualifyTaskModel promotes a persisted model id to the canonical
@@ -10113,6 +10142,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Shared across the resume-retry below so the retry's transcript rows
 	// keep ascending seq values for the same task.
 	var msgSeq atomic.Int32
+	d.reportThinkingLevelWarning(ctx, task.ID, selection.ThinkingLevelWarning, &msgSeq, taskLog)
 	// One detector for the whole task, so a resume retry does not report a
 	// skill the first attempt already used.
 	skillUsage := newTaskSkillUsageDetector(skills, provider, env)

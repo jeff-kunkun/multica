@@ -91,7 +91,7 @@ type singleClaimResponse struct {
 
 func claimSingle(t *testing.T, runtimeID string) singleClaimResponse {
 	t.Helper()
-	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil, testWorkspaceID, "standby-claim-test")
+	req := newOwnerDaemonRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil)
 	req = withURLParam(req, "runtimeId", runtimeID)
 	var resp singleClaimResponse
 	testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusOK).JSON(&resp)
@@ -192,7 +192,7 @@ func TestStandbyRuntimeClearedDuringDeliveryFails(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		req := newDaemonTokenRequest("POST", "/claim", nil, testWorkspaceID, "standby-drift-test")
+		req := newOwnerDaemonRequest("POST", "/claim", nil)
 		_, _, _, _, _, failure := testHandler.buildClaimedTaskResponse(req, task, runtime, f.standby, testWorkspaceID)
 		if failure == nil || failure.outcome != "error_agent_runtime_changed" || !failure.settled {
 			t.Fatalf("build after standby cleared = %+v, want settled error_agent_runtime_changed", failure)
@@ -213,7 +213,7 @@ func TestStandbyRuntimeClearedDuringDeliveryFails(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		req := newDaemonTokenRequest("POST", "/claim", nil, testWorkspaceID, "standby-drift-test")
+		req := newOwnerDaemonRequest("POST", "/claim", nil)
 		resp, delivered, snapshot, _, _, failure := testHandler.buildClaimedTaskResponse(req, task, runtime, f.standby, testWorkspaceID)
 		if failure != nil {
 			t.Fatalf("build with standby configured: %+v", failure)
@@ -247,7 +247,7 @@ func TestStandbyRuntimeDeliveryTransactionAccepts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := newDaemonTokenRequest("POST", "/claim", nil, testWorkspaceID, "standby-ok-test")
+	req := newOwnerDaemonRequest("POST", "/claim", nil)
 	resp, delivered, snapshot, _, _, failure := testHandler.buildClaimedTaskResponse(req, task, runtime, f.standby, testWorkspaceID)
 	if failure != nil {
 		t.Fatalf("build: %+v", failure)

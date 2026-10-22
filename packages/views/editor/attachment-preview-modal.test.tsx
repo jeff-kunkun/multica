@@ -662,7 +662,7 @@ describe("AttachmentPreviewModal — controls", () => {
     render(<AttachmentPreviewModal source={{ kind: "full", attachment: att }} open onClose={() => {}} />);
     // Two Download CTAs may exist (header + unsupported fallback). The header
     // button is always present, look it up by aria-label/title.
-    const buttons = screen.getAllByTitle("Download");
+    const buttons = screen.getAllByRole("button", { name: "Download" });
     expect(buttons.length).toBeGreaterThan(0);
     fireEvent.click(buttons[0]!);
     expect(downloadMock).toHaveBeenCalledWith("att-1");
@@ -687,7 +687,7 @@ describe("AttachmentPreviewModal — controls", () => {
       render(<ClosablePreview attachment={att} />);
       expect(setImmersiveMode).toHaveBeenLastCalledWith(true);
 
-      fireEvent.click(screen.getByTitle("Close"));
+      fireEvent.click(screen.getByRole("button", { name: "Close" }));
       await waitFor(() => {
         expect(setImmersiveMode).toHaveBeenLastCalledWith(false);
       });
@@ -712,7 +712,7 @@ describe("AttachmentPreviewModal — controls", () => {
     });
     render(<ClosablePreview attachment={att} />);
 
-    fireEvent.click(screen.getByTitle("Close"));
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
 
     expect(screen.getByRole("dialog")).toBeInTheDocument();
     await waitFor(() => {
@@ -830,7 +830,7 @@ describe("AttachmentPreviewModal — URL-only source", () => {
         onClose={() => {}}
       />,
     );
-    const button = screen.getAllByTitle("Download")[0]!;
+    const button = screen.getAllByRole("button", { name: "Download" })[0]!;
     fireEvent.click(button);
     expect(openExternalMock).toHaveBeenCalledWith(url);
     expect(downloadMock).not.toHaveBeenCalled();
@@ -854,7 +854,7 @@ describe("AttachmentPreviewModal — open-in-new-tab", () => {
         onClose={() => {}}
       />,
     );
-    expect(screen.getByTitle("Open in new tab")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Open in new tab" })).toBeTruthy();
   });
 
   it("invokes navigation.openInNewTab with the preview path and closes the modal (desktop)", async () => {
@@ -874,7 +874,7 @@ describe("AttachmentPreviewModal — open-in-new-tab", () => {
         onClose={onClose}
       />,
     );
-    fireEvent.click(screen.getByTitle("Open in new tab"));
+    fireEvent.click(screen.getByRole("button", { name: "Open in new tab" }));
     expect(openInNewTabMock).toHaveBeenCalledWith(
       "/acme/attachments/att-1/preview?name=report.html",
       "report.html",
@@ -902,7 +902,7 @@ describe("AttachmentPreviewModal — open-in-new-tab", () => {
     const input = await screen.findByLabelText("Address");
     fireEvent.change(input, { target: { value: "?s=ia#top" } });
     fireEvent.submit(input.closest("form")!);
-    fireEvent.click(screen.getByTitle("Open in new tab"));
+    fireEvent.click(screen.getByRole("button", { name: "Open in new tab" }));
     expect(openInNewTabMock).toHaveBeenCalledWith(
       "/acme/attachments/att-1/preview?name=report.html&loc=%3Fs%3Dia%23top",
       "report.html",
@@ -931,7 +931,7 @@ describe("AttachmentPreviewModal — open-in-new-tab", () => {
         onClose={onClose}
       />,
     );
-    fireEvent.click(screen.getByTitle("Open in new tab"));
+    fireEvent.click(screen.getByRole("button", { name: "Open in new tab" }));
     expect(openInNewTabMock).not.toHaveBeenCalled();
     expect(windowOpenSpy).toHaveBeenCalledWith(
       "https://app.example/acme/attachments/att-1/preview?name=report.html",
@@ -958,7 +958,7 @@ describe("AttachmentPreviewModal — open-in-new-tab", () => {
         onClose={() => {}}
       />,
     );
-    fireEvent.click(screen.getByTitle("Open in new tab"));
+    fireEvent.click(screen.getByRole("button", { name: "Open in new tab" }));
     expect(openInNewTabMock).toHaveBeenCalledWith(
       `/acme/attachments/att-1/preview?name=${filename}`,
       filename,
@@ -978,7 +978,7 @@ describe("AttachmentPreviewModal — open-in-new-tab", () => {
         onClose={() => {}}
       />,
     );
-    expect(screen.queryByTitle("Open in new tab")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Open in new tab" })).toBeNull();
   });
 
   it("does not render the new-tab button for a URL-only source — the page loads by id", () => {
@@ -989,7 +989,7 @@ describe("AttachmentPreviewModal — open-in-new-tab", () => {
         onClose={() => {}}
       />,
     );
-    expect(screen.queryByTitle("Open in new tab")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Open in new tab" })).toBeNull();
   });
 
   it("does not render the new-tab button when there is no workspace slug", async () => {
@@ -1009,7 +1009,7 @@ describe("AttachmentPreviewModal — open-in-new-tab", () => {
         onClose={() => {}}
       />,
     );
-    expect(screen.queryByTitle("Open in new tab")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Open in new tab" })).toBeNull();
   });
 });
 
@@ -1285,7 +1285,7 @@ describe("AttachmentPreviewModal — image zoom", () => {
     fireEvent.click(screen.getByRole("button", { name: "Actual size" }));
     expect(currentScale()).toBe(1);
 
-    fireEvent.click(screen.getByTitle("Close"));
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
     await waitFor(() => {
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     });
@@ -1364,7 +1364,7 @@ describe("AttachmentPreviewModal — text views", () => {
     openText("main.go", "package main\n\nfunc main() {}\n");
     await waitFor(() => expect(document.querySelectorAll(".code-line")).toHaveLength(3));
     expect(document.querySelector("pre.code-lines")).not.toHaveClass("code-lines-wrap");
-    expect(screen.getByTitle("Wrap lines")).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "Wrap lines" })).toHaveAttribute("aria-pressed", "false");
   });
 
   it("wraps a log by default and lets the reader turn it off", async () => {
@@ -1373,9 +1373,9 @@ describe("AttachmentPreviewModal — text views", () => {
     const pre = document.querySelector("pre.code-lines");
     expect(pre).toHaveClass("code-lines-wrap");
 
-    fireEvent.click(screen.getByTitle("Wrap lines"));
+    fireEvent.click(screen.getByRole("button", { name: "Wrap lines" }));
     expect(document.querySelector("pre.code-lines")).not.toHaveClass("code-lines-wrap");
-    expect(screen.getByTitle("Wrap lines")).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "Wrap lines" })).toHaveAttribute("aria-pressed", "false");
   });
 
   it("keeps the reader's wrap choice when the viewer moves to another file", async () => {
@@ -1390,7 +1390,7 @@ describe("AttachmentPreviewModal — text views", () => {
     );
     const { rerender } = rtlRender(viewer(first));
     await waitFor(() => expect(document.querySelector("pre.code-lines")).toBeTruthy());
-    fireEvent.click(screen.getByTitle("Wrap lines"));
+    fireEvent.click(screen.getByRole("button", { name: "Wrap lines" }));
 
     rerender(viewer(second));
     await waitFor(() => expect(document.querySelector("pre.code-lines")).toBeTruthy());
@@ -1430,14 +1430,14 @@ describe("AttachmentPreviewModal — html viewports", () => {
   it("shows the source with line numbers, and holds the viewport while it does", async () => {
     openHtml();
     await screen.findByTitle("prototype.html");
-    expect(screen.getByTitle("Wrap lines")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Wrap lines" })).toBeDisabled();
 
-    fireEvent.click(screen.getByTitle("View source"));
-    expect(screen.getByTitle("View source")).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "View source" }));
+    expect(screen.getByRole("button", { name: "View source" })).toHaveAttribute("aria-pressed", "true");
     expect(screen.queryByTitle("prototype.html")).toBeNull();
     expect(document.querySelector(".code-line")?.textContent).toBe("<h1>Prototype</h1>");
     expect(screen.getByRole("button", { name: "Phone" })).toBeDisabled();
-    expect(screen.getByTitle("Wrap lines")).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Wrap lines" })).toBeEnabled();
   });
 });
 
@@ -1455,14 +1455,14 @@ describe("AttachmentPreviewModal — structured data", () => {
     await screen.findByText("name");
     expect(screen.getByText('"web"')).toBeTruthy();
     expect(screen.getByRole("button", { name: "Tree" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByTitle("Wrap lines")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Wrap lines" })).toBeDisabled();
 
     fireEvent.click(screen.getByRole("button", { name: "Raw" }));
     expect(screen.queryByText("name")).toBeNull();
     expect(document.querySelector(".code-line")?.textContent).toBe(
       '{"name":"web","ports":[80,443]}',
     );
-    expect(screen.getByTitle("Wrap lines")).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Wrap lines" })).toBeEnabled();
   });
 
   it("parses YAML into the same tree", async () => {
@@ -1476,7 +1476,7 @@ describe("AttachmentPreviewModal — structured data", () => {
     expect(document.querySelector(".code-line")?.textContent).toBe('{"name": ');
     expect(screen.getByRole("button", { name: "Tree" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Raw" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByTitle("Wrap lines")).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Wrap lines" })).toBeEnabled();
   });
 });
 

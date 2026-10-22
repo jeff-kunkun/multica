@@ -338,7 +338,7 @@ describe("ProjectDetail pin", () => {
     mocks.createPin.mockImplementation((_vars, opts?: { onError?: () => void }) => opts?.onError?.());
     renderProjectDetail();
 
-    await user.click(screen.getByTitle("Pin to sidebar"));
+    await user.click(screen.getByRole("button", { name: "Pin to sidebar" }));
 
     expect(mocks.createPin).toHaveBeenCalled();
     expect(mocks.toastError).toHaveBeenCalledWith("Couldn't update the pin");

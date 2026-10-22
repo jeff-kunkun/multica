@@ -170,13 +170,13 @@ describe("SettingsPage Plugin feature flag", () => {
     expect(screen.getByText("AccountTab")).toBeInTheDocument();
   });
 
-  it("opens Plugins from a link when enabled, without listing it (DENE-2009)", () => {
+  it("lists and opens Plugins when enabled", () => {
     navigationState.search = "tab=plugins";
     configStore.getState().setFeatureFlags({ [PLUGINS_V1_FLAG]: true });
 
     renderWithI18n(<SettingsPage />);
 
-    expect(screen.queryByRole("link", { name: "Plugins" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Plugins" })).toBeInTheDocument();
     expect(screen.getByText("PluginsTab")).toBeInTheDocument();
   });
 });
@@ -188,8 +188,8 @@ describe("SettingsPage workflow feature flag", () => {
 
     renderWithI18n(<SettingsPage />);
 
-    // DENE-2009: these pages open from links only; the nav does not list them.
     expect(screen.getByText("WorkflowsTab")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Wakeups" })).toBeInTheDocument();
     expect(screen.queryByText("IssueStatusesTab")).not.toBeInTheDocument();
   });
 
@@ -216,7 +216,7 @@ describe("SettingsPage workspace subscription feature flag", () => {
     expect(screen.getByText("WorkspaceTab")).toBeInTheDocument();
   });
 
-  it("opens Billing from a link only when enabled, without listing it", () => {
+  it("lists and opens Billing when enabled", () => {
     navigationState.search = "tab=billing";
     configStore.getState().setFeatureFlags({
       [BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG]: true,
@@ -224,45 +224,53 @@ describe("SettingsPage workspace subscription feature flag", () => {
 
     renderWithI18n(<SettingsPage />);
 
-    expect(screen.queryByRole("link", { name: "Billing" })).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Billing" })).toBeInTheDocument();
     expect(screen.getByText("BillingTab")).toBeInTheDocument();
   });
 });
 
 describe("SettingsPage information architecture", () => {
-  it("lists only what a person must set: keep or delete, nothing in between (DENE-2009)", () => {
+  it("lists every official page in its official group, plus the office pages", () => {
     renderWithI18n(<SettingsPage />);
-    const personal = within(nav()).getByRole("region", { name: /Personal/ });
-    expect(
-      within(personal)
+    const links = (region: HTMLElement) =>
+      within(region)
         .getAllByRole("link")
-        .map((link) => link.textContent?.trim()),
-    ).toEqual(["Profile", "Preferences"]);
+        .map((link) => link.textContent?.trim());
+    const personal = within(nav()).getByRole("region", { name: /Personal/ });
+    expect(links(personal)).toEqual([
+      "Profile",
+      "Preferences",
+      "Notifications",
+      "Shortcuts",
+      "API Tokens",
+    ]);
 
     // The workspace group is named after the workspace it configures.
     const workspace = within(nav()).getByRole("region", { name: /Acme/ });
-    expect(
-      within(workspace)
-        .getAllByRole("link")
-        .map((link) => link.textContent?.trim()),
-    ).toEqual(["General", "Members", "Group chat & Bots", "Code"]);
-    for (const name of [
-      "API Tokens",
-      "Notifications",
-      "Labels",
+    expect(links(workspace)).toEqual([
+      "General",
+      "Members",
+      "Group chat & Bots",
+      "Agent permissions",
       "Issue Statuses",
-      "Export & import",
+      "Wakeups",
+      "Labels",
+      "Properties",
+      "Quick Actions",
+      "Code",
+      "Connections",
       "Messaging",
       "MCP servers",
-    ]) {
+    ]);
+    for (const name of ["Export & import", "Routing", "Permissions & sharing", "Approval rights"]) {
       expect(within(nav()).queryByRole("link", { name })).not.toBeInTheDocument();
     }
   });
 
-  it("still opens a deleted page from an old link", () => {
-    navigationState.search = "tab=labels";
+  it("still opens an unlisted office page from a link", () => {
+    navigationState.search = "tab=config-transfer";
     renderWithI18n(<SettingsPage />);
-    expect(screen.getByText("LabelsTab")).toBeInTheDocument();
+    expect(screen.getByText("ConfigTransferTab")).toBeInTheDocument();
   });
 
   it("keeps retired pages out of navigation", () => {
@@ -300,11 +308,11 @@ describe("SettingsPage information architecture", () => {
     );
   });
 
-  it("still lands an app-connection return link on Connected apps", () => {
+  it("lands an app-connection return link on Connected apps", () => {
     shell.appsAvailable = true;
     navigationState.search = "tab=integrations&connected=notion";
     renderWithI18n(<SettingsPage />);
-    expect(screen.queryByRole("link", { name: "Connected apps" })).toBeNull();
+    expect(screen.getByRole("link", { name: /^Connected apps/ })).toBeInTheDocument();
     expect(screen.getByText("ConnectedAppsTab")).toBeInTheDocument();
   });
 
@@ -358,33 +366,15 @@ describe("SettingsPage information architecture", () => {
   });
 });
 
-// DENE-1022: member management is owner-only.
+// Official: everyone sees Members; non-admins get the read-only lock.
 describe("SettingsPage members entry", () => {
-  it("lists Members for an owner", () => {
+  it.each(["owner", "admin", "member"])("lists Members for a %s", (role) => {
+    shell.role = role;
     layout.compact = false;
     renderWithI18n(<SettingsPage />);
 
-    expect(screen.getByRole("link", { name: "Members" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /^Members/ })).toBeInTheDocument();
   });
-
-  it.each(["admin", "member", "guest"])(
-    "hides Members from a %s but keeps the direct link on the members page",
-    (role) => {
-      shell.role = role;
-      layout.compact = false;
-      navigationState.search = "tab=members";
-
-      renderWithI18n(<SettingsPage />);
-
-      expect(
-        screen.queryByRole("link", { name: "Members" }),
-      ).not.toBeInTheDocument();
-      // The direct link still resolves to the members tab (which explains
-      // itself) rather than bouncing to the profile tab.
-      expect(screen.getByText("MembersTab")).toBeInTheDocument();
-      expect(screen.queryByText("AccountTab")).not.toBeInTheDocument();
-    },
-  );
 });
 
 describe("SettingsPage search", () => {

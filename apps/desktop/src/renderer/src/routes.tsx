@@ -20,8 +20,9 @@ const SkillsPage = lazy(() => import("@multica/views/skills").then((m) => ({ def
 const DesktopRuntimesPage = lazy(() => import("./components/desktop-runtimes-page").then((m) => ({ default: m.DesktopRuntimesPage })));
 const DesktopAgentsPage = lazy(() => import("./components/desktop-agents-page").then((m) => ({ default: m.DesktopAgentsPage })));
 const AiCreateAgentPage = lazy(() => import("@multica/views/agents").then((m) => ({ default: m.AiCreateAgentPage })));
-const ChooseCreateMethodPage = lazy(() => import("@multica/views/agents").then((m) => ({ default: m.ChooseCreateMethodPage })));
 const ManualCreateAgentPage = lazy(() => import("@multica/views/agents").then((m) => ({ default: m.ManualCreateAgentPage })));
+const DesktopChooseRuntimePage = lazy(() => import("./components/desktop-choose-runtime-page").then((m) => ({ default: m.DesktopChooseRuntimePage })));
+const AgentCreatedPage = lazy(() => import("./pages/agent-created-page").then((m) => ({ default: m.AgentCreatedPage })));
 const SquadsPage = lazy(() => import("@multica/views/squads/components").then((m) => ({ default: m.SquadsPage })));
 const SquadDetailPageView = lazy(() => import("@multica/views/squads/components").then((m) => ({ default: m.SquadDetailPage })));
 const InboxPage = lazy(() => import("@multica/views/inbox").then((m) => ({ default: m.InboxPage })));
@@ -200,7 +201,12 @@ export const appRoutes: RouteObject[] = [
           { path: "agents", element: <DesktopAgentsPage />, handle: { title: "Agents" } },
           {
             path: "agents/new",
-            element: <ChooseCreateMethodPage />,
+            element: <DesktopChooseRuntimePage />,
+            handle: { title: "Create Agent" },
+          },
+          {
+            path: "agents/new/done/:agentId",
+            element: <AgentCreatedPage />,
             handle: { title: "Create Agent" },
           },
           {

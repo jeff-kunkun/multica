@@ -6,6 +6,7 @@ import type {
   AgentRuntime,
   MemberWithUser,
 } from "@multica/core/types";
+import { qoderAgentId } from "@multica/core/agents";
 import { runtimeDisplayLabel } from "@multica/core/runtimes";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useT } from "../../i18n";
@@ -35,8 +36,10 @@ export function AgentOverviewSummary({
   owner,
 }: AgentOverviewSummaryProps) {
   const { t } = useT("agents");
+  const { t: tr } = useT("runtimes");
   const now = useNowTick();
   const runtimeOnline = runtime?.status === "online";
+  const qoderRuntime = runtime?.provider === "qoder_cloud";
 
   return (
     <aside className="self-start rounded-xl border border-surface-border bg-surface p-5 shadow-[var(--surface-shadow)] xl:sticky xl:top-6">
@@ -85,16 +88,24 @@ export function AgentOverviewSummary({
               />
             </div>
           </SummaryRow>
-          <SummaryRow label={t(($) => $.inspector.prop_model)}>
-            <span className="flex min-w-0 items-center gap-1.5 text-foreground">
-              <Bot className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
-              <span className="truncate">
-                {agent.model
-                  ? providerSeatModelDisplay(agent.model)
-                  : t(($) => $.pickers.model_default)}
+          {qoderRuntime ? (
+            <SummaryRow label={tr(($) => $.qoder.agent)}>
+              <span className="block truncate font-mono text-foreground">
+                {qoderAgentId(agent.runtime_config) || "—"}
               </span>
-            </span>
-          </SummaryRow>
+            </SummaryRow>
+          ) : (
+            <SummaryRow label={t(($) => $.inspector.prop_model)}>
+              <span className="flex min-w-0 items-center gap-1.5 text-foreground">
+                <Bot className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
+                <span className="truncate">
+                  {agent.model
+                    ? providerSeatModelDisplay(agent.model)
+                    : t(($) => $.pickers.model_default)}
+                </span>
+              </span>
+            </SummaryRow>
+          )}
           <SummaryRow label={t(($) => $.inspector.prop_concurrency)}>
             <span className="font-mono tabular-nums text-foreground">
               {agent.max_concurrent_tasks}
@@ -103,6 +114,7 @@ export function AgentOverviewSummary({
         </dl>
       </section>
 
+      {qoderRuntime ? null : (
       <section className="mt-5 border-t pt-5">
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-body font-medium">
@@ -129,6 +141,7 @@ export function AgentOverviewSummary({
           </p>
         )}
       </section>
+      )}
 
       <AgentQuotaMeter
         agentId={agent.id}
