@@ -1,4 +1,4 @@
-export type { Issue, IssueStatus, BuiltInIssueStatus, IssuePriority, IssueAssigneeType, IssueAssigneeSource, IssueReviewerType, IssueMetadata, IssueMetadataValue, IssueAgentGuardResponse, IssueDriver, IssueDriverKind, IssueDisposeAction, IssueDisposeRequest, IssueDisposeResponse, IssueReaction, SourceContextAttachment, SourceContextAuthor, SourceContextIssueSnapshot, SourceContextCommentSnapshot, SourceContextSnapshot, SourceContextLimitUsage, SourceContextPreview, SourceContextAuthorState, IssueSourceContext, IssueSourceChat, IssueDuplicateOf } from "./issue";
+export type { Issue, IssueStatus, BuiltInIssueStatus, IssuePriority, IssueAssigneeType, IssueReviewerType, IssueMetadata, IssueMetadataValue, IssueAgentGuardResponse, IssueDriver, IssueDriverKind, IssueReaction, SourceContextAttachment, SourceContextAuthor, SourceContextIssueSnapshot, SourceContextCommentSnapshot, SourceContextSnapshot, SourceContextLimitUsage, SourceContextPreview, SourceContextAuthorState, IssueSourceContext, IssueSourceChat, IssueDuplicateOf } from "./issue";
 export type { Progress, ProgressTone } from "./progress";
 export type {
   IssueStatusCategory,
@@ -49,9 +49,6 @@ export type {
   TaskFailureReason,
   AgentRuntime,
   RuntimeDevice,
-  PlanLimitsStatus,
-  PlanLimitWindow,
-  PlanLimitsSnapshot,
   RuntimeProfile,
   RuntimeProtocolFamily,
   RuntimeProfileType,
@@ -65,8 +62,6 @@ export type {
   AgentPermissionScope,
   StoredAgentDraft,
   UpdateAgentRequest,
-  BulkUpdateAgentRoutingRequest,
-  BulkUpdateAgentRoutingResponse,
   AgentEnvResponse,
   UpdateAgentEnvRequest,
   Skill,
@@ -118,7 +113,7 @@ export type {
   SessionBreakReason,
 } from "./agent";
 export { RUNTIME_PROFILE_PROTOCOL_FAMILIES, RUNTIME_PROFILE_RUNTIME_TYPES } from "./agent";
-export type { Workspace, WorkspaceRepo, WorkspaceMcpServer, WorkspaceNaming, WorkspaceNamingOption, WorkspaceNamingSource, Member, MemberRole, User, MemberWithUser, MemberProjectRef, Invitation, ShareLink, ShareLinkInfo, ModuleKey, ModuleVisibility, ModuleVisibilityList } from "./workspace";
+export type { Workspace, WorkspaceRepo, WorkspaceMcpServer, Member, MemberRole, User, MemberWithUser, MemberProjectRef, Invitation, ShareLink, ShareLinkInfo, ModuleKey, ModuleVisibility, ModuleVisibilityList } from "./workspace";
 export { MODULE_KEYS } from "./workspace";
 export type {
   PluginInstallation,
@@ -144,7 +139,7 @@ export type {
   PluginMCPTool,
   PluginTokenIssue,
 } from "./plugin";
-export type { ParkingOwner, ParkingEvent, ParkingCategory, ParkingRecord, ParkingRecordsResponse, WaitingSummon, UnreadInboxIssue, InboxBoardOwnerPayload, InboxBoardRowPayload, InboxBoardResponse } from "./home";
+export type { UnreadInboxIssue, InboxBoardOwnerPayload, InboxBoardRowPayload, InboxBoardResponse } from "./home";
 export type { InboxItem, InboxSeverity, InboxItemType, InboxWorkspaceUnread, ArchivedInboxPage, ArchivedInboxFacets } from "./inbox";
 export type { NotificationGroupKey, NotificationGroupValue, NotificationPreferences, NotificationPreferenceResponse } from "./notification-preference";
 export type { Comment, CommentSendMode, CommentType, CommentAuthorType, CommentSupplementReceipt, CommentSupplementStatus, CommentTriggerPreview, CommentTriggerPreviewAgent, CommentTriggerSource, CommentTriggerOutcome, CommentTriggerStatus, CommentWake, Reaction } from "./comment";
@@ -194,7 +189,6 @@ export {
 } from "./attachment-url";
 export type {
   ChatSession,
-  ChatRoutingReceipt,
   AgentChat,
   AgentChatPage,
   ChatDirectoryItem,
@@ -430,8 +424,6 @@ export type {
 } from "./billing";
 
 export type { WorkThreadSnapshot, WorkThreadTurn, WorkThreadInput } from "./work_thread";
-export type { Ask, AskOption, AskQuestion, CreateAskRequest, AnswerAskRequest } from "./ask";
 export type { IssueWakeup, IssueWakeupInput, SystemWakeup, WorkspaceSystemWakeup, WakeupPreview, IssueWakeupSummaryRow, WakeupCondition, WakeupPausedReason, WakeupRun, PausedWakeup, WakeupSource } from "./issue-wakeup";
 
 export type { WorkspaceWakeup, WorkspaceWakeupPage, WorkspaceWakeupFilters, WakeupScope } from "./issue-wakeup";
-export type { Plan, PlanStep, IssuePlans, PlanApprover } from "./plan";

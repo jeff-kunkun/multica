@@ -153,9 +153,7 @@
   },
   "stage": {
     "none": "Aucune étape",
-    "value": "Étape {{n}}",
-    "blocking": "Bloquante",
-    "queued": "En attente"
+    "value": "Étape {{n}}"
   },
   "scope": {
     "all_label": "Toutes",
@@ -453,8 +451,6 @@
     "prop_status": "Statut",
     "prop_priority": "Priorité",
     "prop_stage": "Étape",
-    "prop_waiting_for": "En attente de",
-    "prop_review_skip": "Validation ignorée",
     "prop_assignee": "Assigné à",
     "prop_start_date": "Date de début",
     "prop_due_date": "Date d'échéance",
@@ -507,7 +503,6 @@
     "workdir_path_copy_failed": "Échec de la copie du chemin du répertoire de travail",
     "workdir_path_unavailable": "Aucun répertoire de travail local — cette tâche n'a pas encore été traitée par un agent local",
     "pull_requests_empty_title": "Aucune pull request associée.",
-    "prop_reviewer": "Relecteur",
     "pull_requests_empty": "Aucune pull request liée pour l'instant. Indiquez l'identifiant de cette tâche dans le titre d'une PR pour la lier.",
     "title_suggestion_label": "Suggested title",
     "title_suggestion_apply": "Apply",
@@ -542,12 +537,6 @@
     "task_completed_other": "a terminé une exécution ({{count}} fois)",
     "task_failed_one": "exécution en échec",
     "task_failed_other": "exécution en échec ({{count}} fois)",
-    "consult_answered": "a consulté {{name}}",
-    "consult_failed": "a consulté {{name}}, sans réponse",
-    "consult_cost": "{{tokens}} jetons · {{seconds}} s",
-    "consult_question": "Question",
-    "consult_answer": "Réponse",
-    "consult_reason": "Pourquoi aucune réponse",
     "squad_leader_evaluated": "a évalué le déclencheur du squad",
     "squad_leader_action": "a évalué et agi",
     "squad_leader_action_reason": "a évalué et agi : {{reason}}",
@@ -1016,14 +1005,6 @@
     "status": {
       "mark_duplicate": "Marquer comme doublon",
       "change_original": "Changer la tâche d'origine"
-    },
-    "reviewer": {
-      "trigger_undecided": "Non décidé",
-      "trigger_no_review": "Aucune relecture nécessaire",
-      "search_placeholder": "Relecture par...",
-      "no_review": "Aucune relecture nécessaire",
-      "members_group": "Membres",
-      "agents_group": "Agents"
     }
   },
   "labels_panel": {
@@ -1395,8 +1376,6 @@
       "blocked_backlog": "Tâche en backlog ; pas de réveil pour l’instant",
       "blocked_member": "Responsable humain ; il reçoit une notification",
       "blocked_none": "Aucun responsable ; la plateforme fait avancer les étapes",
-      "assign": "Assigner",
-      "assign_error": "Impossible d’assigner.",
       "turned_off": "Désactivé pour cette tâche",
       "target_title": "Réveille",
       "target_current": "Responsable (actuellement {{name}})",
@@ -1832,31 +1811,6 @@
   },
   "hover_card": {
     "created_updated": "a créé {{created}} · mis à jour {{updated}}"
-  },
-  "assignee_source": {
-    "human": "Choisi par {{name}}",
-    "human_unknown": "Choisi par une personne",
-    "quote": "Sur la parole de {{name}}",
-    "quote_unknown": "Sur la parole d'un membre",
-    "automation": "Défini par une automatisation",
-    "agent": "Choix propre d'un agent",
-    "router": "Choisi par le routage",
-    "self_claim": "Gardé par l’agent qui traite le ticket parent",
-    "quote_text": "« {{quote}} »"
-  },
-  "driver": {
-    "none": "Personne ne fait avancer ce ticket",
-    "revived": "relancé {{count}}×",
-    "escalated": "signalé au responsable du parent",
-    "rerun": "Relancer",
-    "reroute": "Réattribuer",
-    "split": "Scinder",
-    "cancel": "Annuler le ticket",
-    "split_placeholder": "Titre du sous-ticket",
-    "cancel_placeholder": "Raison de l'annulation",
-    "back": "Retour",
-    "done": "Fait",
-    "failed": "Impossible de traiter le ticket"
   },
   "blocker_summary": {
     "title": "Bloqué · {{count}} cause(s) racine(s)",

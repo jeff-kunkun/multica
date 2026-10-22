@@ -55,29 +55,6 @@ export interface AgentInvocationTargetInput {
 // the fallback.
 export type RuntimeVisibility = "private" | "public";
 
-export type PlanLimitsStatus = "available" | "exhausted";
-
-export interface PlanLimitWindow {
-  name: string;
-  used_percent?: number;
-  window_minutes?: number;
-  resets_at?: number;
-  /** Prepaid remaining amount for `balance_cny` / `balance_usd` windows. */
-  remaining?: number;
-}
-
-/**
- * Credential-free provider subscription usage observed by the daemon. Older
- * daemons omit the field, and some providers can report only an exhausted
- * state plus reset time rather than a live percentage.
- */
-export interface PlanLimitsSnapshot {
-  provider: string;
-  status: PlanLimitsStatus;
-  windows?: PlanLimitWindow[];
-  observed_at: number;
-}
-
 export interface MachineCapacity {
   active_runs: number;
   max_concurrent_runs: number;
@@ -117,7 +94,6 @@ export interface RuntimeDevice {
    * a missing value as `null` (built-in).
    */
   profile_id?: string | null;
-  plan_limits?: PlanLimitsSnapshot | null;
   last_seen_at: string | null;
   created_at: string;
   updated_at: string;
@@ -230,7 +206,6 @@ export type TaskFailureReason =
   | "timeout"
   | "codex_semantic_inactivity"
   | "runtime_offline"
-  | "pickup_timeout"
   | "runtime_access_revoked"
   | "runtime_reconnect_timeout"
   | "runtime_recovery"
@@ -645,14 +620,6 @@ export interface MikaBootstrapResponse extends Agent {
   onboarding_session?: ChatSession;
 }
 
-export interface AgentWorkPause {
-  reason: string;
-  detail?: string;
-  condition?: string;
-  recover_at?: string;
-  opened_at: string;
-}
-
 export interface Agent {
   id: string;
   workspace_id: string;
@@ -666,13 +633,6 @@ export interface Agent {
   runtime_id: string;
   /** False exactly when the agent has no runtime. Older backends omit it. */
   runtime_bound?: boolean;
-  /**
-   * Standby runtime for `chat send --urgent` (DENE-1844): when the primary
-   * runtime is offline, an urgent message is dispatched here instead. Must
-   * share the primary's owner and provider; the server enforces both. Empty
-   * or omitted means none.
-   */
-  fallback_runtime_id?: string;
   /** Privacy-safe coarse liveness for a runtime hidden from the runtime list. */
   runtime_availability?: "online" | "unstable" | "offline";
   name: string;
@@ -689,46 +649,8 @@ export interface Agent {
   /** Read-only product half of a system agent's prompt, served from the
    *  backend binary. Absent for ordinary agents. */
   system_instructions?: string;
-  /**
-   * Base role this agent specialises (DENE-301). Empty/absent for a base role;
-   * the tree is at most two levels deep, so a non-empty value always points at
-   * a base role. Older servers omit the field entirely — treat `undefined`
-   * exactly like the empty string.
-   */
-  parent_agent_id?: string;
-  /** Display name of `parent_agent_id`, served with the list and the detail so
-   *  the client never needs a second request to name the base role. */
-  parent_agent_name?: string;
-  /** Domain this specialisation covers (DENE-1451); absent = generic. */
+  /** Domain tag (DENE-1451); kept only for the mobile domain-fit sort. */
   domain_id?: string;
-  /**
-   * The base role's own `instructions`, verbatim. The prompt a specialisation
-   * actually runs with is `parent + "\n\n" + own` (see
-   * `composeEffectiveInstructions`), so the detail surface shows the inherited
-   * half separately instead of letting the child's text look self-contained.
-   * Empty for a base role, and also empty when the viewer may not read the
-   * parent's prompt — the relationship itself stays visible.
-   */
-  inherited_instructions?: string;
-  /** The base role's skill bindings: read-only on the child (v1 cannot drop
-   *  one). Only the detail endpoint loads them; the list leaves it undefined. */
-  inherited_skills?: AgentSkillSummary[];
-  /**
-   * How many ACTIVE specialisations hang off this agent (0 for a
-   * specialisation, and for a base role with none). Populated on the list, so
-   * the nested view needs no per-agent request; the detail response omits it.
-   */
-  child_count?: number;
-  /**
-   * Runtime inheritance (DENE-505). True when this specialisation follows its
-   * base role's runtime profile: `runtime_id`, `runtime_mode`, `runtime_config`,
-   * `model`, `thinking_level` and `service_tier` are kept equal to the base
-   * role's and are re-copied whenever the base role's change. Always false (or
-   * absent on a backend that predates the feature) for a base role, so
-   * `=== true` is the only safe reading — treat `undefined` as "owns its
-   * runtime", exactly like the pre-feature behaviour.
-   */
-  runtime_inherited?: boolean;
   avatar_url: string | null;
   runtime_mode: AgentRuntimeMode;
   runtime_config: Record<string, unknown>;
@@ -750,19 +672,6 @@ export interface Agent {
    * alongside `has_custom_env`. Treat `undefined` as zero. MUL-2600.
    */
   custom_env_key_count?: number;
-  /**
-   * This agent's own subscription windows, reported by the daemon that runs it
-   * (DENE-715).
-   *
-   * Plan limits live on the runtime, but one runtime serves every CLI seat on
-   * the machine: an agent switched to a numbered account still shares its
-   * runtime row with its unbound siblings. The daemon therefore reports the
-   * bound agent's own account snapshot here, and readers prefer it over
-   * `runtime.plan_limits`. Absent or `null` means "no agent-specific snapshot"
-   * — the agent has no account binding, or the daemon has not run it yet — and
-   * the runtime's value is the correct fallback.
-   */
-  plan_limits?: PlanLimitsSnapshot | null;
   /**
    * MCP server configuration forwarded to runtimes that consume
    * `agent.mcp_config` (see providerSupportsMcpConfig). Each backend
@@ -837,34 +746,6 @@ export interface Agent {
    */
   service_tier?: string;
   /**
-   * Seat strength on the automatic-dispatch ladder (DENE-633): one of the
-   * routing tier keys, or empty for a seat that is not on the ladder. A
-   * person tags it; it is deliberately NOT derived from `model`, because the
-   * same model at another thinking level is another rung.
-   */
-  /** Effective display/routing series, supplied by the server. */
-  series?: string;
-  series_override?: string;
-  series_source?: "auto" | "manual";
-  automatic_series?: string;
-  routing_tier?: string;
-  /**
-   * Account headroom tag (DENE-922): `tight`, `normal` or `ample`. Orders
-   * seats inside one rung; older backends omit it, which reads as `normal`.
-   */
-  routing_usage?: string;
-  /**
-   * `auto` or `mention_only` (DENE-1600). A mention_only seat keeps its tier
-   * but is never picked by automatic dispatch; older backends omit it, which
-   * reads as `auto`.
-   */
-  dispatch_mode?: string;
-  /**
-   * Project ids automatic dispatch is limited to (DENE-1648). Empty serves
-   * every project; older backends omit it.
-   */
-  dispatch_projects?: string[];
-  /**
    * Platform auto-retry switch (DENE-217). When `false`, FailTask /
    * MaybeRetryFailedTask never spawn a retry child. Older backends omit
    * the field; treat `undefined` as enabled. Only `=== false` is off.
@@ -878,13 +759,6 @@ export interface Agent {
    * `undefined` as enabled. Only `=== false` is off.
    */
   work_enabled?: boolean;
-  /**
-   * Why the platform turned the seat off (DENE-870), from its open quota
-   * breaker. Absent for a seat a person turned off. `recover_at` is absent
-   * when only a person can bring it back (reason `balance_exhausted`: top
-   * up, then re-enable).
-   */
-  work_pause?: AgentWorkPause;
   owner_id: string | null;
   skills: AgentSkillSummary[];
   /** Runtime-local skills this agent must not inherit. Older servers omit it. */
@@ -936,8 +810,6 @@ export interface AgentSkillSummary {
 }
 
 export interface CreateAgentRequest {
-  /** Empty restores automatic classification. */
-  series?: string;
   name: string;
   description?: string;
   instructions?: string;
@@ -969,34 +841,6 @@ export interface CreateAgentRequest {
   template?: string;
   /** Workspace skill IDs attached atomically with the agent row. */
   skill_ids?: string[];
-  /**
-   * Base role to attach this agent to as a specialisation (DENE-301). Omit —
-   * or send "" — to create an independent base role. The server refuses a
-   * parent that is archived, belongs to another workspace, or is itself a
-   * specialisation ("特化角色不能再派生").
-   */
-  parent_agent_id?: string;
-  /**
-   * Domain (id or name) for a specialisation (DENE-1451). Needs
-   * `parent_agent_id`; `name` may then be empty and is generated as base
-   * role + domain. A base role holds one specialisation per domain (409).
-   */
-  domain_id?: string;
-  /**
-   * Runtime inheritance (DENE-505). Omitted with a `parent_agent_id` means
-   * "follow the base role's runtime" — the default for a specialisation, and
-   * the reason `runtime_id` may then be omitted entirely: any runtime field sent
-   * alongside is not an override, the child takes the base role's. Send `false`
-   * to opt out, which restores the pre-feature contract (runtime_id required,
-   * model / thinking_level / runtime_config as given). A base role cannot
-   * inherit; `true` without a parent is rejected.
-   */
-  runtime_inherited?: boolean;
-  /**
-   * Standby runtime for urgent chat messages. Send `""` to clear. The server
-   * rejects a runtime with a different owner or provider than the primary.
-   */
-  fallback_runtime_id?: string;
 }
 
 export interface AgentBuilderSession {
@@ -1064,24 +908,7 @@ export interface AgentBuilderRuntimeSwitch {
   runtime_id: string;
 }
 
-/**
- * One batch edit from the routing seats table (DENE-922): every listed seat
- * gets the same change, all or nothing. Omit a field to leave it alone;
- * `routing_tier: ""` takes the seats off the ladder.
- */
-export interface BulkUpdateAgentRoutingRequest {
-  agent_ids: string[];
-  routing_tier?: string;
-  routing_usage?: string;
-}
-
-export interface BulkUpdateAgentRoutingResponse {
-  agents: Agent[];
-}
-
 export interface UpdateAgentRequest {
-  /** Empty restores automatic classification. */
-  series?: string;
   name?: string;
   description?: string;
   instructions?: string;
@@ -1150,17 +977,6 @@ export interface UpdateAgentRequest {
    */
   service_tier?: string;
   /**
-   * Seat strength on the dispatch ladder. Omitted preserves the saved value,
-   * `""` takes the seat off the ladder, and a tier key sets the rung.
-   */
-  routing_tier?: string;
-  /** Account headroom tag. Omitted preserves the saved value. */
-  routing_usage?: string;
-  /** `auto` or `mention_only`. Omitted preserves the saved value. */
-  dispatch_mode?: string;
-  /** Project limit for automatic dispatch; `[]` lifts it. Omitted preserves. */
-  dispatch_projects?: string[];
-  /**
    * Platform auto-retry switch. Omitted preserves the saved value; `false`
    * turns platform auto-retry off without affecting manual rerun.
    */
@@ -1170,27 +986,6 @@ export interface UpdateAgentRequest {
    * stops the seat taking new work without archiving it.
    */
   work_enabled?: boolean;
-  /**
-   * Re-parents this agent (DENE-301). Tri-state semantics:
-   *   - field omitted → no change
-   *   - "" → detach from the base role, keeping the child's own prompt
-   *     (this is what `/solidify` uses when the parent prompt is not readable)
-   *   - non-empty → attach to that base role; refused when this agent already
-   *     has children, or when the target is not a base role
-   */
-  parent_agent_id?: string | null;
-  /**
-   * Runtime inheritance (DENE-505). Omitted preserves the stored flag.
-   *
-   * `true` makes this specialisation follow its base role again and re-copies
-   * the base role's runtime profile immediately; it is refused on a base role,
-   * and refused in the same request as `runtime_id` / `runtime_config` /
-   * `model` / `thinking_level` / `service_tier` — "follow" and "set my own
-   * runtime" contradict each other, so the server answers 400 instead of
-   * picking one. `false` opts out and is lossless: the agent keeps the values
-   * it was already running with.
-   */
-  runtime_inherited?: boolean;
 }
 
 /**

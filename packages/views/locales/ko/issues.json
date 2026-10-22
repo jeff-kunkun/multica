@@ -151,34 +151,7 @@
   },
   "stage": {
     "none": "단계 없음",
-    "value": "{{n}}단계",
-    "blocking": "진행 차단",
-    "queued": "대기 중"
-  },
-  "assignee_source": {
-    "human": "{{name}}님이 직접 선택",
-    "human_unknown": "사람이 직접 선택",
-    "quote": "{{name}}님의 말 그대로 지정",
-    "quote_unknown": "멤버의 말 그대로 지정",
-    "automation": "자동화가 지정",
-    "agent": "에이전트가 스스로 지정",
-    "router": "라우팅이 선택",
-    "self_claim": "상위 티켓 담당 에이전트가 직접 맡음",
-    "quote_text": "“{{quote}}”"
-  },
-  "driver": {
-    "none": "아무도 진행하지 않음",
-    "revived": "{{count}}번 재실행함",
-    "escalated": "상위 이슈 담당자에게 보고함",
-    "rerun": "같은 담당으로 재실행",
-    "reroute": "담당자 다시 선택",
-    "split": "하위 이슈로 분할",
-    "cancel": "이슈 취소",
-    "split_placeholder": "하위 이슈 제목",
-    "cancel_placeholder": "취소 사유",
-    "back": "뒤로",
-    "done": "처리했습니다",
-    "failed": "처리하지 못했습니다"
+    "value": "{{n}}단계"
   },
   "blocker_summary": {
     "title": "차단됨 · 근본 원인 {{count}}개",
@@ -487,10 +460,7 @@
     "prop_status": "상태",
     "prop_priority": "우선순위",
     "prop_stage": "단계",
-    "prop_waiting_for": "대기 사유",
-    "prop_review_skip": "검수 생략",
     "prop_assignee": "담당자",
-    "prop_reviewer": "검수자",
     "prop_start_date": "시작일",
     "prop_due_date": "마감일",
     "prop_project": "프로젝트",
@@ -573,12 +543,6 @@
     "description_updated": "설명을 업데이트했습니다",
     "task_completed_other": "실행을 완료했습니다({{count}}회)",
     "task_failed_other": "실행이 실패했습니다({{count}}회)",
-    "consult_answered": "{{name}}에게 상담했습니다",
-    "consult_failed": "{{name}}에게 상담했지만 답을 받지 못했습니다",
-    "consult_cost": "{{tokens}} 토큰 · {{seconds}}초",
-    "consult_question": "질문",
-    "consult_answer": "답변",
-    "consult_reason": "답이 없는 이유",
     "squad_leader_evaluated": "스쿼드 트리거를 평가했습니다",
     "squad_leader_action": "평가 후 작업을 수행했습니다",
     "squad_leader_action_reason": "평가 후 작업을 수행했습니다: {{reason}}",
@@ -994,14 +958,6 @@
       "agent_runtime_required": "작업을 할당하기 전에 이 에이전트에 런타임을 연결하세요",
       "squad_runtime_required": "작업을 할당하기 전에 이 스쿼드의 리더에 런타임을 연결하세요"
     },
-    "reviewer": {
-      "trigger_undecided": "미지정",
-      "trigger_no_review": "검수 불필요",
-      "search_placeholder": "검수자 지정...",
-      "no_review": "검수 불필요",
-      "members_group": "멤버",
-      "agents_group": "에이전트"
-    },
     "start_date": {
       "trigger_label": "시작일",
       "none": "시작일 없음"
@@ -1389,8 +1345,6 @@
       "blocked_backlog": "백로그 상태라 지금은 깨우지 않음",
       "blocked_member": "담당자가 멤버라 받은편지함으로 알립니다",
       "blocked_none": "담당자 없음. 단계가 끝나면 플랫폼이 진행합니다",
-      "assign": "담당자 지정",
-      "assign_error": "담당자를 지정할 수 없습니다.",
       "turned_off": "이 태스크에서 꺼짐",
       "target_title": "깨울 대상",
       "target_current": "담당자 (현재 {{name}})",

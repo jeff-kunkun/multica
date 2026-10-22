@@ -1,4 +1,4 @@
-import type { Issue, IssueMetadata, IssueStatus, IssueStatusCategory, IssuePriority, IssueAssigneeType, IssueReviewerType } from "./issue";
+import type { Issue, IssueMetadata, IssueStatus, IssueStatusCategory, IssuePriority, IssueAssigneeType } from "./issue";
 import type { IssuePropertyValues, PropertyFilterValue } from "./property";
 import type { MemberRole } from "./workspace";
 import type { Project, ProjectStatus } from "./project";
@@ -71,10 +71,6 @@ export interface UpdateIssueRequest {
   priority?: IssuePriority;
   assignee_type?: IssueAssigneeType | null;
   assignee_id?: string | null;
-  /** 验收席. Send the pair as null to clear it back to undecided, or
-   *  reviewer_type "none" with a null id for "needs no acceptance pass". */
-  reviewer_type?: IssueReviewerType | null;
-  reviewer_id?: string | null;
   position?: number;
   start_date?: string | null;
   due_date?: string | null;
@@ -769,56 +765,6 @@ export interface BotWriteAuditPage {
   next_cursor: string;
 }
 
-/** Where one office event stands for your Bot (DENE-1963). */
-export type OfficeDeliveryStatus =
-  | "pending"
-  | "sending"
-  | "sent"
-  | "received"
-  | "relayed"
-  | "handled"
-  | "blocked";
-
-export interface OfficeDelivery {
-  event_id: string;
-  bot_id: string;
-  target_user_id: string;
-  reason: string;
-  must_relay: boolean;
-  status: OfficeDeliveryStatus;
-  attempts: number;
-  last_error: string;
-  blocked_reason: string;
-  next_attempt_at: string | null;
-  last_attempt_at: string | null;
-  sent_at: string | null;
-  received_at: string | null;
-  relayed_at: string | null;
-  relay_channel: string;
-  relay_error: string;
-  handled_reason: string;
-  fallback_at: string | null;
-  cursor: number;
-  event: {
-    event_type: string;
-    family: string;
-    meaning: string;
-    summary: string;
-    stream_seq: number;
-    pending_approval: boolean;
-    issue_id: string;
-    chat_session_id: string;
-    occurred_at: string;
-  };
-}
-
-export interface OfficeDeliveryPage {
-  deliveries: OfficeDelivery[];
-  next_cursor: number;
-  /** false = you have no Bot to deliver to. */
-  connected: boolean;
-}
-
 export interface BotBinding {
   bound: boolean;
   state: BotBindingState;
@@ -894,10 +840,6 @@ export interface BotWakeSettings {
   inherit_owner_follows: boolean;
   /** Empty disables every event. */
   events: BotWakeEventType[];
-  /** 0..120; 0 pauses delivery. */
-  hourly_limit: number;
-  /** Unacknowledged, visible events currently held by the hourly limit. */
-  limited_count?: number;
   quiet_hours: BotQuietHours;
 }
 
@@ -908,7 +850,6 @@ export interface UpdateBotWakeRequest {
   wake_from?: BotWakeFrom;
   inherit_owner_follows?: boolean;
   events?: BotWakeEventType[];
-  hourly_limit?: number;
   quiet_hours?: BotQuietHours;
   webhook_url?: string;
   webhook_key?: string;

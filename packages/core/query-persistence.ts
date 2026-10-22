@@ -24,7 +24,6 @@ const EXCLUDED_SEGMENTS = new Set([
   "activeTasks",
   "tasks",
   "search",
-  "routing-health",
   "billing",
 ]);
 

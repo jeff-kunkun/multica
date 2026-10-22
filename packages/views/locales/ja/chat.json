@@ -142,7 +142,6 @@
       "timeout": "処理に時間がかかりすぎたため、完了前に停止しました。もう一度お試しいただくか、リクエストを分けてみてください。",
       "codex_semantic_inactivity": "エージェントが応答しなくなり、完了前に停止しました。もう一度お試しください。",
       "runtime_offline": "エージェントは現在オフラインのため、返信できませんでした。オンラインに戻ってから再度お試しください。",
-      "pickup_timeout": "この至急メッセージは 30 秒以内に受け取られませんでした。再送はされません。別のエージェントに送るか、このエージェントに予備ランタイムを設定して送り直してください。",
       "runtime_access_denied": "このエージェントはプライベートランタイムで実行できないため、返信できませんでした。ランタイムを公開にするか、所有者が利用できるランタイムへエージェントを再設定/コピーしてください。",
       "runtime_recovery": "完了する前にエージェントが再起動しました。もう一度お試しください。",
       "runtime_access_revoked": "ランタイムへのアクセスが取り消されました。新しい実行を開始する前に、エージェントを利用可能なランタイムに接続してください。",
@@ -175,8 +174,7 @@
     "quick_actions_regenerate": "候補を再生成",
     "quick_actions_regenerate_failed": "候補を再生成できませんでした。もう一度お試しください。",
     "spawned": "チャットを作成",
-    "spawn_untitled": "新しいチャット",
-    "issue_receipt": "タスクの結果"
+    "spawn_untitled": "新しいチャット"
   },
   "session_history": {
     "untitled": "無題",
@@ -230,12 +228,7 @@
     "history_group": "チャット履歴",
     "agent_filter_placeholder": "エージェントを検索...",
     "agent_needs_runtime": "ランタイム未設定",
-    "agent_needs_runtime_hint": "このエージェントとチャットする前にランタイムを設定してください",
-    "routed_pick": "ルーティングに任せる",
-    "routed_pick_hint": "エージェントを指定せず、内容とプロジェクトから選びます",
-    "routed_pending": "送信後、内容とプロジェクトからエージェントを選びます",
-    "routed_result": "ルーティング結果：",
-    "routed_result_offline": "（ランタイムがオフラインのため、メッセージは復帰まで待機します）"
+    "agent_needs_runtime_hint": "このエージェントとチャットする前にランタイムを設定してください"
   },
   "empty_state": {
     "first_time_title": "エージェントとチャット",
@@ -425,47 +418,5 @@
   },
   "superseded": {
     "label": "新しい指示に置き換えられました"
-  },
-  "report": {
-    "bar_other": "このチャットのチケット {{count}} 件",
-    "bar_fresh_other": "このチャットのチケット {{count}} 件 · 変更 {{fresh}}",
-    "waiting_you": "あなた待ち {{count}}",
-    "in_progress": "進行中 {{count}}",
-    "done": "完了 {{count}}",
-    "title": "このチャットのチケット",
-    "just_changed": "今変わった",
-    "needs_you": "要対応"
-  },
-  "tickets": {
-    "heading_other": "{{count}} 件の課題を作成",
-    "heading_mixed_other": "課題 {{count}} 件",
-    "to": "担当 {{name}}",
-    "routing": "ルーティングが担当を選びます",
-    "working": "{{name}} が作業中",
-    "working_unnamed": "エージェントが作業中",
-    "queued": "{{name}} が待機中",
-    "queued_unnamed": "待機中",
-    "idle": "誰も作業していません",
-    "actions": "{{id}} の操作",
-    "assign_me": "自分に割り当て",
-    "assign_agent": "エージェントに任せる",
-    "withdraw": "取り下げ",
-    "assigned_me": "{{id}} を自分に割り当てました",
-    "assigned_agent": "{{id}} をルーティングに戻しました",
-    "withdrawn": "{{id}} を取り下げました",
-    "failed": "{{id}} を更新できませんでした",
-    "source_created": "このチャットで作成",
-    "source_auto": "フォロー",
-    "source_manual": "手動で追加",
-    "remove": "チャットから外す",
-    "removed": "{{id}} をこのチャットから外しました",
-    "remove_failed": "{{id}} を外せませんでした",
-    "pin": "課題を追加",
-    "pin_title": "このチャットに課題を追加",
-    "pin_hint": "カードと進捗バーに表示されます。課題自体は変わりません。",
-    "pin_placeholder": "課題番号（例: DENE-12）",
-    "pin_submit": "追加",
-    "pinned": "{{id}} を追加しました",
-    "pin_failed": "{{id}} を追加できませんでした"
   }
 }

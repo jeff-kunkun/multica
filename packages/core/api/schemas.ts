@@ -1,5 +1,4 @@
 import { z } from "zod";
-import type { IssuePlans, PlanApprover } from "../types/plan";
 import type {
   CreateRepoLinkResponse,
   ListRepoLinksResponse,
@@ -1030,7 +1029,7 @@ export const ChatMessageSchema = z.object({
   failure_reason: z.string().nullable().optional(),
   elapsed_ms: z.number().nullable().optional(),
   message_kind: z
-    .enum(["message", "no_response", "onboarding_kickoff", "onboarding_opening", "chat_spawn", "chat_spawn_refused", "issue_receipt", "linked_delivery"])
+    .enum(["message", "no_response", "onboarding_kickoff", "onboarding_opening", "chat_spawn", "linked_delivery"])
     .catch("message")
     .optional(),
   // Optional additive data degrades independently: a malformed suggestion
@@ -1445,14 +1444,6 @@ const IssueDriverSchema = z.object({
   reason: z.string().default(""),
   revives: z.number().optional(),
   escalated: z.boolean().optional(),
-}).loose();
-
-export const IssueDisposeResponseSchema = z.object({
-  action: z.enum(["rerun", "reroute", "split", "cancel"]),
-  status: z.string(),
-  driver: IssueDriverSchema.optional().catch(undefined),
-  created: z.array(z.string()).optional(),
-  note: z.string().optional(),
 }).loose();
 
 export const WorkStopResponseSchema = z.object({
@@ -2033,25 +2024,7 @@ export const EMPTY_CLOUD_RUNTIME_NODE: CloudRuntimeNode = {
   updated_at: "",
 };
 
-// Runtime schemas. `plan_limits` is a progressive daemon capability: malformed
-// optional quota data is discarded without hiding an otherwise usable runtime
-// row, while the established runtime identity fields remain validated.
-
-export const PlanLimitWindowSchema = z.object({
-  name: z.string(),
-  used_percent: z.number().min(0).max(100).optional(),
-  window_minutes: z.number().positive().optional(),
-  resets_at: z.number().positive().optional(),
-  remaining: z.number().min(0).optional(),
-}).loose();
-
-export const PlanLimitsSnapshotSchema = z.object({
-  provider: z.string(),
-  status: z.enum(["available", "exhausted"]),
-  windows: z.array(PlanLimitWindowSchema).optional(),
-  observed_at: z.number().positive(),
-}).loose();
-
+// Runtime schemas.
 export const AgentRuntimeSchema = z.object({
   machine_capacity: MachineCapacitySchema.optional().catch(undefined),
   id: z.string(),
@@ -2068,28 +2041,12 @@ export const AgentRuntimeSchema = z.object({
   owner_id: z.string().nullable(),
   visibility: z.enum(["private", "public"]).default("private"),
   profile_id: z.string().nullable().optional(),
-  plan_limits: PlanLimitsSnapshotSchema.nullable().optional().catch(undefined),
   last_seen_at: z.string().nullable(),
   created_at: z.string(),
   updated_at: z.string(),
 }).loose();
 
 export const AgentRuntimeListSchema = z.array(AgentRuntimeSchema);
-
-/**
- * The minimal skill shape embedded in an agent payload (the list/detail batch
- * query joins id, name, description and enabled). Lenient on purpose: the
- * fields are display-only, so a partially-filled row must still render as a
- * chip rather than fail the enclosing agent.
- */
-const AgentSkillSummarySchema = z
-  .object({
-    id: z.string().default(""),
-    name: z.string().default(""),
-    description: z.string().default(""),
-    enabled: z.boolean().optional().catch(undefined),
-  })
-  .loose();
 
 export const AgentSchema: z.ZodType<Agent> = z.object({
   id: z.string(),
@@ -2111,35 +2068,12 @@ export const AgentSchema: z.ZodType<Agent> = z.object({
     .catch(undefined),
   system_key: z.string().optional(),
   system_instructions: z.string().optional(),
-  // Two-level specialisation (DENE-301). Every field is optional-and-caught:
-  // a backend that predates the feature sends none of them, and a backend that
-  // sends a malformed one must degrade THAT field rather than drop the whole
-  // agent — the list is how the product is navigated. Empty string and absent
-  // both mean "base role" for the id; see `isSpecializationAgent`.
-  parent_agent_id: z.string().optional().catch(undefined),
-  parent_agent_name: z.string().optional().catch(undefined),
-  inherited_instructions: z.string().optional().catch(undefined),
-  inherited_skills: z
-    .array(AgentSkillSummarySchema)
-    .optional()
-    .catch(undefined),
-  child_count: z.number().optional().catch(undefined),
-  // Runtime inheritance (DENE-505). Optional-and-caught for the same reason as
-  // the fields above: a backend that predates the feature omits it, and an
-  // absent value has to read as "this agent owns its runtime" — the
-  // pre-feature behaviour — rather than dropping the agent row.
-  runtime_inherited: z.boolean().optional().catch(undefined),
   avatar_url: z.string().nullable().default(null),
   runtime_mode: z.string().catch("local"),
   runtime_config: z.record(z.string(), z.unknown()).default({}),
   custom_args: z.array(z.string()).default([]),
   has_custom_env: z.boolean().optional(),
   custom_env_key_count: z.number().optional(),
-  // Per-agent subscription windows (DENE-715). Optional-and-caught like
-  // runtime.plan_limits: a backend that predates the field omits it, and its
-  // absence has to read as "fall back to the runtime row" rather than failing
-  // the whole agent parse.
-  plan_limits: PlanLimitsSnapshotSchema.nullable().optional().catch(undefined),
   mcp_config: z.unknown().nullable().optional(),
   mcp_config_redacted: z.boolean().optional(),
   composio_toolkit_allowlist: z.array(z.string()).optional(),
@@ -2159,16 +2093,6 @@ export const AgentSchema: z.ZodType<Agent> = z.object({
   model: z.string().default(""),
   thinking_level: z.string().optional(),
   service_tier: z.string().optional(),
-  // Seat strength for automatic dispatch (DENE-633). Optional because a
-  // desktop build can talk to a backend that predates the column.
-  series: z.string().optional().catch(undefined),
-  series_override: z.string().optional().catch(undefined),
-  series_source: z.enum(["auto", "manual"]).optional().catch(undefined),
-  automatic_series: z.string().optional().catch(undefined),
-  routing_tier: z.string().optional().catch(undefined),
-  routing_usage: z.string().optional().catch(undefined),
-  dispatch_mode: z.string().optional().catch(undefined),
-  dispatch_projects: z.array(z.string()).optional().catch(undefined),
   owner_id: z.string().nullable().default(null),
   skills: z.array(z.unknown()).default([]),
   disabled_runtime_skills: z.array(z.unknown()).optional(),
@@ -2182,16 +2106,6 @@ export const AgentSchema: z.ZodType<Agent> = z.object({
   // Reversible seat gate (DENE-714). Same omit/malformed contract as
   // auto_retry_enabled: only an explicit false is off.
   work_enabled: z.boolean().optional().catch(undefined),
-  work_pause: z
-    .object({
-      reason: z.string(),
-      detail: z.string().optional(),
-      condition: z.string().optional(),
-      recover_at: z.string().optional(),
-      opened_at: z.string().default(""),
-    })
-    .optional()
-    .catch(undefined),
 }).loose() as z.ZodType<Agent>;
 
 // Malformed ROWS are dropped individually, the same way a blocked mention is
@@ -2623,19 +2537,6 @@ const ChatLastMessageSchema = z.object({
   sender_user_id: z.string().nullable().optional(),
 }).loose();
 
-const ChatRoutingReceiptSchema = z.object({
-  source: z.string().default(""),
-  routed: z.boolean().default(false),
-  agent_id: z.string().optional().catch(undefined),
-  agent: z.string().optional().catch(undefined),
-  tier: z.string().optional().catch(undefined),
-  tier_label: z.string().optional().catch(undefined),
-  reason: z.string().optional().catch(undefined),
-  availability: z.string().optional().catch(undefined),
-  offline: z.boolean().optional().catch(undefined),
-  candidates: z.array(z.string()).optional().catch(undefined),
-}).loose();
-
 const ChatChannelSourceSchema = z.object({
   channel_type: z.string().default(""),
   installation_id: z.string().default(""),
@@ -2670,7 +2571,6 @@ export const ChatSessionSchema: z.ZodType<ChatSession> = z.object({
   origin_type: z.literal("chat").nullable().optional().catch(undefined),
   origin_session_id: z.string().nullable().optional().catch(undefined),
   origin_title: z.string().nullable().optional().catch(undefined),
-  routing: ChatRoutingReceiptSchema.optional().catch(undefined),
   created_at: z.string().default(""),
   updated_at: z.string().default(""),
 }).loose();
@@ -4665,76 +4565,4 @@ export const TestRepoBindingResponseSchema = z.object({
 export const EMPTY_TEST_REPO_BINDING_RESPONSE: TestRepoBindingResponse = {
   binding: EMPTY_REPO_BINDING,
   ok: false,
-};
-
-/** Validate additive delivery statistics without narrowing older wake settings. */
-export const BotWakeDeliveryStatsSchema = z.object({
-  limited_count: z.number().int().nonnegative().safe().optional().catch(0).default(0),
-}).passthrough();
-
-// Plans (propose-then-approve). Unknown statuses pass through as
-// strings; malformed fields fall back so one bad row never hides the card.
-const nullableString = z.string().nullish().catch(null).transform((v) => v ?? null);
-
-export const PlanStepSchema = z
-  .object({
-    title: z.string().catch("").default(""),
-    assignee_type: z.string().catch("").default(""),
-    assignee_id: z.string().catch("").default(""),
-    issue_id: nullableString,
-  })
-  .loose();
-
-export const PlanSchema = z
-  .object({
-    id: z.string().default(""),
-    issue_id: z.string().catch("").default(""),
-    version: z.number().int().catch(0).default(0),
-    status: z.string().catch("").default(""),
-    author_type: z.string().catch("").default(""),
-    author_id: z.string().catch("").default(""),
-    goal: z.string().catch("").default(""),
-    out_of_scope: z.string().catch("").default(""),
-    steps: z.array(PlanStepSchema).catch([]).default([]),
-    done_when: z.string().catch("").default(""),
-    // null = general work outside any project.
-    project_id: nullableString,
-    comment_id: nullableString,
-    approved_by: nullableString,
-    approved_at: nullableString,
-    created_at: z.string().catch("").default(""),
-  })
-  .loose();
-
-export const IssuePlansSchema = z
-  .object({
-    plans: z.array(PlanSchema).catch([]).default([]),
-    can_approve: z.boolean().catch(false).default(false),
-  })
-  .loose();
-
-export const EMPTY_ISSUE_PLANS: IssuePlans = { plans: [], can_approve: false };
-
-export const ApprovePlanResponseSchema = z
-  .object({ plan: PlanSchema.nullish().catch(null).transform((v) => v ?? null) })
-  .loose();
-
-export const PlanApproverSchema = z
-  .object({
-    user_id: z.string().default(""),
-    name: z.string().catch("").default(""),
-    granted_by: z.string().catch("").default(""),
-    created_at: z.string().catch("").default(""),
-  })
-  .loose();
-
-export const PlanApproverListSchema = z
-  .object({ approvers: z.array(PlanApproverSchema).catch([]).default([]) })
-  .loose();
-
-export const EMPTY_PLAN_APPROVER: PlanApprover = {
-  user_id: "",
-  name: "",
-  granted_by: "",
-  created_at: "",
 };

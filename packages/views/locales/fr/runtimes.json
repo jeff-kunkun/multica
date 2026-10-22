@@ -407,8 +407,7 @@
     "pending_health_warning": "En attente de synchronisation du daemon",
     "pending_health_error": "Erreur d'enregistrement",
     "pending_health_disabled": "Désactivé",
-    "pending_cli_unknown": "en attente",
-    "col_plan_limits": "Limites du forfait"
+    "pending_cli_unknown": "en attente"
   },
   "profiles": {
     "cta": "Ajouter un runtime",
@@ -692,26 +691,5 @@
       "cancel": "Annuler",
       "done": "Qoder déconnecté"
     }
-  },
-  "plan_limits": {
-    "title": "Limites du forfait",
-    "observed": "Mis à jour {{when}}",
-    "unavailable": "Limites du forfait indisponibles",
-    "unavailable_hint": "Aucun quota transmis pour l'instant. Lancez une session CLI Codex pour l'afficher.",
-    "unavailable_hint_claude": "Claude Code ne transmet actuellement les limites du forfait qu'après avoir atteint une limite de session.",
-    "limit_reached": "Limite atteinte",
-    "used": "{{percent}} % utilisés",
-    "resets": "Réinitialisation {{when}}",
-    "window_5h": "Fenêtre de 5 heures",
-    "window_7d": "Fenêtre de 7 jours",
-    "window_primary": "Fenêtre actuelle",
-    "window_secondary": "Fenêtre secondaire",
-    "window_pro": "Pro",
-    "window_flash": "Flash",
-    "window_flash_lite": "Flash Lite",
-    "window_credits": "Crédits",
-    "window_balance_cny": "Solde CNY",
-    "window_balance_usd": "Solde USD",
-    "switch_source": "Basculer sur le quota {{provider}}"
   }
 }

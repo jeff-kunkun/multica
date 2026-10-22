@@ -146,7 +146,6 @@
       "timeout": "L'agent a mis trop de temps et s'est arrêté avant de terminer. Réessayez, ou découpez votre demande en étapes plus courtes.",
       "codex_semantic_inactivity": "L'agent est resté inactif et s'est arrêté avant de terminer. Veuillez réessayer.",
       "runtime_offline": "L'agent est actuellement hors ligne et n'a donc pas pu répondre. Veuillez réessayer dès son retour en ligne.",
-      "pickup_timeout": "Personne n'a pris en charge ce message urgent dans les 30 secondes. La plateforme ne le renvoie pas : envoyez-le à un autre agent, ou configurez un runtime de secours pour cet agent et renvoyez-le.",
       "runtime_access_denied": "Cet agent ne peut pas s'exécuter sur son runtime privé et n'a donc pas pu répondre. Passez le runtime en public, ou réassociez/copiez l'agent vers un runtime que son propriétaire peut utiliser.",
       "runtime_recovery": "L'agent a redémarré avant d'avoir pu terminer. Veuillez réessayer.",
       "runtime_access_revoked": "L'accès au runtime a été révoqué. Associez l'agent à un runtime accessible avant de lancer une nouvelle exécution.",
@@ -181,8 +180,7 @@
     "quick_actions_regenerate": "Régénérer les suggestions",
     "quick_actions_regenerate_failed": "Impossible d'actualiser les suggestions. Veuillez réessayer.",
     "spawned": "Discussion ouverte",
-    "spawn_untitled": "Nouvelle discussion",
-    "issue_receipt": "Résultat de tâche"
+    "spawn_untitled": "Nouvelle discussion"
   },
   "session_history": {
     "untitled": "Sans titre",
@@ -236,12 +234,7 @@
     "history_group": "Historique des discussions",
     "agent_filter_placeholder": "Rechercher des agents...",
     "agent_needs_runtime": "Runtime requis",
-    "agent_needs_runtime_hint": "Associez un runtime avant de démarrer une discussion avec cet agent",
-    "routed_pick": "Laisser le routage choisir",
-    "routed_pick_hint": "Sans nommer d'agent : le routeur choisit selon le message et le projet",
-    "routed_pending": "Après envoi, le routage choisit l'agent selon le message et le projet",
-    "routed_result": "Routé vers : ",
-    "routed_result_offline": "(runtime hors ligne ; le message attend son retour)"
+    "agent_needs_runtime_hint": "Associez un runtime avant de démarrer une discussion avec cet agent"
   },
   "empty_state": {
     "first_time_title": "Discutez avec vos agents",
@@ -431,51 +424,5 @@
   },
   "superseded": {
     "label": "Remplacé par une instruction plus récente"
-  },
-  "report": {
-    "bar_one": "{{count}} ticket de cette discussion",
-    "bar_other": "{{count}} tickets de cette discussion",
-    "bar_fresh_one": "{{count}} ticket de cette discussion · {{fresh}} vient de changer",
-    "bar_fresh_other": "{{count}} tickets de cette discussion · {{fresh}} viennent de changer",
-    "waiting_you": "{{count}} vous attendent",
-    "in_progress": "{{count}} en cours",
-    "done": "{{count}} terminées",
-    "title": "Tickets de cette discussion",
-    "just_changed": "Vient de changer",
-    "needs_you": "vous attend"
-  },
-  "tickets": {
-    "heading_one": "{{count}} ticket ouvert",
-    "heading_other": "{{count}} tickets ouverts",
-    "heading_mixed_one": "{{count}} ticket",
-    "heading_mixed_other": "{{count}} tickets",
-    "to": "pour {{name}}",
-    "routing": "le routage choisit l'exécutant",
-    "working": "{{name}} y travaille",
-    "working_unnamed": "un agent y travaille",
-    "queued": "{{name}} en file",
-    "queued_unnamed": "en file",
-    "idle": "personne n'y travaille",
-    "actions": "Actions pour {{id}}",
-    "assign_me": "Me l'attribuer",
-    "assign_agent": "Confier à un agent",
-    "withdraw": "Retirer",
-    "assigned_me": "{{id}} vous est attribué",
-    "assigned_agent": "{{id}} est rendu au routage",
-    "withdrawn": "{{id}} retiré",
-    "failed": "Impossible de modifier {{id}}",
-    "source_created": "Ouvert ici",
-    "source_auto": "Suivi",
-    "source_manual": "Épinglé",
-    "remove": "Retirer de la discussion",
-    "removed": "{{id}} retiré de cette discussion",
-    "remove_failed": "Impossible de retirer {{id}}",
-    "pin": "Épingler un ticket",
-    "pin_title": "Épingler un ticket à cette discussion",
-    "pin_hint": "Il apparaît dans les cartes et la barre de suivi ; le ticket ne change pas.",
-    "pin_placeholder": "Numéro, ex. DENE-12",
-    "pin_submit": "Épingler",
-    "pinned": "{{id}} épinglé",
-    "pin_failed": "Impossible d'épingler {{id}}"
   }
 }
