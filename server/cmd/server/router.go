@@ -458,9 +458,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		GitExtraCACerts:                gitca.Load(slog.Default()),
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
-	// Chat goal title + progress subtitle refresh after each agent reply
-	// (DENE-1037).
-	h.RegisterChatRecap(bus)
 	invitationRateLimits := handler.DefaultInvitationRateLimits()
 	invitationRateLimits.Actor.Limit = envNonNegativeInt("RATE_LIMIT_INVITATION_ACTOR_10M", invitationRateLimits.Actor.Limit)
 	invitationRateLimits.Workspace.Limit = envNonNegativeInt("RATE_LIMIT_INVITATION_WORKSPACE_24H", invitationRateLimits.Workspace.Limit)
@@ -1862,7 +1859,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
 					r.Get("/", h.GetWorkspace)
-					r.Get("/naming", h.GetWorkspaceNaming)
 					r.Get("/agent-spawn", h.GetWorkspaceAgentSpawn)
 					r.Get("/magpie", h.GetWorkspaceMagpie)
 					r.Get("/members", h.ListMembersWithUser)
@@ -1916,7 +1912,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// Admin-level access
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
-					r.Put("/naming", h.UpdateWorkspaceNaming)
 					r.Put("/agent-spawn", h.UpdateWorkspaceAgentSpawn)
 					r.Put("/magpie", h.UpdateWorkspaceMagpie)
 					r.Put("/", h.UpdateWorkspace)
@@ -2902,7 +2897,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/messages", h.SendChatMessage)
 					// `multica chat ask-human` (DENE-1933).
 					r.Post("/ask-human", h.AskHumanChat)
-					r.Post("/title", h.WriteChatTitle)
 					r.Post("/progress", h.WriteChatProgress)
 					r.Get("/progress", h.ListChatProgress)
 					r.Post("/onboarding", h.StartMikaOnboarding)

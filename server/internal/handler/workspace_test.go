@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"sort"
 	"strings"
 	"testing"
@@ -1458,23 +1457,6 @@ func TestNormalizeIssuePrefix(t *testing.T) {
 	}
 }
 
-func TestUpdateWorkspaceNamingRejectsUnavailableServerModel(t *testing.T) {
-	requireDB(t)
-	previous := testHandler.LLM
-	testHandler.LLM = nil
-	t.Cleanup(func() { testHandler.LLM = previous })
-	w := httptest.NewRecorder()
-	req := newRequest(http.MethodPut, "/api/workspaces/"+testWorkspaceID+"/naming", map[string]any{"source": "server_llm"})
-	req = withURLParam(req, "id", testWorkspaceID)
-	testHandler.UpdateWorkspaceNaming(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected unavailable server model to be rejected with 400, got %d: %s", w.Code, w.Body.String())
-	}
-	if !strings.Contains(w.Body.String(), "MULTICA_LLM_") {
-		t.Fatalf("error should explain missing model key: %s", w.Body.String())
-	}
-}
-
 // TestCreateWorkspace_ChineseNameDerivesPrefixFromSlug is the end-to-end
 // regression for MUL-6050: a workspace whose name has no ASCII letters used
 // to be created with prefix "WS" — deterministically, for every Chinese team
@@ -1594,67 +1576,5 @@ func TestUpdateWorkspace_RejectsInvalidIssuePrefix(t *testing.T) {
 	dbfx.QueryRow(t, `SELECT issue_prefix FROM workspace WHERE id = $1`, testWorkspaceID).Scan(&after)
 	if after != before {
 		t.Fatalf("issue_prefix changed on a rejected update: %q → %q", before, after)
-	}
-}
-
-func TestNamingHealth(t *testing.T) {
-	cases := []struct {
-		name        string
-		source      string
-		serverReady bool
-		stats       map[string]int
-		want        string
-	}{
-		{"no chats", "runtime", false, map[string]int{}, "idle"},
-		{"runtime named", "runtime", false, map[string]int{"titled": 3, "runtime": 1, "rules": 2}, "ok"},
-		{"rules covered every chat", "runtime", false, map[string]int{"titled": 5, "rules": 5}, "degraded"},
-		{"only failures", "rules", false, map[string]int{"failed": 2}, "degraded"},
-		{"server model without key", "server_llm", false, map[string]int{}, "degraded"},
-		{"server model named", "server_llm", true, map[string]int{"titled": 1, "server_llm": 1}, "ok"},
-	}
-	for _, tc := range cases {
-		if got := namingHealth(tc.source, tc.serverReady, tc.stats); got != tc.want {
-			t.Errorf("%s: namingHealth = %q, want %q", tc.name, got, tc.want)
-		}
-	}
-}
-
-// The settings card leads with whether naming works, so the response must
-// carry the latest named chat and a health verdict, not just counters.
-func TestWorkspaceNamingReportsLastTitleAndHealth(t *testing.T) {
-	requireDB(t)
-	previous := testHandler.LLM
-	testHandler.LLM = nil
-	t.Cleanup(func() { testHandler.LLM = previous })
-
-	session := newChatTitleTestSession(t, "seed")
-	if _, err := testHandler.Queries.UpdateChatSessionTitle(context.Background(), db.UpdateChatSessionTitleParams{
-		ID: session.ID, Title: "Multica · naming card",
-	}); err != nil {
-		t.Fatalf("write title: %v", err)
-	}
-	if _, err := testPool.Exec(context.Background(), `
-		INSERT INTO chat_naming_event (workspace_id, chat_session_id, source, status)
-		VALUES ($1, $2, 'runtime', 'success')
-	`, uuidToString(session.WorkspaceID), uuidToString(session.ID)); err != nil {
-		t.Fatalf("record naming: %v", err)
-	}
-
-	w := httptest.NewRecorder()
-	req := newRequest(http.MethodPut, "/api/workspaces/"+testWorkspaceID+"/naming", map[string]any{"source": "runtime"})
-	req = withURLParam(req, "id", testWorkspaceID)
-	testHandler.UpdateWorkspaceNaming(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("update naming: %d %s", w.Code, w.Body.String())
-	}
-	var got workspaceNamingResponse
-	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
-		t.Fatal(err)
-	}
-	if got.Health != "ok" {
-		t.Fatalf("health = %q, want ok (stats %v)", got.Health, got.Stats)
-	}
-	if got.Last == nil || got.Last.Title != "Multica · naming card" || got.Last.Source != "runtime" {
-		t.Fatalf("last = %+v", got.Last)
 	}
 }

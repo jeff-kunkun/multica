@@ -1047,12 +1047,6 @@ func buildChatPrompt(task Task) string {
 		b.WriteString("\n")
 	}
 	b.WriteString(selectedSkillsBlock(task.Agent, task.ChatMessage))
-	// The workspace names chats through the runtime (DENE-1120) and this chat
-	// has no runtime title yet. Listing `multica chat title` in the brief was
-	// never enough — agents skipped it and every chat kept its first line.
-	if task.ChatTitleRequested {
-		b.WriteString("Chat naming: this chat has no title yet. Once you understand the request, run `multica chat title \"{Project} · {topic}\" --output json` once, silently, before your final reply. {Project} is the display name from `## Project Context` (if there is none, use the product or repo the chat is about); {topic} is a short phrase for what the user wants, in the user's language. A refusal (title locked or already changed) is final — do not retry or mention it.\n\n")
-	}
 	// Chat aligns, issues execute (DENE-1665). Every turn, because the urge to
 	// keep working in the chat grows with the conversation; the server checks
 	// the 目标/验收 half on create.
