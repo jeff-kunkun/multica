@@ -13,12 +13,12 @@ import (
 )
 
 func init() {
-	wake := &cobra.Command{Use: "wake", Short: "Manage receiver-owned event webhooks and receipts", Long: `Read or update a bot's wake rules, and inspect delivered or pending events.
-The bot may manage only itself; workspace administrators may manage any bot.
+	wake := &cobra.Command{Use: "wake", Short: "Manage receiver-owned mention webhooks and receipts", Long: `Read or update a bot's wake rules, and inspect delivered or pending events.
+Only @-mentions of the bot are pushed. The bot may manage only itself;
+workspace administrators may manage any bot.
 HTTP 200 means received, not running or completed. Uncertain deliveries are
-never automatically replayed. Quiet and hourly-limited events are automatically
-delivered later in sequence order; mentions bypass positive hourly limits and
-do not consume them. 0 pauses all pushes. Get reports the saved hourly_limit
+never automatically replayed. Mentions held by quiet hours are delivered later
+in sequence order; hourly_limit 0 pauses all pushes. Get reports the saved hourly_limit
 and limited_count (visible events held by that limit), plus worker health:
 last_processed_at, last_error, head_sequence, stuck_seconds and blocked.
 Preparation failures retry at 5/10 seconds, then fail after three attempts.
@@ -32,12 +32,12 @@ Backlog older than five minutes is grouped into batches of up to 100 events.`}
 			cmd.Flags().Bool("config-stdin", false, "Read JSON settings from standard input")
 			cmd.Long = `Update only supplied fields. Pass JSON using exactly one of --config-file
 or --config-stdin. Never pass secret values as command arguments.
-Fields: inherit_owner_follows (boolean, default false; member issue subscriptions/assignments), wake_from {member,agent,bot}: {mode: all|none|list, ids: []}, events (array: mention, started, done, blocked, needs_kun, task, chat), hourly_limit (0..120), quiet_hours
+Fields: wake_from {member,agent,bot}: {mode: all|none|list, ids: []}, events (array: mention; older event names are accepted and dropped), hourly_limit (0..120), quiet_hours
 {enabled,start,end,timezone}, webhook_url, webhook_key.
 Write URL and key together. The key is the complete Authorization header value
 (e.g. Bearer …), as specified by the receiver. Two empty strings disconnect.
-Defaults: 6 attempts/hour, 23:00–08:00 Asia/Shanghai. New subscriptions exclude started.
-Ordinary events for one issue/chat are grouped for 30 seconds; webhooks include events[].`
+Defaults: quiet hours 23:00–08:00 Asia/Shanghai. Mentions for one issue/chat
+are grouped for 30 seconds; webhooks include events[].`
 		}
 		if verb == "events" || verb == "pending" {
 			cmd.Flags().Bool("with-content", false, "Include current mention/chat payload: content, thread previews, attachments and reply location; visibility checked, no delivery or acknowledgement")

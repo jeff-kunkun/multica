@@ -272,28 +272,24 @@ It does not dispatch an internal agent. Resolve identities with the member-visib
 `GET /api/workspaces/{id}/bots/mentions` directory (optionally `issue_id` or
 `chat_session_id`); administrators can also use `multica bot list --output json`.
 Mentioning a Bot grants no access. The Bot's PAT owner must already see the
-source. A mention starts following subsequent lifecycle events on that issue or
-messages in that chat. Owner member issue subscriptions/assignments are inherited
-only when `inherit_owner_follows` is explicitly enabled (default false).
+source. Only mentions are pushed to the Bot's webhook; issue lifecycle, chat
+replies and owner subscriptions are not.
 
 - `multica bot wake get <bot-id>` reads receiver rules; no URL or key is returned.
 - `multica bot wake set <bot-id> --config-file ./wake.json` or `--config-stdin`
   updates only supplied fields. Secrets never go in arguments, comments or logs.
-  Fields: `webhook_url`, `webhook_key` (write these together), `events` (array),
-  `inherit_owner_follows` (boolean, default false), `hourly_limit`, `quiet_hours: {enabled,start,end,timezone}`. The key is the
+  Fields: `webhook_url`, `webhook_key` (write these together), `events` (`["mention"]` or `[]`),
+  `hourly_limit`, `quiet_hours: {enabled,start,end,timezone}`. The key is the
   complete Authorization header value supplied by the receiver, including any
   scheme. Empty URL and key disconnect. Do not guess the receiver's scheme.
 - `multica bot wake events <bot-id> --limit 50 --before <next_cursor>` reads
   receipts. `pending` uses the same pagination for pending/failed/uncertain rows.
   Follow nonempty `next_cursor` even when a page has no visible events.
 
-Defaults: all seven event types, 6 attempts/hour and 23:00–08:00 Asia/Shanghai
-quiet hours. `events: []` disables pushes; `hourly_limit: 0` pauses all pushes.
-Quiet and hourly-limited unsent events remain pending and are automatically
-rechecked each second; saving settings releases eligible events immediately.
-Mentions bypass positive hourly limits without consuming quota; zero pauses all
-pushes, and quiet hours still apply. Disabled/unavailable events remain pending.
-`wake get` reports the saved `hourly_limit` and visible `limited_count`.
+Defaults: mentions on, 23:00–08:00 Asia/Shanghai quiet hours. `events: []`
+disables pushes; `hourly_limit: 0` pauses all pushes. Mentions held by quiet
+hours remain pending and are rechecked each second; saving settings releases
+eligible ones immediately. Disabled/unavailable events remain pending.
 Missing source attribution is noted with empty author fields, not held indefinitely. `received` means HTTP 200 only, never started or completed.
 An interrupted or timed-out send is `uncertain` and is not retried automatically.
 Only definite pre-send failures, HTTP 429 and HTTP 503 retry (5s, 10s, 3 attempts

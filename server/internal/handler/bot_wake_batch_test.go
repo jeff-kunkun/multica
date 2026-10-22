@@ -74,6 +74,7 @@ func TestBotWakeBatchContentAndReply(t *testing.T) {
 	if err := testPool.QueryRow(ctx, `SELECT root_id::text FROM bot_wake_event WHERE bot_id=$1 AND source_id=$2`, bot.ID, sourceID).Scan(&root); err != nil {
 		t.Fatal(err)
 	}
+	// Lifecycle events in the same source window are recorded but never pushed.
 	for _, kind := range []string{"blocked", "needs_kun"} {
 		dbfx.Exec(t, `INSERT INTO bot_wake_event(bot_id,workspace_id,event_type,issue_id,source_id,author_type,author_id,root_id) VALUES($1,$2,$3,$4,gen_random_uuid(),'member',$5,$6)`, bot.ID, testWorkspaceID, kind, issueID, testUserID, root)
 	}
@@ -89,7 +90,7 @@ func TestBotWakeBatchContentAndReply(t *testing.T) {
 		t.Fatalf("worker: %v %v", worked, err)
 	}
 	events := body["events"].([]any)
-	if calls.Load() != 1 || len(events) != 3 {
+	if calls.Load() != 1 || len(events) != 1 {
 		t.Fatalf("calls=%d events=%d", calls.Load(), len(events))
 	}
 	mention := events[0].(map[string]any)
@@ -120,7 +121,9 @@ func TestBotWakeBatchContentAndReply(t *testing.T) {
 	var received, attempts int
 	testPool.QueryRow(ctx, `SELECT count(*) FROM bot_wake_event WHERE bot_id=$1 AND status='received'`, bot.ID).Scan(&received)
 	testPool.QueryRow(ctx, `SELECT count(*) FROM bot_wake_attempt WHERE bot_id=$1`, bot.ID).Scan(&attempts)
-	if received != 3 || attempts != 1 {
+	var disabled int
+	testPool.QueryRow(ctx, `SELECT count(*) FROM bot_wake_event WHERE bot_id=$1 AND status='pending' AND reason='event disabled'`, bot.ID).Scan(&disabled)
+	if received != 1 || attempts != 0 || disabled != 2 {
 		t.Fatalf("received=%d attempts=%d", received, attempts)
 	}
 	if worked, err := worker.ProcessNext(ctx); err != nil || worked || calls.Load() != 1 {
@@ -226,54 +229,12 @@ func TestBotWakeBatchContentAndReply(t *testing.T) {
 	}
 	var results, woken int
 	dbfx.QueryRow(t, `SELECT count(*) FILTER(WHERE result_at IS NOT NULL),count(*) FILTER(WHERE woken_at IS NOT NULL) FROM bot_wake_event WHERE bot_id=$1 AND delivery_id=$2`, bot.ID, body["delivery_id"]).Scan(&results, &woken)
-	if results != 1 || woken != 2 {
-		t.Fatalf("batch member receipt leaked: results=%d woken=%d", results, woken)
+	if results != 1 || woken != 0 {
+		t.Fatalf("delivery receipt: results=%d woken=%d", results, woken)
 	}
-	t.Log("batched members keep independent receipt actions: one result and two acknowledgements; transport received for all")
 
-	t.Log("30s window: no early push; mention + blocked + needs_kun: 1 HTTP POST, 3 events, 1 attempt; content/context/attachment complete; reply POST 201 under original mention; shared thread feed contains reply")
+	t.Log("30s window: no early push; mention pushed alone, blocked + needs_kun kept pending; content/context/attachment complete; reply POST 201 under original mention; shared thread feed contains reply")
 
-	// Retry membership survives worker recreation; a later source event is not
-	// appended to a previously attempted batch.
-	response.Store(503)
-	for i := 0; i < 2; i++ {
-		dbfx.Exec(t, `INSERT INTO bot_wake_event(bot_id,workspace_id,event_type,issue_id,source_id,author_type,author_id,root_id,created_at) VALUES($1,$2,'done',$3,gen_random_uuid(),'member',$4,gen_random_uuid(),now()-interval '31 seconds')`, bot.ID, testWorkspaceID, issueID, testUserID)
-	}
-	if worked, err := worker.ProcessNext(ctx); err != nil || !worked {
-		t.Fatalf("retry first: %v %v", worked, err)
-	}
-	retryID := body["delivery_id"]
-	dbfx.Exec(t, `UPDATE bot_wake_event SET next_attempt_at=now() WHERE bot_id=$1 AND status='queued'`, bot.ID)
-	dbfx.Exec(t, `INSERT INTO bot_wake_event(bot_id,workspace_id,event_type,issue_id,source_id,author_type,author_id,root_id) VALUES($1,$2,'done',$3,gen_random_uuid(),'member',$4,gen_random_uuid())`, bot.ID, testWorkspaceID, issueID, testUserID)
-	response.Store(200)
-	worker = NewBotWakeWorker(testHandler)
-	worker.client = func(*url.URL) *http.Client { return receiver.Client() }
-	if worked, err := worker.ProcessNext(ctx); err != nil || !worked {
-		t.Fatalf("retry second: %v %v", worked, err)
-	}
-	if body["delivery_id"] != retryID || len(body["events"].([]any)) != 2 {
-		t.Fatal("retry batch changed")
-	}
-	var pendingNew int
-	testPool.QueryRow(ctx, `SELECT count(*) FROM bot_wake_event WHERE bot_id=$1 AND status='queued' AND delivery_id IS NULL`, bot.ID).Scan(&pendingNew)
-	if pendingNew != 1 {
-		t.Fatal("new event joined retry")
-	}
-	t.Log("503 retry after worker recreation: same 2 events, stable delivery_id; newer event stays queued")
-	// A disabled event in the same source window cannot hitchhike in the push.
-	dbfx.Exec(t, `UPDATE bot_wake_event SET created_at=now()-interval '31 seconds' WHERE bot_id=$1 AND status='queued'`, bot.ID)
-	dbfx.Exec(t, `INSERT INTO bot_wake_event(bot_id,workspace_id,event_type,issue_id,source_id,author_type,author_id,root_id,created_at) VALUES($1,$2,'started',$3,gen_random_uuid(),'member',$4,gen_random_uuid(),now()-interval '30 seconds')`, bot.ID, testWorkspaceID, issueID, testUserID)
-	if worked, err := worker.ProcessNext(ctx); err != nil || !worked {
-		t.Fatalf("filtered batch: %v %v", worked, err)
-	}
-	if len(body["events"].([]any)) != 1 {
-		t.Fatal("disabled started event entered push")
-	}
-	var disabled int
-	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM bot_wake_event WHERE bot_id=$1 AND event_type='started' AND status='pending' AND reason='event disabled'`, bot.ID).Scan(&disabled); err != nil || disabled != 1 {
-		t.Fatalf("disabled=%d %v", disabled, err)
-	}
-	t.Log("mixed source batch: done delivered; disabled started kept pending")
 	// Chat containers use the same window, preserving every source message.
 	agentID := createHandlerTestAgent(t, "BatchChatAgent", []byte("[]"))
 	chatID := createHandlerTestChatSession(t, agentID)
@@ -290,27 +251,13 @@ func TestBotWakeBatchContentAndReply(t *testing.T) {
 	if worked, err := worker.ProcessNext(ctx); err != nil || !worked {
 		t.Fatalf("chat batch: %v %v", worked, err)
 	}
-	if calls.Load() != beforeCalls+1 || len(body["events"].([]any)) != 3 {
-		t.Fatal("chat group split")
-	}
-	for i, rawEvent := range body["events"].([]any) {
-		event := rawEvent.(map[string]any)
-		if event["message_id"] != messageIDs[i] || event["reply_to_message_id"] != messageIDs[i] || event["content"] == nil {
-			t.Fatalf("chat source lost: %+v", event)
-		}
-	}
-	t.Log("3 messages in the same chat: 1 HTTP POST; each message body and same-chat reply location included")
-	// A retry queued by the old release has no saved delivery_id. It must
-	// still make progress instead of repeatedly selecting an empty batch.
-	dbfx.Exec(t, `INSERT INTO bot_wake_event(bot_id,workspace_id,event_type,issue_id,source_id,author_type,author_id,root_id,attempts) VALUES($1,$2,'done',$3,gen_random_uuid(),'member',$4,gen_random_uuid(),1)`, bot.ID, testWorkspaceID, issueID, testUserID)
-	beforeCalls = calls.Load()
-	if worked, err := worker.ProcessNext(ctx); err != nil || !worked {
-		t.Fatalf("legacy retry: %v %v", worked, err)
-	}
 	if calls.Load() != beforeCalls+1 || len(body["events"].([]any)) != 1 {
-		t.Fatal("legacy retry did not advance")
+		t.Fatal("chat follow-ups pushed")
 	}
-	t.Log("pre-upgrade retry with attempts=1 and no delivery_id: delivered once, no empty-batch loop")
+	if event := body["events"].([]any)[0].(map[string]any); event["message_id"] != messageIDs[0] || event["reply_to_message_id"] != messageIDs[0] || event["content"] == nil {
+		t.Fatalf("chat source lost: %+v", event)
+	}
+	t.Log("3 messages in the same chat: 1 HTTP POST carrying only the mention; same-chat reply location included")
 	// Description mentions can acknowledge with a top-level comment, and
 	// deleted source bodies must never reappear through enriched event reads.
 	var mentionEvent db.BotWakeEvent

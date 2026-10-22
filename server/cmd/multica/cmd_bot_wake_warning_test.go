@@ -13,33 +13,6 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func TestBotWakeChainSettingsUsesPartialWorkspacePatch(t *testing.T) {
-	call, err := planSettings("bot_wake_chain_limit", true, float64(6), nil, "ws-123")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if call.Method != http.MethodPatch || call.Path != "/api/workspaces/ws-123" {
-		t.Fatalf("call = %+v", call)
-	}
-	body := call.Body.(map[string]any)
-	if body["bot_wake_chain_limit"] != float64(6) || len(body) != 1 {
-		t.Fatalf("write replaces unrelated settings: %+v", body)
-	}
-	for _, raw := range []map[string]any{{}, {"settings": map[string]any{"bot_wake_chain_limit": float64(8)}}} {
-		got, err := projectSettings(call.Project, raw, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		want := any(4)
-		if raw["settings"] != nil {
-			want = float64(8)
-		}
-		if got.(map[string]any)["bot_wake_chain_limit"] != want {
-			t.Fatalf("projection = %+v, want %v", got, want)
-		}
-	}
-}
-
 func TestChatSendBlockedPreservesReceiptAndStopsWait(t *testing.T) {
 	t.Chdir(t.TempDir())
 	t.Setenv("MULTICA_TASK_ID", "")

@@ -158,7 +158,6 @@ Bot wake-chain admission defaults to four unacknowledged triggers. A blocked
 send saves the message, prints its receipt, and exits nonzero with the reason;
 do not resend it. A genuine agent reply or completed run resets the chain.
 Human messages and server-verified --per-quote messages are exempt.
-Read or change the limit with multica settings get/set bot_wake_chain_limit.
 
   multica chat send --session <id|url> "Use the staging database instead" --mode steer
   multica chat send --session <id|url> --content-file ./msg.md --mode queue
@@ -645,7 +644,7 @@ func runChatSend(cmd *cobra.Command, args []string) error {
 func blockedChatSendError(out map[string]any) error {
 	warning, _ := out["warning"].(string)
 	if warning == "" {
-		warning = "Bot wake-chain limit reached; wait for the agent to reply or complete a run, use a human login, or ask an administrator to change bot_wake_chain_limit"
+		warning = "Bot wake-chain limit reached; wait for the agent to reply or complete a run, or use a human login"
 	}
 	return fmt.Errorf("message %v saved, but agent was not woken: %s; do not resend the saved message", out["message_id"], warning)
 }

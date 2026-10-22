@@ -31,8 +31,6 @@ decide permissions; the server does.
   multica settings get repo.shares --value-json '{"url":"https://github.com/acme/app.git"}'
   multica settings set repo.shares --value-json '{"url":"https://github.com/acme/app.git","member_id":"..."}'
   multica settings set repo.shares --value-json '{"url":"https://github.com/acme/app.git","member_id":"...","revoke":true}'
-  multica settings get bot_wake_chain_limit
-  multica settings set bot_wake_chain_limit --value-json '4'
 
 Keys, methods, and which page each one belongs to: docs/kun/settings-cli-coverage.md`,
 }
@@ -85,18 +83,6 @@ type settingsKind struct {
 // settings surface without a handler listed here fails
 // TestSettingsSurfaceRoutesAreClaimed.
 var settingsKinds = map[string]settingsKind{
-	"bot_wake_chain_limit": {
-		handlers: []string{"GetWorkspace", "UpdateWorkspace"},
-		read: func(_ string, _ map[string]any, workspaceID string) (settingsCall, error) {
-			if workspaceID == "" {
-				return settingsCall{}, fmt.Errorf("workspace id is required to read bot_wake_chain_limit")
-			}
-			return settingsCall{Method: http.MethodGet, Path: "/api/workspaces/" + url.PathEscape(workspaceID), Project: "bot-wake-chain-limit"}, nil
-		},
-		write: func(workspaceID string, value any) (settingsCall, error) {
-			return settingsCall{Method: http.MethodPatch, Path: "/api/workspaces/" + url.PathEscape(workspaceID), Body: map[string]any{"bot_wake_chain_limit": value}, Project: "bot-wake-chain-limit"}, nil
-		},
-	},
 	"modules.visibility": {
 		handlers: []string{"ListModuleVisibility"},
 		read: func(string, map[string]any, string) (settingsCall, error) {
@@ -219,7 +205,7 @@ func settingsHandlerClaims() map[string]struct{} {
 
 func parseSettingsKey(key string) (kind, id string, err error) {
 	switch key {
-	case "modules.visibility", "repo.visibility", "repo.shares", "bot_wake_chain_limit":
+	case "modules.visibility", "repo.visibility", "repo.shares":
 		return key, "", nil
 	}
 	parts := strings.Split(key, ".")
@@ -256,12 +242,6 @@ func planSettings(key string, write bool, value any, query map[string]any, works
 	if write {
 		if kind.write == nil {
 			return settingsCall{}, fmt.Errorf("setting %s is read-only; set a more specific key", key)
-		}
-		if kindName == "bot_wake_chain_limit" {
-			if workspaceID == "" {
-				return settingsCall{}, fmt.Errorf("workspace id is required to set %s", kindName)
-			}
-			id = workspaceID
 		}
 		return kind.write(id, value)
 	}
@@ -373,14 +353,6 @@ func executeSettings(ctx context.Context, client *cli.APIClient, key string, cal
 
 func projectSettings(project string, raw any, hint any) (any, error) {
 	switch project {
-	case "bot-wake-chain-limit":
-		body, _ := raw.(map[string]any)
-		settings, _ := body["settings"].(map[string]any)
-		limit := any(4)
-		if value, ok := settings["bot_wake_chain_limit"]; ok {
-			limit = value
-		}
-		return map[string]any{"bot_wake_chain_limit": limit}, nil
 	case "repo-visibility":
 		return projectRepoVisibility(raw, hint)
 	case "runtime-visibility":

@@ -169,8 +169,8 @@ runtime last-seen time. An empty chat has no `task_status` or `reason` yet.
 
 ## Unanswered Bot wakes
 
-Separate from the agent handoff budget above, `bot_wake_chain_limit` caps
-unanswered automatic Bot wakes across a trusted root (default 4, range 1–100).
+Separate from the agent handoff budget above, a wake-chain guard caps
+unanswered automatic Bot wakes across a trusted root at 4.
 Queued wakes reserve a slot; terminal tasks that never ran release it. An actual
 agent reply or completed running task clears the count. Human sends bypass it;
 `chat send` and `issue comment add --per-quote` also bypass when the quote exactly
@@ -179,8 +179,4 @@ matches the caller's original human message in that same chat/issue.
 A capped `chat send` retains the message and receipt, reports `mode=blocked`
 and exits nonzero. Do not duplicate that message. A saved issue comment warns
 with each target's `bot_wake_chain_limit` outcome. Wait for a reply/completion or
-a human message; a workspace administrator can change the limit using
-`multica settings set bot_wake_chain_limit --value-json '6'`.
-Routing health exposes the current limit
-and visibility-scoped recent blocks for patrol/daily reports. The initiating
-Bot also receives a `wake_blocked` operational webhook event.
+a human message.

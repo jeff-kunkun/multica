@@ -369,14 +369,13 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateWorkspaceRequest struct {
-	BotWakeChainLimit json.RawMessage `json:"bot_wake_chain_limit"`
-	Name              *string         `json:"name"`
-	Description       *string         `json:"description"`
-	Context           *string         `json:"context"`
-	Settings          any             `json:"settings"`
-	Repos             any             `json:"repos"`
-	IssuePrefix       *string         `json:"issue_prefix"`
-	AvatarURL         *string         `json:"avatar_url"`
+	Name        *string `json:"name"`
+	Description *string `json:"description"`
+	Context     *string `json:"context"`
+	Settings    any     `json:"settings"`
+	Repos       any     `json:"repos"`
+	IssuePrefix *string `json:"issue_prefix"`
+	AvatarURL   *string `json:"avatar_url"`
 }
 
 // workspaceRepoRef is one entry of workspace.repos. A repository has no table
@@ -506,41 +505,7 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 	if req.Context != nil {
 		params.Context = pgtype.Text{String: *req.Context, Valid: true}
 	}
-	if len(req.BotWakeChainLimit) > 0 {
-		var limit int
-		if err := json.Unmarshal(req.BotWakeChainLimit, &limit); err != nil || limit < 1 || limit > 100 {
-			writeError(w, http.StatusBadRequest, "bot_wake_chain_limit must be an integer from 1 to 100")
-			return
-		}
-		if r.Header.Get("X-Actor-Source") == "task_token" {
-			writeError(w, http.StatusForbidden, "agent runs cannot change bot_wake_chain_limit")
-			return
-		}
-		if req.Settings == nil {
-			existing, err := h.Queries.GetWorkspace(r.Context(), idUUID)
-			if err != nil {
-				writeError(w, http.StatusInternalServerError, "failed to load workspace settings")
-				return
-			}
-			values := map[string]any{}
-			_ = json.Unmarshal(existing.Settings, &values)
-			if values == nil {
-				values = map[string]any{}
-			}
-			req.Settings = values
-		}
-		if values, ok := req.Settings.(map[string]any); ok {
-			values["bot_wake_chain_limit"] = limit
-		} else {
-			writeError(w, http.StatusBadRequest, "settings must be a JSON object")
-			return
-		}
-	}
 	if req.Settings != nil {
-		if err := validateBotWakeChainSettings(req.Settings); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
 		if incoming, ok := req.Settings.(map[string]any); ok {
 			if block, ok := incoming["routing"].(map[string]any); ok {
 				if limit, exists := block["consult_per_issue"]; exists {
@@ -596,11 +561,9 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 				"this deployment cannot store a log export git token (no MULTICA_LOG_EXPORT_SECRET_KEY or JWT_SECRET)")
 			return
 		}
-		// An agent run must not be able to raise its own limits through the
-		// generic settings write: bot_wake_chain_limit is carried forward unchanged.
-		if r.Header.Get("X-Actor-Source") == "task_token" {
-			merged = keepStoredBotWakeChainLimit(merged, stored)
-		}
+		// bot_wake_chain_limit is no longer a setting, but the database guard
+		// still reads the stored value, so no write may change it.
+		merged = keepStoredBotWakeChainLimit(merged, stored)
 		// The magpie mode switch is written only through its own endpoint.
 		merged = keepStoredMagpie(merged, stored)
 		s, _ := json.Marshal(merged)
@@ -1651,4 +1614,19 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 	h.notifyDaemonWorkspacesChanged(affectedUserIDs...)
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func keepStoredBotWakeChainLimit(incoming any, stored []byte) any {
+	values, ok := incoming.(map[string]any)
+	if !ok {
+		return incoming
+	}
+	var old map[string]any
+	_ = json.Unmarshal(stored, &old)
+	if limit, present := old["bot_wake_chain_limit"]; present {
+		values["bot_wake_chain_limit"] = limit
+	} else {
+		delete(values, "bot_wake_chain_limit")
+	}
+	return values
 }

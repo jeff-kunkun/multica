@@ -250,7 +250,6 @@ func (h *Handler) EscalateIssue(w http.ResponseWriter, r *http.Request) {
 // model identifier the workspace itself typed in, and whether the last call
 // worked.
 type routingHealthResponse struct {
-	BotWakeChain *botWakeChainReport `json:"bot_wake_chain,omitempty"`
 	// Rules is the rule table that decides the tier (DENE-1677), read-only:
 	// it ships with the server, like ladder.json.
 	Rules             routing.RuleTableView `json:"rules"`
@@ -475,8 +474,6 @@ func (h *Handler) GetRoutingHealth(w http.ResponseWriter, r *http.Request) {
 		// saying "off" is the honest answer rather than an error the settings
 		// page would have to interpret.
 		resp := offlineRoutingHealth()
-		audit := h.botWakeChainReport(r, workspaceID)
-		resp.BotWakeChain = &audit
 		writeJSON(w, http.StatusOK, resp)
 		return
 	}
@@ -488,8 +485,6 @@ func (h *Handler) GetRoutingHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := h.routingHealthPayload(r.Context(), workspaceID, rep)
-	audit := h.botWakeChainReport(r, workspaceID)
-	resp.BotWakeChain = &audit
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -500,8 +495,6 @@ func (h *Handler) CheckRoutingHealth(w http.ResponseWriter, r *http.Request) {
 	workspaceID := chi.URLParam(r, "id")
 	if h.Routing == nil {
 		resp := offlineRoutingHealth()
-		audit := h.botWakeChainReport(r, workspaceID)
-		resp.BotWakeChain = &audit
 		writeJSON(w, http.StatusOK, resp)
 		return
 	}
@@ -515,8 +508,6 @@ func (h *Handler) CheckRoutingHealth(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := h.routingHealthPayload(ctx, workspaceID, rep)
-	audit := h.botWakeChainReport(r, workspaceID)
-	resp.BotWakeChain = &audit
 	writeJSON(w, http.StatusOK, resp)
 }
 

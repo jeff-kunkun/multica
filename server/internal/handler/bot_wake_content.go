@@ -13,7 +13,7 @@ import (
 
 // Recover only the exact persisted source run, preserving unknown attribution.
 func (w *BotWakeWorker) restoreEventActor(ctx context.Context, q *db.Queries, e db.BotWakeEvent) (db.BotWakeEvent, error) {
-	if e.EventType != "wake_blocked" && (e.AuthorType == "system" || !e.AuthorID.Valid) && e.SourceTaskID.Valid {
+	if e.EventType == "mention" && (e.AuthorType == "system" || !e.AuthorID.Valid) && e.SourceTaskID.Valid {
 		if task, err := q.GetAgentTaskInWorkspace(ctx, db.GetAgentTaskInWorkspaceParams{ID: e.SourceTaskID, WorkspaceID: e.WorkspaceID}); err == nil {
 			e.AuthorType, e.AuthorID = "agent", task.AgentID
 			if err := q.RestoreBotWakeAuthor(ctx, db.RestoreBotWakeAuthorParams{Sequence: e.Sequence, AuthorID: e.AuthorID}); err != nil {
@@ -28,8 +28,10 @@ func (w *BotWakeWorker) eventHoldReason(ctx context.Context, q *db.Queries, e db
 	if !w.h.wakeVisible(ctx, e, bot.UserID) {
 		return "access unavailable", nil
 	}
-	if e.EventType == "wake_blocked" {
-		return "", nil
+	// Only @-mentions push; lifecycle, chat, task and chain-block events
+	// are still recorded by the database triggers but never delivered.
+	if e.EventType != "mention" {
+		return "event disabled", nil
 	}
 	if e.AuthorType == "bot" && e.AuthorID == e.BotID {
 		return "self wake suppressed", nil

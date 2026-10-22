@@ -138,6 +138,9 @@ func (h *Handler) openWakeTarget(ctx context.Context, sealed []byte) (wakeTarget
 	return wakeTarget{Endpoint: endpoint, Key: secret.Key, Headers: secret.Headers}, ""
 }
 
+// Event names older clients may still send; they are accepted and dropped.
+var retiredWakeEvents = map[string]bool{"started": true, "done": true, "blocked": true, "needs_kun": true, "task": true, "chat": true}
+
 func NewBotWakeSecretBox(secret string) (*secretbox.Box, error) {
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write([]byte("multica/bot-wake/v1"))
@@ -145,10 +148,10 @@ func NewBotWakeSecretBox(secret string) (*secretbox.Box, error) {
 }
 func wakeResponse(c db.BotWake) BotWakeResponse {
 	r := BotWakeResponse{InheritOwnerFollows: c.InheritOwnerFollows, WebhookConfigured: len(c.WebhookSecret) > 0, Events: []string{}, HourlyLimit: c.HourlyLimit}
-	// Machine disconnect alerts were removed; drop their names from saved
+	// Only mentions are delivered now; drop retired event names from saved
 	// settings so a round-tripped save still validates.
 	for _, e := range c.Events {
-		if e != "runtime.offline" && e != "runtime.online" {
+		if e == "mention" {
 			r.Events = append(r.Events, e)
 		}
 	}
@@ -180,7 +183,7 @@ func validateWakeRules(r BotWakeResponse) error {
 	if r.HourlyLimit < 0 || r.HourlyLimit > 120 {
 		return errors.New("hourly_limit must be between 0 and 120")
 	}
-	allowed := map[string]bool{"mention": true, "started": true, "done": true, "blocked": true, "needs_kun": true, "task": true, "chat": true}
+	allowed := map[string]bool{"mention": true}
 	seen := map[string]bool{}
 	for _, e := range r.Events {
 		if !allowed[e] || seen[e] {
@@ -370,7 +373,12 @@ func (h *Handler) PutBotWake(w http.ResponseWriter, r *http.Request) {
 		rules.WakeFrom = *req.WakeFrom
 	}
 	if req.Events != nil {
-		rules.Events = *req.Events
+		rules.Events = []string{}
+		for _, e := range *req.Events {
+			if !retiredWakeEvents[e] {
+				rules.Events = append(rules.Events, e)
+			}
+		}
 	}
 	if req.HourlyLimit != nil {
 		rules.HourlyLimit = *req.HourlyLimit

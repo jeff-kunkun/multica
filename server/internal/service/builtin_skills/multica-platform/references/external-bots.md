@@ -123,8 +123,7 @@ an unverified stage is unknown, never a reason to automatically resend.
 
 ## Bot wake-chain guard
 
-The workspace's `bot_wake_chain_limit` defaults to 4 (valid values 1–100).
-It limits consecutive unacknowledged Bot wakes, including Bot-originated agent
+The wake-chain guard allows 4 consecutive unacknowledged Bot wakes. It limits consecutive unacknowledged Bot wakes, including Bot-originated agent
 continuations. A real agent reply or completed run resets the chain; work that
 never starts does not consume it. Human messages are exempt. To relay a human
 instruction, use `chat send --per-quote "<exact words>"` or
@@ -138,53 +137,35 @@ A saved comment remains a successful write, with stderr warnings and
 `trigger_outcomes[].reason_code: "bot_wake_chain_limit"` for each blocked target,
 including an implicitly routed assignee or thread owner.
 Do not repost either saved message. Wait for an agent reply/completed run, send
-as the person, relay a verified quote, or have an administrator adjust the limit:
-
-```sh
-multica settings get bot_wake_chain_limit
-multica settings set bot_wake_chain_limit --value-json '6'
-```
-
-Agent task tokens cannot change the guard. Every blocked attempt is recorded
-and emits `wake_blocked` to the originating Bot's webhook. For patrol and
-dispatch daily reports, read the routing-health inspection response:
-`bot_wake_chain.blocked_last_24h` and `recent_blocks` report counts and details.
-Authenticated Bots can inspect their own blocks only; human workspace owners
-and admins can inspect viewer-visible records. Task tokens do not read the audit. Other members see the limit and recovery contract.
-`audit_read_failed: true` means the audit is unavailable, not zero blocks.
+as the person, or relay a verified quote. Every blocked attempt is recorded for
+audit; nothing is pushed to the originating Bot.
 
 ## Mention delivery and replying in place
 
-Ordinary notifications for one Bot and one issue/chat are grouped in a fixed
-30-second window from the first event, including explicit mentions. A standalone
-mention therefore waits about 30 seconds before its first push; the reply
-convention starts when the Bot receives it. `started` is excluded from new Bot
-subscriptions by default; the old untouched default selection is updated too. Custom selections stay unchanged.
-`wake_blocked` operational alerts remain immediate. This notification batching is
-separate from merging agent runs (DENE-1857).
+Only @-mentions of a Bot are pushed to its webhook. Issue status, assignment,
+chat replies and other activity are not; read them when a mention brings you
+in. Mentions for one Bot and one issue/chat are grouped in a fixed 30-second
+window from the first one, so a standalone mention waits about 30 seconds
+before its push; the reply convention starts when the Bot receives it. This
+notification batching is separate from merging agent runs (DENE-1857).
 
 `multica bot wake get <bot-id> --output json` includes `worker` health:
 `last_processed_at`, `last_error`, `head_sequence`, `stuck_seconds`, `blocked`.
-A queue older than five minutes logs one `wake_blocked` alert per head sequence.
+A queue older than five minutes logs one server alert per head sequence.
 Preparation errors are isolated after rollback, retried after 5/10 seconds and
 marked failed after three failures; `processing_attempts` is separate from HTTP
 `attempts`. Use the logged sequence to find the original error. Never replay
 `uncertain` events automatically. An old queue drains in batches of up to 100
 first-attempt events for the same Bot/workspace, including different sources;
 each event still passes current visibility, sender, event and chain checks.
-Completed assistant chat messages notify Bots watching that chat, including
-file-only replies once their attachments are bound. Empty placeholders, failed
-replies and `no_response` outcomes are skipped. Each reply emits at most one
-ordinary `chat` event; a later first explicit mention emits its own `mention`
-event, while repeated mentions remain deduplicated.
+Repeated mentions of the same Bot in one message remain deduplicated.
 
 Every webhook has `delivery_id` and an ordered `events` array, including a
 single-event delivery. The top-level legacy fields mirror the first admitted
 event; handle **each** element of `events`, deduplicating its `event_id`. Each
 keeps its own `ack_url`, `root_id`, `source_id`, author and time. Existing retry,
-receipt, visibility and chain-budget contracts still apply. One HTTP attempt containing non-mention events
-counts once toward the hourly limit; mention-only deliveries bypass it, while
-zero pauses all pushes. Execution receipts remain per event: use each event’s
+receipt, visibility and chain-budget contracts still apply. `hourly_limit: 0`
+pauses all pushes. Execution receipts remain per event: use each event’s
 `ack_body`/`woken_url`/`result_url`, not only the legacy top-level event. A retried batch keeps its membership and
 `delivery_id`; later events are delivered separately.
 
