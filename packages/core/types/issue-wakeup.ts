@@ -124,9 +124,6 @@ export interface SystemWakeup {
   target: { type: "agent" | "squad" | "member"; id: string; name: string } | null;
   /** Why no run would start now; a member assignee gets an inbox notification. */
   blocked: "" | "backlog" | "member_assignee" | "no_assignee";
-  /** What happens when the condition is met now; "advance" means nobody holds
-   *  the parent and the platform promotes clear next-stage sub-issues itself. */
-  on_met?: "wake" | "notify" | "advance" | "hold" | "off" | "paused";
   /** The workspace-wide setting, which applies until the issue sets its own. */
   workspace_default: boolean;
 }

@@ -29,7 +29,6 @@ import { useIssueSurfaceSelection } from "../surface/selection-context";
 import { useIssuePinnedIds } from "../surface/pinned-context";
 import { ParentIssueBadge } from "./parent-issue-badge";
 import { PinnedRowBadge } from "./pinned-row-badge";
-import { BlockWaitProbeBadge } from "./block-wait-probe-badge";
 import {
   PEEKED_ROW_CLASS,
   PEEK_TARGET_ATTR,
@@ -155,7 +154,6 @@ function ListRowContent({
             <span className="truncate">{issue.title}</span>
             {/* Keep custom names visible when this row appears outside a status section. */}
             <CustomStatusChip status={issue.status} className="shrink-0" />
-            <BlockWaitProbeBadge issue={issue} />
             <IssueDuplicateOfMarker issue={issue} insideLink />
             {showChildProgress && (
               <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5">

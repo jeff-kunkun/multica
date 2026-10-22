@@ -36,7 +36,6 @@ import {
   BoardCardSubIssueToggle,
 } from "./board-card-sub-issues";
 import { ParentIssueBadge } from "./parent-issue-badge";
-import { BlockWaitProbeBadge } from "./block-wait-probe-badge";
 import {
   PEEK_TARGET_ATTR,
   useIsIssuePeeked,
@@ -200,7 +199,6 @@ export const BoardCardContent = memo(function BoardCardContent({
           assigneeId={issue.assignee_id}
           onUpdate={handleUpdate}
           trigger={assigneeInner}
-          sceneProjectIds={[issue.project_id]}
         />
       </PickerWrapper>
     ) : (
@@ -252,7 +250,6 @@ export const BoardCardContent = memo(function BoardCardContent({
       {(showCustomStatus || showProject || showLabels || cardCustomProperties.length > 0) && (
         <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
           <CustomStatusChip status={issue.status} />
-          <BlockWaitProbeBadge issue={issue} />
           {showProject && (
             <span className="inline-flex items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 text-micro text-muted-foreground max-w-[160px]">
               <ProjectIcon project={project} size="sm" />
