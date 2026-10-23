@@ -23,6 +23,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/integrations/wecom"
+	"github.com/multica-ai/multica/server/internal/issuewatchdog"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/maintenance"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
@@ -34,6 +35,7 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/featureflag"
 	"github.com/multica-ai/multica/server/pkg/llm"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -726,6 +728,14 @@ func main() {
 	// claim until the cache TTL expires.
 	taskSvc, autopilotSvc := backgroundServices(h)
 	registerAutopilotListeners(bus, autopilotSvc)
+	watchdogConfig, watchdogConfigErr := issuewatchdog.ConfigFromEnv()
+	if watchdogConfigErr != nil {
+		slog.Error("invalid issue watchdog configuration", "error", watchdogConfigErr)
+		os.Exit(1)
+	}
+	watchdog := issuewatchdog.New(pool, watchdogConfig, h.CreateWatchdogNudgeComment)
+	bus.Subscribe(protocol.EventIssueUpdated, watchdog.HandleEvent)
+	bus.Subscribe(protocol.EventCommentCreated, watchdog.HandleEvent)
 
 	// Construct a LivenessStore that mirrors the one wired into the HTTP
 	// handler. Both the heartbeat write path (handler) and the sweeper read
@@ -860,6 +870,24 @@ func main() {
 	// machinery. The job is inert while plugins_v1 is disabled.
 	if err := schedulerMgr.Register(scheduler.PluginHookScheduleDispatchJob(queries, h.PluginService)); err != nil {
 		slog.Warn("scheduler: failed to register plugin_hook_schedule_dispatch job", "error", err)
+	}
+	if watchdogConfig.Enabled {
+		if err := schedulerMgr.Register(scheduler.JobSpec{
+			Name: "office_issue_watchdog", Cadence: watchdogConfig.TickInterval,
+			CatchUpMode: scheduler.CatchUpLatestOnly, CatchUpWindow: watchdogConfig.TickInterval * 2,
+			RunTimeout: 5 * time.Minute, StaleTimeout: 6 * time.Minute, HeartbeatInterval: 30 * time.Second,
+			AllowStaleReentry: false, MaxAttempts: 1,
+			Scopes: scheduler.StaticScopes(scheduler.ScopeGlobal),
+			Handler: func(ctx context.Context, _ scheduler.HandlerInput) (scheduler.HandlerResult, error) {
+				if err := watchdog.Run(ctx, time.Now().UTC()); err != nil {
+					return scheduler.HandlerResult{}, err
+				}
+				return scheduler.HandlerResult{RowsAffected: 1}, nil
+			},
+		}); err != nil {
+			slog.Error("scheduler: register office issue watchdog", "error", err)
+			os.Exit(1)
+		}
 	}
 	go func() {
 		_ = schedulerMgr.Run(sweepCtx)

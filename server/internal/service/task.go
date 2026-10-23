@@ -296,6 +296,13 @@ func (s *TaskService) ResolveOriginatorFromTriggerComment(ctx context.Context, w
 	return s.resolveOriginatorFromTriggerComment(ctx, workspaceID, commentID)
 }
 
+// ResolveOriginatorForWatchdogIssue resolves the trusted human behind an
+// internal issue nudge so the ordinary private-agent invocation gate still
+// applies to the monitor's explicit @mention.
+func (s *TaskService) ResolveOriginatorForWatchdogIssue(ctx context.Context, issue db.Issue) pgtype.UUID {
+	return s.resolveOriginatorForIssueTask(ctx, issue, pgtype.UUID{})
+}
+
 // AttributionForMergedComment resolves the FULL attribution snapshot for a comment
 // being coalesced into an already-queued task (MUL-4302). A merge re-attributes the
 // run to the newly-arrived comment's human, so the whole snapshot — source, evidence,

@@ -116,6 +116,8 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"office_event":                       workspaceDelete,
 	"office_event_delivery":              workspaceDelete,
 	"office_event_gap":                   workspaceDelete,
+	"office_issue_watchdog_attempt":      workspaceDelete,
+	"office_issue_watchdog_state":        workspaceDelete,
 	"inbox_item":                         workspaceDelete,
 	"incremental_sync_tombstone":         workspaceDelete,
 	"instance_telemetry_state":           workspaceDeleteKeep,

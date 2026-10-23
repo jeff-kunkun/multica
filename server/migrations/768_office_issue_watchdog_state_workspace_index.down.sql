@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS office_issue_watchdog_state_workspace;
