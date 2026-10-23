@@ -79,6 +79,18 @@ func TestConfigIsDisabledByDefaultAndRejectsInvalidThresholds(t *testing.T) {
 	if cfg.Enabled {
 		t.Fatal("watchdog must default to disabled")
 	}
+	if cfg.TickInterval != time.Minute {
+		t.Fatalf("watchdog scan interval = %s, want 1m", cfg.TickInterval)
+	}
+	if cfg.TodoStartDelay != 10*time.Minute {
+		t.Fatalf("todo start delay = %s, want 10m", cfg.TodoStartDelay)
+	}
+	if cfg.IdleInterval != 30*time.Minute {
+		t.Fatalf("idle reminder interval = %s, want 30m", cfg.IdleInterval)
+	}
+	if cfg.ManagerWait != 15*time.Minute {
+		t.Fatalf("manager reply wait = %s, want 15m", cfg.ManagerWait)
+	}
 
 	t.Setenv("MULTICA_ISSUE_WATCHDOG_ENABLED", "true")
 	t.Setenv("MULTICA_ISSUE_WATCHDOG_WORKSPACE_ID", "8b82babe-01a5-41f5-b726-622bd77aa839")

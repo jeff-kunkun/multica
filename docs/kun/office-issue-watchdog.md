@@ -48,7 +48,7 @@ deployment entry point must be checked read-only before enabling the feature.
 | `MULTICA_ISSUE_WATCHDOG_WORKSPACE_ID` | empty | The one workspace to monitor; required when enabled |
 | `MULTICA_ISSUE_WATCHDOG_WEBHOOK_URL` | empty | COO webhook URL; HTTPS required except loopback test receivers |
 | `MULTICA_ISSUE_WATCHDOG_WEBHOOK_KEY` | empty | Bearer key sent to the webhook |
-| `MULTICA_ISSUE_WATCHDOG_TICK` | `1m` | Scheduler cadence |
+| `MULTICA_ISSUE_WATCHDOG_TICK` | `1m` | Full issue scan cadence; independent of the reminder thresholds below |
 | `MULTICA_ISSUE_WATCHDOG_TODO_DELAY` | `10m` | Time assigned `todo` issues can wait before the first wake |
 | `MULTICA_ISSUE_WATCHDOG_IDLE_INTERVAL` | `30m` | Idle interval between employee wake attempts |
 | `MULTICA_ISSUE_WATCHDOG_MANAGER_WAIT` | `15m` | Time to wait for the responsible manager before COO escalation |
