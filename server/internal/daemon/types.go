@@ -203,24 +203,26 @@ type Task struct {
 	// SessionRestartReason is filled by the daemon when a continue-retry
 	// cannot actually resume and has to open a new CLI session. It is not
 	// part of the claim payload.
-	SessionRestartReason  string                 `json:"-"`
-	TriggerCommentID      string                 `json:"trigger_comment_id,omitempty"`       // comment that triggered this task
-	CoalescedCommentIDs   []string               `json:"coalesced_comment_ids,omitempty"`    // MUL-4195: earlier comments folded into this run while it was still queued; the agent must address these in addition to the (newest) triggering comment. Empty for old servers / non-merged runs
-	CoalescedComments     []CoalescedCommentData `json:"coalesced_comments,omitempty"`       // MUL-4195: full detail of the folded comments (thread_id/author/created_at/content) so the prompt can address each without assuming a shared thread. Empty for old servers / non-merged runs
-	TriggerThreadID       string                 `json:"trigger_thread_id,omitempty"`        // root comment ID for the triggering thread; falls back to trigger_comment_id on old servers
-	TriggerCommentContent string                 `json:"trigger_comment_content,omitempty"`  // content of the triggering comment
-	TriggerAuthorType     string                 `json:"trigger_author_type,omitempty"`      // "agent" or "member" — author kind for the triggering comment
-	TriggerAuthorName     string                 `json:"trigger_author_name,omitempty"`      // display name of the triggering comment author
-	NewCommentCount       int                    `json:"new_comment_count,omitempty"`        // issue-wide comments since this agent's last run (excludes its own and the injected trigger); 0/omitted for old daemons or cold start
-	NewCommentsSince      string                 `json:"new_comments_since,omitempty"`       // RFC3339 anchor (last run's started_at) the count is measured from; empty on cold start
-	NewCommentsDeltaKnown bool                   `json:"new_comments_delta_known,omitempty"` // the server actually computed the issue-wide delta this claim (both reads succeeded). A zero NewCommentCount means "nothing was said" only when this is true; otherwise the zero is a failed read, a cold start, or an old server, and the prompt must not present it as the comment scan's answer (MUL-6984)
-	IssueStateDeltaKnown  bool                   `json:"issue_state_delta_known,omitempty"`  // MUL-7344: the server compared the issue's title/description against the snapshot taken at this agent's previous run on this issue. Same contract as NewCommentsDeltaKnown — absent means NOT compared (cold start, no prior snapshot, read error, old server), and the prompt must then keep telling the agent to read the issue
-	IssueChangedFields    []string               `json:"issue_changed_fields,omitempty"`     // subset of title,description in that order; empty alongside IssueStateDeltaKnown means unchanged. Fields outside that set (status, assignee, priority, labels, parent, due, stage, project, metadata) are not compared and must never be reported as checked; status and assignee ship their current values instead
-	IssueStatus           string                 `json:"issue_status,omitempty"`             // the issue's status key at claim time; sent whether or not the delta is known
-	IssueAssigneeType     string                 `json:"issue_assignee_type,omitempty"`      // "agent", "member" or "squad" at claim time; empty when unassigned
-	IssueAssigneeID       string                 `json:"issue_assignee_id,omitempty"`        // assignee UUID at claim time; empty when unassigned
-	IssueTitle            string                 `json:"issue_title,omitempty"`
-	IssueDescription      string                 `json:"issue_description,omitempty"`
+	SessionRestartReason   string                 `json:"-"`
+	TriggerCommentID       string                 `json:"trigger_comment_id,omitempty"`        // comment that triggered this task
+	CoalescedCommentIDs    []string               `json:"coalesced_comment_ids,omitempty"`     // MUL-4195: earlier comments folded into this run while it was still queued; the agent must address these in addition to the (newest) triggering comment. Empty for old servers / non-merged runs
+	CoalescedComments      []CoalescedCommentData `json:"coalesced_comments,omitempty"`        // MUL-4195: full detail of the folded comments (thread_id/author/created_at/content) so the prompt can address each without assuming a shared thread. Empty for old servers / non-merged runs
+	TriggerThreadID        string                 `json:"trigger_thread_id,omitempty"`         // root comment ID for the triggering thread; falls back to trigger_comment_id on old servers
+	TriggerCommentContent  string                 `json:"trigger_comment_content,omitempty"`   // content of the triggering comment
+	TriggerAuthorType      string                 `json:"trigger_author_type,omitempty"`       // "agent" or "member" — author kind for the triggering comment
+	TriggerAuthorName      string                 `json:"trigger_author_name,omitempty"`       // display name of the triggering comment author
+	TriggerCommentEditedAt string                 `json:"trigger_comment_edited_at,omitempty"` // MUL-8218: set when the trigger comment was edited after the resumed session's run started, so the resumed history may quote an earlier version. Empty on old servers / unedited comments
+	TriggerCommentRevision int64                  `json:"trigger_comment_revision,omitempty"`  // MUL-8218: current revision of the trigger comment; sent alongside TriggerCommentEditedAt
+	NewCommentCount        int                    `json:"new_comment_count,omitempty"`         // issue-wide comments since this agent's last run (excludes its own and the injected trigger); 0/omitted for old daemons or cold start
+	NewCommentsSince       string                 `json:"new_comments_since,omitempty"`        // RFC3339 anchor (last run's started_at) the count is measured from; empty on cold start
+	NewCommentsDeltaKnown  bool                   `json:"new_comments_delta_known,omitempty"`  // the server actually computed the issue-wide delta this claim (both reads succeeded). A zero NewCommentCount means "nothing was said" only when this is true; otherwise the zero is a failed read, a cold start, or an old server, and the prompt must not present it as the comment scan's answer (MUL-6984)
+	IssueStateDeltaKnown   bool                   `json:"issue_state_delta_known,omitempty"`   // MUL-7344: the server compared the issue's title/description against the snapshot taken at this agent's previous run on this issue. Same contract as NewCommentsDeltaKnown — absent means NOT compared (cold start, no prior snapshot, read error, old server), and the prompt must then keep telling the agent to read the issue
+	IssueChangedFields     []string               `json:"issue_changed_fields,omitempty"`      // subset of title,description in that order; empty alongside IssueStateDeltaKnown means unchanged. Fields outside that set (status, assignee, priority, labels, parent, due, stage, project, metadata) are not compared and must never be reported as checked; status and assignee ship their current values instead
+	IssueStatus            string                 `json:"issue_status,omitempty"`              // the issue's status key at claim time; sent whether or not the delta is known
+	IssueAssigneeType      string                 `json:"issue_assignee_type,omitempty"`       // "agent", "member" or "squad" at claim time; empty when unassigned
+	IssueAssigneeID        string                 `json:"issue_assignee_id,omitempty"`         // assignee UUID at claim time; empty when unassigned
+	IssueTitle             string                 `json:"issue_title,omitempty"`
+	IssueDescription       string                 `json:"issue_description,omitempty"`
 	// CheckoutPaths is issue metadata checkout_paths: the directories this
 	// task asked to check out. Empty means the whole repository. Older
 	// servers omit it.
@@ -311,6 +313,8 @@ type CoalescedCommentData struct {
 	AuthorName string `json:"author_name,omitempty"`
 	Content    string `json:"content"`
 	CreatedAt  string `json:"created_at,omitempty"`
+	EditedAt   string `json:"edited_at,omitempty"` // MUL-8218: set when this comment was edited after the resumed session's run started; empty on old servers / unedited comments
+	Revision   int64  `json:"revision,omitempty"`  // MUL-8218: current revision, sent alongside EditedAt
 }
 
 // SubIssueRef mirrors handler.SubIssueRef.
