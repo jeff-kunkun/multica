@@ -202,7 +202,7 @@ func TestReviewWakesAreOffByDefault(t *testing.T) {
 		t.Fatal("a round limit of 0 was accepted")
 	}
 	t.Setenv("MULTICA_ISSUE_WATCHDOG_ROUND_LIMIT", "")
-	if cfg.HoldWait != 10*time.Minute || cfg.ReviewWait != 20*time.Minute ||
+	if cfg.HoldWait != 2*time.Hour || cfg.ReviewWait != 20*time.Minute ||
 		cfg.NoRunWait != 15*time.Minute || cfg.ChildWait != 30*time.Minute {
 		t.Fatalf("default waits = %v %v %v %v", cfg.HoldWait, cfg.ReviewWait, cfg.NoRunWait, cfg.ChildWait)
 	}

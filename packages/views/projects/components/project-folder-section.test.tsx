@@ -12,6 +12,7 @@ const mockUpdate = vi.hoisted(() => vi.fn());
 const mockDelete = vi.hoisted(() => vi.fn());
 const mockSnapshot = vi.hoisted(() => vi.fn());
 const mockRuntimes = vi.hoisted(() => vi.fn());
+const mockCopy = vi.hoisted(() => vi.fn());
 const env = vi.hoisted(() => ({
   desktop: true,
   daemon: { daemonId: "mac" as string | null, deviceName: "Mac", running: true },
@@ -51,8 +52,10 @@ vi.mock("../../platform/use-local-daemon-status", () => ({
   useLocalDaemonStatus: () => env.daemon,
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock("@multica/ui/lib/clipboard", () => ({ copyText: mockCopy }));
 
-import { ProjectFolderSection } from "./project-folder-section";
+import { toast } from "sonner";
+import { displayFolderPath, ProjectFolderSection } from "./project-folder-section";
 
 function folder(id: string, ref: Record<string, unknown>, label: string | null = null): ProjectResource {
   return {
@@ -143,11 +146,9 @@ describe("ProjectFolderSection", () => {
     const user = userEvent.setup();
     renderSection();
 
-    // An unnamed row shows the folder's name only, with no path tooltip either.
-    const name = await screen.findByText("old");
-    expect(name).not.toHaveAttribute("title");
-    expect(screen.queryByText(/\/work\/old/)).not.toBeInTheDocument();
-    expect(document.querySelector('[title*="/work/old"]')).toBeNull();
+    // An unnamed row is named after the path's last segment, with the path under it.
+    expect(await screen.findByText("old")).toBeInTheDocument();
+    expect(screen.getByText("/work/old")).toBeInTheDocument();
     expect(screen.getByText("This machine")).toBeInTheDocument();
     expect(screen.getByText("Git")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Choose folder/i })).not.toBeInTheDocument();
@@ -166,6 +167,52 @@ describe("ProjectFolderSection", () => {
       },
     });
     expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it("shows the home folder as ~ but copies the absolute path", async () => {
+    mockCopy.mockResolvedValue(true);
+    mockList.mockResolvedValue({
+      resources: [folder("res-1", { local_path: "/Users/kun/code/app", daemon_id: "mac" }, "app")],
+      total: 1,
+    });
+    const user = userEvent.setup();
+    renderSection();
+
+    expect(await screen.findByText("~/code/app")).toBeInTheDocument();
+    expect(screen.queryByText(/\/Users\/kun/)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Copy full path" }));
+
+    expect(mockCopy).toHaveBeenCalledWith("/Users/kun/code/app");
+    expect(await screen.findByRole("button", { name: "Copied" })).toBeInTheDocument();
+  });
+
+  it("says so when the copy fails", async () => {
+    mockCopy.mockResolvedValue(false);
+    mockList.mockResolvedValue({
+      resources: [folder("res-1", { local_path: "/work/app", daemon_id: "mac" }, "app")],
+      total: 1,
+    });
+    const user = userEvent.setup();
+    renderSection();
+
+    await user.click(await screen.findByRole("button", { name: "Copy full path" }));
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Couldn't copy the path"));
+    expect(screen.queryByRole("button", { name: "Copied" })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["/Users/kun", "~"],
+    ["/Users/kun/code", "~/code"],
+    ["/home/ubuntu/work/office", "~/work/office"],
+    ["/root/app", "~/app"],
+    ["C:\\Users\\kun\\code", "~\\code"],
+    ["/Users/Shared/app", "/Users/Shared/app"],
+    ["/Users/kunkun2/app", "~/app"],
+    ["/Volumes/Storge/app", "/Volumes/Storge/app"],
+    ["/opt/Users/kun/app", "/opt/Users/kun/app"],
+  ])("displays %s as %s", (path, shown) => {
+    expect(displayFolderPath(path)).toBe(shown);
   });
 
   it("warns when more than one run is in the folder", async () => {

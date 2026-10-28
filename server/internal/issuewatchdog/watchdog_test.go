@@ -52,6 +52,8 @@ func TestEveryManagerHasAnAssignedSignature(t *testing.T) {
 		{"选品经理·放大镜", "负责经理放大镜：已处理"},
 		{"论文负责人·学霸", "[负责经理·学霸] 已处理"},
 		{"COO·Grok", "[COO·Grok] 已处理"},
+		{"基建管家·扫帚", "【负责经理·扫帚】已处理"},
+		{"负责人·手柄", "【负责经理·手柄】已处理"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.manager, func(t *testing.T) {
@@ -70,8 +72,14 @@ func TestConfigIsDisabledByDefaultAndRejectsInvalidThresholds(t *testing.T) {
 		"MULTICA_ISSUE_WATCHDOG_IDLE_INTERVAL", "MULTICA_ISSUE_WATCHDOG_MANAGER_WAIT",
 		"MULTICA_ISSUE_WATCHDOG_EMPLOYEE_ROUNDS", "MULTICA_ISSUE_WATCHDOG_HEARTBEAT_FILE",
 		"MULTICA_ISSUE_WATCHDOG_RUN_AWARE", "MULTICA_ISSUE_WATCHDOG_SILENT_INTERVAL",
+		"MULTICA_ISSUE_WATCHDOG_IN_REVIEW_WAIT", "MULTICA_ISSUE_WATCHDOG_KUN_LABEL",
+		"MULTICA_ISSUE_WATCHDOG_KUN_GROUP",
 	} {
 		t.Setenv(name, "")
+	}
+	// An empty label turns it off; unset it so the default applies.
+	if err := os.Unsetenv("MULTICA_ISSUE_WATCHDOG_KUN_LABEL"); err != nil {
+		t.Fatal(err)
 	}
 	cfg, err := ConfigFromEnv()
 	if err != nil {
@@ -89,11 +97,18 @@ func TestConfigIsDisabledByDefaultAndRejectsInvalidThresholds(t *testing.T) {
 	if cfg.TickInterval != time.Minute {
 		t.Fatalf("watchdog scan interval = %s, want 1m", cfg.TickInterval)
 	}
-	if cfg.TodoStartDelay != 10*time.Minute {
-		t.Fatalf("todo start delay = %s, want 10m", cfg.TodoStartDelay)
+	// The office timeouts: todo 6h, in_progress and in_review 2h.
+	if cfg.TodoStartDelay != 6*time.Hour {
+		t.Fatalf("todo start delay = %s, want 6h", cfg.TodoStartDelay)
 	}
-	if cfg.IdleInterval != 30*time.Minute {
-		t.Fatalf("idle reminder interval = %s, want 30m", cfg.IdleInterval)
+	if cfg.IdleInterval != 2*time.Hour {
+		t.Fatalf("idle reminder interval = %s, want 2h", cfg.IdleInterval)
+	}
+	if cfg.InReviewWait != 2*time.Hour {
+		t.Fatalf("in_review wait = %s, want 2h", cfg.InReviewWait)
+	}
+	if cfg.KunLabel != "等 Kun 拍板" || cfg.KunGroup != "Multica 办公室" {
+		t.Fatalf("Kun label / group = %q / %q, want 等 Kun 拍板 / Multica 办公室", cfg.KunLabel, cfg.KunGroup)
 	}
 	if cfg.ManagerWait != 15*time.Minute {
 		t.Fatalf("manager reply wait = %s, want 15m", cfg.ManagerWait)
@@ -108,6 +123,26 @@ func TestConfigIsDisabledByDefaultAndRejectsInvalidThresholds(t *testing.T) {
 		t.Fatal("invalid threshold was accepted")
 	}
 	t.Setenv("MULTICA_ISSUE_WATCHDOG_IDLE_INTERVAL", "")
+	t.Setenv("MULTICA_ISSUE_WATCHDOG_IN_REVIEW_WAIT", "0s")
+	if _, err := ConfigFromEnv(); err == nil {
+		t.Fatal("zero in_review wait was accepted")
+	}
+	t.Setenv("MULTICA_ISSUE_WATCHDOG_IN_REVIEW_WAIT", "90m")
+	t.Setenv("MULTICA_ISSUE_WATCHDOG_TODO_DELAY", "3h")
+	t.Setenv("MULTICA_ISSUE_WATCHDOG_KUN_LABEL", " 待拍板 ")
+	t.Setenv("MULTICA_ISSUE_WATCHDOG_KUN_GROUP", "测试群")
+	cfg, err = ConfigFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.InReviewWait != 90*time.Minute || cfg.TodoStartDelay != 3*time.Hour ||
+		cfg.KunLabel != "待拍板" || cfg.KunGroup != "测试群" {
+		t.Fatalf("overrides = %s / %s / %q / %q", cfg.InReviewWait, cfg.TodoStartDelay, cfg.KunLabel, cfg.KunGroup)
+	}
+	t.Setenv("MULTICA_ISSUE_WATCHDOG_KUN_LABEL", "")
+	if cfg, err = ConfigFromEnv(); err != nil || cfg.KunLabel != "" {
+		t.Fatalf("explicitly empty Kun label = %q (err %v), want empty so the push and quieting are off", cfg.KunLabel, err)
+	}
 
 	t.Setenv("MULTICA_ISSUE_WATCHDOG_RUN_AWARE", "true")
 	t.Setenv("MULTICA_ISSUE_WATCHDOG_SILENT_INTERVAL", "25m")

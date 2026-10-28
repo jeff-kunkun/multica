@@ -31,10 +31,6 @@ func TestIssueCloseStopsWakeupsInApplication(t *testing.T) {
 			req := newRequest(http.MethodPost, "/api/issues/batch-update", map[string]any{"issue_ids": []string{issue}, "updates": map[string]any{"status": "cancelled"}})
 			testutil.Call(t, testHandler.BatchUpdateIssues, req).Want(http.StatusOK)
 		}},
-		{"merged pull request", func(t *testing.T, issue string) {
-			linkMergedGitHubPRForTest(t, issue, "wake-close")
-			testHandler.maybeAutoCompleteIssue(ctx, parseUUID(testWorkspaceID), parseUUID(issue), nil)
-		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			issue := dbfx.Issue(t, "wake close "+tc.name)

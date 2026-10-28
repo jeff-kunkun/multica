@@ -16,15 +16,22 @@ detail response (see "Project-group reminders" below).
   idle rounds.
 - An assignee's substantive comment and transitions into `in_review`, `blocked`,
   or `done` immediately alert the responsible manager through the COO webhook.
+- An `in_review` issue, or a started issue put back in `todo`, with no
+  progress and no live run for its wait alerts the responsible manager (see
+  "Office timeouts" below).
 - If the responsible manager does not add a signed substantive reply to the
   issue within the manager wait, the watchdog sends one escalation to the COO.
   A status change also resolves the wait. A bare "收到" does not.
+- The watchdog never changes an issue's status; only the responsible manager
+  does.
 
-Manager replies use the prefix matching the issue's "负责经理" property. The
-recognized labels are `【负责经理·扳手】`, `【负责经理·小喇叭】`,
-`【负责经理·放大镜】`, `【负责经理·学霸】`, and `【COO·Grok】`. The equivalent
-ASCII square brackets and unbracketed prefixes are accepted. A missing property
-value falls back to `CTO·扳手`.
+Manager replies start with the signature for the issue's "负责经理" property:
+`【负责经理·X】`, where X is the part of the option after its last `·`, so
+`CTO·扳手` signs `【负责经理·扳手】` and `基建管家·扫帚` signs `【负责经理·扫帚】`.
+`COO·Grok` signs `【COO·Grok】`. The equivalent ASCII square brackets and
+unbracketed prefixes (`负责经理·扳手`, `负责经理扳手`) are accepted, so a new
+manager option needs no code change. A missing property value falls back to
+`CTO·扳手`.
 
 Every COO webhook event includes the project name, issue number, title, current
 status, employee, responsible manager, wake target, and reason. The receiver
@@ -32,6 +39,54 @@ can use `project_name` to route the notification to the corresponding project
 group; that external routing must be verified before production enablement. The
 watchdog makes at most one HTTP attempt for each event; it does not retry a
 failed webhook.
+
+## Office timeouts (Kun, 2026-10-28)
+
+The defaults wake whoever an issue waits on: an unstarted `todo` after 6
+hours, an idle `in_progress` issue every 2 hours, a hold nobody answered after
+2 hours (with `HOLD_WAKE` on), and the responsible manager after 2 hours in
+`in_review`. Each threshold is an environment variable below.
+
+- **`in_review`.** When neither progress nor a run has happened for
+  `IN_REVIEW_WAIT`, the manager gets one `in_review_overdue` webhook event
+  (`wake_target=manager`) asking them to accept and close the issue, or to put
+  the 「等 Kun 拍板」 label on it. A running task on the issue counts as
+  movement. The event is sent once per stall and starts the ordinary manager
+  wait, so no signed reply in 15 minutes escalates to the COO. No comment is
+  posted and no employee is woken.
+- **Paused `todo`.** A `todo` issue that has run before (it was started, then
+  put back) is a pause, not a new assignment. Its assignee is not woken;
+  after `TODO_DELAY` with no progress the manager gets one `todo_overdue`
+  event, asking whether to resume it.
+
+## 「等 Kun 拍板」 label
+
+Kun's decisions are a label, not a board column or status. The responsible
+manager labels an issue 「等 Kun 拍板」 (`KUN_LABEL`, matched case-insensitively)
+when it waits on Kun, including every red line: touching production,
+spending money, posting to social media, or changing the architecture. The
+label comes and goes through the ordinary label commands (`multica issue
+label add|remove` and the web UI); the workspace label must exist first
+(`multica label create`).
+
+- **Push.** When the label goes on, the watchdog sends one `kun_decision`
+  webhook event with `wake_target=office_group` and `group` set to
+  `KUN_GROUP` (「Multica 办公室」), for the receiver to post into that group.
+  It reacts to the `issue_labels:changed` event at once; the scan catches a
+  label put on at issue creation, which publishes no event. Each time the
+  label goes on is one push; done and cancelled issues are not pushed. The
+  push starts no manager wait, so it does not escalate to the COO.
+- **Quiet.** While the label is on, the watchdog wakes nobody on the issue:
+  no idle, hold, review, stuck, `in_review`, or paused-`todo` wake. A stalled
+  sub-issue of a labelled parent sends the manager a `child_unattended` event
+  instead of waking the parent's owner, as under a round stop.
+- **Lift.** Taking the label off closes the decision in the attempt log and
+  restarts the issue's idle clock, so Kun's answer is not followed at once by
+  a wake for the hours spent waiting.
+
+The pushes are rows in `office_issue_watchdog_attempt` with event type
+`kun_decision`; `manager_resolved_at` records when the label came off. No
+migration is needed.
 
 ## Project-group reminders for live runs
 
@@ -142,14 +197,17 @@ deployment entry point must be checked read-only before enabling the feature.
 | `MULTICA_ISSUE_WATCHDOG_WEBHOOK_URL` | empty | COO webhook URL; HTTPS required except loopback test receivers |
 | `MULTICA_ISSUE_WATCHDOG_WEBHOOK_KEY` | empty | Bearer key sent to the webhook |
 | `MULTICA_ISSUE_WATCHDOG_TICK` | `1m` | Full issue scan cadence; independent of the reminder thresholds below |
-| `MULTICA_ISSUE_WATCHDOG_TODO_DELAY` | `10m` | Time assigned `todo` issues can wait before the first wake |
-| `MULTICA_ISSUE_WATCHDOG_IDLE_INTERVAL` | `30m` | Idle interval between employee wake attempts |
+| `MULTICA_ISSUE_WATCHDOG_TODO_DELAY` | `6h` | Time assigned `todo` issues can wait before the first wake, and a paused `todo` before the manager alert |
+| `MULTICA_ISSUE_WATCHDOG_IDLE_INTERVAL` | `2h` | Idle interval between employee wake attempts |
+| `MULTICA_ISSUE_WATCHDOG_IN_REVIEW_WAIT` | `2h` | Time an `in_review` issue can sit quiet before the manager alert |
+| `MULTICA_ISSUE_WATCHDOG_KUN_LABEL` | `等 Kun 拍板` | Label that pushes an issue to Kun's group and quiets its wakes; unset uses the default, set to empty turns both off |
+| `MULTICA_ISSUE_WATCHDOG_KUN_GROUP` | `Multica 办公室` | Group named in the `kun_decision` event |
 | `MULTICA_ISSUE_WATCHDOG_MANAGER_WAIT` | `15m` | Time to wait for the responsible manager before COO escalation |
 | `MULTICA_ISSUE_WATCHDOG_EMPLOYEE_ROUNDS` | `2` | Employee wake attempts before manager escalation |
 | `MULTICA_ISSUE_WATCHDOG_RUN_AWARE` | `false` | Replaces comment wakes for live runs with project-group reminders |
 | `MULTICA_ISSUE_WATCHDOG_SILENT_INTERVAL` | `20m` | Silence before a live run's project-group reminder, and the gap between them |
 | `MULTICA_ISSUE_WATCHDOG_HOLD_WAKE` | `false` | Wakes the developer on a hold that did not @mention them |
-| `MULTICA_ISSUE_WATCHDOG_HOLD_WAIT` | `10m` | Time after a hold with no run before the scan wakes the developer |
+| `MULTICA_ISSUE_WATCHDOG_HOLD_WAIT` | `2h` | Time after a hold with no run before the scan wakes the developer |
 | `MULTICA_ISSUE_WATCHDOG_REVIEW_WAKE` | `false` | Wakes the reviewer once when a review request has no verdict |
 | `MULTICA_ISSUE_WATCHDOG_REVIEW_WAIT` | `20m` | Time a review request can wait for a verdict |
 | `MULTICA_ISSUE_WATCHDOG_STUCK_WAKE` | `false` | Routes an `in_progress` issue with no run to whoever it waits on |
@@ -172,6 +230,9 @@ UUID.
 - To stop a review wake, set its switch (`HOLD_WAKE`, `REVIEW_WAKE`,
   `STUCK_WAKE`, `CHILD_WAKE`, `ROUND_STOP`) to `false` and restart the backend. Its past
   wakes stay in the attempt log and as comments on the issues.
+- To stop the Kun-decision push and quieting, set
+  `MULTICA_ISSUE_WATCHDOG_KUN_LABEL=` (empty) and restart the backend; the
+  label itself stays on the issues.
 - To return to comment wakes for live runs, set
   `MULTICA_ISSUE_WATCHDOG_RUN_AWARE=false` and restart the backend. Recorded
   reminders stay in the attempt log and remain visible on the issue.
@@ -229,6 +290,22 @@ database, with the real wake comment and agent-trigger path:
   and starts no run on the parent, and sends the manager one
   `child_unattended` event; with `ROUND_STOP` off it wakes the parent's owner
   as before.
+
+`office_timeouts_integration_test.go` covers the office timeouts and the
+label on the same database:
+
+- an `in_review` issue quiet for 1h59m gets nothing, and at 2h one
+  `in_review_overdue` manager event, no comment, and after 15 more minutes
+  one COO escalation; one with a running task gets nothing;
+- a paused `todo` quiet for 6h gets one `todo_overdue` manager event;
+- a `【负责经理·扫帚】` reply ends 基建管家·扫帚's wait with no COO escalation;
+- putting the label on sends one `office_group` push to 「Multica 办公室」
+  with no manager wait, even for a repeated event; while it is on, three
+  hours idle and a hold wake nobody; taking it off waits a fresh idle
+  interval before the ordinary wake; putting it on again with no event is
+  pushed by the scan;
+- a stalled sub-issue under a labelled parent wakes nobody on the parent and
+  sends the manager one `child_unattended` event.
 
 `review_test.go` checks verdict recognition against the review wording used on
 2026-10-27, which had no `verdict:` lines, and the round counting: same-round

@@ -24,8 +24,12 @@ fresh temporary folder when the machine has none.
   machine could not tell, because the server keeps omitted identity fields
   from the stored row. Folders on other machines can only be removed. The
   web shows the folders and points to the desktop app or the CLI.
-- Only the folder's name shows (its label, else the path's last segment).
-  The full path carries the account name, so no text or tooltip shows it.
+- Each row shows the folder's name (its label, else the path's last segment)
+  and, under it, the path with the home folder shown as `~` (`/Users/<name>`,
+  `/home/<name>`, `/root`, `C:\Users\<name>`; not `/Users/Shared`), so a
+  screenshot does not carry the account name. Its Copy button puts the
+  absolute path on the clipboard and reads "Copied" for 1.5 s. The issue
+  page's shared-folder warning still names the folder only.
 - New project dialog and the inline new-project form: folder only. No
   repository tab, no "create local Git" offer, no git-init checkbox. The web
   hides the source pill.

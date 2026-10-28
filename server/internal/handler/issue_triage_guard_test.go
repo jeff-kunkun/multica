@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"context"
 	"net/http"
 	"testing"
 
@@ -187,9 +186,7 @@ func TestTriageIssueIsNotAnActiveDuplicate(t *testing.T) {
 // A merged PR links to a triage issue but must not move it out.
 func TestPullRequestMergeDoesNotAdvanceTriageIssue(t *testing.T) {
 	issueID := triageIssueForTest(t, "closed by a PR while in triage")
-	ctx := context.Background()
 	linkMergedGitHubPRForTest(t, issueID, "triage-guard")
-	testHandler.maybeAutoCompleteIssue(ctx, parseUUID(testWorkspaceID), parseUUID(issueID), nil)
 	if got := issueStatusOf(t, issueID); got == "done" {
 		t.Fatalf("merged PR moved a Triage entry to done")
 	}

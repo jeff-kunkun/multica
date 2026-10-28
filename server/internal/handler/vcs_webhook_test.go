@@ -276,15 +276,13 @@ func TestAutoCompleteSpansProviders(t *testing.T) {
 		t.Fatalf("LinkIssueToVCSPullRequest: %v", err)
 	}
 
-	testHandler.maybeAutoCompleteIssue(ctx, parseUUID(testWorkspaceID), parseUUID(issue.ID), nil)
 	if got, _ := testHandler.Queries.GetIssue(ctx, parseUUID(issue.ID)); got.Status == "done" {
 		t.Fatal("the open GitHub PR must hold the issue open")
 	}
 
 	upsertGH("merged")
-	testHandler.maybeAutoCompleteIssue(ctx, parseUUID(testWorkspaceID), parseUUID(issue.ID), nil)
-	if got, _ := testHandler.Queries.GetIssue(ctx, parseUUID(issue.ID)); got.Status != "done" {
-		t.Errorf("status = %q, want done once both providers' PRs merged", got.Status)
+	if got, _ := testHandler.Queries.GetIssue(ctx, parseUUID(issue.ID)); got.Status == "done" {
+		t.Errorf("merged PRs changed issue status to done; manager acceptance is required")
 	}
 }
 

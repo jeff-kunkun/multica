@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronRight, FolderOpen, X } from "lucide-react";
+import { Check, ChevronRight, Copy, FolderOpen, X } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
@@ -14,6 +14,7 @@ import {
 } from "@multica/core/projects";
 import type { LocalDirectoryResourceRef, ProjectResource } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
+import { copyText } from "@multica/ui/lib/clipboard";
 import { useT } from "../../i18n";
 import { isDesktopShell, pickDirectory, validateLocalDirectory } from "../../platform/local-directory";
 import { useLocalDaemonStatus } from "../../platform/use-local-daemon-status";
@@ -26,12 +27,59 @@ function isFolder(resource: ProjectResource): resource is FolderResource {
   return resource.resource_type === "local_directory";
 }
 
-/** The row's name, or the path's last segment when it has none — never the whole path. */
+/** The row's name, or the path's last segment when it has none. */
 function folderName(folder: FolderResource): string {
   const named = (folder.label || folder.resource_ref.label || "").trim();
   if (named) return named;
   const path = folder.resource_ref.local_path.trim().replace(/[\\/]+$/, "");
   return path.split(/[\\/]/).pop() || path;
+}
+
+const HOME_PREFIX = /^(?:\/Users\/(?!Shared(?:\/|$))[^/]+|\/home\/[^/]+|\/root|[A-Za-z]:\\Users\\[^\\]+)(?=$|[\\/])/;
+
+/**
+ * The path as shown: the home folder becomes `~`, so a screenshot does not
+ * carry the account name. Copying still takes the absolute path.
+ */
+export function displayFolderPath(path: string): string {
+  return path.replace(HOME_PREFIX, "~");
+}
+
+function FolderPathLine({ path }: { path: string }) {
+  const { t } = useT("projects");
+  const [copied, setCopied] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (timer.current) clearTimeout(timer.current);
+  }, []);
+
+  const copy = async () => {
+    if (!(await copyText(path))) {
+      toast.error(t(($) => $.folder.copy_failed));
+      return;
+    }
+    setCopied(true);
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => setCopied(false), 1500);
+  };
+
+  return (
+    <div className="flex items-start gap-1 pl-5">
+      <span className="min-w-0 flex-1 break-all font-mono text-micro text-muted-foreground">
+        {displayFolderPath(path)}
+      </span>
+      <button
+        type="button"
+        aria-label={copied ? t(($) => $.folder.copied) : t(($) => $.folder.copy_path_aria)}
+        onClick={() => void copy()}
+        className={`-mt-0.5 inline-flex h-5 shrink-0 items-center gap-0.5 rounded-sm px-1 text-micro transition-colors hover:bg-accent [@media(pointer:coarse)]:h-8 [@media(pointer:coarse)]:px-2 ${copied ? "text-success" : "text-muted-foreground hover:text-foreground"}`}
+      >
+        {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
+        <span aria-live="polite">{copied ? t(($) => $.folder.copied) : t(($) => $.folder.copy)}</span>
+      </button>
+    </div>
+  );
 }
 
 /**
@@ -151,7 +199,6 @@ export function ProjectFolderSection({ projectId }: { projectId: string }) {
                 <div className="group flex items-center justify-between gap-2 py-1">
                   <div className="flex min-w-0 items-center gap-1.5">
                     <FolderOpen className="size-3.5 shrink-0 text-muted-foreground" />
-                    {/* The full path carries the account name, so it is never shown, not even on hover. */}
                     <span className="truncate text-caption font-medium">{folderName(folder)}</span>
                     {daemon.daemonId ? (
                       <span className="shrink-0 text-micro text-muted-foreground">
@@ -189,6 +236,7 @@ export function ProjectFolderSection({ projectId }: { projectId: string }) {
                     </button>
                   </div>
                 </div>
+                <FolderPathLine path={ref.local_path.trim()} />
                 <FolderRunsNotice runs={runsInProjectFolder(tasks, daemonOf, folder)} />
               </div>
             );

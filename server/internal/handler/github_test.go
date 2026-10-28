@@ -2129,16 +2129,9 @@ func TestGitHubInstallationBroadcastRedaction(t *testing.T) {
 	}
 }
 
-// TestWebhook_MergedPR_ChildWithParent_NotifiesParent guards the MUL-2538
-// must-fix: a merged PR is the dominant path by which a sub-issue actually
-// reaches `done`, and that path goes through maybeAutoCompleteIssue — not the
-// HTTP UpdateIssue / BatchUpdateIssues handlers that originally wired up
-// the child-done processing. Without the helper call inside maybeAutoCompleteIssue,
-// the parent receives nothing when a child is closed by merging its PR.
-// This test fires a `pull_request closed merged` webhook against a child
-// issue and verifies the parent gets exactly one platform-generated system
-// comment with the child's real workspace identifier.
-func TestWebhook_MergedPR_ChildWithParent_NotifiesParent(t *testing.T) {
+// A merged PR does not mark a child issue done or notify its parent as if
+// manager acceptance had happened.
+func TestWebhook_MergedPR_ChildWithParentLeavesIssueOpen(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("handler test fixture not initialized (no DB?)")
 	}
@@ -2216,21 +2209,18 @@ func TestWebhook_MergedPR_ChildWithParent_NotifiesParent(t *testing.T) {
 	req2.Header.Set("X-Hub-Signature-256", sig)
 	w = testutil.Call(t, testHandler.HandleGitHubWebhook, req2).Want(http.StatusAccepted)
 
-	// Child must now be done (sanity check — the existing path).
+	// The PR merge records code review state but does not accept the issue.
 	updatedChild, err := testHandler.Queries.GetIssue(ctx, parseUUID(child.ID))
 	if err != nil {
 		t.Fatalf("GetIssue child: %v", err)
 	}
-	if updatedChild.Status != "done" {
-		t.Fatalf("expected child status 'done', got %q", updatedChild.Status)
+	if updatedChild.Status != "in_progress" {
+		t.Fatalf("expected child status to remain 'in_progress', got %q", updatedChild.Status)
 	}
 
-	// The merge closed the child through the PR path; the parent's rule
-	// recorded it once, like a manual status change.
-	if entries := childDoneEntries(t, parent.ID); len(entries) != 1 || entries[0].Outcome != "none" {
-		t.Fatalf("expected 1 child_done entry on the parent after PR-merge auto-done, got %+v", entries)
+	if entries := childDoneEntries(t, parent.ID); len(entries) != 0 {
+		t.Fatalf("PR merge emitted child_done before manager acceptance: %+v", entries)
 	}
-	t.Cleanup(func() { cleanupChildDoneIssue(parent.ID) })
 }
 
 // generateTestRSAKeyPEM returns the shared RSA-2048 test key's PKCS#1 PEM

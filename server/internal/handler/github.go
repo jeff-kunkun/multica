@@ -25,7 +25,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/githubapp"
-	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -1634,18 +1633,6 @@ func (h *Handler) triggerPRRefreshFromCIEvent(ctx context.Context, body []byte) 
 func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype.UUID, installationID int64, p *ghPullRequestPayload, linkPolicy prLinkPolicy) {
 	state := derivePRState(p.PullRequest.State, p.PullRequest.Draft, p.PullRequest.Merged)
 	mergeable, clearMergeable := derivePRMergeableState(p.Action, p.PullRequest.MergeableState, baseRefChanged(p.Changes))
-	// The stored state before this event, so a merge is acted on once — when it
-	// happens — and not again on a later edit/label event of a merged PR (that
-	// would re-complete an issue someone reopened on purpose).
-	prevState := ""
-	if prev, err := h.Queries.GetGitHubPullRequest(ctx, db.GetGitHubPullRequestParams{
-		WorkspaceID: wsID,
-		RepoOwner:   p.Repository.Owner.Login,
-		RepoName:    p.Repository.Name,
-		PrNumber:    p.PullRequest.Number,
-	}); err == nil {
-		prevState = prev.State
-	}
 	pr, err := h.Queries.UpsertGitHubPullRequest(ctx, db.UpsertGitHubPullRequestParams{
 		WorkspaceID:         wsID,
 		InstallationID:      installationID,
@@ -1685,14 +1672,13 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 	linkedIssueIDs := make([]string, 0)
 
 	// RFC MUL-2414 §4.8: the PR mirror upsert above always runs (so re-enabling
-	// GitHub features restores history without backfill), but links and status
-	// changes are side-effects gated by the master `github_enabled` switch.
+	// GitHub features restores history without backfill), but links are gated
+	// by the master `github_enabled` switch.
 	ws, err := h.Queries.GetWorkspace(ctx, wsID)
 	if err == nil && githubFeaturesEnabled(ws) && !linkPolicy.indeterminate {
-		touched := map[pgtype.UUID]struct{}{}
 		idents := prClaimedIdentifiers(p.PullRequest.Title, p.PullRequest.Body, p.PullRequest.Head.Ref)
 		if autoLink, _ := autoLinkPRsEnabledForWorkspace(ws); autoLink {
-			linkedIssueIDs, touched = h.reconcileAutoLinks(ctx, ws, pr.ID, state, prAutoLinkInput{
+			linkedIssueIDs, _ = h.reconcileAutoLinks(ctx, ws, pr.ID, state, prAutoLinkInput{
 				idents:    idents,
 				permits:   func(id string) bool { return linkPolicy.permits(id, workspaceID) },
 				ambiguous: func(id string) bool { return linkPolicy.ambiguous[id] },
@@ -1706,23 +1692,6 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 					return h.Queries.ListAutoLinkedIssueIDsForPullRequest(ctx, pr.ID)
 				},
 			})
-		}
-		// A merge is a PR event for every issue this PR is linked to, manual
-		// links included.
-		if state == "merged" && prevState != "merged" {
-			issueIDs, err := h.Queries.ListIssueIDsForPullRequest(ctx, pr.ID)
-			if err != nil {
-				slog.Warn("github: list linked issues failed", "err", err)
-			}
-			for _, id := range issueIDs {
-				touched[id] = struct{}{}
-			}
-		}
-		// One status-catalog read per workspace per delivery, however many
-		// issues the PR touches.
-		resolver := issuestatus.NewResolver(wsID)
-		for issueID := range touched {
-			h.maybeAutoCompleteIssue(ctx, wsID, issueID, resolver)
 		}
 	}
 

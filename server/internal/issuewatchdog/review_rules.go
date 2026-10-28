@@ -313,7 +313,7 @@ WHERE issue_id = $1::uuid`, issueID, now)
 // with HoldWake, a hold that does not @mention whoever has to fix it wakes
 // them.
 func (w *Watchdog) onHold(ctx context.Context, issue Issue, commentID string, author actor, content string) {
-	if commentID == "" || !reviewWakeStatus(issue.Status) || reviewVerdict(content) != "hold" {
+	if commentID == "" || issue.KunLabel || !reviewWakeStatus(issue.Status) || reviewVerdict(content) != "hold" {
 		return
 	}
 	if developer := assigneeActor(issue); developer == author {
@@ -489,8 +489,8 @@ func (w *Watchdog) checkChild(ctx context.Context, child Issue, now time.Time) e
 	if stalled < w.cfg.ChildWait {
 		return nil
 	}
-	if stopped, err := w.stoppedForKun(ctx, child); err != nil || stopped {
-		return err // parked for Kun, not stalled
+	if parked, err := w.parkedForKun(ctx, child); err != nil || parked {
+		return err // waits on Kun, not stalled
 	}
 	parent, err := w.loadIssue(ctx, child.WorkspaceID, child.ParentID)
 	if err != nil {
@@ -521,13 +521,17 @@ func (w *Watchdog) checkChild(ctx context.Context, child Issue, now time.Time) e
 		return w.notifyManager(ctx, child, "child_unattended", key,
 			fmt.Sprintf("子单已 %d 分钟没有进展也没人在跑，父单也没有负责人", minutes), "manager", now)
 	}
-	// A parent stopped for Kun wakes nobody, so the manager hears about the
+	// A parent waiting on Kun wakes nobody, so the manager hears about the
 	// child instead.
-	if stopped, err := w.stoppedForKun(ctx, parent); err != nil {
+	if parked, err := w.parkedForKun(ctx, parent); err != nil {
 		return err
-	} else if stopped {
+	} else if parked {
+		why := "父单审查连续不通过、正等 Kun 拍板"
+		if parent.KunLabel {
+			why = "父单正等 Kun 拍板"
+		}
 		return w.notifyManager(ctx, child, "child_unattended", key,
-			fmt.Sprintf("子单已 %d 分钟没有进展也没人在跑，父单审查连续不通过、正等 Kun 拍板，看门狗不叫醒父单上的人", minutes),
+			fmt.Sprintf("子单已 %d 分钟没有进展也没人在跑，%s，看门狗不叫醒父单上的人", minutes, why),
 			"manager", now)
 	}
 	cause := "子单没有负责人"
@@ -540,8 +544,12 @@ func (w *Watchdog) checkChild(ctx context.Context, child Issue, now time.Time) e
 	return err
 }
 
-// stoppedForKun reports whether RoundStop has parked issue for Kun.
-func (w *Watchdog) stoppedForKun(ctx context.Context, issue Issue) (bool, error) {
+// parkedForKun reports whether issue waits on Kun: it carries the
+// Kun-decision label, or RoundStop has stopped its review loop.
+func (w *Watchdog) parkedForKun(ctx context.Context, issue Issue) (bool, error) {
+	if issue.KunLabel {
+		return true, nil
+	}
 	if !w.cfg.RoundStop {
 		return false, nil
 	}
