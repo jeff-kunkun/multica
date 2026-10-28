@@ -5,6 +5,8 @@ import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 import type { Attachment } from "@multica/core/types";
 import { useCommentComposerStore, useCommentDraftStore } from "@multica/core/issues/stores";
+import { configStore } from "@multica/core/config";
+import { OFFICE_INTERRUPT_STEER_FLAG } from "@multica/core/feature-flags";
 import { WorkspaceSlugProvider } from "@multica/core/paths";
 import { TooltipProvider } from "@multica/ui/components/ui/tooltip";
 import { renderWithI18n } from "../../test/i18n";
@@ -472,7 +474,7 @@ describe("comment composers", () => {
     fireEvent.click(getSubmitButton(container));
 
     await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith("hello from composer", undefined, undefined, undefined, undefined);
+      expect(onSubmit).toHaveBeenCalledWith("hello from composer", undefined, undefined, undefined, undefined, undefined);
     });
   });
 
@@ -499,15 +501,44 @@ describe("comment composers", () => {
     await screen.findByText("Steer", {}, { timeout: 5000 });
     fireEvent.click(getSubmitButton(container));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("only fix web", undefined, undefined,
-      ["turn-1"], undefined), { timeout: 5000 });
+      ["turn-1"], undefined, undefined), { timeout: 5000 });
     expect(apiCancelTask).not.toHaveBeenCalled();
 
     fireEvent.change(screen.getByTestId("editor"), { target: { value: "start over on web" } });
     await chooseRecipientAction("Lambda trigger: Steer", /^Interrupt and restart/);
     fireEvent.click(await screen.findByRole("button", { name: "Stop and send" }, { timeout: 5000 }));
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("start over on web", undefined, undefined, undefined, undefined), { timeout: 5000 });
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("start over on web", undefined, undefined, undefined, undefined, undefined), { timeout: 5000 });
     expect(apiCancelTask).toHaveBeenCalledWith("issue-1", "turn-1");
     expect(apiCancelTask.mock.invocationCallOrder[0]!).toBeLessThan(onSubmit.mock.invocationCallOrder[1]!);
+  }, 15_000);
+
+  it("interrupts a run that can stop its step by default in office builds (DENE-2667)", async () => {
+    configStore.getState().setLocalFeatureFlags({ [OFFICE_INTERRUPT_STEER_FLAG]: true });
+    try {
+      const turn = {
+        id: "turn-1", agent_id: "agent-1", issue_id: "issue-1", status: "running", priority: 0,
+        created_at: "2026-09-23T00:00:00Z", dispatched_at: null, started_at: "2026-09-23T00:00:01Z",
+        completed_at: null, result: null, error: null,
+        supplement_capability: "task-supplement-v1", can_supplement: true, supplement_interrupt: true,
+      };
+      apiListTasksByIssue.mockResolvedValue([turn]);
+      apiPreviewCommentTriggers.mockResolvedValue({ agents: [{ id: "agent-1", name: "Lambda", source: "thread_parent", reason: "" }] });
+      const onSubmit = vi.fn().mockResolvedValue("reply-new");
+      const { container } = renderWithProviders(
+        <ReplyInput issueId="issue-1" parentId="comment-1" avatarType="member" avatarId="user-1"
+          onSubmit={onSubmit} steerByDefault={(task) => task.id === "turn-1"} />,
+      );
+
+      activateComposer("reply-composer-shell");
+      fireEvent.change(screen.getByTestId("editor"), { target: { value: "改成写 hello" } });
+      await screen.findByRole("button", { name: "Lambda trigger: Interrupt" }, { timeout: 5000 });
+      fireEvent.click(getSubmitButton(container));
+      await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("改成写 hello", undefined, undefined,
+        undefined, undefined, ["turn-1"]), { timeout: 5000 });
+      expect(apiCancelTask).not.toHaveBeenCalled();
+    } finally {
+      configStore.getState().setLocalFeatureFlags({});
+    }
   }, 15_000);
 
   it("starts after the run by default when the personal preference says so", async () => {
@@ -530,7 +561,7 @@ describe("comment composers", () => {
     fireEvent.change(screen.getByTestId("editor"), { target: { value: "only fix web" } });
     await screen.findByRole("button", { name: "Lambda trigger: Queue" }, { timeout: 5000 });
     fireEvent.click(getSubmitButton(container));
-    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("only fix web", undefined, undefined, undefined, undefined), { timeout: 5000 });
+    await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("only fix web", undefined, undefined, undefined, undefined, undefined), { timeout: 5000 });
 
     // One message can still go into the running turn.
     fireEvent.change(screen.getByTestId("editor"), { target: { value: "and keep desktop as is" } });
@@ -538,7 +569,7 @@ describe("comment composers", () => {
     await screen.findByRole("button", { name: "Lambda trigger: Steer" }, { timeout: 5000 });
     fireEvent.click(getSubmitButton(container));
     await waitFor(() => expect(onSubmit).toHaveBeenLastCalledWith("and keep desktop as is", undefined, undefined,
-      ["turn-1"], undefined), { timeout: 5000 });
+      ["turn-1"], undefined, undefined), { timeout: 5000 });
   }, 15_000);
 
   it("steers every running recipient the message addresses", async () => {
@@ -565,7 +596,7 @@ describe("comment composers", () => {
     expect(screen.getByRole("button", { name: "Orion trigger: Steer" })).toBeInTheDocument();
     fireEvent.click(getSubmitButton(container));
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith("only fix web", undefined, undefined,
-      ["turn-1", "turn-2"], undefined), { timeout: 5000 });
+      ["turn-1", "turn-2"], undefined, undefined), { timeout: 5000 });
   }, 15_000);
 
   it("never stops the previous recipient after the mentions change under a stale preview", async () => {
@@ -605,7 +636,7 @@ describe("comment composers", () => {
     fireEvent.click(getSubmitButton(container));
 
     await waitFor(() => {
-      expect(onSubmit).toHaveBeenCalledWith("thread reply", undefined, undefined, undefined, undefined);
+      expect(onSubmit).toHaveBeenCalledWith("thread reply", undefined, undefined, undefined, undefined, undefined);
     });
   });
 
@@ -655,7 +686,7 @@ describe("comment composers", () => {
         "true",
       ),
     );
-    expect(onSubmit).toHaveBeenCalledWith("sending", undefined, undefined, undefined, undefined);
+    expect(onSubmit).toHaveBeenCalledWith("sending", undefined, undefined, undefined, undefined, undefined);
 
     resolveSubmit(true);
 
@@ -1146,6 +1177,7 @@ describe("comment composers — upload submit gate", () => {
         undefined,
         undefined,
         undefined,
+        undefined,
       ),
     );
   });
@@ -1167,7 +1199,7 @@ describe("comment composers — upload submit gate", () => {
     fireEvent.keyDown(editor, { key: "Enter", metaKey: true });
 
     await waitFor(() => expect(onSubmit).toHaveBeenCalled());
-    expect(onSubmit).toHaveBeenCalledWith("keep this, dropped the image", undefined, undefined, undefined, undefined);
+    expect(onSubmit).toHaveBeenCalledWith("keep this, dropped the image", undefined, undefined, undefined, undefined, undefined);
   });
 
   it("writes the finished upload's link into the persisted draft after the composer unmounts", async () => {

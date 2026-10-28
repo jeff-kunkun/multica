@@ -1,6 +1,6 @@
 ---
 name: multica-platform
-description: "Overview, chat, inbox, sub-issue, wakeup, halt, mention, agent, specialisation, squad, autopilot, project, runtime, progress, skill import, transfer, bot, GitHub App, status, env."
+description: "Overview, chat, inbox, sub-issue, wakeup, halt, mention, agent, specialisation, squad, autopilot, project, runtime, progress, skill import, transfer, bot, GitHub App, status, env, plan."
 user-invocable: false
 allowed-tools: Bash(multica *), Bash(git *), Bash(gh *)
 ---
@@ -29,6 +29,7 @@ command map, then list only what the task needs (`multica agent list`,
 | `references/status-effects.md` | What a status change makes the server do: Backlog parking, In Review completion and parent-scoped acceptance, Blocked failure fields, In Progress recovery |
 | `references/run-control.md` | Stopping issue/chat work with optional related targets, halt / resume, default wakeup merging, and explicit steer / queue / restart |
 | `references/wakeups.md` | Issue wakeups: events, conditions (`--until-*`), timers, check-ins, runaway protection |
+| `references/plans.md` | A plan-first issue: a `[Plan first]` block in your prompt, `issue plan propose`, the 409 `plan_not_approved` on review / done / PR link, approval resuming the same session |
 | `references/sub-issues.md` | Sub-issues: todo vs backlog at create time, promoting parked children |
 | `references/mentions.md` | Writing a `mention://` link: which types enqueue a run, which are inert, why one silently did nothing; a comment that "Woke no one" |
 | `references/agents.md` | Creating, copying or debugging an agent definition: fields, skill binding |

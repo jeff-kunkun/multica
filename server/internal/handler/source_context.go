@@ -744,6 +744,10 @@ func (h *Handler) createManualCommentSubIssue(w http.ResponseWriter, r *http.Req
 		}
 		stage = pgtype.Int4{Int32: *input.Stage, Valid: true}
 	}
+	after, ok := h.resolveIssueAfter(w, r.Context(), workspaceID, capture.SourceIssueID, projectID, input.AfterIssueIDs, &status, &input.WaitingFor)
+	if !ok {
+		return errSourceContextResponseWritten
+	}
 	prefix := h.getIssuePrefix(r.Context(), workspaceID)
 	result, err := h.IssueService.Create(r.Context(), service.IssueCreateParams{
 		WorkspaceID: workspaceID, Title: title, Description: ptrToText(input.Description), Status: status, Priority: priority,
@@ -751,6 +755,7 @@ func (h *Handler) createManualCommentSubIssue(w http.ResponseWriter, r *http.Req
 		ParentIssueID: capture.SourceIssueID, ProjectID: projectID, ProjectPinned: projectPinned, StartDate: startDate, DueDate: dueDate,
 		AttachmentIDs: attachmentIDs, LabelIDs: labelIDs, Properties: properties, Stage: stage,
 		AllowDuplicate: input.AllowDuplicate, SourceContext: &capture,
+		AfterIssueIDs: after.ids,
 	}, service.IssueCreateOpts{
 		ActorID: util.UUIDToString(userID),
 		BroadcastPayload: func(issue db.Issue, _ []db.Attachment, labels []db.IssueLabel) map[string]any {
@@ -763,7 +768,9 @@ func (h *Handler) createManualCommentSubIssue(w http.ResponseWriter, r *http.Req
 	if err != nil {
 		return err
 	}
-	response := issueToResponse(result.Issue, prefix)
+	issue := h.syncBacklogWaitingFor(r.Context(), result.Issue, input.WaitingFor)
+	issue = h.startIfPredecessorsFinished(r.Context(), after, issue)
+	response := issueToResponse(issue, prefix)
 	h.fillStatusCategory(r.Context(), workspaceID, &response)
 	labelResponses := labelsToResponse(result.Labels)
 	response.Labels = &labelResponses

@@ -21,12 +21,13 @@ import (
 // (DENE-618). A unique-index collision — two legacy spellings of one directory
 // both resolving to the same real_path — must not fail the daemon: the first
 // row keeps the identity, this one is left as it was, and we log.
+//
+// A daemon signed in with a personal token has no daemon id on its credential.
+// It names the runtime its task ran on instead, and that runtime — owned by
+// the caller, on the machine that holds the folder, in the folder's workspace
+// — stands in for the daemon token. Before this every such daemon got a 401
+// on every task (DENE-2667 PR 8).
 func (h *Handler) BackfillLocalDirectoryIdentity(w http.ResponseWriter, r *http.Request) {
-	daemonID := middleware.DaemonIDFromContext(r.Context())
-	if strings.TrimSpace(daemonID) == "" {
-		writeError(w, http.StatusUnauthorized, "daemon token required")
-		return
-	}
 	resourceUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "resourceId"), "resource id")
 	if !ok {
 		return
@@ -35,10 +36,29 @@ func (h *Handler) BackfillLocalDirectoryIdentity(w http.ResponseWriter, r *http.
 		RealPath  string `json:"real_path"`
 		RepoKey   string `json:"repo_key"`
 		IsGitRepo *bool  `json:"is_git_repo"`
+		RuntimeID string `json:"runtime_id"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
+	}
+	daemonID := middleware.DaemonIDFromContext(r.Context())
+	var userTokenRuntimeWorkspace string
+	if strings.TrimSpace(daemonID) == "" {
+		if strings.TrimSpace(req.RuntimeID) == "" {
+			writeError(w, http.StatusUnauthorized, "daemon token or runtime_id required")
+			return
+		}
+		rt, ok := h.requireDaemonRuntimeAccess(w, r, req.RuntimeID)
+		if !ok {
+			return
+		}
+		if !rt.DaemonID.Valid || strings.TrimSpace(rt.DaemonID.String) == "" {
+			writeError(w, http.StatusForbidden, "runtime has no daemon")
+			return
+		}
+		daemonID = rt.DaemonID.String
+		userTokenRuntimeWorkspace = uuidToString(rt.WorkspaceID)
 	}
 	req.RealPath = strings.TrimSpace(req.RealPath)
 	if req.RealPath != "" && !isAbsoluteLocalPath(req.RealPath) {
@@ -53,6 +73,10 @@ func (h *Handler) BackfillLocalDirectoryIdentity(w http.ResponseWriter, r *http.
 		return
 	}
 	if !h.requireDaemonWorkspaceAccess(w, r, uuidToString(existing.WorkspaceID)) {
+		return
+	}
+	if userTokenRuntimeWorkspace != "" && userTokenRuntimeWorkspace != uuidToString(existing.WorkspaceID) {
+		writeError(w, http.StatusForbidden, "runtime is not in the resource's workspace")
 		return
 	}
 	if existing.ResourceType != "local_directory" {

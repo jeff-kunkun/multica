@@ -5,7 +5,7 @@ import { api } from "@multica/core/api";
 import { issueKeys } from "@multica/core/issues/queries";
 import type { AgentTask, Comment, TimelineEntry } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
-import { formatAgentNames, SteerBadge, SteerReceipts } from "./steer-receipts";
+import { deliveredSecond, formatAgentNames, SteerBadge, SteerReceipts } from "./steer-receipts";
 
 vi.mock("@multica/core/api", () => ({ api: {
   retryTaskSupplement: vi.fn(), createComment: vi.fn(), listTasksByIssue: vi.fn(),
@@ -73,6 +73,17 @@ describe("SteerReceipts", () => {
     expect(screen.getByText("Read by Orion")).toBeInTheDocument();
   });
 
+  it("says an interrupt was delivered and in which second it was read (DENE-2667)", () => {
+    const supplements = [{ task_id: turn, agent_id: "lambda", status: "delivered" as const,
+      delivered_at: "2026-09-07T00:00:12Z", delivery_mode: "interrupt" as const, delivered_after_ms: 2300 }];
+    render(<>
+      <SteerBadge issueId="issue" entry={entry({ supplements })} />
+      <SteerReceipts issueId="issue" entry={entry({ supplements })} />
+    </>);
+    expect(screen.getByText("Interrupted Lambda's run")).toBeInTheDocument();
+    expect(screen.getByText("Delivered · read by Lambda after 3s")).toBeInTheDocument();
+  });
+
   it("settles a pending receipt when its run ends first and offers a new run instead", async () => {
     vi.mocked(api.createComment).mockResolvedValue({ id: "resent" } as Comment);
     vi.mocked(api.previewCommentTriggers).mockResolvedValue(recipients("lambda"));
@@ -85,7 +96,7 @@ describe("SteerReceipts", () => {
     expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Send as a new run" }));
     await waitFor(() => expect(api.createComment).toHaveBeenCalledWith(
-      "issue", "Only fix web.", undefined, "thread", undefined, undefined, undefined, undefined,
+      "issue", "Only fix web.", undefined, "thread", undefined, undefined, undefined, undefined, undefined,
     ));
     await waitFor(() => expect(screen.queryByRole("button", { name: "Send as a new run" })).not.toBeInTheDocument());
   });
@@ -114,6 +125,17 @@ describe("SteerReceipts", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Lambda didn't get it · the agent rejected the message");
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     await waitFor(() => expect(api.retryTaskSupplement).toHaveBeenCalledWith("issue", turn, "steer"));
+  });
+});
+
+describe("deliveredSecond", () => {
+  it("counts the second the message was read in, and nothing without timing", () => {
+    expect(deliveredSecond(0)).toBe(1);
+    expect(deliveredSecond(400)).toBe(1);
+    expect(deliveredSecond(1000)).toBe(1);
+    expect(deliveredSecond(1001)).toBe(2);
+    expect(deliveredSecond(undefined)).toBeNull();
+    expect(deliveredSecond(-5)).toBeNull();
   });
 });
 

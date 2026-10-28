@@ -847,6 +847,9 @@ func newIssueCreateTestCmd() *cobra.Command {
 	cmd.Flags().String("assignee", "", "")
 	cmd.Flags().String("assignee-id", "", "")
 	cmd.Flags().String("parent", "", "")
+	cmd.Flags().StringSlice("after", nil, "")
+	cmd.Flags().String("from-comment", "", "")
+	cmd.Flags().Bool("plan-first", false, "")
 	cmd.Flags().String("project", "", "")
 	cmd.Flags().String("due-date", "", "")
 	cmd.Flags().Bool("allow-duplicate", false, "")
@@ -855,6 +858,109 @@ func newIssueCreateTestCmd() *cobra.Command {
 	cmd.Flags().StringSlice("attachment-id", nil, "")
 	cmd.Flags().StringArray("property", nil, "")
 	return cmd
+}
+
+func TestRunIssueCreateSendsAfterIssueIDs(t *testing.T) {
+	const parentID = "11111111-1111-4111-8111-111111111111"
+	const siblingID = "22222222-2222-4222-8222-222222222222"
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/issues" || r.Method != http.MethodPost {
+			http.NotFound(w, r)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode body: %v", err)
+		}
+		json.NewEncoder(w).Encode(map[string]any{"id": "issue-1", "identifier": "MUL-3", "title": "Second", "status": "backlog"})
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueCreateTestCmd()
+	_ = cmd.Flags().Set("title", "Second")
+	_ = cmd.Flags().Set("parent", parentID)
+	_ = cmd.Flags().Set("after", siblingID)
+	if err := runIssueCreate(cmd, nil); err != nil {
+		t.Fatalf("runIssueCreate: %v", err)
+	}
+	if got, ok := body["after_issue_ids"].([]any); !ok || len(got) != 1 || got[0] != siblingID {
+		t.Fatalf("after_issue_ids = %#v, want [%s]", body["after_issue_ids"], siblingID)
+	}
+
+	cmd = newIssueCreateTestCmd()
+	_ = cmd.Flags().Set("title", "Loose")
+	_ = cmd.Flags().Set("after", siblingID)
+	if err := runIssueCreate(cmd, nil); err == nil || !strings.Contains(err.Error(), "--after needs --parent") {
+		t.Fatalf("--after without a parent: err = %v", err)
+	}
+}
+
+func TestRunIssueCreateFromComment(t *testing.T) {
+	const issueID = "11111111-1111-4111-8111-111111111111"
+	const commentID = "33333333-3333-4333-8333-333333333333"
+	var request map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/comments/"+commentID+"/sub-issue-preview":
+			json.NewEncoder(w).Encode(map[string]any{
+				"source_issue":   map[string]any{"id": issueID, "identifier": "MUL-1"},
+				"comment_thread": []any{map[string]any{"id": commentID, "content": "\n## Add a CSV export\nso people can share it"}},
+				"capture_token":  "token-1",
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/comments/"+commentID+"/sub-issues":
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				t.Errorf("decode body: %v", err)
+			}
+			w.WriteHeader(http.StatusCreated)
+			json.NewEncoder(w).Encode(map[string]any{"id": "issue-2", "identifier": "MUL-2", "title": "Add a CSV export", "status": "todo"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueCreateTestCmd()
+	_ = cmd.Flags().Set("from-comment", commentID)
+	_ = cmd.Flags().Set("parent", issueID)
+	if err := runIssueCreate(cmd, nil); err != nil {
+		t.Fatalf("runIssueCreate: %v", err)
+	}
+	if request["mode"] != "manual" || request["capture_token"] != "token-1" {
+		t.Fatalf("request = %#v, want manual mode with the preview's capture token", request)
+	}
+	issue, _ := request["issue"].(map[string]any)
+	if issue["title"] != "Add a CSV export" {
+		t.Fatalf("title = %#v, want the comment's first line", issue["title"])
+	}
+	if _, ok := issue["parent_issue_id"]; ok {
+		t.Fatalf("issue body carries parent_issue_id; the comment's issue is the parent")
+	}
+
+	cmd = newIssueCreateTestCmd()
+	_ = cmd.Flags().Set("from-comment", commentID)
+	_ = cmd.Flags().Set("parent", "44444444-4444-4444-8444-444444444444")
+	if err := runIssueCreate(cmd, nil); err == nil || !strings.Contains(err.Error(), "differs from the comment's issue MUL-1") {
+		t.Fatalf("mismatched --parent: err = %v", err)
+	}
+
+	// The comment endpoint has no plan gate, so --plan-first is refused
+	// rather than dropped.
+	request = nil
+	cmd = newIssueCreateTestCmd()
+	_ = cmd.Flags().Set("from-comment", commentID)
+	_ = cmd.Flags().Set("plan-first", "true")
+	if err := runIssueCreate(cmd, nil); err == nil || !strings.Contains(err.Error(), "--plan-first does not go with --from-comment") {
+		t.Fatalf("--plan-first with --from-comment: err = %v", err)
+	}
+	if request != nil {
+		t.Fatalf("refused create still posted %#v", request)
+	}
 }
 
 func TestRunIssueCreatePropertiesFailClosedBeforePost(t *testing.T) {

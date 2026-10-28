@@ -35,30 +35,10 @@ func TestClassifyTask(t *testing.T) {
 	}
 }
 
-// TestTaskKindHasIssueContext pins the predicate that gates Project
-// Context / Sub-issue Creation in the slim dispatcher.
-func TestTaskKindHasIssueContext(t *testing.T) {
-	t.Parallel()
-	cases := []struct {
-		kind taskKind
-		want bool
-	}{
-		{kindIssue, true},
-		{kindAutopilotRunOnly, false},
-		{kindQuickCreate, false},
-		{kindChat, false},
-	}
-	for _, tc := range cases {
-		if got := tc.kind.hasIssueContext(); got != tc.want {
-			t.Errorf("kind=%d hasIssueContext: got %v, want %v", tc.kind, got, tc.want)
-		}
-	}
-}
-
 // TestBuildMetaSkillContentBriefContent pins that buildMetaSkillContent
-// renders the (now sole) brief: the issue-read verb line of the Commands verb
-// map (DENE-1329) is present, and neither the retired legacy verbose
-// description nor the pre-verb-map `issue get` synopsis is.
+// renders the (now sole) brief: the Commands pointer to `--help` (DENE-2679)
+// is present, and neither the retired legacy verbose description nor the
+// pre-verb-map `issue get` synopsis is.
 func TestBuildMetaSkillContentBriefContent(t *testing.T) {
 	t.Parallel()
 
@@ -69,8 +49,8 @@ func TestBuildMetaSkillContentBriefContent(t *testing.T) {
 		AgentID:          "eve-1",
 	})
 
-	if !strings.Contains(out, "- `issue get | list | children` — read issues\n") {
-		t.Errorf("brief is missing the issue-read verb line\n---\n%s", out)
+	if !strings.Contains(out, "run `multica <command> --help` for verbs and flags.") {
+		t.Errorf("brief is missing the pointer to the CLI's own --help\n---\n%s", out)
 	}
 	if strings.Contains(out, "- `multica issue get <id> --output json` — full issue.") {
 		t.Errorf("brief still carries the pre-verb-map `issue get` synopsis; flags live in `--help` (DENE-1329)\n---\n%s", out)
@@ -151,7 +131,6 @@ func TestBuildMetaSkillContentSlimKindMatrix(t *testing.T) {
 		kindIssue: true, kindAutopilotRunOnly: true,
 		kindQuickCreate: true, kindChat: true,
 	}
-	issueKinds := map[taskKind]bool{kindIssue: true}
 	quickCreateOnly := map[taskKind]bool{kindQuickCreate: true}
 	noKind := map[taskKind]bool{}
 	checks := []sectionCheck{
@@ -173,12 +152,13 @@ func TestBuildMetaSkillContentSlimKindMatrix(t *testing.T) {
 		{"## Repositories", map[taskKind]bool{
 			kindIssue: true, kindAutopilotRunOnly: true, kindChat: true,
 		}},
-		{"## Instruction Precedence", issueKinds},
-		{"## Sub-issue Creation", issueKinds},
-		// Quick-create included: it used to be skipped here and carry its own
-		// copy in issue_context.md, which nothing read. One index, one place.
-		{"## Skills", allKinds},
-		{"## Mentions", issueKinds},
+		// DENE-2679 folded these into the issue Workflow and Output.
+		{"## Instruction Precedence", noKind},
+		{"## Sub-issue Creation", noKind},
+		{"## Mentions", noKind},
+		// Claude Code lists the skills it discovers (DENE-2679); the index
+		// other providers get is checked for every kind below.
+		{"## Skills", noKind},
 	}
 
 	fixtures := map[taskKind]TaskContextForEnv{
@@ -205,6 +185,11 @@ func TestBuildMetaSkillContentSlimKindMatrix(t *testing.T) {
 			if !want && present {
 				t.Errorf("kind=%d: heading %q should NOT be in slim brief (matrix gating regression)", kind, c.heading)
 			}
+		}
+		// Quick-create included: it used to be skipped here and carry its own
+		// copy in issue_context.md, which nothing read. One index, one place.
+		if !strings.Contains(buildMetaSkillContent("codex", ctx), "\n## Skills\n") {
+			t.Errorf("kind=%d: expected heading \"## Skills\" in a codex brief", kind)
 		}
 	}
 }
@@ -370,9 +355,8 @@ func TestBackgroundTaskSafetySlimHardPins(t *testing.T) {
 		"## Background work",
 		// 1. The platform fact and the no-background-and-yield rule.
 		"Your run ends when your turn exits",
-		"anything still running is orphaned and its result lost",
-		"Never background work and yield",
-		"block on results in the foreground",
+		"anything still running is lost",
+		"never background work and yield: block in the foreground",
 		// 2. CI / external systems. The full compound ban, not its first item —
 		// MUL-5223 made this a non-derivable boundary, so no member may be
 		// silently dropped.
@@ -381,14 +365,13 @@ func TestBackgroundTaskSafetySlimHardPins(t *testing.T) {
 		"\"Local tests pass; CI running: <PR link>\" is a complete hand-off",
 		// 3. The one persistent-service exception and its handoff triple.
 		"Only a service the user asked to keep running may outlive the turn",
-		"detach it (durable logs, a recorded PID), verify it, and reply with URL, logs and how to stop it",
-		"without a supervisor its survival is best-effort",
+		"detach it (durable logs, recorded PID), verify it, reply with URL, logs and how to stop it",
+		"its survival is best-effort",
 		// 2b. The CI-result carve-out, restored by DENE-1329 (sample C).
-		"explicitly ask for the CI result, wait for it in ONE foreground `gh pr checks <pr> --watch`",
+		"unless the task explicitly asks for the CI result: then ONE foreground `gh pr checks <pr> --watch`",
 		// 4. Never kill the daemon.
-		"Never kill `multica` by name",
+		"Never kill `multica` by name or the daemon's PID (`multica daemon status`)",
 		"stop only a PID you started",
-		"never the daemon's (`multica daemon status --output json`)",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("slim Background work missing hardened pin %q\n---\n%s", want, out)

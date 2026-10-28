@@ -140,6 +140,20 @@
       "running": "En cours {{active}}/{{limit}}",
       "owner_only": "Seul le propriétaire peut modifier cette limite.",
       "failed": "Enregistrement impossible. Réessayez."
+    },
+    "default_dir": {
+      "label": "Dossier de travail par défaut",
+      "hint": "Les exécutions dont le projet n'a pas de dossier démarrent ici. Laissez vide pour utiliser un nouveau dossier temporaire.",
+      "placeholder": "/Users/me/work",
+      "clear": "Effacer",
+      "exists": "Trouvé sur cette machine.",
+      "missing": "Ce dossier n'existe pas sur cette machine. Les exécutions utilisent un dossier temporaire tant qu'il n'existe pas.",
+      "checking": "En attente de la vérification par cette machine (environ une minute).",
+      "checking_offline": "La machine vérifiera le dossier une fois en ligne.",
+      "relative": "Saisissez un chemin complet, par exemple /Users/me/work.",
+      "invalid": "Le serveur a refusé ce chemin. Saisissez le chemin complet d'un dossier.",
+      "owner_only": "Seul le propriétaire de la machine peut modifier le dossier de travail par défaut.",
+      "failed": "Échec de l'enregistrement. Réessayez."
     }
   },
   "health": {

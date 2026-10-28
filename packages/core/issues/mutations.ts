@@ -836,6 +836,7 @@ export function useCreateComment(issueId: string) {
       suppressAgentIds,
       steerTaskIds,
       mode,
+      interruptTaskIds,
     }: {
       content: string;
       type?: string;
@@ -846,7 +847,9 @@ export function useCreateComment(issueId: string) {
       steerTaskIds?: string[];
       /** "handoff": the @agent takes over and every other agent's run here stops. */
       mode?: CommentSendMode;
-    }) => api.createComment(issueId, content, type, parentId, attachmentIds, suppressAgentIds, steerTaskIds, mode),
+      /** Running turns this comment stops at their current step and continues with. */
+      interruptTaskIds?: string[];
+    }) => api.createComment(issueId, content, type, parentId, attachmentIds, suppressAgentIds, steerTaskIds, mode, interruptTaskIds),
     onSuccess: (comment) => {
       if (comment.issue_revision) {
         onIssueAuxiliaryRevision(qc, wsId, issueId, comment.issue_revision);

@@ -42,6 +42,7 @@ import { taskStatusConfig } from "../../config";
 import { cancellationActorLabel, cancelReasonLabel, failureReasonLabel } from "./task-failure";
 import { Sparkline } from "../sparkline";
 import { useT, useTimeAgo } from "../../../i18n";
+import { TaskLiveLine, useShowRunLive } from "../../../common/task-live-line";
 
 // Reveal cached rows in small batches and fetch another page only on demand.
 const RECENT_INITIAL = 10;
@@ -751,6 +752,8 @@ function TaskRow({
   const hasIssue = task.issue_id !== "";
   const issue = hasIssue ? issueMap.get(task.issue_id) : undefined;
   const isRunning = task.status === "running";
+  // The daemon's live view of a running issue run; office test builds show it.
+  const showLive = useShowRunLive(task);
   // A chat run belongs to someone's conversation: its transcript, trigger
   // text and cancel stay behind the chat's own visibility.
   const isChat = !!task.chat_session_id;
@@ -948,6 +951,7 @@ function TaskRow({
             </>
           )}
         </div>
+        {timeMode === "active" && showLive && <TaskLiveLine task={task} details className="mt-2" />}
       </div>
 
       {chatOpenable && <OpenChatLink chatId={task.chat_session_id!} />}

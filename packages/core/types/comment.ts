@@ -74,6 +74,10 @@ export interface CommentSupplementReceipt {
   status: CommentSupplementStatus;
   failure_reason?: string;
   delivered_at?: string;
+  /** "interrupt" when the message stopped the run's current step (DENE-2667). */
+  delivery_mode?: "interrupt";
+  /** Milliseconds from posting until the run read the message. */
+  delivered_after_ms?: number;
 }
 
 // The domain result of one explicitly-mentioned trigger target. Success-shaped

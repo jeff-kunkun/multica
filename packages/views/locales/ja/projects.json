@@ -215,5 +215,29 @@
     "cancel": "キャンセル",
     "loading": "読み込み中…",
     "load_more": "さらに読み込む"
+  },
+  "folder": {
+    "title": "フォルダー",
+    "intro": "エージェントはこのフォルダーで作業を始めます。Git リポジトリかどうかは CLI が自動で判別します。",
+    "choose": "フォルダーを選択",
+    "change": "フォルダーを変更",
+    "remove": "フォルダーを外す",
+    "picking": "選択中…",
+    "this_machine": "このマシン",
+    "other_machine": "別のマシン",
+    "git": "Git",
+    "empty": "フォルダーはまだありません。実行はマシンの既定の作業ディレクトリ（ランタイムページで設定）で始まり、未設定なら新しい一時フォルダーを使います。",
+    "web_hint": "デスクトップアプリでフォルダーを選ぶか、`multica project resource add --type local_directory` を実行してください。",
+    "offline": "ローカルのデーモンが動いていないため、今はフォルダーを選べません。",
+    "invalid": "このフォルダーは使えません。",
+    "load_failed": "フォルダーを読み込めませんでした。",
+    "toast_saved": "フォルダーを保存しました",
+    "toast_save_failed": "フォルダーを保存できませんでした",
+    "toast_remove_failed": "フォルダーを外せませんでした",
+    "shared_other": "いま {{count}} 件の実行がこのフォルダーで動いています。同じブランチの同じファイルを編集します。",
+    "shared_folder": "共有フォルダー {{name}}",
+    "this_issue": "この課題",
+    "chat_run": "チャット",
+    "create_hint": "エージェントはこのフォルダーで作業を始めます。Git リポジトリかどうかは CLI が自動で判別します。"
   }
 }

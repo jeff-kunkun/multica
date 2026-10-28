@@ -1,9 +1,8 @@
 # Mentions and delegation
 
-What a mention link DOES. WHETHER to mention at all — loop avoidance, staying
-silent on acknowledgements — is in your runtime brief's Mentions section; follow
-that and do not re-derive it here.
+What a mention link DOES, and whether to write one at all.
 
+- [Whether to mention](#whether-to-mention)
 - [A mention link is built from a real UUID](#a-mention-link-is-built-from-a-real-uuid)
 - [Step 1 — look up the UUID](#step-1--look-up-the-uuid)
 - [Step 2 — the five types and what each enqueues](#step-2--the-four-types-and-what-each-enqueues)
@@ -12,6 +11,22 @@ that and do not re-derive it here.
 - [What does NOT happen](#what-does-not-happen)
 - [Who the invoke gate judges](#who-the-invoke-gate-judges)
 - [Incorrect to correct](#incorrect-to-correct)
+
+## Whether to mention
+
+A member mention **notifies a person**; an agent mention **starts a run for
+that agent**. Mention only to pull someone into work they are not doing yet:
+
+- Followers already see your comment, so a mention to tell them adds nothing.
+  For someone who does not follow the issue, a mention is how they find out.
+- A thank-you or FYI mention of an agent costs a paid run, and its reply can
+  start another — the loop the brief's one-line rule exists to stop.
+- Naming someone in prose stays plain text; write a link only to wake them.
+- When unsure, leave it out: a missed mention costs one follow-up ask, a stray
+  one costs a run.
+
+Issue and project links (`mention://issue/...`, `mention://project/...`) are
+plain links and wake no one.
 
 ## A mention link is built from a real UUID
 

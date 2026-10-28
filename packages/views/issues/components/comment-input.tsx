@@ -28,7 +28,7 @@ interface CommentInputProps {
   /** Resolves true on success, false on failure. The composer keeps the text
    *  (editor locked + button spinning) until this settles, then clears only on
    *  success — a failed send must not silently discard the user's draft. */
-  onSubmit: (content: string, attachmentIds?: string[], suppressAgentIds?: string[], steerTaskIds?: string[], mode?: CommentSendMode) => Promise<string | boolean>;
+  onSubmit: (content: string, attachmentIds?: string[], suppressAgentIds?: string[], steerTaskIds?: string[], mode?: CommentSendMode, interruptTaskIds?: string[]) => Promise<string | boolean>;
   /** Called after the server accepts the comment and the composer is cleared. */
   onAccepted?: (commentId: string) => void;
   onEditAnnotation?: (id: string) => boolean;
@@ -196,6 +196,7 @@ function CommentInput({ issueId, onSubmit, onAccepted, onEditAnnotation }: Comme
         steerTaskIds.length > 0 ? steerTaskIds : undefined,
         // A handoff stops other agents' runs: only on a preview that matches the text.
         triggerPreview.isCurrent ? routing.mode : undefined,
+        routing.interruptTaskIds.length > 0 ? routing.interruptTaskIds : undefined,
       ).then((commentId) => {
         acceptedCommentIdRef.current = typeof commentId === "string" ? commentId : null;
         return !!commentId;

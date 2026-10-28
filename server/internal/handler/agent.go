@@ -771,6 +771,7 @@ type AgentTaskResponse struct {
 	// ProjectWorkflow is the issue's project workflow, when it has one other
 	// than the Default (MUL-7420). Absent keeps the brief unchanged.
 	ProjectWorkflow         *TaskProjectWorkflowData `json:"project_workflow,omitempty"`
+	PlanGate                string                   `json:"plan_gate,omitempty"`             // plan first (DENE-2670): needs_plan, awaiting_approval or changes_requested while the issue waits for an approved plan; absent otherwise, so older daemons and ungated issues see no change
 	ThreadName              string                   `json:"thread_name,omitempty"`           // semantic title for provider-native session/thread history
 	MagpieGroup             string                   `json:"magpie_group,omitempty"`          // issue metadata magpie_group; honoured only for a group in the agent's runtime_config.magpie_groups
 	MagpieGroupsEnabled     bool                     `json:"magpie_groups_enabled,omitempty"` // the workspace's magpie mode switch; off means no magpie group pin and an empty MagpieGroup
@@ -805,6 +806,12 @@ type AgentTaskResponse struct {
 	// talking to a server that predates it, which is a different situation
 	// from a run whose code source could not be resolved.
 	CodeDecision *coderesolve.Decision `json:"code_decision,omitempty"`
+	// DefaultWorkDir is the claiming machine's default working directory,
+	// set only when the decision is shared_scratch: the run binds no folder
+	// and names no repository, so it runs there instead of a fresh scratch
+	// directory (DENE-2667 PR 8). Claim-only. Mirror field:
+	// internal/daemon/types.go, same JSON name.
+	DefaultWorkDir string `json:"default_work_dir,omitempty"`
 	// Projects is the task's full project set in priority order (DENE-523): a
 	// chat session can attach several projects, every other surface at most
 	// one. The singular project_* fields above mirror the FIRST entry so a
@@ -860,6 +867,7 @@ type AgentTaskResponse struct {
 	SupplementCapability  string                 `json:"supplement_capability,omitempty"`
 	SupplementCommentIDs  []string               `json:"supplement_comment_ids,omitempty"`
 	SupplementSteerMode   string                 `json:"supplement_steer_mode,omitempty"` // DENE-1349: "same" reads the message in the running process, "restart" stops the CLI and resumes its session
+	SupplementInterrupt   bool                   `json:"supplement_interrupt,omitempty"`  // DENE-2667: the run can stop its current step and continue the same session with a message
 	CanSupplement         bool                   `json:"can_supplement,omitempty"`
 	TriggerThreadID       string                 `json:"trigger_thread_id,omitempty"`       // root comment ID for the triggering thread
 	TriggerCommentContent string                 `json:"trigger_comment_content,omitempty"` // content of the triggering comment
@@ -903,6 +911,7 @@ type AgentTaskResponse struct {
 	IssueSubIssues           []SubIssueRef         `json:"issue_sub_issues,omitempty"` // the task issue's sub-issues; non-empty tells the run it holds a coordinator (DENE-812)
 	IssueContextGeneratedAt  string                `json:"issue_context_generated_at,omitempty"`
 	IssueContextTruncated    bool                  `json:"issue_context_truncated,omitempty"`
+	IdleUnlimited            bool                  `json:"idle_unlimited,omitempty"`              // a person labelled the issue 长任务: the daemon must not stop the run for going quiet (DENE-2667). Older daemons ignore it
 	ChatSessionID            string                `json:"chat_session_id,omitempty"`             // non-empty for chat tasks
 	ChatChannelType          string                `json:"chat_channel_type,omitempty"`           // "slack" when the chat session is backed by an IM channel; empty for a web-only chat. Makes the agent channel-aware (read history from the channel, not Multica)
 	ChatChannelDeliversFiles bool                  `json:"chat_channel_delivers_files,omitempty"` // server capability: THIS deployment can put a file the agent produced into THIS conversation — the adapter goes back for the bound attachment AND object storage exists to go back to. Absent/false on a server predating it, which is the safe reading: the agent is told to describe its file in words. Never inferred daemon-side from chat_channel_type; see handler.Handler.channelDeliversFiles

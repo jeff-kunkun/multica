@@ -13,8 +13,11 @@ WITH candidate AS MATERIALIZED (
       AND (t.pickup_deadline_at IS NULL OR t.pickup_deadline_at >= now())
     FOR UPDATE OF t
 ), capability AS (
-    INSERT INTO task_supplement_capability (task_id, workspace_id, issue_id, capability, steer_mode)
-    SELECT id, workspace_id, issue_id, 'task-supplement-v1', @steer_mode::text
+    INSERT INTO task_supplement_capability (task_id, workspace_id, issue_id, capability, steer_mode, interrupt_supported)
+    SELECT id, workspace_id, issue_id, 'task-supplement-v1', @steer_mode::text,
+           -- steer-interrupt-v1 (DENE-2667): the providers that can stop the
+           -- current step and continue the same session also live in Go.
+           (@interrupt_offered::boolean AND provider = ANY(@interrupt_providers::text[]))
     FROM candidate
     WHERE @enable_task_supplement::boolean
       -- The providers allowed this mode live in Go (service.steerProviders).
@@ -102,7 +105,7 @@ WHERE s.task_id = @task_id
 -- is bound — never a later turn of the same agent — and the caller keeps the
 -- comment's normal trigger instead.
 WITH locked_task AS MATERIALIZED (
-    SELECT t.id, t.issue_id, t.runtime_id
+    SELECT t.id, t.issue_id, t.runtime_id, cap.interrupt_supported
     FROM agent_task_queue t
     JOIN agent_runtime r ON r.id = t.runtime_id
     JOIN task_supplement_capability cap ON cap.task_id = t.id
@@ -116,10 +119,13 @@ WITH locked_task AS MATERIALIZED (
 ), inserted AS (
     INSERT INTO task_supplement (
         task_id, workspace_id, issue_id, comment_id, author_id,
-        client_request_id, status
+        client_request_id, status, delivery_mode
     )
+    -- An interrupt asked of a run that cannot stop its step is still read at
+    -- the next step: the message is never lost to the run's capability.
     SELECT t.id, @workspace_id, t.issue_id, @comment_id, @author_id,
-           @client_request_id, 'pending'
+           @client_request_id, 'pending',
+           CASE WHEN @want_interrupt::boolean AND t.interrupt_supported THEN 'interrupt' ELSE 'supplement' END
     FROM locked_task t
     RETURNING *
 )
@@ -151,14 +157,14 @@ WHERE s.workspace_id = @workspace_id
 ORDER BY s.created_at, s.task_id;
 
 -- name: ListTaskSupplementMetadata :many
-SELECT cap.task_id, cap.capability, cap.steer_mode,
+SELECT cap.task_id, cap.capability, cap.steer_mode, cap.interrupt_supported,
        COALESCE(array_agg(s.comment_id ORDER BY s.created_at, s.comment_id)
                 FILTER (WHERE s.comment_id IS NOT NULL), '{}'::uuid[])::uuid[] AS comment_ids
 FROM task_supplement_capability cap
 LEFT JOIN task_supplement s ON s.task_id = cap.task_id
 WHERE cap.workspace_id = @workspace_id
   AND cap.task_id = ANY(@task_ids::uuid[])
-GROUP BY cap.task_id, cap.capability, cap.steer_mode;
+GROUP BY cap.task_id, cap.capability, cap.steer_mode, cap.interrupt_supported;
 
 -- name: SettleTerminalTaskSupplements :execrows
 -- Application terminal transitions call this in the same transaction as the
@@ -200,10 +206,13 @@ WITH next AS MATERIALIZED (
     RETURNING s.*
 )
 SELECT claimed.comment_id, claimed.attempt_count, c.content,
-       COALESCE(NULLIF(btrim(u.name), ''), 'a user')::text AS author_name
+       COALESCE(NULLIF(btrim(u.name), ''), NULLIF(btrim(a.name), ''), 'a user')::text AS author_name,
+       claimed.delivery_mode, claimed.workspace_id
 FROM claimed
 JOIN comment c ON c.id = claimed.comment_id
-LEFT JOIN "user" u ON u.id = claimed.author_id;
+LEFT JOIN "user" u ON u.id = claimed.author_id
+-- Interrupts can come from an agent (a manager); its name is the author's.
+LEFT JOIN agent a ON a.id = claimed.author_id AND c.author_type = 'agent';
 
 -- name: AckTaskSupplementDelivered :one
 -- The provider can accept input before completion while its HTTP acknowledgement
@@ -405,7 +414,8 @@ WHERE task_id = @followup_task_id
 -- mid-reply, so a steer can be refused up front with the reason.
 SELECT t.id, t.agent_id, r.provider,
        COALESCE(cap.capability, '')::text AS capability,
-       COALESCE(cap.steer_mode, '')::text AS steer_mode
+       COALESCE(cap.steer_mode, '')::text AS steer_mode,
+       COALESCE(cap.interrupt_supported, false)::boolean AS interrupt_supported
 FROM agent_task_queue t
 JOIN agent_runtime r ON r.id = t.runtime_id
 LEFT JOIN task_supplement_capability cap ON cap.task_id = t.id

@@ -20,6 +20,7 @@
 - [Compact cross-workspace read and durable replay protocol](kun/fast-access.md)
 - [Local MCP adapter and client configuration](kun/fast-access-mcp.md)
 - [Office issue watchdog: configuration, heartbeat, stop, and rollback](kun/office-issue-watchdog.md)
+- [Project folder: one folder per project, shared-folder warning, rollback](kun/office-project-folder.md)
 
 - [CLI project names, temp files, key status and compact reads](kun/cli-convenience.md)
 

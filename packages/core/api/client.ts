@@ -47,6 +47,7 @@ import type {
   AgentEnvResponse,
   UpdateAgentEnvRequest,
   AgentTask,
+  TaskLive,
   AgentActivityBucket,
   AgentRunCount,
   WorkspaceWorkingAgent,
@@ -206,6 +207,8 @@ import type {
   PluginInstallRequest,
   PluginConfigRequest,
   IssuePullRequestsResponse,
+  IssuePlanAnswer,
+  IssuePlansResponse,
   ListGitHubInstallationsResponse,
   ListGitHubRepositoriesResponse,
   GitHubConnectResponse,
@@ -525,6 +528,8 @@ import {
   EMPTY_ISSUE_PROPERTIES_RESPONSE,
   EMPTY_ISSUE_PULL_REQUESTS_RESPONSE,
   IssuePullRequestsResponseSchema,
+  EMPTY_ISSUE_PLANS_RESPONSE,
+  IssuePlansResponseSchema,
   ResourceLabelsResponseSchema,
   EMPTY_LABEL,
   EMPTY_LIST_LABELS_RESPONSE,
@@ -1900,7 +1905,11 @@ export class ApiClient {
   async batchUpdateIssues(
     issueIds: string[],
     updates: UpdateIssueRequest,
-  ): Promise<{ updated: number; rejected: Array<{ issue_id: string; reason: string }> }> {
+  ): Promise<{
+    updated: number;
+    /** code names a refusal the caller can act on, e.g. "plan_not_approved" (DENE-2670). */
+    rejected: Array<{ issue_id: string; reason: string; code?: string }>;
+  }> {
     return this.fetch("/api/issues/batch-update", {
       method: "POST",
       body: JSON.stringify({ issue_ids: issueIds, updates }),
@@ -1931,6 +1940,7 @@ export class ApiClient {
     suppressAgentIds?: string[],
     steerTaskIds?: string[],
     mode?: CommentSendMode,
+    interruptTaskIds?: string[],
   ): Promise<Comment> {
     return this.fetch(`/api/issues/${issueId}/comments`, {
       method: "POST",
@@ -1941,6 +1951,7 @@ export class ApiClient {
         ...(attachmentIds?.length ? { attachment_ids: attachmentIds } : {}),
         ...(suppressAgentIds?.length ? { suppress_agent_ids: suppressAgentIds } : {}),
         ...(steerTaskIds?.length ? { steer_task_ids: steerTaskIds } : {}),
+        ...(interruptTaskIds?.length ? { interrupt_task_ids: interruptTaskIds } : {}),
         ...(mode ? { mode } : {}),
       }),
     });
@@ -2728,6 +2739,8 @@ export class ApiClient {
       custom_name?: string;
       /** Apply custom_name to every runtime on the same machine. */
       apply_to_machine?: boolean;
+      /** The machine's default working directory; "" clears it. Owner only. */
+      default_work_dir?: string;
     },
   ): Promise<AgentRuntime> {
     return this.fetch(`/api/runtimes/${runtimeId}`, {
@@ -3146,6 +3159,13 @@ export class ApiClient {
   // Workspace is resolved server-side from the X-Workspace-Slug header.
   async getAgentTaskSnapshot(): Promise<AgentTask[]> {
     return this.fetch(`/api/agent-task-snapshot`);
+  }
+
+  // Live views of the workspace's running issue runs the caller can see
+  // (DENE-2667 PR 4). Servers without live status answer 404.
+  async listTaskLive(): Promise<TaskLive[]> {
+    const resp = await this.fetch<{ live: TaskLive[] }>(`/api/task-live`);
+    return resp.live ?? [];
   }
 
   // Independent workspace-level projection. Unlike the task snapshot, this
@@ -6187,6 +6207,30 @@ export class ApiClient {
       EMPTY_ISSUE_PULL_REQUESTS_RESPONSE,
       { endpoint: "POST /api/issues/:id/pull-requests" },
     );
+  }
+
+  /** Plan first (DENE-2670): the gate state and every plan version. */
+  async listIssuePlans(issueId: string): Promise<IssuePlansResponse> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/plans`);
+    return parseWithFallback(raw, IssuePlansResponseSchema, EMPTY_ISSUE_PLANS_RESPONSE, {
+      endpoint: "GET /api/issues/:id/plans",
+    });
+  }
+
+  /** Approve a plan version; the agent continues in the same session. */
+  async approveIssuePlan(issueId: string, version: number): Promise<IssuePlanAnswer> {
+    return this.fetch(`/api/issues/${issueId}/plans/${version}/approve`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+  }
+
+  /** "Change it, then do it": send a plan back with what to change. */
+  async requestIssuePlanChanges(issueId: string, version: number, feedback: string): Promise<IssuePlanAnswer> {
+    return this.fetch(`/api/issues/${issueId}/plans/${version}/request-changes`, {
+      method: "POST",
+      body: JSON.stringify({ feedback }),
+    });
   }
 
   /** Remove a PR from an issue; later webhooks will not link it again. */

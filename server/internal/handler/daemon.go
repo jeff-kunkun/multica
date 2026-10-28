@@ -3035,11 +3035,9 @@ func rerunSourceMatchesTaskScope(task, source db.AgentTaskQueue) bool {
 }
 
 // applyFreshSessionRetryWorkdir resolves the prior pointers for an automatic
-// retry that must start a fresh session. CreateRetryTask forces one only when
-// the parent's failure poisoned the conversation (currently
-// codex_semantic_inactivity), and still copies the parent's work_dir onto the
-// child: a poisoned conversation says nothing about the files it left behind,
-// the same contract the manual-retry branch applies (MUL-4869, MUL-7034).
+// retry that must start a fresh session. Issue retries always start fresh and
+// still carry the parent's work_dir onto the child: a failed turn says nothing
+// about the files it left behind.
 //
 // The workdir is offered only to a daemon whose `multica repo checkout` keeps
 // an existing checkout's work (DaemonCapabilityCheckoutKeepsWorkV1). The fresh
@@ -3381,6 +3379,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			)
 		}
 		resp.CheckoutPaths = checkoutPaths
+		resp.IdleUnlimited = h.issueIdleUnlimited(r.Context(), issue)
 		resp.IssueStatus = issue.Status
 		resp.IssueAssigneeType = issue.AssigneeType.String
 		resp.IssueAssigneeID = uuidToString(issue.AssigneeID)
@@ -3426,6 +3425,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		// was actually handed. Building it here, from the issue row already
 		// loaded, is what makes the snapshot mean "the issue as of this claim".
 		currentSnapshot := buildIssueStateSnapshot(issue)
+		currentSnapshot.IdleUnlimited = resp.IdleUnlimited
 		if encoded, err := json.Marshal(currentSnapshot); err != nil {
 			// A snapshot that cannot be encoded is simply not recorded; the
 			// next run reports "not compared" and reads the issue, which is
@@ -3548,6 +3548,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		// Project workflow (MUL-7420): best-effort, like the status catalog
 		// below — a failure degrades to the workspace-wide status rules.
 		resp.ProjectWorkflow = h.claimProjectWorkflow(r.Context(), issue, task)
+		resp.PlanGate = h.claimPlanGate(r.Context(), issue)
 
 		// Load every planned input as one chronological, de-duplicated set.
 		// The trigger is included here so the delivery receipt can only contain
@@ -3696,20 +3697,11 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 
 		// Resolve the prior agent session / workdir to resume.
 		if task.RerunOfTaskID.Valid {
-			// Manual retry: resume precisely from the source task the user
-			// clicked, NOT the most-recent (agent, issue) row — a parallel task
-			// on the same issue must never hijack the resume (MUL-4869). The
-			// workdir is ALWAYS reused when it still exists; the session is
-			// resumed only when the source failure did not poison the
-			// conversation AND the source ran on this runtime.
-			//
-			// Resume-safety is computed HERE from the source task, not read off
-			// task.ForceFreshSession: RerunIssue pins that flag to true so an OLD
-			// claim handler mid rolling-deploy degrades to a clean start instead
-			// of resuming a different execution via the (agent, issue) lookup.
-			// service.ResumeUnsafeFailure mirrors GetLastTaskSession, including
-			// its 400/invalid_request_error text defense for legacy /
-			// mis-classified rows that the exact-source path would otherwise miss.
+			// Manual retry: use the exact source task the user clicked for its
+			// workdir, NOT the most-recent (agent, issue) row — a parallel task
+			// on the same issue must never supply its workdir (MUL-4869). Issue
+			// reruns always start a fresh session, including legacy rows without
+			// the fresh-session flag.
 			//
 			// When the source workdir is gone (GC'd), absent on this runtime, or
 			// was never recorded (failed too early), execenv.Reuse falls back to a
@@ -3722,18 +3714,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				if src.WorkDir.Valid {
 					resp.PriorWorkDir = src.WorkDir.String
 				}
-				if !service.ResumeUnsafeFailure(src.FailureReason.String, src.Error.String) &&
-					src.SessionID.Valid && src.RuntimeID == task.RuntimeID {
-					resp.PriorSessionID = src.SessionID.String
-					// The deltas date from the run we actually resume, which on
-					// this path is the operator-chosen source — routinely NOT
-					// the newest run on the issue. nil unless that run proved it
-					// delivered its prompt to the provider (MUL-7344).
-					resumeAnchor = newResumedRunAnchor(src.Status, src.StartedAt, src.IssueSnapshot)
-				}
 				// MUL-5305: if the source task withheld its Codex session because
-				// the rollout was missing, this rerun has nothing resumable from it
-				// — disclose the gap rather than silently starting fresh.
+				// the rollout was missing, disclose the gap rather than silently
+				// starting fresh.
 				if src.SessionRolloutMissing {
 					resp.PriorSessionResumeUnavailable = true
 				}
@@ -3748,20 +3731,22 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				)
 				resp.PriorSessionResumeUnavailable = true
 			}
-		} else if !task.ForceFreshSession {
-			// Non-rerun follow-up on the same issue: resume the most recent
-			// (agent, issue) session so the agent keeps the issue's conversation
-			// context across turns. The "Focus on THIS comment" guard in
-			// prompt.go defends against inheriting the prior turn's "Done."
-			// marker, and GetLastTaskSession already excludes poisoned sessions.
+		} else if service.ShouldResumeIssueSession(*task) {
+			// Comment-triggered follow-up on the same issue: resume the most
+			// recent (agent, issue) session so the agent keeps the issue's
+			// conversation context across turns. The "Focus on THIS comment"
+			// guard in prompt.go defends against inheriting the prior turn's
+			// "Done." marker, and GetLastTaskSession already excludes poisoned sessions.
+			// Issue retries bypass this lookup even when a legacy row lacks the
+			// fresh-session flag; they take the retry workdir path below.
 			if prior, err := h.Queries.GetLastTaskSession(r.Context(), db.GetLastTaskSessionParams{
 				AgentID: task.AgentID,
 				IssueID: task.IssueID,
 			}); err == nil && prior.SessionID.Valid {
 				// Cold and thick (DENE-1331): the cache is gone and the
 				// context is large, so the run starts a new session in the
-				// same working directory. An automatic retry continues its
-				// parent's session regardless.
+				// same working directory. Issue retries are handled separately
+				// and always start a fresh session.
 				coldAndThick := prior.RuntimeID == task.RuntimeID && !task.RetryOfTaskID.Valid && h.sessionTooColdAndThick(r.Context(), *task, prior.SessionID.String)
 				if prior.RuntimeID == task.RuntimeID && !coldAndThick {
 					resp.PriorSessionID = prior.SessionID.String
@@ -3800,12 +3785,11 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		//
 		// resumeAnchor is non-nil only where a session was actually ADOPTED
 		// above, so the run being dated is the run whose context the agent will
-		// continue from. Every other path — no prior session, a session on
-		// another runtime, a forced-fresh retry, a rerun whose source failure
-		// poisoned the conversation — leaves it nil, reports neither delta, and
-		// the daemon falls back to the reads it has always performed. That is
-		// the conservative direction: the cost of not reporting is one extra
-		// read, while the cost of reporting against the wrong run is an agent
+		// continue from. Other paths — no prior session, another runtime, an
+		// issue retry or rerun — have no anchor. They send no deltas and let the
+		// daemon perform the reads it has always performed. That is the
+		// conservative direction: the cost of not reporting is one extra read,
+		// while the cost of reporting against the wrong run is an agent
 		// continuing on stale requirements with nothing to signal it.
 		//
 		// PriorSessionResumeUnavailable is deliberately NOT consulted here. It
@@ -4431,6 +4415,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	if resp.CodeDecision != nil {
 		h.persistCodeDecision(r.Context(), task.ID, *resp.CodeDecision)
 	}
+	resp.DefaultWorkDir = h.defaultWorkDirForClaim(r.Context(), resp, runtime.ID)
 
 	// DENE-727: an automatic retry that inherited the parent's session already
 	// ran partway. Tell the daemon to continue that session instead of
@@ -4439,7 +4424,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	// signal — a retry of a startup failure has no session and keeps the
 	// full prompt. force_fresh_session (poisoned conversation) also stays
 	// on the full-prompt path.
-	if task.RetryOfTaskID.Valid && !task.ForceFreshSession && task.SessionID.Valid {
+	if service.ShouldContinueInterruptedSession(*task) {
 		resp.ContinueInterruptedSession = true
 	}
 
@@ -6464,6 +6449,7 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 	h.hydrateMachineQueueReasons(r.Context(), resp)
 	attachCapacityRetries(allTasks, resp)
 	h.hydrateTaskSupplementMetadata(r.Context(), r, issue.WorkspaceID, tasks, resp)
+	h.hydrateTaskIdleUnlimited(r.Context(), issue, tasks, resp)
 	// Execution-log rows render the "on behalf of <member>" badge, so this
 	// issue-facing surface must resolve initiator/originator names (departed-safe,
 	// one batch) — otherwise the badge falls back to "someone" on issue detail.

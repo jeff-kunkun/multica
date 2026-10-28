@@ -222,8 +222,19 @@ func (d *Daemon) reconcileOneAgentCLI(ctx context.Context, spec agentCLIRelease,
 		return
 	}
 
+	if !cliVersionAllowed(spec, latest) {
+		// Neither auto-follow nor "update now" crosses the ceiling; moving to
+		// that major is a manual decision outside the daemon.
+		status.Phase = agentCLIPhaseUnsupported
+		status.Error = fmt.Sprintf("%s %s is at or above %s; this daemon only follows releases below %s", spec.Provider, latest, spec.Below, spec.Below)
+		d.clearAgentCLIWaiting(spec.Provider)
+		d.publishAgentCLIStatus(ctx, spec.Provider, status, manual)
+		d.finishAgentCLIManual(spec.Provider, manual.RequestID)
+		return
+	}
+
 	wantUpgrade := follow || manual.RequestID != ""
-	steps, why := planAgentCLIUpgrade(spec, binaryPath)
+	steps, why := planAgentCLIUpgrade(spec, binaryPath, latest)
 	if !wantUpgrade {
 		status.Phase = agentCLIPhaseAvailable
 		d.clearAgentCLIWaiting(spec.Provider)

@@ -75,11 +75,15 @@ function SourceContextCreateIssueDialog({
   const [sourceContextExpanded, setSourceContextExpanded] = useState(false);
   const sourceQuery = useQuery(sourceContextPreviewOptions(wsId, anchorCommentId));
 
+  const seedTitle = typeof data?.title === "string" ? data.title : "";
   useLayoutEffect(() => {
     useIssueDraftStore.getState().beginIsolatedDraft();
+    // A title read off the comment (DENE-2671) seeds the fresh draft before
+    // the panel mounts, so the title editor opens with it.
+    if (seedTitle) useIssueDraftStore.getState().setManual({ title: seedTitle });
     setDraftReady(true);
     return () => useIssueDraftStore.getState().endIsolatedDraft();
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!draftReady) return null;
 

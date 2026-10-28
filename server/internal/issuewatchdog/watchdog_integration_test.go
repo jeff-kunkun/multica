@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -137,6 +138,250 @@ ORDER BY created_at DESC LIMIT 1`, issueID).Scan(&commentID); err != nil {
 		t.Fatalf("repeated scan resent an event; got %d webhook calls", len(received()))
 	}
 	t.Log("at +15m after the manager alert, COO received exactly one escalation; repeat scan sent no duplicate")
+}
+
+// The three cases the office asked for (DENE-2667 PR 1): a live run that
+// reported 5 minutes ago is left alone, a live run silent for 25 minutes gets a
+// project-group reminder and no issue comment, and an assigned issue that never
+// started still gets the issue-comment wake.
+func TestRunAwareWatchdogRemindsGroupInsteadOfCommentingOnLiveRuns(t *testing.T) {
+	ctx := context.Background()
+	pool := testutil.OpenTestDatabase(ctx, t)
+	fx, workspaceID, agentID, projectName, seedIssueID := watchdogFixture(t, pool)
+
+	const fakeKey = "run-aware-test-key"
+	receiver, received, _ := newFakeReceiver(t, fakeKey, http.StatusAccepted)
+	defer receiver.Close()
+
+	h := handler.New(db.New(pool), pool, realtime.NewHub(), events.New(), nil, nil, nil, analytics.NoopClient{}, handler.Config{})
+	w := New(pool, Config{
+		Enabled: true, WorkspaceID: workspaceID, WebhookURL: receiver.URL, WebhookKey: fakeKey,
+		TickInterval: time.Minute, TodoStartDelay: 10 * time.Minute,
+		IdleInterval: 30 * time.Minute, ManagerWait: 15 * time.Minute,
+		MaxEmployeeRound: 2, HeartbeatFile: filepath.Join(t.TempDir(), "last-run"),
+		RunAware: true, SilentInterval: 20 * time.Minute,
+	}, h.CreateWatchdogNudgeComment)
+	now := time.Now().UTC().Truncate(time.Second)
+	w.now = func() time.Time { return now }
+
+	var projectID, runtimeID string
+	var properties []byte
+	if err := pool.QueryRow(ctx, `SELECT project_id::text, properties FROM issue WHERE id = $1::uuid`,
+		seedIssueID).Scan(&projectID, &properties); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT runtime_id::text FROM agent WHERE id = $1::uuid`,
+		agentID).Scan(&runtimeID); err != nil {
+		t.Fatal(err)
+	}
+	// The seed issue was assigned just now; keep it out of the scan.
+	if _, err := pool.Exec(ctx, `UPDATE issue SET status = 'backlog' WHERE id = $1::uuid`, seedIssueID); err != nil {
+		t.Fatal(err)
+	}
+	newIssue := func(title, status string, cols testutil.Cols) string {
+		t.Helper()
+		base := testutil.Cols{
+			"workspace_id": workspaceID, "project_id": projectID, "properties": json.RawMessage(properties),
+			"status": status, "assignee_type": "agent", "assignee_id": agentID,
+			"created_at": now.Add(-2 * time.Hour), "updated_at": now.Add(-15 * time.Minute),
+		}
+		for k, v := range cols {
+			base[k] = v
+		}
+		return fx.Issue(t, title, base)
+	}
+	liveRun := func(issueID string, lastReport time.Time) string {
+		t.Helper()
+		taskID := fx.Task(t, agentID, testutil.Cols{
+			"issue_id": issueID, "runtime_id": runtimeID, "status": "running",
+			"dispatched_at": now.Add(-40 * time.Minute), "started_at": now.Add(-40 * time.Minute),
+		})
+		fx.Comment(t, issueID, "still on it: tests are running", testutil.Cols{
+			"author_type": "agent", "author_id": agentID, "created_at": lastReport,
+		})
+		return taskID
+	}
+
+	reportedID := newIssue("live run, reported 5m ago", "in_progress", testutil.Cols{"first_executed_at": now.Add(-40 * time.Minute)})
+	liveRun(reportedID, now.Add(-5*time.Minute))
+	silentID := newIssue("live run, silent 25m", "in_progress", testutil.Cols{"first_executed_at": now.Add(-40 * time.Minute)})
+	silentTaskID := liveRun(silentID, now.Add(-25*time.Minute))
+	notStartedID := newIssue("assigned, never started", "todo", nil)
+
+	// The employee reported through the progress line 5m ago, then a manager
+	// overwrote the issue's summary. The history still has the report.
+	overwrittenID := newIssue("live run, progress overwritten by someone else", "in_progress",
+		testutil.Cols{"first_executed_at": now.Add(-40 * time.Minute)})
+	liveRun(overwrittenID, now.Add(-40*time.Minute))
+	managerID := "01a17d60-0000-7000-8000-000000000001"
+	if _, err := pool.Exec(ctx, `
+INSERT INTO issue_progress (workspace_id, issue_id, text, source, author_type, author_id, created_at)
+VALUES ($1::uuid, $2::uuid, '跑完单测，正在改接口', 'agent', 'agent', $3::uuid, $4),
+       ($1::uuid, $2::uuid, '经理改写了摘要', 'member', 'member', $5::uuid, $6)`,
+		workspaceID, overwrittenID, agentID, now.Add(-5*time.Minute), managerID, now.Add(-2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `
+UPDATE issue SET progress_text = '经理改写了摘要', progress_source = 'member',
+    progress_author_type = 'member', progress_author_id = $2::uuid, progress_updated_at = $3
+WHERE id = $1::uuid`, overwrittenID, managerID, now.Add(-2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+
+	// A bare acknowledgement 3m ago is not a report: the run has been silent
+	// since its last substantive comment 25m ago.
+	ackID := newIssue("live run, only acknowledged", "in_progress", testutil.Cols{"first_executed_at": now.Add(-40 * time.Minute)})
+	ackTaskID := liveRun(ackID, now.Add(-25*time.Minute))
+	fx.Comment(t, ackID, "收到。", testutil.Cols{
+		"author_type": "agent", "author_id": agentID, "created_at": now.Add(-3 * time.Minute),
+	})
+
+	// The silent run's daemon reported a command in flight 30s ago; the
+	// acknowledged run's last live report is 10m old, too stale to name
+	// (DENE-2667 PR 4).
+	liveStatus := func(taskID, issueID, command string, reportedAt time.Time) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, `
+INSERT INTO task_live_status (task_id, workspace_id, issue_id, agent_id, tool, command,
+    tools_in_flight, last_activity_at, reported_at)
+VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'Bash', $5, 1, $6, $6)`,
+			taskID, workspaceID, issueID, agentID, command, reportedAt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	liveStatus(silentTaskID, silentID, "go test ./internal/... -count=1", now.Add(-30*time.Second))
+	liveStatus(ackTaskID, ackID, "make build", now.Add(-10*time.Minute))
+
+	watchdogComments := func(issueID string) int {
+		t.Helper()
+		var n int
+		if err := pool.QueryRow(ctx, `
+SELECT count(*) FROM comment
+WHERE issue_id = $1::uuid AND author_type = 'system' AND content LIKE '%office-issue-watchdog%'`,
+			issueID).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	eventsFor := func(issueID string) []webhookEvent {
+		var out []webhookEvent
+		for _, e := range received() {
+			if e.IssueID == issueID {
+				out = append(out, e)
+			}
+		}
+		return out
+	}
+
+	if err := w.Run(ctx, now); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+
+	if n, got := watchdogComments(reportedID), eventsFor(reportedID); n != 0 || len(got) != 0 {
+		t.Fatalf("live run that reported 5m ago: comments=%d events=%+v, want none", n, got)
+	}
+	t.Log("live run, reported 5m ago: no comment, no group reminder")
+
+	if n := watchdogComments(silentID); n != 0 {
+		t.Fatalf("live run silent 25m got %d issue comments; a comment would be steered into the run", n)
+	}
+	silentEvents := eventsFor(silentID)
+	if len(silentEvents) != 1 {
+		t.Fatalf("live run silent 25m: events=%+v, want one group reminder", silentEvents)
+	}
+	if e := silentEvents[0]; e.EventType != RunningSilentEventType || e.WakeTarget != "project_group" ||
+		e.TaskID != silentTaskID || e.SilentMinutes != 25 || e.ProjectName != projectName || e.Manager != "CTO·扳手" {
+		t.Fatalf("group reminder = %+v", e)
+	}
+	if e := silentEvents[0]; e.CurrentCommand != "go test ./internal/... -count=1" ||
+		!strings.HasSuffix(e.Reason, "；当前命令：go test ./internal/... -count=1") {
+		t.Fatalf("group reminder does not name the command in flight: command=%q reason=%q", e.CurrentCommand, e.Reason)
+	}
+	t.Logf("live run, silent 25m: group reminder only (type=%s target=%s silent=%dm project=%q)",
+		silentEvents[0].EventType, silentEvents[0].WakeTarget, silentEvents[0].SilentMinutes, silentEvents[0].ProjectName)
+
+	if n, got := watchdogComments(overwrittenID), eventsFor(overwrittenID); n != 0 || len(got) != 0 {
+		t.Fatalf("employee progress 5m ago, summary overwritten since: comments=%d events=%+v, want none", n, got)
+	}
+	t.Log("live run, own progress 5m ago under someone else's summary: no reminder")
+
+	if got := eventsFor(ackID); watchdogComments(ackID) != 0 || len(got) != 1 || got[0].SilentMinutes != 25 {
+		t.Fatalf("live run acknowledged 3m ago, last report 25m ago: events=%+v, want one reminder at 25 silent minutes", got)
+	} else if got[0].CurrentCommand != "" || strings.Contains(got[0].Reason, "当前命令") {
+		t.Fatalf("a 10m-old live report was named as the current command: %+v", got[0])
+	}
+	t.Log("live run, bare 收到。 3m ago: silence still counted from the 25m-old report")
+
+	if n, got := watchdogComments(notStartedID), eventsFor(notStartedID); n != 1 || len(got) != 0 {
+		t.Fatalf("never-started issue: comments=%d events=%+v, want one comment wake", n, got)
+	}
+	var queued int
+	if err := pool.QueryRow(ctx, `
+SELECT count(*) FROM agent_task_queue WHERE issue_id = $1::uuid AND status IN ('queued', 'dispatched', 'deferred')`,
+		notStartedID).Scan(&queued); err != nil {
+		t.Fatal(err)
+	}
+	if queued == 0 {
+		t.Fatal("the never-started issue's comment wake did not queue a run")
+	}
+	t.Log("assigned, never started: issue-comment wake queued a run")
+
+	// Within the interval the silent run is not reminded again; at the
+	// interval it is, and still without an issue comment.
+	if err := w.Run(ctx, now.Add(19*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if got := eventsFor(silentID); len(got) != 1 {
+		t.Fatalf("reminded again 19m after the first reminder: %+v", got)
+	}
+	if err := w.Run(ctx, now.Add(20*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if got := eventsFor(silentID); len(got) != 2 || got[1].SilentMinutes != 45 || got[1].CurrentCommand != "" {
+		t.Fatalf("second reminder at +20m = %+v, want one more at 45 silent minutes, no stale command", got)
+	}
+	if n := watchdogComments(silentID); n != 0 {
+		t.Fatalf("silent live run collected %d issue comments", n)
+	}
+	t.Log("silent run: second group reminder exactly 20m after the first, none in between")
+}
+
+func TestRunAwareWatchdogIsOffByDefault(t *testing.T) {
+	ctx := context.Background()
+	pool := testutil.OpenTestDatabase(ctx, t)
+	fx, workspaceID, agentID, _, issueID := watchdogFixture(t, pool)
+	var runtimeID string
+	if err := pool.QueryRow(ctx, `SELECT runtime_id::text FROM agent WHERE id = $1::uuid`, agentID).Scan(&runtimeID); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC().Truncate(time.Second)
+	if _, err := pool.Exec(ctx, `
+UPDATE issue SET status = 'in_progress', created_at = $2, first_executed_at = $3
+WHERE id = $1::uuid`, issueID, now.Add(-2*time.Hour), now.Add(-40*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	fx.Task(t, agentID, testutil.Cols{
+		"issue_id": issueID, "runtime_id": runtimeID, "status": "running", "started_at": now.Add(-40 * time.Minute),
+	})
+	var nudges int
+	w := New(pool, Config{
+		Enabled: true, WorkspaceID: workspaceID, WebhookURL: "http://127.0.0.1:1", WebhookKey: "unused",
+		TickInterval: time.Minute, TodoStartDelay: 10 * time.Minute,
+		IdleInterval: 30 * time.Minute, ManagerWait: 15 * time.Minute,
+		MaxEmployeeRound: 2, HeartbeatFile: filepath.Join(t.TempDir(), "last-run"),
+		SilentInterval: 20 * time.Minute,
+	}, func(context.Context, string, string, string, string) error {
+		nudges++
+		return nil
+	})
+	// The status update above records a status change now, so the idle
+	// interval counts from here.
+	if err := w.Run(ctx, now.Add(31*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if nudges != 1 {
+		t.Fatalf("with RunAware off, an idle in_progress issue was nudged %d times, want the old single comment wake", nudges)
+	}
 }
 
 func TestMissingManagerPropertyFallsBackToWrench(t *testing.T) {

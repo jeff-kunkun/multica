@@ -8,6 +8,8 @@ import { api } from "@multica/core/api";
 import { issueTasksOptions } from "@multica/core/issues/queries";
 import { useHaltIssueRuns, useResumeIssueRuns } from "@multica/core/issues/mutations";
 import { useActorName } from "@multica/core/workspace/hooks";
+import { useFeatureEnabled } from "@multica/core/config";
+import { OFFICE_IDLE_STOP_FLAG } from "@multica/core/feature-flags";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
 import type { AgentTask } from "@multica/core/types";
 import { cn } from "@multica/ui/lib/utils";
@@ -44,6 +46,7 @@ import { TaskStatusIcon } from "./task-status-icon";
 import { useStatusLabel, useTriggerText } from "./task-run-labels";
 import { StopWorkDialog } from "../../common/stop-work-dialog";
 import { WakeupRunLabel } from "./wakeup-source-chip";
+import { TaskLiveLine, useShowRunLive } from "../../common/task-live-line";
 
 // Right-panel section that lists every agent run for this issue. Active
 // runs sit at the top (always visible when present); below them the issue's
@@ -556,10 +559,14 @@ const STATUS_TONE: Record<AgentTask["status"], string> = {
 export function ActiveTaskRow({
   task,
   issueId,
+  liveDetails = false,
   onTranscriptOpenChange,
 }: {
   task: AgentTask;
   issueId: string;
+  /** Lays the live status out as labelled rows (the header card) instead of
+   *  the right panel's two lines. */
+  liveDetails?: boolean;
   onTranscriptOpenChange?: (open: boolean, fromKeyboard?: boolean) => void;
 }) {
   const { t } = useT("issues");
@@ -582,6 +589,10 @@ export function ActiveTaskRow({
       })
     : statusLabel;
   const trigger = useTriggerText(task);
+  // A 长任务 run is never stopped for going quiet; office test builds say so.
+  const idleUnlimited = useFeatureEnabled(OFFICE_IDLE_STOP_FLAG) && task.idle_unlimited === true;
+  // The daemon's live view of a running issue run; office test builds show it.
+  const showLive = useShowRunLive(task);
 
   // Running rows show a live-ticking elapsed timer (the ticking digits carry
   // "alive", the duration carries "how long"). Only running rows tick.
@@ -631,7 +642,25 @@ export function ActiveTaskRow({
   // test that asserts a scenario production cannot produce. Restore it in the
   // same change that adds incremental reporting + cache invalidation.
   return (
-    <RowShell task={task} footer={reason ? label : undefined}>
+    <RowShell
+      task={task}
+      footer={
+        reason ? (
+          label
+        ) : idleUnlimited || showLive ? (
+          <>
+            {idleUnlimited && t(($) => $.execution_log.idle_unlimited)}
+            {showLive && (
+              <TaskLiveLine
+                task={task}
+                details={liveDetails}
+                className={cn(idleUnlimited && "mt-0.5", liveDetails && "pt-1")}
+              />
+            )}
+          </>
+        ) : undefined
+      }
+    >
       {task.wakeup_id ? (
         <WakeupRunLabel task={task} fallback={trigger} render={(label) => <TriggerText text={label} />} />
       ) : (
@@ -805,7 +834,7 @@ function RowShell({
    *  is swapped out for the action buttons on hover — a title there would
    *  disappear at exactly the moment the pointer arrives. */
   title?: string;
-  footer?: string;
+  footer?: React.ReactNode;
   /** Top-aligns the avatar with the first of several lines. */
   multiline?: boolean;
   children: React.ReactNode;
@@ -833,7 +862,7 @@ function RowShell({
       {children}
     </div>
   );
-  return footer ? <div>{row}<p className="ml-7 whitespace-normal px-1 pb-1.5 text-caption text-muted-foreground">{footer}</p></div> : row;
+  return footer ? <div>{row}<div className="ml-7 whitespace-normal px-1 pb-1.5 text-caption text-muted-foreground empty:hidden">{footer}</div></div> : row;
 }
 
 function TriggerText({ text, emphasis = false }: { text: string; emphasis?: boolean }) {

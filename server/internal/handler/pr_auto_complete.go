@@ -466,6 +466,20 @@ func (h *Handler) LinkIssuePullRequest(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	workspaceID := uuidToString(issue.WorkspaceID)
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	// Plan first (DENE-2670): an agent links no PR before a plan is approved.
+	if actorType == "agent" {
+		blocked, err := h.planBlocksAgent(r.Context(), issue)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to check plan approval")
+			return
+		}
+		if blocked {
+			writePlanNotApproved(w)
+			return
+		}
+	}
 	var req LinkIssuePullRequestRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -485,8 +499,6 @@ func (h *Handler) LinkIssuePullRequest(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, "pull request not found; it appears here once its repository is connected and the PR has been synced")
 		return
 	}
-	workspaceID := uuidToString(issue.WorkspaceID)
-	_, actorID := h.resolveActor(r, userID, workspaceID)
 	linkedBy := pgtype.UUID{}
 	if parsed, err := util.ParseUUID(actorID); err == nil {
 		linkedBy = parsed

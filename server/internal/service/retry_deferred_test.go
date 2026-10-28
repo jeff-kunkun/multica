@@ -15,8 +15,8 @@ import (
 // three-tier provider_network schedule (MUL-4910): CreateRetryTask inserts a
 // 'deferred' child carrying fire_at when the fire_at param is set (the final,
 // backed-off attempt) and an immediately-claimable 'queued' child when it is
-// NULL (every other retry). Both continue the resume chain — force_fresh_session
-// stays false for a provider_network parent.
+// NULL (every other retry). Issue retries start fresh while preserving the
+// existing provider_network backoff schedule and workdir.
 func TestCreateRetryTaskFireAtControlsDeferral(t *testing.T) {
 	pool := newResolveOriginatorPool(t)
 	ctx := context.Background()
@@ -77,9 +77,11 @@ func TestCreateRetryTaskFireAtControlsDeferral(t *testing.T) {
 			if child.MaxAttempts != tc.wantMaxAttempts {
 				t.Errorf("max_attempts = %d, want %d", child.MaxAttempts, tc.wantMaxAttempts)
 			}
-			// provider_network is resume-safe: the retry must continue the session.
-			if child.ForceFreshSession {
-				t.Errorf("force_fresh_session = true, want false (provider_network resumes) for %s", util.UUIDToString(child.ID))
+			if !child.ForceFreshSession {
+				t.Errorf("force_fresh_session = false, want true for issue retry %s", util.UUIDToString(child.ID))
+			}
+			if child.SessionID.Valid {
+				t.Errorf("session_id = %q, want NULL for a fresh issue retry", child.SessionID.String)
 			}
 			if !child.ChannelContextRevision.Valid || child.ChannelContextRevision.Int64 != 7 {
 				t.Errorf("channel_context_revision = %+v, want 7", child.ChannelContextRevision)
@@ -465,8 +467,8 @@ func TestFailTaskProviderCapacityBudget(t *testing.T) {
 			if childStatus != "deferred" {
 				t.Errorf("child status = %q, want deferred", childStatus)
 			}
-			if childSession != "src-session" {
-				t.Errorf("child session = %q, want the parent's session resumed", childSession)
+			if childSession != "" {
+				t.Errorf("child session = %q, want a fresh issue retry session", childSession)
 			}
 			if !fireAt.Valid {
 				t.Fatal("fire_at must be set: capacity retries are deferred, not immediate")

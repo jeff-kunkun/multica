@@ -35,7 +35,7 @@ before checking containment and ownership. Other locations require
 `--allow-external-file`; attachment and other file flags keep their own rules.
 
 ## Sub-issues: todo starts work now, backlog parks it
-The steps are in `references/sub-issues.md`. `--status backlog` parks a child instead of starting it. `` `--stage <N>` `` groups children into a stage, and the parent is woken when a whole stage finishes. Promote one parked child with `multica issue status <child-id> todo`.
+The steps are in `references/sub-issues.md`. `--status backlog` parks a child instead of starting it. `` `--stage <N>` `` groups children into a stage, and the parent is woken when a whole stage finishes. Promote one parked child with `multica issue status <child-id> todo`; `--after <sibling>` makes a child start by itself when that sibling is done.
 
 ## Editing comments without overwriting concurrent work
 

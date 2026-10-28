@@ -51,6 +51,10 @@ type localDirectoryAssignment struct {
 	RealPath   string // canonical key for the folder-run registry
 	ResourceID string // project_resource id, for identity backfill
 	ProjectID  string
+	// DefaultDir marks the machine's default working directory standing in
+	// for a project that binds no folder (DENE-2667 PR 8). It is the run's
+	// cwd like a bound folder, but it is not the project's code.
+	DefaultDir bool
 }
 
 // DisplayName is the human-facing name for this directory, safe to render in

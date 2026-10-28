@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -75,7 +76,29 @@ func perTurnContextBlocks(task Task, opts promptOpts) string {
 	b.WriteString(execenv.BuildConnectedAppsBlock(task.ConnectedApps))
 	b.WriteString(buildJoinedWakeupsBlock(task.WakeupJoined))
 	b.WriteString(buildProjectWorkflowBlock(task))
+	b.WriteString(buildPlanGateBlock(task.PlanGate))
 	return b.String()
+}
+
+// buildPlanGateBlock tells a run on a plan-first issue (DENE-2670) to propose a
+// plan and stop. The server refuses review, done and PR links until a person
+// approves; approval is a reply that resumes this same session.
+func buildPlanGateBlock(state string) string {
+	var lead string
+	switch state {
+	case "needs_plan":
+		lead = "This issue asks for a plan before the work, and no plan is proposed yet."
+	case "awaiting_approval":
+		lead = "This issue asks for a plan before the work. Your plan is waiting for a person's approval."
+	case "changes_requested":
+		lead = "This issue asks for a plan before the work. A person sent your plan back: read their reply under the plan card and propose a revised version."
+	default:
+		return ""
+	}
+	return "[Plan first]\n" + lead + "\n" +
+		"- Propose with `multica issue plan propose <issue> --goal \"...\" --out-of-scope \"...\" --step \"...\" --done-when \"...\"` (1 to 5 steps); `multica issue plan show <issue>` reads the current state.\n" +
+		"- Until a plan is approved, do not change files, commit or open a pull request. The server refuses moving the issue to review or done and linking a PR.\n" +
+		"- After proposing, end your turn. Approval or a change request arrives as a reply under the plan card and resumes this same session.\n\n"
 }
 
 // buildProjectWorkflowBlock carries the issue's project workflow and current
@@ -180,10 +203,19 @@ func buildIssueContextBlock(task Task) string {
 	// Ahead of the description: the snapshot is cut from the end, and a long
 	// plan must not be what pushes the division of labour out of it.
 	writeCoordinatorRole(&b, task.IssueSubIssues)
-	if task.IssueDescription != "" {
-		fmt.Fprintf(&b, "Description:\n%s\n", task.IssueDescription)
-	}
 	warm := task.PriorSessionID != "" && !task.PriorSessionResumeUnavailable
+	if task.IssueDescription != "" {
+		// A resumed session already holds the description from the run that
+		// last sent it. When the server compared it against this agent's
+		// previous run and found it unchanged, sending it again only re-pays
+		// it (DENE-2679); any doubt — no comparison, a changed description,
+		// a session that did not come back — sends it in full.
+		if warm && task.IssueStateDeltaKnown && !slices.Contains(task.IssueChangedFields, "description") {
+			b.WriteString("Description: unchanged since your previous run on this issue, so it is not repeated; `multica issue get` re-reads it.\n")
+		} else {
+			fmt.Fprintf(&b, "Description:\n%s\n", task.IssueDescription)
+		}
+	}
 	if warm {
 		if !task.NewCommentsDeltaKnown {
 			b.WriteString("The server could not confirm the comment delta for this resumed run; scan the issue comments with the CLI before acting.\n")

@@ -81,7 +81,7 @@ describe("recipient actions", () => {
       { agentId: "c", action: "restart", state: { kind: "running", task: task({ id: "turn-c" }), steerable: false } },
       { agentId: "d", action: "after_run", state: busy },
     ]);
-    expect(routing).toEqual({ steerTaskIds: [steerable.task.id], suppressAgentIds: ["b"], restartTaskIds: ["turn-c"] });
+    expect(routing).toEqual({ steerTaskIds: [steerable.task.id], interruptTaskIds: [], suppressAgentIds: ["b"], restartTaskIds: ["turn-c"] });
   });
 
   it("offers handoff or working alongside while another agent runs here", () => {
@@ -95,9 +95,35 @@ describe("recipient actions", () => {
     expect(recipientActions(busy, others)).toEqual(["after_run", "restart", "skip"]);
   });
 
+  describe("interrupt (DENE-2667)", () => {
+    const interruptible = { kind: "running", task: task({ id: "turn-i", supplement_interrupt: true }), steerable: true } as const;
+    const office = { ...inThread, canInterrupt: true };
+
+    it("is offered only behind the flag, to a steerable run that can stop its step", () => {
+      expect(recipientActions(interruptible, office)).toEqual(["interrupt", "steer", "after_run", "restart", "skip"]);
+      expect(recipientActions(interruptible, inThread)).toEqual(["steer", "after_run", "restart", "skip"]);
+      expect(recipientActions(steerable, office)).toEqual(["steer", "after_run", "restart", "skip"]);
+      expect(recipientActions({ ...interruptible, steerable: false }, office)).toEqual(["after_run", "restart", "skip"]);
+    });
+
+    it("is the default in the running turn's thread and carries files", () => {
+      expect(resolveRecipientAction(interruptible, undefined, office)).toBe("interrupt");
+      expect(resolveRecipientAction(interruptible, undefined, { ...office, steerByDefault: false })).toBe("after_run");
+      expect(resolveRecipientAction(interruptible, undefined, { ...office, canSteer: false })).toBe("interrupt");
+      expect(resolveRecipientAction(interruptible, "steer", office)).toBe("steer");
+      // An edit neither steers nor interrupts.
+      expect(recipientActions(interruptible, { canSteer: false, canRestart: false, canInterrupt: false, steerByDefault: false })).toEqual(["after_run", "skip"]);
+    });
+
+    it("routes the chosen turn as an interrupt", () => {
+      expect(recipientRouting([{ agentId: "a", action: "interrupt", state: interruptible }]))
+        .toEqual({ steerTaskIds: [], interruptTaskIds: ["turn-i"], suppressAgentIds: [], restartTaskIds: [] });
+    });
+  });
+
   it("sends handoff mode when any recipient takes over", () => {
     expect(recipientRouting([{ agentId: "b", action: "handoff", state: { kind: "idle" } }]))
-      .toEqual({ steerTaskIds: [], suppressAgentIds: [], restartTaskIds: [], mode: "handoff" });
+      .toEqual({ steerTaskIds: [], interruptTaskIds: [], suppressAgentIds: [], restartTaskIds: [], mode: "handoff" });
     expect(recipientRouting([{ agentId: "b", action: "parallel", state: { kind: "idle" } }]).mode).toBeUndefined();
   });
 });

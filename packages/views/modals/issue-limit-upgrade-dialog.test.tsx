@@ -232,6 +232,15 @@ describe("IssueLimitUpgradeDialog", () => {
     summaryState.value = { availableActions: actions({ checkout: true }) };
     renderPrompt({ layered: true });
     const user = await openPrompt();
+    // Base UI moves focus into a newly opened dialog asynchronously, and the
+    // recovery dialog handles Escape only from inside itself. Press it once
+    // the dialog has focus, as a user would; under load an earlier press lands
+    // on the create dialog's button instead.
+    await waitFor(() =>
+      expect(queryRecoveryDialog()).toContainElement(
+        document.activeElement as HTMLElement,
+      ),
+    );
 
     await user.keyboard("{Escape}");
 

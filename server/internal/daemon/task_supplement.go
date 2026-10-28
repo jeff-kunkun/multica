@@ -104,6 +104,55 @@ Human message:
 %s`, strconv.Quote(authorName), content)
 }
 
+// formatTaskInterruptInstruction is the next input of a run whose step was
+// stopped for a message (DENE-2667). Unlike a supplement it is a change of
+// direction: the human's message decides what to do next.
+func formatTaskInterruptInstruction(authorName, content string) string {
+	authorName = strings.Join(strings.Fields(authorName), " ")
+	if authorName == "" {
+		authorName = "a user"
+	}
+	return fmt.Sprintf(`[INTERRUPTED] %s stopped your current step to give you a new instruction.
+
+Whatever was running (a command included) has been stopped; do not restart it unless the instruction asks you to.
+- Follow this instruction from here on. It overrides earlier plans where they conflict.
+- Keep the parts of the original task the instruction does not change.
+- Do not send a separate acknowledgement.
+
+Message from %s:
+%s`, strconv.Quote(authorName), strconv.Quote(authorName), content)
+}
+
+// appendSupplementAttachments lists the files a message carries; the run
+// fetches each one with the Multica CLI like any comment attachment.
+func appendSupplementAttachments(text string, files []TaskSupplementAttachment) string {
+	if len(files) == 0 {
+		return text
+	}
+	var b strings.Builder
+	b.WriteString(text)
+	b.WriteString("\n\nAttached files (download with `multica attachment download <id>`):")
+	for _, f := range files {
+		name := strings.Join(strings.Fields(f.Filename), " ")
+		if name == "" {
+			name = "file"
+		}
+		fmt.Fprintf(&b, "\n- %s (id %s, %d bytes)", name, f.ID, f.SizeBytes)
+	}
+	return b.String()
+}
+
+// deliverTaskSupplement hands one claimed message to the run: an interrupt
+// when asked for and the backend can, otherwise at the next step.
+func deliverTaskSupplement(ctx context.Context, session *agent.Session, supplement *TaskSupplement) error {
+	if supplement.DeliveryMode == protocol.TaskSupplementDeliveryInterrupt && session.Interrupt != nil {
+		text := formatTaskInterruptInstruction(supplement.AuthorName, supplement.Content)
+		return session.Interrupt(ctx, appendSupplementAttachments(text, supplement.Attachments))
+	}
+	text := formatTaskSupplementInstruction(supplement.AuthorName, supplement.Content)
+	return session.Supplement(ctx, appendSupplementAttachments(text, supplement.Attachments))
+}
+
 func taskSupplementEndpointUnsupported(err error) bool {
 	var reqErr *requestError
 	return errors.As(err, &reqErr) && (reqErr.StatusCode == http.StatusNotFound || reqErr.StatusCode == http.StatusPreconditionFailed)
@@ -163,12 +212,14 @@ func (d *Daemon) runTaskSupplementLoop(ctx context.Context, session *agent.Sessi
 		// The adapter owns transport deadlines. Hook-based providers wait for a
 		// safe boundary, which can follow a long-running tool; run cancellation
 		// still aborts that wait and prevents late delivery.
-		injectErr := session.Supplement(ctx, formatTaskSupplementInstruction(supplement.AuthorName, supplement.Content))
+		injectErr := deliverTaskSupplement(ctx, session, supplement)
 		reason := taskSupplementFailureReason(ctx, injectErr)
 		if injectErr != nil {
 			// Raw provider/Go diagnostics remain local. Workspace-visible state is
 			// restricted to the stable reason code sent below.
-			taskLog.Warn("additional message injection failed", "comment_id", supplement.CommentID, "reason", reason, "error", injectErr)
+			taskLog.Warn("additional message injection failed", "comment_id", supplement.CommentID, "mode", supplement.DeliveryMode, "reason", reason, "error", injectErr)
+		} else if supplement.DeliveryMode == protocol.TaskSupplementDeliveryInterrupt {
+			taskLog.Info("additional message interrupted the current step", "comment_id", supplement.CommentID, "interrupted", session.Interrupt != nil)
 		}
 
 		ackCtx, cancelAck := context.WithTimeout(context.WithoutCancel(ctx), taskSupplementAckTimeout)

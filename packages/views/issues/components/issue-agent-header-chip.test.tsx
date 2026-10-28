@@ -78,13 +78,15 @@ vi.mock("@multica/ui/components/ui/popover", async () => {
 vi.mock("./execution-log-section", () => ({
   ActiveTaskRow: ({
     task,
+    liveDetails,
     onTranscriptOpenChange,
   }: {
     task: AgentTask;
+    liveDetails?: boolean;
     transcriptOpen?: boolean;
     onTranscriptOpenChange?: (open: boolean) => void;
   }) => (
-    <div data-testid="active-task-row">
+    <div data-testid="active-task-row" data-live-details={String(!!liveDetails)}>
       <span>{task.id}</span>
       <button
         type="button"
@@ -242,6 +244,8 @@ describe("IssueAgentHeaderChip", () => {
     expect(screen.getByTestId("active-task-row")).toHaveTextContent(
       "task-running",
     );
+    // The card has room for the live status's labelled rows.
+    expect(screen.getByTestId("active-task-row")).toHaveAttribute("data-live-details", "true");
     expect(mockState.taskMessagesOptions).not.toHaveBeenCalled();
   });
 

@@ -931,6 +931,14 @@ func buildResourceRefFromFlags(cmd *cobra.Command, resourceType string, existing
 			delete(ref, "repo_key")
 			delete(ref, "is_git_repo")
 			fillLocalDirectoryIdentity(ref, pathVal)
+			// What could not be measured goes out as null: the server keeps
+			// an omitted identity field from the stored row, which would be
+			// the previous folder's.
+			for _, key := range []string{"real_path", "repo_key", "is_git_repo"} {
+				if _, present := ref[key]; !present {
+					ref[key] = nil
+				}
+			}
 		}
 		if daemonSet {
 			daemonVal := strings.TrimSpace(mustString(cmd, "daemon-id"))

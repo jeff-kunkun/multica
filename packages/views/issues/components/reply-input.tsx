@@ -33,7 +33,7 @@ interface ReplyInputProps {
   avatarId: string;
   /** Resolves true on success, false on failure — the reply box keeps its text
    *  (locked + spinning) until then, clearing only on success. */
-  onSubmit: (content: string, attachmentIds?: string[], suppressAgentIds?: string[], steerTaskIds?: string[], mode?: CommentSendMode) => Promise<string | boolean>;
+  onSubmit: (content: string, attachmentIds?: string[], suppressAgentIds?: string[], steerTaskIds?: string[], mode?: CommentSendMode, interruptTaskIds?: string[]) => Promise<string | boolean>;
   /** Called after the server accepts the reply and the composer is cleared. */
   onAccepted?: (commentId: string) => void;
   size?: "sm" | "default";
@@ -199,6 +199,7 @@ function ReplyInput({
         steerTaskIds.length > 0 ? steerTaskIds : undefined,
         // A handoff stops other agents' runs: only on a preview that matches the text.
         triggerPreview.isCurrent ? routing.mode : undefined,
+        routing.interruptTaskIds.length > 0 ? routing.interruptTaskIds : undefined,
       ).then((commentId) => {
         acceptedCommentIdRef.current = typeof commentId === "string" ? commentId : null;
         return !!commentId;

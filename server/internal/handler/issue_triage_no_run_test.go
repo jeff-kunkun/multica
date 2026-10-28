@@ -527,7 +527,7 @@ func TestRerunSourceScopeRejectsATriageSource(t *testing.T) {
 		t.Fatal("an ordinary same-issue source is in scope, so the triage case below proves nothing")
 	}
 	if rerunSourceMatchesTaskScope(task, triage) {
-		t.Error("a triage source is in scope, so its session and workdir would be reused")
+		t.Error("a triage source is in scope, so its workdir would be reused")
 	}
 }
 

@@ -511,6 +511,17 @@ type TaskSupplement struct {
 	CommentID  string `json:"comment_id"`
 	AuthorName string `json:"author_name"`
 	Content    string `json:"content"`
+	// DeliveryMode is "interrupt" when the run should stop its current step
+	// first (DENE-2667); empty means a supplement.
+	DeliveryMode string                     `json:"delivery_mode,omitempty"`
+	Attachments  []TaskSupplementAttachment `json:"attachments,omitempty"`
+}
+
+type TaskSupplementAttachment struct {
+	ID          string `json:"id"`
+	Filename    string `json:"filename"`
+	ContentType string `json:"content_type,omitempty"`
+	SizeBytes   int64  `json:"size_bytes"`
 }
 
 func (c *Client) ClaimTaskSupplement(ctx context.Context, taskID string) (*TaskSupplement, error) {
@@ -645,6 +656,28 @@ func (c *Client) ReportProgress(ctx context.Context, taskID, summary string, ste
 		"step":    step,
 		"total":   total,
 	}, nil)
+}
+
+// TaskLiveData is one live report of a running task (DENE-2667 PR 4). Every
+// text field is redacted before it is built.
+type TaskLiveData struct {
+	Tool          string `json:"tool,omitempty"`
+	Command       string `json:"command,omitempty"`
+	LastOutput    string `json:"last_output,omitempty"`
+	ToolsInFlight int    `json:"tools_in_flight"`
+	IdleSeconds   int64  `json:"idle_seconds"`
+}
+
+// ReportTaskLive sends one live report. accepted is false when the server
+// dropped it because the task is not a running issue run.
+func (c *Client) ReportTaskLive(ctx context.Context, taskID string, live TaskLiveData) (accepted bool, err error) {
+	var resp struct {
+		Status string `json:"status"`
+	}
+	if err := c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/live", taskID), live, &resp); err != nil {
+		return false, err
+	}
+	return resp.Status == "ok", nil
 }
 
 // TaskMessageData represents a single agent execution message for batch reporting.
@@ -1178,6 +1211,20 @@ func (c *Client) Deregister(ctx context.Context, runtimeIDs []string, reasons ma
 // removes it.
 func (c *Client) ReportMagpieRoute(ctx context.Context, runtimeID string, route *MagpieRoute) error {
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/magpie", runtimeID), map[string]any{"magpie": route}, nil)
+}
+
+// SyncDefaultWorkDir reports whether path exists on this machine (nil exists
+// reports nothing) and returns the machine's current default working
+// directory, "" when none is set.
+func (c *Client) SyncDefaultWorkDir(ctx context.Context, runtimeID, path string, exists *bool) (string, error) {
+	var resp struct {
+		Path string `json:"path"`
+	}
+	body := map[string]any{"path": path, "exists": exists}
+	if err := c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/default-dir", runtimeID), body, &resp); err != nil {
+		return "", err
+	}
+	return resp.Path, nil
 }
 
 // RegisterResponse holds the server's response to a daemon registration.

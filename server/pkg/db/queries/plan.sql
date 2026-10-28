@@ -76,3 +76,53 @@ SELECT (
     EXISTS (SELECT 1 FROM plan WHERE plan.workspace_id = $1)
     OR EXISTS (SELECT 1 FROM plan_approver WHERE plan_approver.workspace_id = $1)
 )::bool AS uses_plans;
+
+-- name: CreateIssuePlanGate :exec
+-- Plan first (migration 772): written in the issue's create transaction, so the
+-- first run already sees the gate.
+INSERT INTO issue_plan_gate (issue_id, workspace_id, requested_by_type, requested_by_id)
+VALUES (@issue_id, @workspace_id, @requested_by_type, @requested_by_id)
+ON CONFLICT (issue_id) DO NOTHING;
+
+-- name: GetIssuePlanGateState :one
+-- gated without approved is the only state that refuses an agent's review,
+-- done and PR-link moves.
+SELECT
+    EXISTS (
+        SELECT 1 FROM issue_plan_gate g
+        WHERE g.issue_id = @issue_id AND g.workspace_id = @workspace_id
+    )::bool AS gated,
+    EXISTS (
+        SELECT 1 FROM plan p
+        WHERE p.issue_id = @issue_id AND p.workspace_id = @workspace_id AND p.status = 'approved'
+    )::bool AS approved;
+
+-- name: RequestPlanChanges :one
+UPDATE plan
+SET changes_requested_by = @requested_by, changes_requested_at = now()
+WHERE id = @id AND workspace_id = @workspace_id AND status = 'proposed'
+RETURNING *;
+
+-- name: SetPlanApprovalComment :exec
+UPDATE plan SET approval_comment_id = @approval_comment_id
+WHERE id = @id AND workspace_id = @workspace_id;
+
+-- name: PlanApprovalPickedUp :one
+-- Whether any run on the issue is active, or started or finished since the
+-- approval: then the approval reply reached the agent.
+SELECT EXISTS (
+    SELECT 1 FROM agent_task_queue
+    WHERE issue_id = @issue_id
+      AND (created_at >= @since::timestamptz
+           OR completed_at >= @since::timestamptz
+           OR status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred'))
+)::bool AS picked_up;
+
+-- name: DeleteIssuePlanRows :exec
+-- No foreign keys: deleting an issue clears its gate and plan versions here.
+WITH deleted_gate AS (
+    DELETE FROM issue_plan_gate
+    WHERE issue_plan_gate.issue_id = @issue_id AND issue_plan_gate.workspace_id = @workspace_id
+)
+DELETE FROM plan
+WHERE plan.issue_id = @issue_id AND plan.workspace_id = @workspace_id;

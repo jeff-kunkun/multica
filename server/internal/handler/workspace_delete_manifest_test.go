@@ -148,6 +148,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"issue_routing_outcome":              workspaceDelete,
 	"issue_source_context":               workspaceDelete,
 	"issue_source_context_object_intent": workspaceDeleteSettle,
+	"issue_plan_gate":                    workspaceDelete,
 	"issue_status":                       workspaceDelete,
 	"issue_workflow":                     workspaceDelete,
 	"issue_subscriber":                   workspaceDelete,
@@ -204,6 +205,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"squad_member":                       workspaceDelete,
 	"stage_wakeup_failure":               workspaceDelete,
 	"sys_cron_executions":                workspaceDeleteKeep,
+	"task_live_status":                   workspaceDelete,
 	"task_message":                       workspaceDelete,
 	"task_supplement":                    workspaceDelete,
 	"task_supplement_capability":         workspaceDelete,
@@ -216,6 +218,7 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"transfer_attachment_upload_chunk":   workspaceDelete,
 	"user":                               workspaceDeleteKeep,
 	"runtime_machine_capacity":           workspaceDeleteKeep, // owner-scoped, shared across workspaces
+	"runtime_machine_default_dir":        workspaceDeleteKeep, // per machine, like capacity
 	"user_composio_connection":           workspaceDeleteKeep,
 	"user_password_credential":           workspaceDeleteKeep,
 	"vcs_commit_status":                  workspaceDelete,

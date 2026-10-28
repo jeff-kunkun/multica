@@ -168,7 +168,7 @@ func TestWorkThreadActionInterruptsActiveTurn(t *testing.T) {
 	}
 }
 
-func TestWorkThreadActionContinuePreservesCancelledSession(t *testing.T) {
+func TestWorkThreadActionContinueStartsFreshIssueSession(t *testing.T) {
 	issueID := dbfx.Issue(t, "resume cancelled work thread", testutil.Cols{"status": "in_progress"})
 	agentID := createHandlerTestAgent(t, "Resume Work Thread Agent", []byte("[]"))
 	threadID := uuid.NewString()
@@ -192,8 +192,8 @@ func TestWorkThreadActionContinuePreservesCancelledSession(t *testing.T) {
 	if err := testPool.QueryRow(t.Context(), `SELECT session_id FROM agent_task_queue WHERE work_thread_id=$1 AND status='queued'`, threadID).Scan(&got); err != nil {
 		t.Fatal(err)
 	}
-	if !got.Valid || got.String() != sessionID {
-		t.Fatalf("session_id=%v, want %s", got, sessionID)
+	if got.Valid && got.String() != "" {
+		t.Fatalf("session_id=%v, want no inherited issue session", got)
 	}
 }
 

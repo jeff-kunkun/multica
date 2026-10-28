@@ -13,7 +13,53 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
-const issueWatchdogCommentMarker = "<!-- office-issue-watchdog -->"
+const (
+	issueWatchdogCommentMarker = "<!-- office-issue-watchdog -->"
+	// Mirrors issuewatchdog.RunningSilentEventType; that package imports this
+	// one in its tests, so the constant cannot be shared without a cycle.
+	issueWatchdogRunningSilentEvent = "employee_running_silent"
+)
+
+// WatchdogReminderResponse is what `multica issue get` and the issue header
+// show about project-group reminders: when the last one went out, for which
+// run, and how many were sent for this issue in total.
+type WatchdogReminderResponse struct {
+	GroupRemindedAt    string `json:"group_reminded_at"`
+	GroupReminderCount int64  `json:"group_reminder_count"`
+	TaskID             string `json:"task_id"`
+}
+
+// watchdogReminder reads delivered reminders from the watchdog's attempt
+// log. Display metadata: a failed read leaves the field off.
+func (h *Handler) watchdogReminder(ctx context.Context, workspaceID, issueID pgtype.UUID) *WatchdogReminderResponse {
+	if h.DB == nil {
+		return nil
+	}
+	var (
+		lastAt pgtype.Timestamptz
+		count  int64
+		key    string
+	)
+	err := h.DB.QueryRow(ctx, `
+SELECT count(*) OVER (), attempted_at, event_key
+FROM office_issue_watchdog_attempt
+WHERE workspace_id = $1 AND issue_id = $2 AND event_type = $3 AND outcome = 'sent'
+ORDER BY attempted_at DESC, id DESC
+LIMIT 1`, workspaceID, issueID, issueWatchdogRunningSilentEvent).Scan(&count, &lastAt, &key)
+	if err != nil || !lastAt.Valid {
+		return nil
+	}
+	// event_key is running-silent:<task id>:<reminder number for that run>.
+	taskID := ""
+	if parts := strings.Split(key, ":"); len(parts) == 3 {
+		taskID = parts[1]
+	}
+	return &WatchdogReminderResponse{
+		GroupRemindedAt:    timestampToString(lastAt),
+		GroupReminderCount: count,
+		TaskID:             taskID,
+	}
+}
 
 // CreateWatchdogNudgeComment leaves an issue-local reminder and invokes the
 // assigned agent through the normal mention admission path.
@@ -40,32 +86,63 @@ func (h *Handler) CreateWatchdogNudgeComment(ctx context.Context, issueID, assig
 		return nil
 	}
 
-	targetType := issue.AssigneeType.String
-	targetID := uuidToString(issue.AssigneeID)
-	mention := "[@负责员工](mention://" + targetType + "/" + targetID + ")"
-	body := strings.TrimSpace(fmt.Sprintf("%s %s %s", mention, reason, issueWatchdogCommentMarker))
-	created, err := h.Queries.CreateComment(ctx, db.CreateCommentParams{
-		ID:          dbid.NewV7(),
-		IssueID:     issue.ID,
-		WorkspaceID: issue.WorkspaceID,
-		AuthorType:  "system",
-		AuthorID:    pgtype.UUID{Valid: true},
-		Content:     body,
-		Type:        "system",
-	})
-	if err != nil {
-		return errors.New("failed to add issue watchdog reminder")
-	}
+	return h.postWatchdogMention(ctx, issue, issue.AssigneeType.String, uuidToString(issue.AssigneeID), "负责员工", reason)
+}
 
-	comment := created.Comment()
-	h.publishWithSource(ctx, protocol.EventCommentCreated, uuidToString(issue.WorkspaceID), "system", "", map[string]any{
-		"comment":             commentToResponse(comment, nil, nil),
-		"issue_title":         issue.Title,
-		"issue_assignee_type": textToPtr(issue.AssigneeType),
-		"issue_assignee_id":   uuidToPtr(issue.AssigneeID),
-		"issue_status":        issue.Status,
-		"issue_revision":      created.IssueRevision,
-	})
+// CreateWatchdogWakeComment is the review rules' wake: it @mentions any agent
+// or member of the workspace on the issue, not only the assignee, and works
+// on every open status.
+func (h *Handler) CreateWatchdogWakeComment(ctx context.Context, issueID, targetType, targetID, role, reason string) error {
+	id, err := util.ParseUUID(issueID)
+	if err != nil {
+		return errors.New("invalid issue id")
+	}
+	issue, err := h.Queries.GetIssue(ctx, id)
+	if err != nil {
+		return errors.New("issue is no longer available")
+	}
+	switch issue.Status {
+	case "done", "cancelled":
+		return nil
+	}
+	if targetType != "agent" && targetType != "member" {
+		return errors.New("watchdog wake target must be an agent or a member")
+	}
+	if _, err := util.ParseUUID(targetID); err != nil {
+		return errors.New("invalid watchdog wake target")
+	}
+	return h.postWatchdogMention(ctx, issue, targetType, targetID, role, reason)
+}
+
+// CreateWatchdogNoteComment leaves a marked system comment that @mentions
+// nobody, so it starts no run: the review-round stop uses it to lay out
+// options for Kun.
+func (h *Handler) CreateWatchdogNoteComment(ctx context.Context, issueID, content string) error {
+	id, err := util.ParseUUID(issueID)
+	if err != nil {
+		return errors.New("invalid issue id")
+	}
+	issue, err := h.Queries.GetIssue(ctx, id)
+	if err != nil {
+		return errors.New("issue is no longer available")
+	}
+	switch issue.Status {
+	case "done", "cancelled":
+		return nil
+	}
+	_, err = h.postWatchdogComment(ctx, issue, strings.TrimSpace(content+"\n\n"+issueWatchdogCommentMarker))
+	return err
+}
+
+// postWatchdogMention leaves the marked system comment and, for an agent,
+// admits the mention through the normal comment trigger path.
+func (h *Handler) postWatchdogMention(ctx context.Context, issue db.Issue, targetType, targetID, role, reason string) error {
+	mention := "[@" + role + "](mention://" + targetType + "/" + targetID + ")"
+	body := strings.TrimSpace(fmt.Sprintf("%s %s %s", mention, reason, issueWatchdogCommentMarker))
+	comment, err := h.postWatchdogComment(ctx, issue, body)
+	if err != nil {
+		return err
+	}
 	if targetType != "agent" {
 		return nil
 	}
@@ -82,9 +159,36 @@ func (h *Handler) CreateWatchdogNudgeComment(ctx context.Context, issueID, assig
 			case DispatchQueued, DispatchCoalesced, DispatchDeferred, DispatchSteered:
 				return nil
 			default:
-				return errors.New("assigned agent mention did not start or join a run")
+				return errors.New("watchdog agent mention did not start or join a run")
 			}
 		}
 	}
-	return errors.New("assigned agent mention did not produce a run")
+	return errors.New("watchdog agent mention did not produce a run")
+}
+
+// postWatchdogComment stores and publishes a system comment.
+func (h *Handler) postWatchdogComment(ctx context.Context, issue db.Issue, body string) (db.Comment, error) {
+	created, err := h.Queries.CreateComment(ctx, db.CreateCommentParams{
+		ID:          dbid.NewV7(),
+		IssueID:     issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+		AuthorType:  "system",
+		AuthorID:    pgtype.UUID{Valid: true},
+		Content:     body,
+		Type:        "system",
+	})
+	if err != nil {
+		return db.Comment{}, errors.New("failed to add issue watchdog reminder")
+	}
+
+	comment := created.Comment()
+	h.publishWithSource(ctx, protocol.EventCommentCreated, uuidToString(issue.WorkspaceID), "system", "", map[string]any{
+		"comment":             commentToResponse(comment, nil, nil),
+		"issue_title":         issue.Title,
+		"issue_assignee_type": textToPtr(issue.AssigneeType),
+		"issue_assignee_id":   uuidToPtr(issue.AssigneeID),
+		"issue_status":        issue.Status,
+		"issue_revision":      created.IssueRevision,
+	})
+	return comment, nil
 }

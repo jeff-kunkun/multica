@@ -31,6 +31,8 @@
     "steer_badge": "Ajouté à l'exécution de {{names}}",
     "steer_waiting": "En attente de lecture par {{name}}",
     "steer_read": "Lu par {{name}}",
+    "steer_badge_interrupt": "Exécution de {{names}} interrompue",
+    "steer_read_after": "Remis · lu par {{name}} après {{seconds}} s",
     "steer_not_received": "{{name}} ne l'a pas reçu · {{reason}}",
     "steer_resend": "Envoyer comme nouvelle exécution",
     "steer_resend_failed": "Impossible de l'envoyer comme nouvelle exécution.",
@@ -153,6 +155,12 @@
   "stage": {
     "none": "Aucune étape",
     "value": "Étape {{n}}"
+  },
+  "after": {
+    "none": "Sans ordre",
+    "value": "Après {{list}}",
+    "hint": "Attend dans le backlog jusqu’à ce qu’elles soient terminées, puis démarre seule",
+    "empty": "Aucune sous-tâche sœur ouverte"
   },
   "scope": {
     "all_label": "Toutes",
@@ -450,6 +458,7 @@
     "prop_status": "Statut",
     "prop_priority": "Priorité",
     "prop_stage": "Étape",
+    "prop_after": "Démarre après",
     "prop_assignee": "Assigné à",
     "prop_start_date": "Date de début",
     "prop_due_date": "Date d'échéance",
@@ -674,6 +683,9 @@
     "recipient_steer_desc_handoff": "Arrête cette étape pour le lire ; le travail d'origine continue",
     "recipient_steer_restart_desc": "Lu tout de suite, puis reprend le travail initial ; l’étape en cours est interrompue",
     "recipient_after_run": "File d'attente",
+    "recipient_interrupt": "Interrompre",
+    "recipient_interrupt_desc": "Arrête l'étape en cours, commande comprise, et suit ce message",
+    "recipient_interrupt_process": "Même processus · même session · fichiers acceptés",
     "recipient_after_run_desc": "Traité après cette exécution",
     "recipient_restart": "Interrompre et recommencer",
     "recipient_restart_desc": "Arrête maintenant et recommence à partir de ce message",
@@ -814,7 +826,19 @@
     "status_deferred": "Nouvelle tentative",
     "status_capacity_retry": "Modèle saturé · tentative {{retry}}, prochaine à {{time}}",
     "usage_label": "Coût en tokens",
-    "machine_full": "En attente : machine pleine ({{active}}/{{limit}})"
+    "machine_full": "En attente : machine pleine ({{active}}/{{limit}})",
+    "idle_unlimited": "Sans limite d'inactivité",
+    "live_label": "État en direct",
+    "live_quiet": "Silencieux depuis {{duration}}",
+    "live_quiet_under_second": "moins d'une seconde",
+    "live_running": "En cours : {{command}}",
+    "live_no_command": "Aucune commande en cours",
+    "live_last_output": "Dernière sortie : {{line}}",
+    "live_command_label": "Commande",
+    "live_output_label": "Sortie",
+    "live_quiet_label": "Silencieux",
+    "live_tool_running": "Un outil est en cours",
+    "live_no_output": "Aucune sortie pour l'instant"
   },
   "runs_timeline": {
     "title": "Exécutions",
@@ -1854,5 +1878,34 @@
     "reason_runtime_changed": "la dernière session est sur une autre machine",
     "reason_session_lost": "la session n'a pas pu être restaurée",
     "reason_fresh_requested": "nouvelle session demandée"
+  },
+  "watchdog_reminder": {
+    "label": "Groupe prévenu",
+    "detail_one": "La personne assignée tourne encore mais ne donne plus de nouvelles ici. Le groupe du projet a été prévenu une fois, la dernière à {{time}}.",
+    "detail_other": "La personne assignée tourne encore mais ne donne plus de nouvelles ici. Le groupe du projet a été prévenu {{count}} fois, la dernière à {{time}}."
+  },
+  "plan_first": {
+    "title": "Plan d'abord",
+    "waiting_for_plan": "L'agent propose un plan ici avant de commencer. Il ne peut ni passer en revue ni lier une PR avant l'approbation du plan.",
+    "version_title": "Plan v{{version}}",
+    "state_waiting": "En attente d'approbation",
+    "state_approved": "Approuvé",
+    "state_changes": "Renvoyé",
+    "state_superseded": "Remplacé",
+    "goal": "À faire",
+    "out_of_scope": "Hors périmètre",
+    "steps": "Étapes",
+    "done_when": "Terminé quand",
+    "approve": "Approuver et lancer",
+    "request_changes": "Modifier d'abord",
+    "feedback_label": "Que faut-il changer ?",
+    "feedback_placeholder": "Ex. : retirer l'étape 3 et garder l'ancienne API",
+    "send_back": "Renvoyer",
+    "cancel": "Annuler",
+    "approved_toast": "Plan v{{version}} approuvé. L'agent continue dans la même session.",
+    "changes_toast": "Plan v{{version}} renvoyé. L'agent proposera une nouvelle version.",
+    "answer_failed": "Impossible de répondre au plan. Réessayez.",
+    "not_woken_toast": "Approuvé, mais aucun agent n'a été réveillé. Réveillez-le à nouveau pour continuer.",
+    "retry_wake": "Réveiller l'agent à nouveau"
   }
 }

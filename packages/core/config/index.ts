@@ -28,17 +28,14 @@ interface ConfigState {
   // managed cloud (which omits the field) keep it hidden.
   vcsIntegrationAvailable: boolean;
   featureFlags: Record<string, boolean>;
+  // Flags baked into this client at build time (VITE_/NEXT_PUBLIC_
+  // MULTICA_FEATURE_FLAGS). They win over the server's flags so a test build
+  // can turn on an office feature that every other client keeps off.
+  localFeatureFlags: Record<string, boolean>;
   // The running API build version, surfaced in the Help popover so
   // self-hosted operators can confirm what's deployed. Empty for dev builds
   // or servers older than this feature.
   serverVersion: string;
-  // Whether the connected server validates local_directory execution_mode.
-  // Defaults to false, and stays false for any server that does not declare it:
-  // the dangerous ones accept worktree mode, drop the field, and run the task
-  // in the user's working copy anyway (#7113). Servers that validate but
-  // predate this signal are caught by the same net — indistinguishable from
-  // here, and only one of the two answers is safe to guess.
-  localWorktreeSupported: boolean;
   // Whether this server persists conversation_starters on agent create/update.
   // Older handlers accepted the unknown field and returned success while
   // dropping it, so absent must fail closed.
@@ -65,8 +62,8 @@ interface ConfigState {
     daemonAppUrl?: string;
   }) => void;
   setFeatureFlags: (flags?: Record<string, boolean>) => void;
+  setLocalFeatureFlags: (flags?: Record<string, boolean>) => void;
   setServerVersion: (version?: string) => void;
-  setLocalWorktreeSupported: (supported?: boolean) => void;
   setAgentConversationStartersSupported: (supported?: boolean) => void;
   setIssueCreatePropertiesSupported: (supported?: boolean) => void;
   setCommentDeleteKeepRepliesSupported: (supported?: boolean) => void;
@@ -85,8 +82,8 @@ export const configStore = createStore<ConfigState>((set) => ({
   workspaceCreationDisabled: false,
   vcsIntegrationAvailable: false,
   featureFlags: {},
+  localFeatureFlags: {},
   serverVersion: "",
-  localWorktreeSupported: false,
   agentConversationStartersSupported: false,
   issueCreatePropertiesSupported: false,
   commentDeleteKeepRepliesSupported: false,
@@ -103,9 +100,8 @@ export const configStore = createStore<ConfigState>((set) => ({
   setDaemonConfig: ({ daemonServerUrl = "", daemonAppUrl = "" }) =>
     set({ daemonServerUrl, daemonAppUrl }),
   setFeatureFlags: (flags = {}) => set({ featureFlags: { ...flags } }),
+  setLocalFeatureFlags: (flags = {}) => set({ localFeatureFlags: { ...flags } }),
   setServerVersion: (version = "") => set({ serverVersion: version }),
-  setLocalWorktreeSupported: (supported = false) =>
-    set({ localWorktreeSupported: supported === true }),
   setAgentConversationStartersSupported: (supported = false) =>
     set({ agentConversationStartersSupported: supported === true }),
   setIssueCreatePropertiesSupported: (supported = false) =>
@@ -130,6 +126,26 @@ export function featureFlagEnabled(
 
 export function useFeatureEnabled(key: string, defaultValue = false): boolean {
   return useConfigStore((state) =>
-    featureFlagEnabled(state.featureFlags, key, defaultValue),
+    featureFlagEnabled(
+      state.localFeatureFlags,
+      key,
+      featureFlagEnabled(state.featureFlags, key, defaultValue),
+    ),
   );
+}
+
+// Parses a build-time flag list: "a,b" turns a and b on, "-a" turns a off.
+export function parseFeatureFlagList(value?: string): Record<string, boolean> {
+  const flags: Record<string, boolean> = {};
+  for (const raw of (value ?? "").split(",")) {
+    const item = raw.trim();
+    if (!item) continue;
+    if (item.startsWith("-")) {
+      const key = item.slice(1).trim();
+      if (key) flags[key] = false;
+    } else {
+      flags[item] = true;
+    }
+  }
+  return flags;
 }

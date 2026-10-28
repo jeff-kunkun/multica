@@ -31,6 +31,9 @@ func TestWakeupRunKeepsTheRegisteringRunsStep(t *testing.T) {
 		if err != nil {
 			t.Fatalf("wakeup did not queue a run: %v", err)
 		}
+		if !task.ForceFreshSession {
+			t.Fatal("issue wakeup must start a fresh CLI session")
+		}
 		return task
 	}
 

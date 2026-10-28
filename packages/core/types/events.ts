@@ -1,6 +1,6 @@
 import type { Issue, IssueMetadata, IssueReaction } from "./issue";
 import type { IssueProperty, IssuePropertyValues } from "./property";
-import type { Agent, AgentStatus } from "./agent";
+import type { Agent, AgentStatus, TaskLive } from "./agent";
 import type { InboxItem } from "./inbox";
 import type { Comment, Reaction } from "./comment";
 import type { TimelineEntry } from "./activity";
@@ -34,6 +34,7 @@ export type WSEventType =
   | "task:failed"
   | "task:message"
   | "task:cancelled"
+  | "task_live:updated"
   | "inbox:new"
   | "inbox:read"
   | "inbox:unread"
@@ -96,7 +97,8 @@ export type WSEventType =
   | "github_installation:deleted"
   | "pull_request:linked"
   | "pull_request:updated"
-  | "pull_request:unlinked";
+  | "pull_request:unlinked"
+  | "issue_plan:changed";
 
 export interface WSMessage<T = unknown> {
   type: WSEventType;
@@ -639,6 +641,7 @@ export interface WSEventPayloadMap {
   "task:failed": TaskFailedPayload;
   "task:message": TaskMessagePayload;
   "task:cancelled": TaskCancelledPayload;
+  "task_live:updated": TaskLive;
   "task:progress": unknown;
   "inbox:new": InboxNewPayload;
   "inbox:read": InboxReadPayload;
@@ -694,6 +697,7 @@ export interface WSEventPayloadMap {
   "pull_request:linked": unknown;
   "pull_request:updated": unknown;
   "pull_request:unlinked": unknown;
+  "issue_plan:changed": unknown;
 }
 
 /**

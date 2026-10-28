@@ -290,7 +290,11 @@ func issueCreateLong() string {
 		"refused without it; staged sub-issues are exempt).\n\n" +
 		"Sub-issues: --parent <issue>; --status todo starts an agent-assigned child\n" +
 		"at once, --status backlog --stage <N> parks a later stage until the stage\n" +
-		"before it finishes.\n\n" +
+		"before it finishes. --after <sibling> (repeatable) orders one sub-issue\n" +
+		"after others: it waits in backlog until they are done, then moves to todo\n" +
+		"and starts its assignee. --from-comment <comment-id> makes the sub-issue\n" +
+		"from a comment, under that comment's issue, keeping the thread as its\n" +
+		"source (people only; agents use --parent).\n\n" +
 		"Executor: --assignee names who does it; the pick stands as written.\n\n" +
 		"Properties: --property \"Name=Value\" sets a custom property atomically\n" +
 		"with creation (repeatable, one distinct property per flag). For multi_text /\n" +
@@ -443,6 +447,13 @@ A comment is not a dispatch. The receipt says who it woke ("Woke: ..."; JSON
 "wake.woken"); "Woke no one" (JSON "wake.none_woken") means no run started and
 none is running, so nobody will act on it: use multica issue handoff, or @ them.
 
+Mentions: [@Name](mention://agent/<agent-id>) starts a run for that agent and
+[@Name](mention://member/<user-id>) notifies a person; issue and project links
+wake no one. Mention only to pull someone into work they are not doing yet:
+followers already see the comment, a thank-you or FYI mention of an agent costs
+a paid run, and a name written in prose stays plain text. When unsure, leave it
+out. The full contract is references/mentions.md in the multica-platform skill.
+
 A Bot wake blocked by bot_wake_chain_limit leaves the comment saved and prints
 a warning naming the target and recovery options. JSON trigger_outcomes carries
 the reason; do not repost the saved comment. Human messages and verified
@@ -455,6 +466,10 @@ replying on this issue (omit it for the usual behaviour):
            original work continues (same process, same session on Claude,
            Codex and Grok; one-shot CLIs such as Cursor restart on the same
            session; text only, people only)
+  interrupt stop their current step now, a running command included, and
+           continue the same session with this comment (Claude and Codex;
+           other CLIs read it after the current step like steer; files and
+           agent authors allowed; your own run is never interrupted)
   queue    answer it after the current turn (new process, same session)
   restart  stop their current turn first, then start from this comment (new
            process, same session; the half-done step is dropped)
@@ -789,12 +804,15 @@ func init() {
 	issueCreateCmd.Flags().String("assignee", "", "Assignee name (member, agent, or squad; fuzzy match)")
 	issueCreateCmd.Flags().String("assignee-id", "", "Assignee UUID — member, agent, or squad (mutually exclusive with --assignee)")
 	issueCreateCmd.Flags().String("parent", "", "Parent issue ID")
+	issueCreateCmd.Flags().StringSlice("after", nil, "Sibling sub-issue(s) this one starts after (repeatable). While one is unfinished the new issue waits in backlog; when the last is done it moves to todo and its assignee starts. Needs --parent or --from-comment")
+	issueCreateCmd.Flags().String("from-comment", "", "Comment UUID to make this sub-issue from: the parent is the comment's issue and the thread is kept as its source. --title defaults to the comment's first line. Not available to agents")
 	issueCreateCmd.Flags().Int("stage", 0, "Stage ordinal (>=1) grouping this sub-issue into an ordered barrier group under its parent; omit for unstaged. The parent assignee is woken only when every sub-issue in a stage finishes.")
 	issueCreateCmd.Flags().String("project", "", "Project UUID, prefix or exact name (case-insensitive)")
 	issueCreateCmd.Flags().String("start-date", "", "Start date (calendar day, YYYY-MM-DD)")
 	issueCreateCmd.Flags().String("due-date", "", "Due date (calendar day, YYYY-MM-DD)")
 	issueCreateCmd.Flags().String("waiting-for", "", "What this backlog issue is waiting for, one line (80 chars max). Required when an agent puts an issue in backlog; nothing to wait for means use todo")
 	issueCreateCmd.Flags().Bool("allow-duplicate", false, "Allow creating an issue even when an active duplicate exists")
+	issueCreateCmd.Flags().Bool("plan-first", false, "Ask the agent for a plan first: no review, done or PR link until a person approves it (see multica issue plan)")
 	issueCreateCmd.Flags().String("output", "json", "Output format: table or json")
 	issueCreateCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times). Each file is uploaded and its markdown reference is appended to the description, which is what makes it render on the issue page")
 	issueCreateCmd.Flags().StringSlice("attachment-id", nil, "Existing attachment UUID(s) to bind to the created issue (can be specified multiple times)")
@@ -888,7 +906,7 @@ func init() {
 	issueCommentAddCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times). Non-image files, HTML included, show as file cards that open in the viewer; to render a chart inside the comment, put a ```html or ```mermaid block in the content instead")
 	issueCommentAddCmd.Flags().String("output", "json", "Output format: table or json")
 	issueCommentAddCmd.Flags().String("per-quote", "", "Exact words from this caller’s earlier human comment on this issue; the server verifies it before exempting the wake from the Bot chain limit")
-	issueCommentAddCmd.Flags().String("mode", "", "steer, queue or restart for agents still replying; handoff or parallel when you @ another agent (see --help)")
+	issueCommentAddCmd.Flags().String("mode", "", "steer, interrupt, queue or restart for agents still replying; handoff or parallel when you @ another agent (see --help)")
 
 	// issue comment update
 	issueCommentUpdateCmd.Flags().String("content", "", "New comment content (decodes \\n, \\r, \\t, \\\\; pipe via --content-stdin for multi-line bodies or to preserve literal backslashes)")
@@ -1334,6 +1352,9 @@ func runIssueGet(cmd *cobra.Command, args []string) error {
 			strVal(issue, "description"),
 		}}
 		cli.PrintTable(os.Stdout, headers, rows)
+		if line := watchdogReminderLine(issue); line != "" {
+			fmt.Fprintln(os.Stdout, line)
+		}
 		return nil
 	}
 
@@ -1343,6 +1364,25 @@ func runIssueGet(cmd *cobra.Command, args []string) error {
 		}
 	}
 	return cli.PrintJSON(os.Stdout, issue)
+}
+
+// watchdogReminderLine renders the detail-only watchdog_reminder object as
+// one line under the table; JSON output carries the object as-is. Servers
+// without the field produce no line.
+func watchdogReminderLine(issue map[string]any) string {
+	reminder, ok := issue["watchdog_reminder"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	at := strVal(reminder, "group_reminded_at")
+	if at == "" {
+		return ""
+	}
+	if parsed, err := time.Parse(time.RFC3339, at); err == nil {
+		at = parsed.Local().Format("2006-01-02 15:04")
+	}
+	count, _ := reminder["group_reminder_count"].(float64)
+	return fmt.Sprintf("Group reminded: %s (%d total)", at, int(count))
 }
 
 // childStage extracts the integer stage from a child issue response map.
@@ -1626,7 +1666,9 @@ func quickCreateAttachmentIDsFromEnv() ([]string, error) {
 
 func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	title, _ := cmd.Flags().GetString("title")
-	if title == "" {
+	fromComment, _ := cmd.Flags().GetString("from-comment")
+	fromComment = strings.TrimSpace(fromComment)
+	if title == "" && fromComment == "" {
 		return fmt.Errorf("--title is required")
 	}
 	statusFlag, _ := cmd.Flags().GetString("status")
@@ -1656,7 +1698,10 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	body := map[string]any{"title": title}
+	body := map[string]any{}
+	if title != "" {
+		body["title"] = title
+	}
 	propertyFlags, _ := cmd.Flags().GetStringArray("property")
 	var createProperties map[string]json.RawMessage
 	if len(propertyFlags) > 0 {
@@ -1701,6 +1746,20 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 		}
 		body["parent_issue_id"] = parent.ID
 	}
+	if refs, _ := cmd.Flags().GetStringSlice("after"); len(refs) > 0 {
+		if body["parent_issue_id"] == nil && fromComment == "" {
+			return fmt.Errorf("--after needs --parent or --from-comment: only a sub-issue can wait for its siblings")
+		}
+		after := make([]string, 0, len(refs))
+		for _, ref := range refs {
+			resolved, err := resolveIssueRef(ctx, client, ref)
+			if err != nil {
+				return fmt.Errorf("resolve --after issue: %w", err)
+			}
+			after = append(after, resolved.ID)
+		}
+		body["after_issue_ids"] = after
+	}
 	if cmd.Flags().Changed("project") {
 		v, _ := cmd.Flags().GetString("project")
 		if strings.TrimSpace(v) == "" {
@@ -1730,6 +1789,9 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	}
 	if v, _ := cmd.Flags().GetBool("allow-duplicate"); v {
 		body["allow_duplicate"] = true
+	}
+	if v, _ := cmd.Flags().GetBool("plan-first"); v {
+		body["plan_first"] = true
 	}
 	aType, aID, hasAssignee, resolveErr := pickAssigneeFromFlags(ctx, client, cmd, "assignee", "assignee-id", issueAssigneeKinds)
 	if resolveErr != nil {
@@ -1797,7 +1859,12 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	}
 
 	var result map[string]any
-	if err := client.PostJSON(ctx, "/api/issues", body, &result); err != nil {
+	if fromComment != "" {
+		result, err = createIssueFromComment(ctx, client, fromComment, body)
+		if err != nil {
+			return err
+		}
+	} else if err := client.PostJSON(ctx, "/api/issues", body, &result); err != nil {
 		if msg, ok := activeDuplicateIssueCreateMessage(err); ok {
 			return errors.New(msg)
 		}
@@ -1821,6 +1888,86 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	}
 
 	return cli.PrintJSON(os.Stdout, result)
+}
+
+// createIssueFromComment makes a sub-issue from a comment through the same
+// endpoint as the comment menu on web and desktop (DENE-2671): it reads the
+// comment's thread for a capture token, then creates the sub-issue under the
+// comment's issue with the thread kept as its source.
+func createIssueFromComment(ctx context.Context, client *cli.APIClient, commentID string, body map[string]any) (map[string]any, error) {
+	if !uuidRegexp.MatchString(commentID) {
+		return nil, fmt.Errorf("--from-comment takes the comment's full UUID (see `multica issue comment list <issue> --output json`)")
+	}
+	commentID = strings.ToLower(commentID)
+	if body["plan_first"] == true {
+		return nil, fmt.Errorf("--plan-first does not go with --from-comment: the comment's sub-issue endpoint has no plan gate. Use --parent <issue> --plan-first instead")
+	}
+	var preview struct {
+		SourceIssue struct {
+			ID         string `json:"id"`
+			Identifier string `json:"identifier"`
+		} `json:"source_issue"`
+		CommentThread []struct {
+			ID      string `json:"id"`
+			Content string `json:"content"`
+		} `json:"comment_thread"`
+		CaptureToken string `json:"capture_token"`
+	}
+	if err := client.GetJSON(ctx, "/api/comments/"+commentID+"/sub-issue-preview", &preview); err != nil {
+		return nil, fromCommentError("read comment", err)
+	}
+	if parent, ok := body["parent_issue_id"].(string); ok && parent != preview.SourceIssue.ID {
+		return nil, fmt.Errorf("--parent differs from the comment's issue %s; a sub-issue from a comment always sits under that issue, so leave --parent out", preview.SourceIssue.Identifier)
+	}
+	delete(body, "parent_issue_id")
+	if _, ok := body["title"]; !ok {
+		for _, c := range preview.CommentThread {
+			if c.ID == commentID {
+				body["title"] = commentTitle(c.Content)
+			}
+		}
+		if body["title"] == "" || body["title"] == nil {
+			return nil, fmt.Errorf("the comment has no text to use as a title; pass --title")
+		}
+	}
+	var result map[string]any
+	request := map[string]any{"mode": "manual", "capture_token": preview.CaptureToken, "issue": body}
+	if err := client.PostJSON(ctx, "/api/comments/"+commentID+"/sub-issues", request, &result); err != nil {
+		if msg, ok := activeDuplicateIssueCreateMessage(err); ok {
+			return nil, errors.New(msg)
+		}
+		return nil, fromCommentError("create sub-issue from comment", err)
+	}
+	return result, nil
+}
+
+// commentTitle is a comment's first line of text, as a title of at most 80
+// characters.
+func commentTitle(content string) string {
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(line), "#>*-"))
+		if line == "" {
+			continue
+		}
+		if runes := []rune(line); len(runes) > 80 {
+			line = strings.TrimSpace(string(runes[:79])) + "…"
+		}
+		return line
+	}
+	return ""
+}
+
+func fromCommentError(action string, err error) error {
+	var httpErr *cli.HTTPError
+	if errors.As(err, &httpErr) {
+		switch httpErr.StatusCode {
+		case http.StatusForbidden:
+			return fmt.Errorf("%s: the comment endpoint is for people only; an agent splits work with `multica issue create --parent <issue> [--after <sibling>]`: %w", action, err)
+		case http.StatusNotFound:
+			return fmt.Errorf("%s: this server has no sub-issue-from-comment endpoint or the comment is gone: %w", action, err)
+		}
+	}
+	return fmt.Errorf("%s: %w", action, err)
 }
 
 func verifyIssueCreateProperties(expected map[string]json.RawMessage, issue map[string]any) error {
@@ -2902,9 +3049,9 @@ func runIssueCommentAdd(cmd *cobra.Command, args []string) error {
 	}
 	mode, _ := cmd.Flags().GetString("mode")
 	switch mode {
-	case "", "steer", "queue", "restart", "handoff", "parallel":
+	case "", "steer", "interrupt", "queue", "restart", "handoff", "parallel":
 	default:
-		return fmt.Errorf("--mode must be steer, queue, restart, handoff or parallel")
+		return fmt.Errorf("--mode must be steer, interrupt, queue, restart, handoff or parallel")
 	}
 
 	client, err := newAPIClient(cmd)

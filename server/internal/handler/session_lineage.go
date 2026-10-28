@@ -42,7 +42,7 @@ func classifySessionBreak(task db.AgentTaskQueue, bc sessionBreakContext) string
 		}
 		return sessionBreakFirstRun
 	}
-	if task.ForceFreshSession && !task.RerunOfTaskID.Valid && !task.RetryOfTaskID.Valid {
+	if task.ForceFreshSession && !task.RetryOfTaskID.Valid {
 		return sessionBreakFreshRequested
 	}
 	if bc.ownLastRuntimeID != uuidToString(task.RuntimeID) {

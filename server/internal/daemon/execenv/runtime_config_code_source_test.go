@@ -40,7 +40,7 @@ func TestBriefTellsTheAgentNotToCloneACoveredRepo(t *testing.T) {
 	if !strings.Contains(brief, "/Users/kunkun/.agents/multica") {
 		t.Error("the brief must name the directory the task actually runs in")
 	}
-	if !strings.Contains(brief, "do NOT run `multica repo checkout` for these") {
+	if !strings.Contains(brief, "Already here, do NOT `multica repo checkout`: https://github.com/jeff-kunkun/multica") {
 		t.Error("a covered repo must carry an explicit do-not-clone instruction")
 	}
 	if !strings.Contains(brief, "don't switch branches, reset, or discard changes you didn't make") {
@@ -66,7 +66,7 @@ func TestBriefReportsAnUnverifiedDirectoryInsteadOfHidingIt(t *testing.T) {
 	if !strings.Contains(brief, "no git remote there matches it") {
 		t.Error("the reason must reach the agent verbatim; a silent skip is how this failed before")
 	}
-	if !strings.Contains(brief, "will refuse these") {
+	if !strings.Contains(brief, "`multica repo checkout` refuses them; report it") {
 		t.Error("the brief must say the checkout refuses rather than clones, so the agent reports instead of retrying")
 	}
 }
@@ -81,7 +81,7 @@ func TestBriefKeepsRemoteOnlyReposCheckoutable(t *testing.T) {
 			RemoteRepos: []CodeSourceRepoForEnv{{URL: "https://github.com/o/elsewhere"}},
 		},
 	})
-	if !strings.Contains(brief, "Not in that directory — check these out normally") {
+	if !strings.Contains(brief, "Not here, check out with `multica repo checkout <url>`: https://github.com/o/elsewhere") {
 		t.Error("pinning one directory must not strand a project's other repositories")
 	}
 }
@@ -99,12 +99,12 @@ func TestBriefNamesTheBranchAndTheOtherTasksInTheFolder(t *testing.T) {
 			},
 		},
 	})
+	// The identifier is enough to look a co-runner up (DENE-2679); a run
+	// without one is named by its title.
 	for _, want := range []string{
-		"- Folder: `/Users/kunkun/code/app`",
-		"- Current branch: `main`",
-		"- DENE-7 Fix login (branch `fix-login`)",
-		"- Chat about the build\n",
-		"create a git worktree inside or beside the project folder",
+		"You run in `/Users/kunkun/code/app` (branch `main`)",
+		"- Also running here now: DENE-7 (branch `fix-login`), Chat about the build\n",
+		"put a separate change in a git worktree beside the folder",
 	} {
 		if !strings.Contains(brief, want) {
 			t.Errorf("brief missing %q", want)
@@ -117,13 +117,13 @@ func TestBriefOmitsTheCoRunnerListWhenAloneInTheFolder(t *testing.T) {
 		IssueID:    "i1",
 		CodeSource: CodeSourceForEnv{Kind: "local_directory", LocalPath: "/Users/kunkun/code/app"},
 	})
-	if strings.Contains(brief, "Other tasks running in this folder") {
+	if strings.Contains(brief, "Also running here now") {
 		t.Error("no co-runner list without other tasks")
 	}
-	if strings.Contains(brief, "Current branch") {
-		t.Error("no branch line when the branch is unknown")
+	if strings.Contains(brief, "(branch `") {
+		t.Error("no branch when the branch is unknown")
 	}
-	if !strings.Contains(brief, "Other agents may be working in this folder at the same time") {
+	if !strings.Contains(brief, "Others may work here too") {
 		t.Error("the risk sentence applies even when the folder is free right now")
 	}
 }

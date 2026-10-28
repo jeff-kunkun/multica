@@ -1498,26 +1498,20 @@ func TestInjectRuntimeConfigClaude(t *testing.T) {
 	s := string(content)
 	for _, want := range []string{
 		"Multica Agent Runtime",
-		// DENE-1329 verb map: reads are one line per verb, flags in --help.
-		"`issue get | list | children`",
-		"`issue comment list | add`",
+		// Verbs and flags are in --help (DENE-1329, DENE-2679).
+		"run `multica <command> --help` for verbs and flags.",
 		"Leave the status true with `multica issue status`",
-		// Skills are listed by on-disk slug: that is the directory
-		// writeSkillFiles creates and the only identifier the model can
-		// actually invoke (MUL-5529).
-		"go-conventions",
-		"pr-review",
-		"discovered automatically",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("CLAUDE.md missing %q", want)
 		}
 	}
-	// The display names must not leak into the listing — a model that reads
-	// "PR Review" and invokes it by that name gets nothing.
-	for _, absent := range []string{"Go Conventions", "PR Review"} {
+	// Claude Code lists the skills it discovers itself (DENE-2679), so the
+	// brief carries no index; the slug listing other providers get is pinned
+	// in TestBriefSkillsListIsNamesOnly.
+	for _, absent := range []string{"discovered automatically", "go-conventions", "Go Conventions", "PR Review"} {
 		if strings.Contains(s, absent) {
-			t.Errorf("CLAUDE.md lists display name %q instead of its slug", absent)
+			t.Errorf("CLAUDE.md carries skill index text %q; Claude lists skills natively", absent)
 		}
 	}
 }
@@ -1551,16 +1545,16 @@ func TestInjectRuntimeConfigBackgroundTaskSafetyProviderAgnostic(t *testing.T) {
 			s := string(data)
 			for _, want := range []string{
 				"## Background work",
-				// DENE-1329 verb-map rewrite: the section is one paragraph that
-				// keeps the four constraints only the model can keep (ADR-0007).
+				// DENE-1329 and DENE-2679: the section is one short paragraph
+				// that keeps the four constraints only the model can keep
+				// (ADR-0007).
 				// Each pin below is one of them; the incident history behind each
 				// lives in its ticket, not in the brief.
 				//
 				// 1. The platform fact and the no-background-and-yield rule.
 				"Your run ends when your turn exits",
-				"anything still running is orphaned and its result lost",
-				"Never background work and yield",
-				"block on results in the foreground",
+				"anything still running is lost",
+				"never background work and yield: block in the foreground",
 				// 2. CI / external systems are not run-owned — the full compound
 				// ban, not its first item (MUL-5223).
 				"Don't wait on CI or external systems",
@@ -1569,15 +1563,14 @@ func TestInjectRuntimeConfigBackgroundTaskSafetyProviderAgnostic(t *testing.T) {
 				// 3. The one persistent-service exception and its handoff triple
 				// (MUL-5274).
 				"Only a service the user asked to keep running may outlive the turn",
-				"detach it (durable logs, a recorded PID), verify it",
+				"detach it (durable logs, recorded PID), verify it",
 				"reply with URL, logs and how to stop it",
-				"without a supervisor its survival is best-effort",
+				"its survival is best-effort",
 				// The one CI exception: the result was explicitly asked for.
-				"explicitly ask for the CI result, wait for it in ONE foreground `gh pr checks <pr> --watch`",
+				"explicitly asks for the CI result: then ONE foreground `gh pr checks <pr> --watch`",
 				// 4. Never kill the daemon by name.
-				"Never kill `multica` by name",
+				"Never kill `multica` by name or the daemon's PID (`multica daemon status`)",
 				"stop only a PID you started",
-				"never the daemon's (`multica daemon status --output json`)",
 			} {
 				if !strings.Contains(s, want) {
 					t.Errorf("%s missing background work text %q\n---\n%s", tc.file, want, s)
@@ -1621,20 +1614,16 @@ func TestInjectRuntimeConfigAvailableCommandsCoreOnly(t *testing.T) {
 	}
 
 	s := string(content)
-	// DENE-1329: the Commands section is a verb map — one line per verb, with
-	// each command's synopsis and flags in `multica <command> --help`.
+	// DENE-1329 made the Commands section a verb map; DENE-2679 sends the agent
+	// to `multica <command> --help` for verbs and flags and keeps the two verbs
+	// the workflow's last steps use. `--no-start` is taught by workflow step 3.
 	for _, want := range []string{
 		"## Commands",
-		"`multica <command> --help`",
-		"`issue get | list | children`",
-		"`issue comment list | add`",
-		"bodies via `--content-file`",
-		"`issue create | update | assign`",
-		"`--no-start` records a change without starting a run",
+		"run `multica <command> --help` for verbs and flags.",
+		"Post comment and issue bodies via `--content-file`",
 		"`issue status <id> <status>`",
 		"`issue handoff --to <agent>`",
-		"`repo checkout <url>`",
-		"`attachment upload | download`",
+		"pass `--no-start`",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("AGENTS.md missing core command/help text %q\n---\n%s", want, s)
@@ -2599,8 +2588,8 @@ func TestInjectRuntimeConfigCommentGuardrailIsProviderAgnostic(t *testing.T) {
 				// The provider-agnostic guardrail: the comment verb line sends
 				// bodies through `--content-file`, and the rules live in --help.
 				for _, want := range []string{
-					"`issue comment list | add` — read / post comments (bodies via `--content-file`)",
-					"Run `multica <command> --help` for flags.",
+					"Post comment and issue bodies via `--content-file`",
+					"run `multica <command> --help` for verbs and flags.",
 				} {
 					if !strings.Contains(s, want) {
 						t.Errorf("%s missing provider-agnostic comment guardrail %q\n---\n%s", configFile, want, s)
@@ -2680,7 +2669,7 @@ func TestInjectRuntimeConfigLinuxCommentFormattingEmphasizesFile(t *testing.T) {
 			if strings.Contains(s, "\n## Comment Formatting\n") {
 				t.Errorf("%s still carries the pre-DENE-1329 ## Comment Formatting section\n---\n%s", fileName, s)
 			}
-			if !strings.Contains(s, "(bodies via `--content-file`)") {
+			if !strings.Contains(s, "bodies via `--content-file`") {
 				t.Errorf("%s Commands section lost the --content-file body rule\n---\n%s", fileName, s)
 			}
 
@@ -2737,7 +2726,7 @@ func TestInjectRuntimeConfigCodexWindowsUsesContentFile(t *testing.T) {
 		t.Fatalf("read AGENTS.md: %v", err)
 	}
 	s := string(data)
-	if !strings.Contains(s, "(bodies via `--content-file`)") {
+	if !strings.Contains(s, "bodies via `--content-file`") {
 		t.Errorf("AGENTS.md missing Codex/Windows file-first rule\n---\n%s", s)
 	}
 
@@ -3918,7 +3907,7 @@ func TestEnsureCodexSandboxConfigCreatesDefaultLinux(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.toml")
 
-	policy := codexSandboxPolicyFor("linux", "0.121.0")
+	policy := codexSandboxPolicyFor("linux")
 	if err := ensureCodexSandboxConfig(configPath, policy, "0.121.0", testLogger()); err != nil {
 		t.Fatalf("ensureCodexSandboxConfig failed: %v", err)
 	}
@@ -3947,7 +3936,7 @@ func TestEnsureCodexSandboxConfigDarwinFallsBack(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.toml")
 
-	policy := codexSandboxPolicyFor("darwin", "0.121.0")
+	policy := codexSandboxPolicyFor("darwin")
 	if err := ensureCodexSandboxConfig(configPath, policy, "0.121.0", testLogger()); err != nil {
 		t.Fatalf("ensureCodexSandboxConfig failed: %v", err)
 	}
@@ -3972,7 +3961,7 @@ func TestEnsureCodexSandboxConfigWindowsFallsBack(t *testing.T) {
 	configPath := filepath.Join(dir, "config.toml")
 
 	// No native sandbox configured → danger-full-access.
-	policy := codexSandboxPolicyForConfig("windows", "0.144.5", windowsSandboxAbsent)
+	policy := codexSandboxPolicyForConfig("windows", windowsSandboxAbsent)
 	if err := ensureCodexSandboxConfig(configPath, policy, "0.144.5", testLogger()); err != nil {
 		t.Fatalf("ensureCodexSandboxConfig failed: %v", err)
 	}
@@ -4009,7 +3998,7 @@ func TestEnsureCodexSandboxConfigWindowsRespectsUserSandbox(t *testing.T) {
 			if winState != windowsSandboxNative {
 				t.Fatalf("resolveWindowsSandboxState = %v, want native", winState)
 			}
-			policy := codexSandboxPolicyForConfig("windows", "0.144.5", winState)
+			policy := codexSandboxPolicyForConfig("windows", winState)
 			if err := ensureCodexSandboxConfig(configPath, policy, "0.144.5", testLogger()); err != nil {
 				t.Fatalf("ensureCodexSandboxConfig failed: %v", err)
 			}
@@ -4038,7 +4027,7 @@ func TestEnsureCodexSandboxConfigIsIdempotent(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "config.toml")
 
-	policy := codexSandboxPolicyFor("linux", "0.121.0")
+	policy := codexSandboxPolicyFor("linux")
 	for i := 0; i < 3; i++ {
 		if err := ensureCodexSandboxConfig(configPath, policy, "0.121.0", testLogger()); err != nil {
 			t.Fatalf("pass %d: %v", i, err)
@@ -4061,7 +4050,7 @@ approval_policy = "on-failure"
 `
 	os.WriteFile(configPath, []byte(existing), 0o644)
 
-	policy := codexSandboxPolicyFor("linux", "0.121.0")
+	policy := codexSandboxPolicyFor("linux")
 	if err := ensureCodexSandboxConfig(configPath, policy, "0.121.0", testLogger()); err != nil {
 		t.Fatalf("ensureCodexSandboxConfig failed: %v", err)
 	}
@@ -4096,7 +4085,7 @@ network_access = true
 `
 	os.WriteFile(configPath, []byte(existing), 0o644)
 
-	policy := codexSandboxPolicyFor("darwin", "0.121.0")
+	policy := codexSandboxPolicyFor("darwin")
 	if err := ensureCodexSandboxConfig(configPath, policy, "0.121.0", testLogger()); err != nil {
 		t.Fatalf("ensureCodexSandboxConfig failed: %v", err)
 	}
@@ -4135,7 +4124,7 @@ trust = "always"
 `
 	os.WriteFile(configPath, []byte(existing), 0o644)
 
-	policy := codexSandboxPolicyFor("linux", "0.121.0")
+	policy := codexSandboxPolicyFor("linux")
 	if err := ensureCodexSandboxConfig(configPath, policy, "0.121.0", testLogger()); err != nil {
 		t.Fatalf("ensureCodexSandboxConfig failed: %v", err)
 	}
@@ -4200,7 +4189,7 @@ network_access = true
 `
 	os.WriteFile(configPath, []byte(legacy), 0o644)
 
-	policy := codexSandboxPolicyFor("linux", "0.121.0")
+	policy := codexSandboxPolicyFor("linux")
 	if err := ensureCodexSandboxConfig(configPath, policy, "0.121.0", testLogger()); err != nil {
 		t.Fatalf("ensureCodexSandboxConfig failed: %v", err)
 	}
@@ -4222,43 +4211,73 @@ network_access = true
 	}
 }
 
+// TestCodexSandboxPolicyFor pins the explicit default: every platform gets
+// danger-full-access, with no Codex-version branch left to fall through.
 func TestCodexSandboxPolicyFor(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		name     string
-		goos     string
-		version  string
-		wantMode string
-		wantNet  bool
+		name string
+		goos string
 		// wantHint is whether the policy carries an actionable remediation hint.
-		// macOS points at a Codex upgrade and Linux at running the daemon inside
-		// an outer boundary; the Windows compatibility fallback has no generic
-		// action, so it must not surface a misleading macOS hint.
+		// macOS and Linux point at running the daemon inside an outer boundary;
+		// the Windows compatibility fallback has no generic action.
 		wantHint bool
 	}{
-		// Linux runs unsandboxed by product decision, on any Codex version
-		// (MUL-5578) — there is no version-dependent branch to exercise here.
-		{"linux any version", "linux", "0.100.0", "danger-full-access", false, true},
-		{"linux unknown version", "linux", "", "danger-full-access", false, true},
-		{"windows any version", "windows", "0.144.5", "danger-full-access", false, false},
-		{"windows unknown version", "windows", "", "danger-full-access", false, false},
-		{"darwin old version", "darwin", "0.121.0", "danger-full-access", false, true},
-		{"darwin unknown version", "darwin", "", "danger-full-access", false, true},
+		{"darwin", "darwin", true},
+		{"linux", "linux", true},
+		{"freebsd", "freebsd", true},
+		{"windows", "windows", false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			p := codexSandboxPolicyFor(tc.goos, tc.version)
-			if p.Mode != tc.wantMode {
-				t.Errorf("mode = %q, want %q", p.Mode, tc.wantMode)
+			p := codexSandboxPolicyFor(tc.goos)
+			if p.Mode != CodexFullAccessSandboxMode {
+				t.Errorf("mode = %q, want %q", p.Mode, CodexFullAccessSandboxMode)
 			}
-			if p.NetworkAccess != tc.wantNet {
-				t.Errorf("network_access = %v, want %v", p.NetworkAccess, tc.wantNet)
+			if p.NetworkAccess {
+				t.Error("network_access must stay unset under danger-full-access")
 			}
 			if p.Reason == "" {
 				t.Error("expected non-empty Reason")
 			}
 			if (p.Hint != "") != tc.wantHint {
 				t.Errorf("hint present = %v, want %v (hint=%q)", p.Hint != "", tc.wantHint, p.Hint)
+			}
+		})
+	}
+}
+
+// TestCodexStartupSandboxMode pins what the startup log reports: full access
+// everywhere by default, and on Windows the shared config's windows.sandbox
+// opt-in (or an unparseable config) reported as workspace-write, matching what
+// its tasks get.
+func TestCodexStartupSandboxMode(t *testing.T) {
+	cases := []struct {
+		name   string
+		goos   string
+		config string // "" means no shared config.toml
+		want   string
+	}{
+		{"darwin no config", "darwin", "", CodexFullAccessSandboxMode},
+		{"linux no config", "linux", "", CodexFullAccessSandboxMode},
+		{"darwin ignores windows.sandbox", "darwin", "[windows]\nsandbox = \"unelevated\"\n", CodexFullAccessSandboxMode},
+		{"windows no config", "windows", "", CodexFullAccessSandboxMode},
+		{"windows config without sandbox", "windows", "model = \"o3\"\n", CodexFullAccessSandboxMode},
+		{"windows native unelevated", "windows", "[windows]\nsandbox = \"unelevated\"\n", "workspace-write"},
+		{"windows native elevated", "windows", "[windows]\nsandbox = \"elevated\"\n", "workspace-write"},
+		{"windows undecidable", "windows", "[windows\n", "workspace-write"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			if tc.config != "" {
+				if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(tc.config), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			t.Setenv("CODEX_HOME", home)
+			if got := CodexStartupSandboxMode(tc.goos); got != tc.want {
+				t.Errorf("CodexStartupSandboxMode(%q) = %q, want %q", tc.goos, got, tc.want)
 			}
 		})
 	}
@@ -4285,7 +4304,7 @@ func TestCodexSandboxPolicyForConfig(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			p := codexSandboxPolicyForConfig(tc.goos, "0.144.5", tc.winState)
+			p := codexSandboxPolicyForConfig(tc.goos, tc.winState)
 			if p.Mode != tc.wantMode {
 				t.Errorf("mode = %q, want %q", p.Mode, tc.wantMode)
 			}
@@ -5622,27 +5641,21 @@ func TestInjectRuntimeConfigMentionLoopHardening(t *testing.T) {
 	t.Run("mentions-section-lists-loop-protocol", func(t *testing.T) {
 		t.Parallel()
 		s := readClaudeMD(t, assignmentCtx)
-		// MUL-6417: the section is fact-anchored, no prescriptive default.
-		// Pin each fact that invalidates a false reason to mention — losing
-		// any one of them re-opens the incident class it closed.
-		// DENE-1329 compressed the section to two sentences; each fact
-		// survives in shorter words.
+		// MUL-6417: the rule is fact-anchored, no prescriptive default.
+		// DENE-2679 cut it to one line in Output. The brief keeps the side
+		// effects, the one real function and the courtesy-loop fact; the
+		// followers fact (#7245), the prose-name fact (MUL-6528) and the
+		// missed-vs-stray asymmetry moved to `issue comment add --help`
+		// (TestIssueHelpCarriesMovedBriefRules) and the platform skill's
+		// mentions reference (TestPlatformSkillCoversPlatformContracts).
 		for _, want := range []string{
 			"**notifies a person**",
 			"**starts a run for that agent**",
-			// Notifying FOLLOWERS is a false need: delivery already happens.
-			// Scoped to followers on purpose — for a non-follower, a mention
-			// IS how they find out (Elon's review catch on #7245).
-			"Followers already see your comment",
 			// The one real function, with its scope.
 			"pull someone into work they are not doing yet",
-			// The reference fact (MUL-6528): @-as-attribution dispatched the
-			// agent being credited.
-			"naming someone in prose stays plain text",
 			// The courtesy-loop fact (the incident class behind #1581/#6453).
 			"a thank-you or FYI mention of an agent costs a paid run",
-			// The asymmetry that breaks ambiguous cases toward not mentioning.
-			"a missed mention costs one follow-up ask, a stray one costs a run",
+			"`issue comment add --help`",
 		} {
 			if !strings.Contains(s, want) {
 				t.Errorf("Mentions section missing %q\n---\n%s", want, s)
@@ -5685,7 +5698,7 @@ func TestInjectRuntimeConfigMentionLoopHardening(t *testing.T) {
 		// MUL-6417 merged the reply-mode block into the shared steps: the
 		// unconditional one-comment contract now lives in step 4, and the
 		// mention-after-work bullet is gone with the block (the discipline
-		// itself stays in `## Mentions`, pinned by the Mentions subtest).
+		// itself stays in the Mentions line, pinned by the Mentions subtest).
 		// Step 4 states the delivery as one result comment under --parent.
 		for _, want := range []string{
 			"4. Post one result comment with `multica issue comment add`, under the `--parent` the per-turn message gave (top-level when none).",
@@ -6116,11 +6129,11 @@ func TestInjectRuntimeConfigBriefKeepsStaticCatchUpRead(t *testing.T) {
 		t.Errorf("brief must not render a since-delta hint\n---\n%s", s)
 	}
 
-	// The flags' discovery point is the CLI's own --help (DENE-1329); the
-	// Commands map names the verb and points there.
+	// The flags' discovery point is the CLI's own --help (DENE-1329); since
+	// DENE-2679 the Commands section points there for the verbs too.
 	for _, want := range []string{
-		"- `issue comment list | add`",
-		"Run `multica <command> --help` for flags.",
+		"Post comment and issue bodies via `--content-file`",
+		"run `multica <command> --help` for verbs and flags.",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("Commands missing flag discovery %q\n---\n%s", want, s)
@@ -6410,7 +6423,7 @@ func TestInjectRuntimeConfigCodexCommentFormattingUnchanged(t *testing.T) {
 		// The post-#4182 file-first rule is still emitted on Linux, as the
 		// Commands line; its mechanics live in `issue comment add --help`
 		// (DENE-1329)...
-		if !strings.Contains(s, "(bodies via `--content-file`)") {
+		if !strings.Contains(s, "bodies via `--content-file`") {
 			t.Fatalf("codex linux --content-file rule missing\n---\n%s", s)
 		}
 		// ...AND the brief does NOT carry this turn's trigger comment id:
@@ -6436,7 +6449,7 @@ func TestInjectRuntimeConfigCodexCommentFormattingUnchanged(t *testing.T) {
 		}
 		s := string(data)
 
-		if !strings.Contains(s, "(bodies via `--content-file`)") || strings.Contains(s, "--content-stdin") {
+		if !strings.Contains(s, "bodies via `--content-file`") || strings.Contains(s, "--content-stdin") {
 			t.Fatalf("codex Windows --content-file rule missing\n---\n%s", s)
 		}
 	})
@@ -7273,9 +7286,12 @@ func TestPrepareIsolateSidecarsKeepsUserDirectoryUntouched(t *testing.T) {
 	if strings.Contains(brief, "`.multica/project/resources.json`") {
 		t.Errorf("brief still names the cwd-relative resources file the cwd does not hold:\n%s", brief)
 	}
+	// Claude finds the relocated skills itself: the daemon passes the sidecar
+	// root with --add-dir and the SKILL.md sits where that discovery looks
+	// (checked above), so the brief names no skills tree (DENE-2679).
 	skillsDir := filepath.ToSlash(filepath.Join(env.SidecarRoot, ".claude", "skills"))
-	if !strings.Contains(brief, skillsDir+"/<skill>/SKILL.md") {
-		t.Errorf("brief does not point at the relocated skills tree %q:\n%s", skillsDir, brief)
+	if strings.Contains(brief, skillsDir) {
+		t.Errorf("claude brief repeats the skills tree Claude Code discovers through --add-dir:\n%s", brief)
 	}
 }
 

@@ -65,7 +65,9 @@ compatible CLI. HTTP timeout follows MULTICA_HTTP_TIMEOUT.`,
 	cmd.Flags().String("output", "table", "Output format: table or json (entire envelope)")
 	if runs {
 		cmd.Flags().Bool("active", false, "Required: request the server's active run set, preserving status and phase")
-		cmd.Example = "  multica runs --active --all-workspaces --output json\n  multica runs --active --cursor 'SERVER_CURSOR' --output json"
+		cmd.Flags().Bool("live", false, "Also show each running issue run's live status (command in flight, last output line, quiet time); JSON adds a top-level live array")
+		cmd.Example = "  multica runs --active --all-workspaces --output json\n  multica runs --active --live\n  multica runs --active --cursor 'SERVER_CURSOR' --output json"
+		cmd.AddCommand(newRunsWatchCommand())
 	} else {
 		cmd.Flags().String("since", "", "First-page RFC3339 timestamp; mutually exclusive with --cursor")
 		cmd.Example = "  multica changes --since 2026-10-11T17:00:00Z --all-workspaces --output json\n  multica changes --cursor 'SERVER_CURSOR' --output json"
@@ -116,10 +118,17 @@ func runFastAccess(cmd *cobra.Command, runs bool) error {
 	if cursor != "" && (cmd.Flags().Changed("all-workspaces") || cmd.Flags().Changed("workspace") || cmd.Flags().Changed("workspace-id")) {
 		return fmt.Errorf("--cursor already binds scope; omit --all-workspaces, --workspace and --workspace-id on continuation")
 	}
+	live := false
+	if runs {
+		live, _ = cmd.Flags().GetBool("live")
+	}
 	client, err := newAPIClient(cmd)
 	if err != nil {
 		return err
 	}
+	// Live status is a separate read outside the fast-access envelope, so it
+	// keeps the plain client rather than the envelope's byte budget.
+	liveClient := *client
 	if cursor == "" && !all && !cmd.Flags().Changed("workspace") {
 		workspaces = []string{client.WorkspaceID}
 	}
@@ -213,6 +222,12 @@ func runFastAccess(cmd *cobra.Command, runs bool) error {
 	if envelope.Mode == "timestamp_snapshot" {
 		fmt.Fprintln(cmd.ErrOrStderr(), "timestamp_snapshot: current summaries only; coverage does not include historical deletions or every intermediate state.")
 	}
+	var liveByTask map[string]taskLive
+	if live {
+		if raw, liveByTask, err = attachRunsLive(cmd, &liveClient, raw); err != nil {
+			return err
+		}
+	}
 	if output == "json" {
 		// Do not decode through float64 or pretty-print: preserve large revisions,
 		// unknown fields and the server's bounded UTF-8 representation.
@@ -225,7 +240,7 @@ func runFastAccess(cmd *cobra.Command, runs bool) error {
 	if err := decoder.Decode(&snapshot); err != nil {
 		return err
 	}
-	return printFastAccess(cmd.OutOrStdout(), snapshot)
+	return printFastAccess(cmd.OutOrStdout(), snapshot, liveByTask)
 }
 
 type fastAccessTransport struct {
@@ -262,7 +277,7 @@ func (t fastAccessTransport) RoundTrip(req *http.Request) (*http.Response, error
 	return resp, nil
 }
 
-func printFastAccess(w io.Writer, snapshot map[string]any) error {
+func printFastAccess(w io.Writer, snapshot map[string]any, liveByTask map[string]taskLive) error {
 	for _, key := range []string{"schema_version", "mode", "as_of", "coverage_from", "scope_revision", "complete", "active_runs_complete", "next_cursor", "checkpoint", "retention_floor"} {
 		value, err := json.Marshal(snapshot[key])
 		if err != nil {
@@ -280,6 +295,14 @@ func printFastAccess(w io.Writer, snapshot map[string]any) error {
 				return err
 			}
 			fmt.Fprintln(w, string(value))
+			if section != "active_runs" {
+				continue
+			}
+			if id, _ := row.(map[string]any)["id"].(string); id != "" {
+				if live, ok := liveByTask[id]; ok {
+					fmt.Fprintf(w, "  live: %s\n", formatTaskLive(live))
+				}
+			}
 		}
 	}
 	return nil

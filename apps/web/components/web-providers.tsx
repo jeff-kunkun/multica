@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { CoreProvider } from "@multica/core/platform";
+import { configStore, parseFeatureFlagList } from "@multica/core/config";
 import { createBrowserCookieLocaleAdapter } from "@multica/core/i18n/browser";
 import type { LocaleResources, SupportedLocale } from "@multica/core/i18n";
 import packageJson from "../package.json";
@@ -43,6 +44,12 @@ function deriveWsUrl(): string | undefined {
 // to the package.json version so local dev still reports something useful.
 const WEB_VERSION =
   process.env.NEXT_PUBLIC_APP_VERSION || packageJson.version || "dev";
+
+// Office test builds bake feature flags in at build time
+// (NEXT_PUBLIC_MULTICA_FEATURE_FLAGS=a,b); production leaves it unset.
+configStore
+  .getState()
+  .setLocalFeatureFlags(parseFeatureFlagList(process.env.NEXT_PUBLIC_MULTICA_FEATURE_FLAGS));
 
 export function WebProviders({
   children,

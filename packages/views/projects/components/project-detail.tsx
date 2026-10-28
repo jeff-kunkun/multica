@@ -9,7 +9,7 @@ import { copyText } from "@multica/ui/lib/clipboard";
 import { toast } from "sonner";
 import type { Project, ProjectStatus } from "@multica/core/types";
 import { useFeatureEnabled } from "@multica/core/config";
-import { PROJECT_WORKFLOWS_V1_FLAG } from "@multica/core/feature-flags";
+import { OFFICE_PROJECT_FOLDER_FLAG, PROJECT_WORKFLOWS_V1_FLAG } from "@multica/core/feature-flags";
 import { useAuthStore } from "@multica/core/auth";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { useUpdateProject, useDeleteProject } from "@multica/core/projects/mutations";
@@ -28,6 +28,7 @@ import { ActorAvatar } from "../../common/actor-avatar";
 import { currentPath, useNavigation } from "../../navigation";
 import { TitleEditor } from "../../editor";
 import { ProjectCodeSection } from "./project-code-section";
+import { ProjectFolderSection } from "./project-folder-section";
 import { ProjectMembersSection } from "./project-members-section";
 import { ProjectWorkflowControl } from "../../workflows/project-workflow-row";
 import { ProjectWorkflowMenu } from "../../workflows/project-workflow-menu";
@@ -97,6 +98,16 @@ function PropRow({
         {children}
       </div>
     </div>
+  );
+}
+
+// Office test builds bind a project to a folder instead of repositories.
+function ProjectSourceSection({ projectId }: { projectId: string }) {
+  const folderOnly = useFeatureEnabled(OFFICE_PROJECT_FOLDER_FLAG);
+  return folderOnly ? (
+    <ProjectFolderSection projectId={projectId} />
+  ) : (
+    <ProjectCodeSection projectId={projectId} />
   );
 }
 
@@ -454,7 +465,7 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
       })()}
 
       {/* Resources */}
-      <ProjectCodeSection projectId={projectId} />
+      <ProjectSourceSection projectId={projectId} />
 
       <div id="project-members-section">
         <ProjectMembersSection

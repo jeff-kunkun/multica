@@ -1,7 +1,9 @@
 "use client";
 
 import { issueStatusCategory } from "@multica/core/issues";
-import { useState, useRef, useEffect, useLayoutEffect } from "react";
+import { useFeatureEnabled } from "@multica/core/config";
+import { OFFICE_PLAN_FIRST_FLAG, OFFICE_SPLIT_FROM_COMMENT_FLAG } from "@multica/core/feature-flags";
+import { useState, useRef, useEffect, useLayoutEffect, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AppLink, resolveClickIntent, useNavigation } from "../navigation";
 import {
@@ -56,7 +58,7 @@ import { ContentEditor, type ContentEditorRef, TitleEditor, type TitleEditorRef,
 import { useIssueCreateUploads } from "./use-issue-create-uploads";
 import { useShortcut } from "@multica/core/shortcuts";
 import { ShortcutKeycaps } from "../common/shortcut-keycaps";
-import { StatusIcon, StatusPicker, PriorityIcon, PriorityPicker, StagePicker, AssigneePicker, StartDatePicker, DueDatePicker, LabelPicker } from "../issues/components";
+import { StatusIcon, StatusPicker, PriorityIcon, PriorityPicker, StagePicker, AfterPicker, AssigneePicker, StartDatePicker, DueDatePicker, LabelPicker } from "../issues/components";
 import { maxSiblingStage } from "../issues/components/pickers/stage-picker";
 import { ProjectPicker } from "../projects/components/project-picker";
 import { useIssueTriggerPreview } from "../issues/hooks/use-issue-trigger-preview";
@@ -268,6 +270,9 @@ export function ManualCreatePanel({
   const setLastAssignee = useIssueDraftStore((s) => s.setLastAssignee);
   const setLastMode = useCreateModeStore((s) => s.setLastMode);
   const keepOpen = useQuickCreateStore((s) => s.keepOpen);
+  // Plan first (DENE-2670): only for an agent assignee, behind the office flag.
+  const planFirstEnabled = useFeatureEnabled(OFFICE_PLAN_FIRST_FLAG);
+  const [planFirst, setPlanFirst] = useState(false);
   const setKeepOpen = useQuickCreateStore((s) => s.setKeepOpen);
   const manualFields = useIssueCreateSettingsStore((s) => s.manualCreateFields);
 
@@ -322,6 +327,9 @@ export function ManualCreatePanel({
   const [stage, setStage] = useState<number | null>(
     typeof data?.stage === "number" ? (data.stage as number) : null,
   );
+  // Siblings this sub-issue starts after (DENE-2671); office test builds only.
+  const splitFromComment = useFeatureEnabled(OFFICE_SPLIT_FROM_COMMENT_FLAG);
+  const [afterIds, setAfterIds] = useState<string[]>([]);
   const [parentPickerOpen, setParentPickerOpen] = useState(false);
   // Toolbar fields hidden via Settings → Preferences → Issue creation reuse the overflow reveal
   // pattern: the ⋯ menu item flips this open, which mounts the inline pill
@@ -361,6 +369,18 @@ export function ManualCreatePanel({
     ...childIssuesOptions(wsId, parentIssueId ?? ""),
     enabled: !!parentIssueId,
   });
+  // Only unfinished siblings can be waited on: a done one is already past and
+  // a cancelled one never finishes.
+  const afterOptions = useMemo(
+    () => parentChildren.filter((c) => {
+      const category = issueStatusCategory(c);
+      return category !== "done" && category !== "closed";
+    }),
+    [parentChildren],
+  );
+  const submittedAfterIds = splitFromComment && parentIssueId
+    ? afterIds.filter((id) => afterOptions.some((o) => o.id === id))
+    : [];
 
   // Set the persisted draft's active mode so a later reopen (and any reader of
   // the unified draft) knows which form the user is editing in.
@@ -573,6 +593,7 @@ export function ManualCreatePanel({
               ...(Object.keys(propertyValues).length > 0 ? { properties: propertyValues } : {}),
               stage: parentIssueId && stage != null ? stage : undefined,
               project_id: submittedProjectId,
+              ...(submittedAfterIds.length > 0 ? { after_issue_ids: submittedAfterIds } : {}),
             },
           },
         });
@@ -598,6 +619,8 @@ export function ManualCreatePanel({
           // Stage is only meaningful for a sub-issue (relative to its siblings).
           stage: parentIssueId && stage != null ? stage : undefined,
           project_id: submittedProjectId,
+          ...(planFirstEnabled && planFirst && assigneeType === "agent" ? { plan_first: true } : {}),
+          ...(submittedAfterIds.length > 0 ? { after_issue_ids: submittedAfterIds } : {}),
         });
       }
 
@@ -1157,6 +1180,18 @@ export function ManualCreatePanel({
                 />
               )}
 
+              {/* Starts after — orders this sub-issue behind open siblings */}
+              {splitFromComment && parentIssueId && (
+                <AfterPicker
+                  options={afterOptions}
+                  selectedIds={afterIds}
+                  onChange={setAfterIds}
+                  triggerRender={<PillButton />}
+                  tooltip={tIssues(($) => $.detail.prop_after)}
+                  align="start"
+                />
+              )}
+
               {/* Start date — collapsed into the ⋯ menu by default since it's
                   a low-frequency field (exposable via Settings → Preferences → Issue creation).
                   Renders inline when configured visible, when the field has a
@@ -1507,6 +1542,14 @@ export function ManualCreatePanel({
                   <BorderBeam />
                 </button>
               </TooltipHint>
+              {planFirstEnabled && assigneeType === "agent" && (
+                <TooltipHint label={t(($) => $.create_issue.plan_first_tooltip)}>
+                  <label className="flex shrink-0 items-center gap-1.5 text-caption text-muted-foreground cursor-pointer select-none">
+                    <Switch size="sm" checked={planFirst} onCheckedChange={setPlanFirst} />
+                    {t(($) => $.create_issue.plan_first)}
+                  </label>
+                </TooltipHint>
+              )}
               <label className="flex shrink-0 items-center gap-1.5 text-caption text-muted-foreground cursor-pointer select-none">
                 <Switch
                   size="sm"

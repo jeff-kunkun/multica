@@ -57,12 +57,15 @@ export function SteerBadge({ issueId, entry }: { issueId: string; entry: Timelin
   const names = receipts.every((receipt) => receipt.agent_id)
     ? formatAgentNames(locale, receipts.map((receipt) => getActorName("agent", receipt.agent_id!)))
     : null;
+  const interrupted = receipts.every((receipt) => receipt.delivery_mode === "interrupt");
   return (
     <span className="inline-flex min-w-0 items-center gap-1 text-caption text-muted-foreground">
       <CornerDownRight aria-hidden className="size-3 shrink-0" />
       <span className="truncate">
         {names !== null
-          ? t(($) => $.inline_run.steer_badge, { names })
+          ? interrupted
+            ? t(($) => $.inline_run.steer_badge_interrupt, { names })
+            : t(($) => $.inline_run.steer_badge, { names })
           : <BadgeLegacyName issueId={issueId} receipt={receipts[0]!} />}
       </span>
     </span>
@@ -73,6 +76,15 @@ function BadgeLegacyName({ issueId, receipt }: { issueId: string; receipt: Comme
   const { t } = useT("issues");
   const { name } = useReceiptAgentName(issueId, receipt);
   return <>{t(($) => $.inline_run.steer_badge, { names: name })}</>;
+}
+
+/**
+ * The second, counted from posting, in which the run read the message: 0.4 s
+ * is the 1st. Servers that predate DENE-2667 send no timing.
+ */
+export function deliveredSecond(ms: number | undefined): number | null {
+  if (typeof ms !== "number" || !Number.isFinite(ms) || ms < 0) return null;
+  return Math.max(1, Math.ceil(ms / 1000));
 }
 
 /** One line per running turn the message steered, following its delivery. */
@@ -135,10 +147,15 @@ function SteerReceipt({ issueId, entry, receipt }: {
     );
   }
   if (receipt.status === "delivered") {
+    const seconds = deliveredSecond(receipt.delivered_after_ms);
     return (
       <p className="flex items-center gap-1.5 text-caption text-muted-foreground">
         <Check aria-hidden className="size-3.5 shrink-0 text-success" />
-        <span>{t(($) => $.inline_run.steer_read, { name })}</span>
+        <span>
+          {seconds === null
+            ? t(($) => $.inline_run.steer_read, { name })
+            : t(($) => $.inline_run.steer_read_after, { name, seconds })}
+        </span>
       </p>
     );
   }

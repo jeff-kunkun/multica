@@ -1,5 +1,6 @@
-export type { Issue, IssueStatus, BuiltInIssueStatus, IssuePriority, IssueAssigneeType, IssueReviewerType, IssueMetadata, IssueMetadataValue, IssueAgentGuardResponse, IssueDriver, IssueDriverKind, IssueReaction, SourceContextAttachment, SourceContextAuthor, SourceContextIssueSnapshot, SourceContextCommentSnapshot, SourceContextSnapshot, SourceContextLimitUsage, SourceContextPreview, SourceContextAuthorState, IssueSourceContext, IssueSourceChat, IssueDuplicateOf } from "./issue";
+export type { Issue, IssueStatus, BuiltInIssueStatus, IssuePriority, IssueAssigneeType, IssueReviewerType, IssueMetadata, IssueMetadataValue, IssueAgentGuardResponse, IssueDriver, IssueDriverKind, IssueReaction, SourceContextAttachment, SourceContextAuthor, SourceContextIssueSnapshot, SourceContextCommentSnapshot, SourceContextSnapshot, SourceContextLimitUsage, SourceContextPreview, SourceContextAuthorState, IssueSourceContext, IssueSourceChat, IssueDuplicateOf, WatchdogReminder } from "./issue";
 export type { Progress, ProgressTone } from "./progress";
+export type { IssuePlan, IssuePlanAnswer, IssuePlansResponse } from "./plan";
 export type {
   IssueStatusCategory,
   IssueStatusEntry,
@@ -36,6 +37,7 @@ export type {
   AgentInvocationTarget,
   AgentInvocationTargetInput,
   AgentTask,
+  TaskLive,
   TaskUsage,
   TaskAttribution,
   AttributionUser,

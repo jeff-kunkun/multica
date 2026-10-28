@@ -1622,6 +1622,14 @@ type IssueParkingRecord struct {
 	EvaluatedAt   pgtype.Timestamptz `json:"evaluated_at"`
 }
 
+type IssuePlanGate struct {
+	IssueID         pgtype.UUID        `json:"issue_id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	RequestedByType string             `json:"requested_by_type"`
+	RequestedByID   pgtype.UUID        `json:"requested_by_id"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
 type IssuePrAutomation struct {
 	IssueID              pgtype.UUID        `json:"issue_id"`
 	WorkspaceID          pgtype.UUID        `json:"workspace_id"`
@@ -2119,6 +2127,34 @@ type OfficeEventGap struct {
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
+type OfficeIssueWatchdogAttempt struct {
+	ID                 int64              `json:"id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	IssueID            pgtype.UUID        `json:"issue_id"`
+	EventKey           string             `json:"event_key"`
+	EventType          string             `json:"event_type"`
+	Target             string             `json:"target"`
+	ManagerName        string             `json:"manager_name"`
+	AttemptedAt        pgtype.Timestamptz `json:"attempted_at"`
+	Outcome            string             `json:"outcome"`
+	ManagerWaitUntil   pgtype.Timestamptz `json:"manager_wait_until"`
+	ManagerResolvedAt  pgtype.Timestamptz `json:"manager_resolved_at"`
+	ManagerEscalatedAt pgtype.Timestamptz `json:"manager_escalated_at"`
+}
+
+type OfficeIssueWatchdogState struct {
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	IssueID            pgtype.UUID        `json:"issue_id"`
+	AssigneeType       string             `json:"assignee_type"`
+	AssigneeID         pgtype.UUID        `json:"assignee_id"`
+	AssignedAt         pgtype.Timestamptz `json:"assigned_at"`
+	LastProgressAt     pgtype.Timestamptz `json:"last_progress_at"`
+	EmployeeRounds     int32              `json:"employee_rounds"`
+	LastNudgeAt        pgtype.Timestamptz `json:"last_nudge_at"`
+	ManagerEscalatedAt pgtype.Timestamptz `json:"manager_escalated_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
 type PasswordResetAudit struct {
 	ID          pgtype.UUID        `json:"id"`
 	UserID      pgtype.UUID        `json:"user_id"`
@@ -2157,22 +2193,25 @@ type PinnedItem struct {
 }
 
 type Plan struct {
-	ID          pgtype.UUID        `json:"id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	IssueID     pgtype.UUID        `json:"issue_id"`
-	Version     int32              `json:"version"`
-	AuthorType  string             `json:"author_type"`
-	AuthorID    pgtype.UUID        `json:"author_id"`
-	Goal        string             `json:"goal"`
-	OutOfScope  string             `json:"out_of_scope"`
-	Steps       []byte             `json:"steps"`
-	DoneWhen    string             `json:"done_when"`
-	Status      string             `json:"status"`
-	ProjectID   pgtype.UUID        `json:"project_id"`
-	CommentID   pgtype.UUID        `json:"comment_id"`
-	ApprovedBy  pgtype.UUID        `json:"approved_by"`
-	ApprovedAt  pgtype.Timestamptz `json:"approved_at"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	ID                 pgtype.UUID        `json:"id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	IssueID            pgtype.UUID        `json:"issue_id"`
+	Version            int32              `json:"version"`
+	AuthorType         string             `json:"author_type"`
+	AuthorID           pgtype.UUID        `json:"author_id"`
+	Goal               string             `json:"goal"`
+	OutOfScope         string             `json:"out_of_scope"`
+	Steps              []byte             `json:"steps"`
+	DoneWhen           string             `json:"done_when"`
+	Status             string             `json:"status"`
+	ProjectID          pgtype.UUID        `json:"project_id"`
+	CommentID          pgtype.UUID        `json:"comment_id"`
+	ApprovedBy         pgtype.UUID        `json:"approved_by"`
+	ApprovedAt         pgtype.Timestamptz `json:"approved_at"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	ChangesRequestedBy pgtype.UUID        `json:"changes_requested_by"`
+	ChangesRequestedAt pgtype.Timestamptz `json:"changes_requested_at"`
+	ApprovalCommentID  pgtype.UUID        `json:"approval_comment_id"`
 }
 
 type PlanApprover struct {
@@ -2395,6 +2434,13 @@ type RuntimeMachineCapacity struct {
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
 }
 
+type RuntimeMachineDefaultDir struct {
+	MachineKey string             `json:"machine_key"`
+	Path       string             `json:"path"`
+	PathExists pgtype.Bool        `json:"path_exists"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
+
 type RuntimeMachineWatch struct {
 	WorkspaceID       pgtype.UUID   `json:"workspace_id"`
 	OwnerID           pgtype.UUID   `json:"owner_id"`
@@ -2585,15 +2631,17 @@ type TaskSupplement struct {
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 	DeliveredAt     pgtype.Timestamptz `json:"delivered_at"`
+	DeliveryMode    string             `json:"delivery_mode"`
 }
 
 type TaskSupplementCapability struct {
-	TaskID      pgtype.UUID        `json:"task_id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	IssueID     pgtype.UUID        `json:"issue_id"`
-	Capability  string             `json:"capability"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	SteerMode   string             `json:"steer_mode"`
+	TaskID             pgtype.UUID        `json:"task_id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	IssueID            pgtype.UUID        `json:"issue_id"`
+	Capability         string             `json:"capability"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	SteerMode          string             `json:"steer_mode"`
+	InterruptSupported bool               `json:"interrupt_supported"`
 }
 
 type TaskToken struct {

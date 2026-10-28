@@ -122,7 +122,7 @@ describe("comment actions menu", () => {
     fireEvent.click(openMenu());
     await screen.findByText("Create sub-issue from here");
     fireEvent.click(screen.getByText("Create sub-issue from here"));
-    expect(onCreateSubIssue).toHaveBeenCalledWith("comment-1");
+    expect(onCreateSubIssue).toHaveBeenCalledWith("comment-1", "the toggle flickers");
   });
 
   it("offers no sub-issue action where the card was not given one", async () => {

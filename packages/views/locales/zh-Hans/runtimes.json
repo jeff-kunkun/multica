@@ -136,6 +136,20 @@
       "running": "运行中 {{active}}/{{limit}}",
       "owner_only": "只有机器主人能修改上限。",
       "failed": "保存失败，请重试。"
+    },
+    "default_dir": {
+      "label": "默认工作目录",
+      "hint": "项目没选文件夹时，运行从这里开始。留空则每次用新的临时文件夹。",
+      "placeholder": "/Users/me/work",
+      "clear": "清除",
+      "exists": "这台电脑上有这个文件夹。",
+      "missing": "这台电脑上没有这个文件夹。在它出现之前，运行会改用临时文件夹。",
+      "checking": "正在等这台电脑检查文件夹（约一分钟）。",
+      "checking_offline": "这台电脑上线后会检查文件夹。",
+      "relative": "请填写完整路径，例如 /Users/me/work。",
+      "invalid": "服务器不接受这个路径，请填写文件夹的完整路径。",
+      "owner_only": "只有机器主人能修改默认工作目录。",
+      "failed": "保存失败，请重试。"
     }
   },
   "health": {

@@ -734,6 +734,8 @@ func main() {
 		os.Exit(1)
 	}
 	watchdog := issuewatchdog.New(pool, watchdogConfig, h.CreateWatchdogNudgeComment)
+	watchdog.SetWake(h.CreateWatchdogWakeComment)
+	watchdog.SetNote(h.CreateWatchdogNoteComment)
 	bus.Subscribe(protocol.EventIssueUpdated, watchdog.HandleEvent)
 	bus.Subscribe(protocol.EventCommentCreated, watchdog.HandleEvent)
 

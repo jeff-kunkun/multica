@@ -7,13 +7,17 @@
 | runtime | 权限姿态 | 代码位置 |
 | --- | --- | --- |
 | claude | `--permission-mode bypassPermissions` | `server/pkg/agent/claude.go` |
-| codex | macOS 上守护进程强制 `sandbox_mode=danger-full-access` | `server/internal/daemon/execenv/codex_sandbox.go` |
+| codex | 所有平台默认写死 `sandbox_mode=danger-full-access`，审批请求一律自动同意；只有 Windows 上用户自己开了 `windows.sandbox` 才保留 `workspace-write` | `server/internal/daemon/execenv/codex_sandbox.go` |
 | grok | `--always-approve`，无 OS 沙箱 | `server/pkg/agent/grok.go` |
 | antigravity | `--dangerously-skip-permissions` | `server/pkg/agent/antigravity.go` |
 | opencode | `--dangerously-skip-permissions` | `server/pkg/agent/opencode.go` |
 | cursor | `--yolo` | `server/pkg/agent/cursor.go` |
 | dsh | `DSH_PERMISSION_MODE=danger-full-access`（本页） | `server/internal/daemon/daemon.go` |
 | reasonix | `--sandbox-network auto --sandbox-bash auto`，仍有沙箱 | `server/pkg/agent/reasonix.go` |
+
+Codex、Claude、OpenCode 三家的实际取值写在 `server/pkg/agent/permissions.go` 和 `codex_sandbox.go`，守护进程启动时打一行 `agent permissions` 日志列出来（`codex_sandbox_mode`、`codex_approvals`、`claude_permission_mode`、`opencode_permissions`）。Windows 上 `codex_sandbox_mode` 按共享的 Codex 配置（`$CODEX_HOME` 或 `~/.codex/config.toml`）算：开了 `windows.sandbox` 或配置读不出来就记 `workspace-write`；单个 agent 用 `-c windows.sandbox=…` 自定义参数打开的，只在它自己的任务里生效，启动日志看不到。
+
+OpenCode 自动升级只跟到 2.0 以下（`agent_cli_release.go` 的 `Below`）：2.x 收掉了插话插件和 MCP 配置用的通道。最新版到了 2.x 时，运行时页显示「不能自动更新」并写明原因，手动「立即更新」也不会跨过去。
 
 ## 为什么 dsh 需要单独处理
 
@@ -44,5 +48,6 @@ DSH_PERMISSION_MODE=workspace-write
 ## 验收
 
 ```
-cd server && go test ./internal/daemon/ -run Dsh -count=1
+cd server && go test ./internal/daemon/ -run 'Dsh|AgentPermission|OpenCode|CLIVersionAllowed' -count=1
+cd server && go test ./internal/daemon/execenv/ -run 'CodexSandbox|CodexStartupSandbox' -count=1
 ```

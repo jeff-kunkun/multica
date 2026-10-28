@@ -33,8 +33,9 @@ func TestGuestRouteCoverage(t *testing.T) {
 		"/api/cloud-billing/",
 		"/api/cloud-subscriptions/",
 		"/api/workspaces/",
-		"/api/bot/",   // a Bot's own push address; its key acts as a workspace member
-		"/api/links/", // DENE-897: link reads are GET-only; the write methods are registered solely to answer 405 link_write_forbidden
+		"/api/bot/",         // a Bot's own push address; its key acts as a workspace member
+		"/api/bot-connect/", // DENE-2009: approving lets a Bot into a workspace, which is workspace content, not the caller's own account state
+		"/api/links/",       // DENE-897: link reads are GET-only; the write methods are registered solely to answer 405 link_write_forbidden
 	}
 
 	isNamed := func(fn func(http.Handler) http.Handler, name string) bool {

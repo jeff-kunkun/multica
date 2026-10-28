@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useFeatureEnabled } from "@multica/core/config";
+import { OFFICE_INTERRUPT_STEER_FLAG } from "@multica/core/feature-flags";
 import { issueTasksOptions } from "@multica/core/issues/queries";
 import { useCommentComposerStore } from "@multica/core/issues/stores";
 import {
@@ -72,6 +74,8 @@ export function useRecipientActions({
     (task: AgentTask) => steerWithoutChoice && steerHere(task),
     [steerWithoutChoice, steerHere],
   );
+  // Office test builds offer interrupting a run that can stop its step.
+  const interruptEnabled = useFeatureEnabled(OFFICE_INTERRUPT_STEER_FLAG);
   const [chosen, setChosen] = useState<Record<string, RecipientAction>>(NO_CHOICES);
 
   useEffect(() => {
@@ -97,6 +101,7 @@ export function useRecipientActions({
     const opts = {
       canSteer: allowSteer && !hasAttachments,
       canRestart: allowSteer,
+      canInterrupt: allowSteer && interruptEnabled,
       steerByDefault: state.kind === "running" && steerByDefault(state.task),
       othersRunning,
     };
@@ -106,11 +111,12 @@ export function useRecipientActions({
       action: resolveRecipientAction(state, chosen[agent.id], opts),
       actions: recipientActions(state, opts),
     };
-  }), [agents, tasks, chosen, allowSteer, hasAttachments, steerByDefault, othersRunning]);
+  }), [agents, tasks, chosen, allowSteer, interruptEnabled, hasAttachments, steerByDefault, othersRunning]);
 
-  // A recipient would take this in its running turn, but files cannot go there.
+  // A recipient would take this in its running turn, but files cannot go there
+  // (an interrupt carries them).
   const attachmentsBlockSteer = allowSteer && hasAttachments && recipients.some((r) =>
-    r.state.kind === "running" && r.state.steerable
+    r.state.kind === "running" && r.state.steerable && r.action !== "interrupt"
     && (chosen[r.agent.id] === "steer" || (!chosen[r.agent.id] && steerByDefault(r.state.task))));
 
   const setAction = useCallback((agentId: string, action: RecipientAction) => {

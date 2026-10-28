@@ -217,5 +217,30 @@
     "cancel": "Annuler",
     "loading": "Chargement…",
     "load_more": "Voir plus"
+  },
+  "folder": {
+    "title": "Dossier",
+    "intro": "Les agents commencent leur travail dans ce dossier. S'il s'agit d'un dépôt Git, la CLI le détecte d'elle-même.",
+    "choose": "Choisir un dossier",
+    "change": "Changer de dossier",
+    "remove": "Retirer le dossier",
+    "picking": "Sélection…",
+    "this_machine": "Cette machine",
+    "other_machine": "Une autre machine",
+    "git": "Git",
+    "empty": "Aucun dossier pour l'instant. Les exécutions démarrent dans le répertoire de travail par défaut de la machine (réglé sur la page Runtimes), ou dans un dossier temporaire neuf s'il n'y en a pas.",
+    "web_hint": "Choisissez un dossier dans l'application de bureau, ou lancez `multica project resource add --type local_directory`.",
+    "offline": "Le daemon local ne tourne pas : impossible de choisir un dossier pour le moment.",
+    "invalid": "Ce dossier ne peut pas être utilisé.",
+    "load_failed": "Impossible de charger le dossier.",
+    "toast_saved": "Dossier enregistré",
+    "toast_save_failed": "Échec de l'enregistrement du dossier",
+    "toast_remove_failed": "Échec du retrait du dossier",
+    "shared_one": "{{count}} exécution travaille dans ce dossier en ce moment.",
+    "shared_other": "{{count}} exécutions travaillent dans ce dossier en ce moment. Elles modifient les mêmes fichiers sur la même branche.",
+    "shared_folder": "Dossier partagé {{name}}",
+    "this_issue": "Ce ticket",
+    "chat_run": "Chat",
+    "create_hint": "Les agents commencent leur travail dans ce dossier. S'il s'agit d'un dépôt Git, la CLI le détecte d'elle-même."
   }
 }

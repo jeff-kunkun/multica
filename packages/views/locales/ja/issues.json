@@ -30,6 +30,8 @@
     "steer_badge": "{{names}} の実行に追加",
     "steer_waiting": "{{name}} が読むのを待っています",
     "steer_read": "{{name}} が読みました",
+    "steer_badge_interrupt": "{{names}} の実行を中断",
+    "steer_read_after": "配信済み · {{seconds}} 秒後に {{name}} が読みました",
     "steer_not_received": "{{name}} は受け取れませんでした · {{reason}}",
     "steer_resend": "新しい実行として送信",
     "steer_resend_failed": "新しい実行として送信できませんでした。",
@@ -151,6 +153,12 @@
   "stage": {
     "none": "ステージなし",
     "value": "ステージ {{n}}"
+  },
+  "after": {
+    "none": "順序なし",
+    "value": "{{list}} の後",
+    "hint": "これらが完了するまでバックログで待ち、その後自動で開始します",
+    "empty": "未完了の兄弟サブイシューはありません"
   },
   "blocker_summary": {
     "title": "ブロック中 · 根因 {{count}} 件",
@@ -459,6 +467,7 @@
     "prop_status": "ステータス",
     "prop_priority": "優先度",
     "prop_stage": "ステージ",
+    "prop_after": "開始順",
     "prop_assignee": "担当者",
     "prop_start_date": "開始日",
     "prop_due_date": "期限",
@@ -669,6 +678,9 @@
     "recipient_steer_desc_handoff": "このステップを止めて読み、元の作業を続けます",
     "recipient_steer_restart_desc": "すぐに読み、元の作業を続ける · 今のステップは中断",
     "recipient_after_run": "キュー",
+    "recipient_interrupt": "中断して指示",
+    "recipient_interrupt_desc": "実行中のコマンドを含め今のステップを止め、このメッセージに従います",
+    "recipient_interrupt_process": "同じプロセス · 同じセッション · ファイル可",
     "recipient_after_run_desc": "この実行の後に処理します",
     "recipient_restart": "中断してやり直す",
     "recipient_restart_desc": "すぐに止めて、このメッセージからやり直します",
@@ -797,7 +809,19 @@
     "status_deferred": "再試行中",
     "status_capacity_retry": "モデル混雑中・{{retry}} 回目の再試行、次回 {{time}}",
     "usage_label": "トークン費用",
-    "machine_full": "待機中：マシンの上限に到達（{{active}}/{{limit}}）"
+    "machine_full": "待機中：マシンの上限に到達（{{active}}/{{limit}}）",
+    "idle_unlimited": "アイドル時間の上限なし",
+    "live_label": "ライブ状況",
+    "live_quiet": "{{duration}} 無反応",
+    "live_quiet_under_second": "1 秒未満",
+    "live_running": "実行中：{{command}}",
+    "live_no_command": "実行中のコマンドなし",
+    "live_last_output": "最新出力：{{line}}",
+    "live_command_label": "コマンド",
+    "live_output_label": "最新出力",
+    "live_quiet_label": "無反応",
+    "live_tool_running": "ツール実行中",
+    "live_no_output": "まだ出力なし"
   },
   "runs_timeline": {
     "title": "実行履歴",
@@ -1784,5 +1808,33 @@
     "reason_runtime_changed": "前回のセッションは別のマシンにあります",
     "reason_session_lost": "セッションを復元できませんでした",
     "reason_fresh_requested": "新規セッションを指定"
+  },
+  "watchdog_reminder": {
+    "label": "グループに通知済み",
+    "detail_other": "担当者は実行中ですが、この課題でしばらく報告がありません。プロジェクトグループに {{count}} 回通知しました（最新 {{time}}）。"
+  },
+  "plan_first": {
+    "title": "先に計画",
+    "waiting_for_plan": "エージェントは作業前にここで計画を提案します。計画が承認されるまで、レビューへの移動や PR のリンクはできません。",
+    "version_title": "計画 v{{version}}",
+    "state_waiting": "承認待ち",
+    "state_approved": "承認済み",
+    "state_changes": "差し戻し",
+    "state_superseded": "置き換え済み",
+    "goal": "やること",
+    "out_of_scope": "やらないこと",
+    "steps": "手順",
+    "done_when": "完了条件",
+    "approve": "承認して開始",
+    "request_changes": "修正してから",
+    "feedback_label": "何を変えますか？",
+    "feedback_placeholder": "例：手順 3 を削除し、旧 API はそのまま",
+    "send_back": "差し戻す",
+    "cancel": "キャンセル",
+    "approved_toast": "計画 v{{version}} を承認しました。エージェントは同じセッションで続行します。",
+    "changes_toast": "計画 v{{version}} を差し戻しました。エージェントが新しい版を提案します。",
+    "answer_failed": "計画に回答できませんでした。もう一度お試しください。",
+    "not_woken_toast": "承認しましたが、エージェントは起動されませんでした。もう一度起動して続行してください。",
+    "retry_wake": "エージェントを再度起動"
   }
 }

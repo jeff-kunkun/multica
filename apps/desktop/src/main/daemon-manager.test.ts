@@ -118,3 +118,43 @@ describe("Desktop daemon supervision", () => {
     vi.unstubAllGlobals();
   });
 });
+
+// DENE-2667 PR 3: only an office test build runs its daemon under the office
+// idle policy; release builds leave the daemon on the legacy watchdog.
+describe("office idle stop", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it.each([
+    [undefined, undefined],
+    ["", undefined],
+    ["office_interrupt_steer", undefined],
+    ["office_interrupt_steer, office_idle_stop", "office"],
+    ["-office_idle_stop", undefined],
+  ])("flags %j start the daemon with policy %j", async (flags, policy) => {
+    if (flags !== undefined) vi.stubEnv("VITE_MULTICA_FEATURE_FLAGS", flags);
+    await boot();
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(starts()).toHaveLength(1);
+    expect(starts()[0][2].env.MULTICA_IDLE_STOP_POLICY).toBe(policy);
+    expect(starts()[0][2].env.MULTICA_LAUNCHED_BY).toBe("desktop");
+  });
+});
+
+// DENE-2667 PR 4: office test builds have their daemon report live status;
+// release builds send nothing new.
+describe("office live status", () => {
+  afterEach(() => vi.unstubAllEnvs());
+
+  it.each([
+    [undefined, undefined],
+    ["office_idle_stop", undefined],
+    ["office_idle_stop, office_live_status", "on"],
+    ["-office_live_status", undefined],
+  ])("flags %j start the daemon with MULTICA_LIVE_STATUS %j", async (flags, value) => {
+    if (flags !== undefined) vi.stubEnv("VITE_MULTICA_FEATURE_FLAGS", flags);
+    await boot();
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(starts()).toHaveLength(1);
+    expect(starts()[0][2].env.MULTICA_LIVE_STATUS).toBe(value);
+  });
+});

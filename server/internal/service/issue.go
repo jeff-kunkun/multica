@@ -118,6 +118,14 @@ type IssueCreateParams struct {
 	// Its immutable snapshot and cloned attachment rows commit in the same
 	// transaction as the new issue.
 	SourceContext *SourceContextCapture
+	// PlanFirst asks the agent for a plan before the work (DENE-2670). The gate
+	// row commits with the issue, so the first run already sees it.
+	PlanFirst bool
+	// AfterIssueIDs are the unfinished-at-create siblings this one starts
+	// after (DENE-2671), written to its backlog.after key in the create
+	// transaction. The caller has validated them and parked the issue in
+	// backlog; StartReadyDependents moves it on once the last one is done.
+	AfterIssueIDs []pgtype.UUID
 }
 
 // IssueCreateOpts groups optional knobs for IssueService.Create. Most
@@ -609,6 +617,13 @@ func (s *IssueService) createInTx(ctx context.Context, tx pgx.Tx, qtx *db.Querie
 			return issueCreateTxOutcome{}, fmt.Errorf("record assignee source: %w", err)
 		}
 	}
+	if len(p.AfterIssueIDs) > 0 {
+		row, err := qtx.SetIssueMetadataKey(ctx, db.SetIssueMetadataKeyParams{ID: issue.ID, WorkspaceID: issue.WorkspaceID, Key: MetaKeyBacklogAfter, Value: afterValue(p.AfterIssueIDs)})
+		if err != nil {
+			return issueCreateTxOutcome{}, fmt.Errorf("record predecessors: %w", err)
+		}
+		issue.Metadata, issue.Revision = row.Metadata, row.Revision
+	}
 
 	if p.SourceContext != nil {
 		if _, err := PersistSourceContext(ctx, qtx, *p.SourceContext, issue.ID, pgtype.UUID{}); err != nil {
@@ -664,6 +679,15 @@ func (s *IssueService) createInTx(ctx context.Context, tx pgx.Tx, qtx *db.Querie
 				}
 				return issueCreateTxOutcome{}, fmt.Errorf("attach quick-create source context: %w", attachErr)
 			}
+		}
+	}
+
+	if p.PlanFirst {
+		if err := qtx.CreateIssuePlanGate(ctx, db.CreateIssuePlanGateParams{
+			IssueID: issue.ID, WorkspaceID: p.WorkspaceID,
+			RequestedByType: p.CreatorType, RequestedByID: p.CreatorID,
+		}); err != nil {
+			return issueCreateTxOutcome{}, fmt.Errorf("create plan gate: %w", err)
 		}
 	}
 

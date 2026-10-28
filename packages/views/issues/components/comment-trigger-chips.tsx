@@ -98,6 +98,8 @@ function stateLabel(state: AgentRunState, t: IssuesT): string | null {
 
 function actionLabel(action: RecipientAction, state: AgentRunState, name: string, t: IssuesT): string {
   switch (action) {
+    case "interrupt":
+      return t(($) => $.comment.recipient_interrupt);
     case "steer":
       return t(($) => $.comment.recipient_steer);
     case "after_run":
@@ -132,6 +134,8 @@ function isHandoffSteer(entry: RecipientEntry): boolean {
 function actionDescription(action: RecipientAction, entry: RecipientEntry, presenceLine: string | null, t: IssuesT): string | null {
   const name = entry.agent.name;
   switch (action) {
+    case "interrupt":
+      return t(($) => $.comment.recipient_interrupt_desc);
     case "steer":
       return isRestartSteer(entry)
         ? t(($) => $.comment.recipient_steer_restart_desc)
@@ -160,6 +164,8 @@ function actionDescription(action: RecipientAction, entry: RecipientEntry, prese
 // on the same session (one-shot CLIs, DENE-1349).
 function actionProcessLine(action: RecipientAction, entry: RecipientEntry, t: IssuesT): string | null {
   switch (action) {
+    case "interrupt":
+      return t(($) => $.comment.recipient_interrupt_process);
     case "steer":
       return isRestartSteer(entry)
         ? t(($) => $.comment.recipient_steer_restart_process)
@@ -176,7 +182,7 @@ function actionProcessLine(action: RecipientAction, entry: RecipientEntry, t: Is
 }
 
 function chipToneClass(action: RecipientAction): string {
-  if (action === "steer") {
+  if (action === "steer" || action === "interrupt") {
     return "border-brand/28 bg-brand/7 text-foreground hover:bg-brand/12 aria-expanded:bg-brand/12 dark:border-brand/45 dark:bg-brand/12 dark:hover:bg-brand/18";
   }
   if (action === "restart") {
@@ -385,7 +391,7 @@ function MultiRecipientChip({
       : t(($) => $.comment.recipient_count, { count: activeCount });
   const tone = recipients.some((r) => r.action === "restart")
     ? "restart"
-    : recipients.some((r) => r.action === "steer") ? "steer" : "start";
+    : recipients.some((r) => r.action === "steer" || r.action === "interrupt") ? "steer" : "start";
 
   const popoverTrigger = (
     <PopoverTrigger

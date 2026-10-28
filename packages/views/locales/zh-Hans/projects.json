@@ -215,5 +215,29 @@
     "cancel": "取消",
     "loading": "加载中…",
     "load_more": "加载更多"
+  },
+  "folder": {
+    "title": "文件夹",
+    "intro": "智能体会在这个文件夹里开工。是不是 Git 仓库，CLI 会自己认出来。",
+    "choose": "选择文件夹",
+    "change": "换文件夹",
+    "remove": "移除文件夹",
+    "picking": "正在选择…",
+    "this_machine": "本机",
+    "other_machine": "其他电脑",
+    "git": "Git",
+    "empty": "还没选文件夹。任务会在这台机器的默认工作目录（在「运行时」页设置）里开工；没设就用一个新的临时文件夹。",
+    "web_hint": "请在桌面端选择文件夹，或运行 `multica project resource add --type local_directory`。",
+    "offline": "本机守护进程没在运行，现在选不了文件夹。",
+    "invalid": "这个文件夹用不了。",
+    "load_failed": "文件夹加载失败。",
+    "toast_saved": "文件夹已保存",
+    "toast_save_failed": "文件夹保存失败",
+    "toast_remove_failed": "文件夹移除失败",
+    "shared_other": "现在有 {{count}} 个任务在这个文件夹里跑，会改同一批文件、同一个分支。",
+    "shared_folder": "共用文件夹 {{name}}",
+    "this_issue": "本单",
+    "chat_run": "聊天",
+    "create_hint": "智能体会在这个文件夹里开工。是不是 Git 仓库，CLI 会自己认出来。"
   }
 }

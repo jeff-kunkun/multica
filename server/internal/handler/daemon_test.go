@@ -2420,15 +2420,22 @@ func TestClaimTask_ProjectGithubReposOverrideWorkspaceRepos(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	// Workspace repos: two of them, neither matches the project repo URL.
-	setHandlerTestWorkspaceRepos(t, []map[string]string{
+	// Keep this fixture in its own workspace so parallel handler tests that
+	// change the shared integration workspace's repo list cannot affect it.
+	workspaceID := dbfx.Workspace(t, "Claim project repo override", "claim-project-repo-"+uuid.NewString())
+	dbfx.Member(t, workspaceID, testUserID, "owner")
+	workspaceRepos, err := json.Marshal([]map[string]string{
 		{"url": "https://github.com/example/workspace-repo-a", "description": "ws a"},
 		{"url": "https://github.com/example/workspace-repo-b", "description": "ws b"},
 	})
+	if err != nil {
+		t.Fatalf("marshal workspace repos: %v", err)
+	}
+	dbfx.Exec(t, `UPDATE workspace SET repos = $1 WHERE id = $2`, workspaceRepos, workspaceID)
 
 	// Project + project_resource(github_repo) with a URL that is NOT in the
 	// workspace's repos list.
-	projectID := dbfx.Project(t, "Claim project repo override")
+	projectID := dbfx.Project(t, "Claim project repo override", testutil.Cols{"workspace_id": workspaceID})
 
 	const projectRepoURL = "https://github.com/example/project-only-repo"
 	const projectRepoRef = "release/v2"
@@ -2436,19 +2443,17 @@ func TestClaimTask_ProjectGithubReposOverrideWorkspaceRepos(t *testing.T) {
 		INSERT INTO project_resource (
 			project_id, workspace_id, resource_type, resource_ref, position
 		) VALUES ($1, $2, 'github_repo', $3::jsonb, 0)
-	`, projectID, testWorkspaceID, `{"url":"`+projectRepoURL+`","ref":"`+projectRepoRef+`"}`)
+	`, projectID, workspaceID, `{"url":"`+projectRepoURL+`","ref":"`+projectRepoRef+`"}`)
 
 	// Agent + runtime + queued task in this project.
-	var agentID, runtimeID string
-	dbfx.QueryRow(t,
-		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 LIMIT 1`,
-		testWorkspaceID,
-	).Scan(&agentID, &runtimeID)
+	runtimeID := dbfx.Runtime(t, "Claim project repo override", testutil.Cols{"workspace_id": workspaceID})
+	agentID := dbfx.Agent(t, "Claim project repo override", runtimeID, testutil.Cols{"workspace_id": workspaceID})
 
 	issueID := dbfx.Issue(t, "project repo override", testutil.Cols{
-		"project_id": projectID,
-		"priority":   "medium",
-		"number":     88001,
+		"workspace_id": workspaceID,
+		"project_id":   projectID,
+		"priority":     "medium",
+		"number":       88001,
 	})
 
 	dbfx.Task(t, agentID, testutil.Cols{
@@ -2505,11 +2510,10 @@ func TestClaimTask_ProjectDescriptionInjected(t *testing.T) {
 		"description": projectDescription,
 	})
 
-	var agentID, runtimeID string
-	dbfx.QueryRow(t,
-		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 LIMIT 1`,
-		testWorkspaceID,
-	).Scan(&agentID, &runtimeID)
+	// A runtime of its own: the claim takes the runtime's oldest queued task,
+	// and a shared agent's runtime can hold another test's task.
+	runtimeID := dbfx.Runtime(t, "Claim project description")
+	agentID := dbfx.Agent(t, "Claim project description", runtimeID)
 
 	issueID := dbfx.Issue(t, "project description", testutil.Cols{
 		"project_id": projectID,
@@ -3322,6 +3326,7 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 		"status": "in_progress",
 		"number": 81203,
 	})
+	skipCommentID := dbfx.Comment(t, skipIssueID, "continue from another runtime")
 
 	dbfx.Exec(t, `
 		INSERT INTO agent_task_queue (
@@ -3333,11 +3338,11 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 	`, agentID, oldRuntimeID, skipIssueID)
 	dbfx.Exec(t, `
 		INSERT INTO agent_task_queue (
-			agent_id, runtime_id, issue_id,
+			agent_id, runtime_id, issue_id, trigger_comment_id,
 			status, priority
 		)
-		VALUES ($1, $2, $3, 'queued', 0)
-	`, agentID, runtimeID, skipIssueID)
+		VALUES ($1, $2, $3, $4, 'queued', 0)
+	`, agentID, runtimeID, skipIssueID, skipCommentID)
 
 	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
 	if task.PriorSessionID != "" {
@@ -3359,6 +3364,7 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 		"status": "in_progress",
 		"number": 81204,
 	})
+	resumeCommentID := dbfx.Comment(t, resumeIssueID, "continue this issue")
 
 	dbfx.Exec(t, `
 		INSERT INTO agent_task_queue (
@@ -3370,11 +3376,11 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 	`, agentID, runtimeID, resumeIssueID)
 	dbfx.Exec(t, `
 		INSERT INTO agent_task_queue (
-			agent_id, runtime_id, issue_id,
+			agent_id, runtime_id, issue_id, trigger_comment_id,
 			status, priority
 		)
-		VALUES ($1, $2, $3, 'queued', 0)
-	`, agentID, runtimeID, resumeIssueID)
+		VALUES ($1, $2, $3, $4, 'queued', 0)
+	`, agentID, runtimeID, resumeIssueID, resumeCommentID)
 
 	task = claimTaskForRuntimeGuard(t, runtimeID, daemonID)
 	if task.PriorSessionID != "same-runtime-session" {
@@ -3450,14 +3456,8 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 	}
 }
 
-// TestClaimTask_ManualRetryReusesWorkdir is the MUL-4869 claim-layer contract: a
-// manual retry (rerun_of_task_id set) ALWAYS hands back the source task's
-// workdir, and resumes the session only when the source failure did not poison
-// the conversation AND the source ran on the claiming runtime. The rerun row's
-// force_fresh_session is always true (rollback-safe); the session decision is
-// computed here from the source task, including the legacy 400 error-text guard.
-// Contrast with a plain force_fresh task carrying no rerun lineage, which resumes
-// nothing — covered by TestClaimTask_IssuePriorSessionRuntimeGuard.
+// TestClaimTask_ManualRetryReusesWorkdir verifies that manual issue retries
+// reuse the source task's files but always start a fresh CLI session.
 func TestClaimTask_ManualRetryReusesWorkdir(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -3474,7 +3474,7 @@ func TestClaimTask_ManualRetryReusesWorkdir(t *testing.T) {
 	// never trips across cases. The source's runtime, failure_reason, and error
 	// text drive the runtime-match and resume-safety gates.
 	issueNum := 81207
-	insertRerun := func(t *testing.T, sourceRuntimeID, failureReason, errorText, session, workdir string) *claimRuntimeGuardTask {
+	insertRerun := func(t *testing.T, sourceRuntimeID, failureReason, errorText, session, workdir string, forceFresh bool) *claimRuntimeGuardTask {
 		t.Helper()
 		issueNum++
 		issueID := dbfx.Issue(t, "manual-retry-reuse fixture", testutil.Cols{
@@ -3490,30 +3490,40 @@ func TestClaimTask_ManualRetryReusesWorkdir(t *testing.T) {
 			"session_id":     session,
 			"work_dir":       workdir,
 		})
-		// force_fresh_session is always true on a rerun row (rollback-safe); the
-		// new claim handler resumes from the source task regardless.
+		// Production reruns set force_fresh_session=true. The false case below
+		// represents a legacy issue rerun row and must still start fresh.
 		dbfx.Exec(t, `
 			INSERT INTO agent_task_queue (
 				agent_id, runtime_id, issue_id, status, priority,
 				rerun_of_task_id, force_fresh_session
 			)
-			VALUES ($1, $2, $3, 'queued', 0, $4, TRUE)
-		`, agentID, runtimeID, issueID, sourceID)
+			VALUES ($1, $2, $3, 'queued', 0, $4, $5)
+		`, agentID, runtimeID, issueID, sourceID, forceFresh)
 		return claimTaskForRuntimeGuard(t, runtimeID, daemonID)
 	}
 
-	t.Run("resume_safe_same_runtime_reuses_both", func(t *testing.T) {
-		task := insertRerun(t, runtimeID, "timeout", "", "safe-session", "/tmp/retry-safe-workdir")
+	t.Run("resume_safe_same_runtime_reuses_workdir_only", func(t *testing.T) {
+		task := insertRerun(t, runtimeID, "timeout", "", "safe-session", "/tmp/retry-safe-workdir", true)
 		if task.PriorWorkDir != "/tmp/retry-safe-workdir" {
 			t.Fatalf("PriorWorkDir = %q, want /tmp/retry-safe-workdir", task.PriorWorkDir)
 		}
-		if task.PriorSessionID != "safe-session" {
-			t.Fatalf("PriorSessionID = %q, want safe-session (transient failure resumes)", task.PriorSessionID)
+		if task.PriorSessionID != "" {
+			t.Fatalf("PriorSessionID = %q, want empty for a fresh issue retry", task.PriorSessionID)
+		}
+	})
+
+	t.Run("legacy_row_without_fresh_flag_starts_fresh", func(t *testing.T) {
+		task := insertRerun(t, runtimeID, "timeout", "", "legacy-session", "/tmp/legacy-rerun-workdir", false)
+		if task.PriorWorkDir != "/tmp/legacy-rerun-workdir" {
+			t.Fatalf("PriorWorkDir = %q, want the source task's workdir", task.PriorWorkDir)
+		}
+		if task.PriorSessionID != "" {
+			t.Fatalf("PriorSessionID = %q, want empty for every issue rerun", task.PriorSessionID)
 		}
 	})
 
 	t.Run("poisoned_reason_same_runtime_reuses_workdir_fresh_session", func(t *testing.T) {
-		task := insertRerun(t, runtimeID, "agent_error.context_overflow", "", "poison-session", "/tmp/retry-poison-workdir")
+		task := insertRerun(t, runtimeID, "agent_error.context_overflow", "", "poison-session", "/tmp/retry-poison-workdir", true)
 		if task.PriorWorkDir != "/tmp/retry-poison-workdir" {
 			t.Fatalf("PriorWorkDir = %q, want /tmp/retry-poison-workdir (workdir reused even when session poisoned)", task.PriorWorkDir)
 		}
@@ -3527,7 +3537,7 @@ func TestClaimTask_ManualRetryReusesWorkdir(t *testing.T) {
 		// carries the Anthropic 400 invalid_request_error marker — the exact
 		// source path must still refuse to resume that session (defense-in-depth
 		// mirrored from GetLastTaskSession).
-		task := insertRerun(t, runtimeID, "agent_error", "API error 400 invalid_request_error: prompt is too long", "legacy400-session", "/tmp/retry-legacy400-workdir")
+		task := insertRerun(t, runtimeID, "agent_error", "API error 400 invalid_request_error: prompt is too long", "legacy400-session", "/tmp/retry-legacy400-workdir", true)
 		if task.PriorWorkDir != "/tmp/retry-legacy400-workdir" {
 			t.Fatalf("PriorWorkDir = %q, want /tmp/retry-legacy400-workdir", task.PriorWorkDir)
 		}
@@ -3537,7 +3547,7 @@ func TestClaimTask_ManualRetryReusesWorkdir(t *testing.T) {
 	})
 
 	t.Run("different_runtime_reuses_workdir_drops_session", func(t *testing.T) {
-		task := insertRerun(t, otherRuntimeID, "timeout", "", "cross-session", "/tmp/retry-cross-workdir")
+		task := insertRerun(t, otherRuntimeID, "timeout", "", "cross-session", "/tmp/retry-cross-workdir", true)
 		if task.PriorWorkDir != "/tmp/retry-cross-workdir" {
 			t.Fatalf("PriorWorkDir = %q, want /tmp/retry-cross-workdir (workdir offered regardless of runtime, best-effort)", task.PriorWorkDir)
 		}
@@ -3671,11 +3681,9 @@ func TestClaimTask_AutoRetryFreshSessionReusesParentWorkdir(t *testing.T) {
 	}
 }
 
-// TestClaimTask_AutoRetryContinueInterruptedSession pins DENE-727: a
-// resume-safe automatic retry that inherited the parent's session must tell
-// the daemon to continue that session instead of re-injecting the original
-// task. Contrast the poisoned path above, which starts fresh.
-func TestClaimTask_AutoRetryContinueInterruptedSession(t *testing.T) {
+// Issue auto-retries reuse the parent's workdir but must open a fresh CLI
+// session, including for provider disconnects that were previously resume-safe.
+func TestClaimTask_IssueAutoRetryAfterDisconnectStartsFreshSession(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -3699,14 +3707,64 @@ func TestClaimTask_AutoRetryContinueInterruptedSession(t *testing.T) {
 	createAutoRetryForTest(t, ctx, parentID)
 
 	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
-	if task.PriorSessionID != "halfway-session" {
-		t.Fatalf("PriorSessionID = %q, want halfway-session (resume-safe retry continues the parent session)", task.PriorSessionID)
+	if task.PriorSessionID != "" {
+		t.Fatalf("PriorSessionID = %q, want empty after a disconnect retry", task.PriorSessionID)
 	}
-	if !task.ContinueInterruptedSession {
-		t.Fatal("resume-safe auto-retry that inherited a session must set continue_interrupted_session")
+	if task.ContinueInterruptedSession {
+		t.Fatal("disconnect retry must not continue the interrupted session")
 	}
-	if task.PriorSessionResumeUnavailable {
-		t.Fatal("resume-safe auto-retry must not disclose a continuity gap")
+	if !task.PriorSessionResumeUnavailable {
+		t.Fatal("fresh-session retry must disclose the continuity gap")
+	}
+}
+
+func TestClaimTask_LegacyIssueAutoRetryWithoutFreshFlagStartsFreshSession(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
+	issueID := dbfx.Issue(t, "legacy auto-retry fresh-session fixture", testutil.Cols{"status": "in_progress"})
+
+	dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id":   runtimeID,
+		"issue_id":     issueID,
+		"status":       "completed",
+		"started_at":   testutil.Raw("now() - interval '30 minutes'"),
+		"completed_at": testutil.Raw("now() - interval '25 minutes'"),
+		"session_id":   "earlier-healthy-session",
+		"work_dir":     "/tmp/earlier-healthy-workdir",
+	})
+	parentID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id":     runtimeID,
+		"issue_id":       issueID,
+		"status":         "failed",
+		"failure_reason": "agent_error.provider_network",
+		"started_at":     testutil.Raw("now() - interval '6 minutes'"),
+		"completed_at":   testutil.Raw("now() - interval '1 minute'"),
+		"session_id":     "interrupted-parent-session",
+		"work_dir":       "/tmp/interrupted-parent-workdir",
+	})
+	dbfx.Exec(t, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority,
+			retry_of_task_id, session_id, work_dir, force_fresh_session
+		)
+		VALUES ($1, $2, $3, 'queued', 0, $4, 'legacy-copied-session', '/tmp/interrupted-parent-workdir', FALSE)
+	`, agentID, runtimeID, issueID, parentID)
+
+	task := claimTaskForRuntimeGuardWithCapabilities(t, runtimeID, daemonID, protocol.DaemonCapabilityCheckoutKeepsWorkV1)
+	if task.PriorSessionID != "" {
+		t.Fatalf("PriorSessionID = %q, want empty for every issue retry", task.PriorSessionID)
+	}
+	if task.PriorWorkDir != "/tmp/interrupted-parent-workdir" {
+		t.Fatalf("PriorWorkDir = %q, want the retry's inherited workdir", task.PriorWorkDir)
+	}
+	if task.ContinueInterruptedSession {
+		t.Fatal("legacy issue retry must not continue its interrupted CLI session")
+	}
+	if !task.PriorSessionResumeUnavailable {
+		t.Fatal("fresh issue retry must disclose the continuity gap")
 	}
 }
 

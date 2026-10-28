@@ -37,10 +37,13 @@ type MachineQueueReason struct {
 
 type AgentRuntimeResponse struct {
 	MachineCapacity *MachineCapacityResponse `json:"machine_capacity,omitempty"`
-	ID              string                   `json:"id"`
-	WorkspaceID     string                   `json:"workspace_id"`
-	DaemonID        *string                  `json:"daemon_id"`
-	Name            string                   `json:"name"`
+	// DefaultWorkDir is the machine's default working directory, shown only
+	// to the runtime's owner; absent when unset.
+	DefaultWorkDir *RuntimeDefaultDirResponse `json:"default_work_dir,omitempty"`
+	ID             string                     `json:"id"`
+	WorkspaceID    string                     `json:"workspace_id"`
+	DaemonID       *string                    `json:"daemon_id"`
+	Name           string                     `json:"name"`
 	// CustomName is the user-set display override (MUL-4217); null when the
 	// runtime still uses its daemon-proposed Name. Clients show
 	// CustomName ?? Name and seed the rename field from this raw value.
@@ -487,6 +490,9 @@ type UpdateAgentRuntimeRequest struct {
 	// runtime per provider) instead of just this one. Ignored when the
 	// runtime has no daemon_id.
 	ApplyToMachine bool `json:"apply_to_machine,omitempty"`
+	// DefaultWorkDir sets the machine's default working directory, used when
+	// a run's project binds no folder; "" clears it. Machine owner only.
+	DefaultWorkDir *string `json:"default_work_dir,omitempty"`
 }
 
 // maxRuntimeCustomNameLen caps a runtime's custom name. Default names are
@@ -576,7 +582,30 @@ func (h *Handler) UpdateAgentRuntime(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	var defaultDir string
+	if req.DefaultWorkDir != nil {
+		var err error
+		if defaultDir, err = validateDefaultDir(*req.DefaultWorkDir); err != nil {
+			writeErrorCode(w, http.StatusBadRequest, "invalid_default_work_dir", err.Error())
+			return
+		}
+		// Like the run limit, this is a setting of the owner's device.
+		if !rt.OwnerID.Valid || rt.OwnerID != member.UserID {
+			writeErrorCode(w, http.StatusForbidden, "default_work_dir_owner_required", "only the machine owner can change its default working directory")
+			return
+		}
+	}
+
 	changed := false
+
+	if req.DefaultWorkDir != nil {
+		if err := h.setRuntimeDefaultDir(r.Context(), runtimeUUID, defaultDir); err != nil {
+			slog.Error("set machine default dir failed", "error", err, "runtime_id", runtimeID)
+			writeError(w, http.StatusInternalServerError, "failed to update default working directory")
+			return
+		}
+		changed = true
+	}
 
 	if req.MaxConcurrentRuns != nil {
 		tx, err := h.TxStarter.Begin(r.Context())
@@ -701,6 +730,7 @@ func (h *Handler) UpdateAgentRuntime(w http.ResponseWriter, r *http.Request) {
 	resp := runtimeToResponse(rt)
 	rows := []AgentRuntimeResponse{resp}
 	h.hydrateRuntimeMachineCapacities(r.Context(), rows)
+	h.hydrateRuntimeDefaultDirs(r.Context(), uuidToString(member.UserID), rows)
 	writeJSON(w, http.StatusOK, rows[0])
 }
 
@@ -1323,6 +1353,7 @@ func (h *Handler) ListAgentRuntimes(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.hydrateRuntimeMachineCapacities(r.Context(), resp)
+	h.hydrateRuntimeDefaultDirs(r.Context(), requestUserID(r), resp)
 	writeProjectedList(w, r, resp, listshape.Runtime)
 }
 

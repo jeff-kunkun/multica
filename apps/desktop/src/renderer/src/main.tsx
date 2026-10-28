@@ -1,4 +1,5 @@
 import ReactDOM from "react-dom/client";
+import { configStore, parseFeatureFlagList } from "@multica/core/config";
 import App from "./App";
 import { AppCrashBoundary } from "./components/app-crash-boundary";
 // Inter variable font covers all weights (100-900) in a single file.
@@ -37,6 +38,12 @@ if (import.meta.env.DEV && import.meta.env.VITE_REACT_GRAB) {
   grab.crossOrigin = "anonymous";
   document.head.appendChild(grab);
 }
+
+// Office test builds bake feature flags in at build time
+// (VITE_MULTICA_FEATURE_FLAGS=a,b); release builds leave it unset.
+configStore
+  .getState()
+  .setLocalFeatureFlags(parseFeatureFlagList(import.meta.env.VITE_MULTICA_FEATURE_FLAGS));
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <AppCrashBoundary>

@@ -35,6 +35,8 @@ import { api } from "@multica/core/api";
 import { repoConnectionsOptions } from "@multica/core/repo-reach";
 import { parseRepoLocator } from "@multica/core/repo-links";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
+import { useFeatureEnabled } from "@multica/core/config";
+import { OFFICE_PROJECT_FOLDER_FLAG } from "@multica/core/feature-flags";
 import { memberListOptions, agentListOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import { useActorName } from "@multica/core/workspace/hooks";
 import type { ProjectStatus, ProjectPriority } from "@multica/core/types";
@@ -204,7 +206,11 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   // is hidden entirely on web (no daemon to bind the path to).
   const desktop = isDesktopShell();
   const daemonStatus = useLocalDaemonStatus();
-  const [sourceMode, setSourceMode] = useState<"repos" | "local">("repos");
+  // Office test builds bind a project to one folder and leave Git to the CLI:
+  // no repository source, no git init offer, and nothing to pick on the web.
+  const folderOnly = useFeatureEnabled(OFFICE_PROJECT_FOLDER_FLAG);
+  const [pickedMode, setSourceMode] = useState<"repos" | "local">("repos");
+  const sourceMode = folderOnly ? "local" : pickedMode;
   const [selectedLocalPath, setSelectedLocalPath] = useState<string | null>(null);
   const [selectedLocalLabel, setSelectedLocalLabel] = useState<string | null>(null);
   const [localPickError, setLocalPickError] = useState<string | null>(null);
@@ -733,6 +739,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
             />
           )}
 
+          {!(folderOnly && !desktop) && (
           <Popover
             open={repoPopoverOpen}
             onOpenChange={(v) => {
@@ -770,7 +777,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                   Local option is desktop-only because a local_directory
                   resource has to be pinned to a daemon_id, which doesn't
                   exist on the web. */}
-              {desktop && (
+              {desktop && !folderOnly && (
                 <div className="grid grid-cols-2 gap-1 rounded-md bg-muted/60 p-0.5">
                   <button
                     type="button"
@@ -995,7 +1002,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                           </button>
                         </TooltipHint>
                       </div>
-                      {isPlainFolder(localIsGitRepo, localGitRoot) && (
+                      {!folderOnly && isPlainFolder(localIsGitRepo, localGitRoot) && (
                         <PlainFolderGitOffer
                           onInit={() => void handleInitLocalGit()}
                           pending={gitInitPending}
@@ -1038,12 +1045,15 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                   )}
 
                   <p className="text-micro text-muted-foreground leading-snug">
-                    {t(($) => $.create_project.local_hint)}
+                    {folderOnly
+                      ? tProjects(($) => $.folder.create_hint)
+                      : t(($) => $.create_project.local_hint)}
                   </p>
                 </>
               )}
             </PopoverContent>
           </Popover>
+          )}
 
           {/* Overflow — always the last child so it stays at the end of the
               wrap flow. Only rendered while a date is still collapsible; when

@@ -28,6 +28,7 @@ import { RenameMachineDialog } from "./rename-machine-dialog";
 import { RuntimeProfilesDialog } from "./runtime-profiles-dialog";
 import { pendingRuntimesForProfiles } from "./pending-runtime";
 import { MachineCapacityControl } from "./machine-capacity-control";
+import { MachineDefaultDirControl } from "./machine-default-dir-control";
 import { MachineCliSection } from "./machine-cli-section";
 import { isQoderLocator, QoderDetailPage } from "./qoder-detail-page";
 import { HealthIcon, useHealthLabel } from "./shared";
@@ -299,7 +300,10 @@ export function RuntimeDetailPage({
               {machine.isCurrent && localMachineActions}
             </div>
           </div>
-          <div className="mt-4"><MachineCapacityControl runtimes={machine.runtimes} /></div>
+          <div className="mt-4 flex flex-col gap-3 empty:hidden">
+            <MachineCapacityControl runtimes={machine.runtimes} />
+            <MachineDefaultDirControl runtimes={machine.runtimes} />
+          </div>
         </div>
       </header>
 

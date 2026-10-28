@@ -75,6 +75,18 @@ type ExecOptions struct {
 	// daemon-wide zero still disables the watchdog entirely, and an in-flight
 	// tool continues to use the separate tool watchdog budget.
 	IdleWatchdogTimeout time.Duration
+	// ToolWatchdogTimeout optionally replaces the daemon-wide tool watchdog
+	// budget for this execution: how long a running command may stay silent.
+	// Zero keeps the daemon-wide budget. Set by the office idle policy.
+	ToolWatchdogTimeout time.Duration
+	// IdleUnlimited switches the daemon's idle watchdog off for this execution:
+	// a person labelled the issue 长任务 under the office idle policy.
+	IdleUnlimited bool
+	// OfficeIdleStop selects the office idle policy (DENE-2667). The daemon
+	// counts every CLI output line (Session.OutputActivity) as activity, and
+	// Claude streams its reply word by word (--include-partial-messages) so a
+	// long answer is never mistaken for silence. False keeps the legacy policy.
+	OfficeIdleStop bool
 	// HandshakeTimeout bounds startup RPCs for providers with a long-lived
 	// protocol transport, including Codex app-server and Claude SDK hooks;
 	// zero uses the provider default rather than disabling the bound.
@@ -186,6 +198,12 @@ type Session struct {
 	// a transient startup window into a user-visible delivery failure. Nil is
 	// fail-closed and means no run-scoped input may be claimed.
 	SupplementReady func() bool
+	// Interrupt stops the step the provider turn is in, a running command
+	// included, then continues the same session with the instruction as the
+	// next input (DENE-2667). It returns once the provider accepted that
+	// input. Nil means the backend can only Supplement. It shares
+	// SupplementReady: an interrupt needs the same live turn.
+	Interrupt func(context.Context, string) error
 	// ToolActivity optionally reports backend-owned tool accounting and its last
 	// transition time, independent of the best-effort transcript. Nil uses the
 	// daemon's message-based accounting. The timestamp gives completed tools a
@@ -193,6 +211,11 @@ type Session struct {
 	// The timestamp is an awakeclock reading (see package awakeclock), the same
 	// clock the idle watchdog measures, so host sleep never counts as silence.
 	ToolActivity func() (int32, time.Duration)
+	// OutputActivity optionally reports the awakeclock reading of the last
+	// line the CLI wrote, whatever it was: a partial word, a reasoning step, a
+	// progress notice. Zero means no line yet. Only the office idle policy
+	// counts it as activity (ExecOptions.OfficeIdleStop).
+	OutputActivity func() time.Duration
 	// InterruptBackgroundTools stops owned background tools at the daemon's
 	// tool watchdog boundary without cancelling the agent. True means at least
 	// one tool completed/was stopped and released from accounting; the watchdog

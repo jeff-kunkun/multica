@@ -62,6 +62,9 @@ func TestMain(m *testing.M) {
 	case "supplement":
 		runFakeClaudeSupplement()
 		os.Exit(0)
+	case "interrupt":
+		runFakeClaudeInterrupt()
+		os.Exit(0)
 	case "startup_stdout_burst":
 		runFakeClaudeStartupStdoutBurst()
 		os.Exit(0)

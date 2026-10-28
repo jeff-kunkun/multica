@@ -2,11 +2,9 @@ package service
 
 import "testing"
 
-// TestResumeUnsafeFailureEmptyHistoryMessage covers the manual-retry half of
-// GH #6066. The claim handler resolves a rerun's session from the exact source
-// task via ResumeUnsafeFailure rather than GetLastTaskSession, so a gap here
-// means clicking Rerun resumes the very transcript the provider just refused —
-// which is what the reporter experienced.
+// TestResumeUnsafeFailureEmptyHistoryMessage pins the shared failure guard used
+// by chat retry and session-resume paths. A gap here can make a retry replay the
+// transcript the provider just refused — which is what the reporter experienced.
 //
 // The failure_reason cases and the raw-text cases are both exercised because
 // they cover different hosts: a current daemon writes api_invalid_request, an
@@ -67,8 +65,8 @@ func TestResumeUnsafeFailureEmptyHistoryMessage(t *testing.T) {
 			want:          true,
 		},
 		{
-			// Transient failures must stay resumable: the whole point of
-			// reusing the session on retry is to keep the conversation.
+			// Chat retries still resume after transient failures to keep the
+			// conversation. Issue retries use a separate always-fresh policy.
 			name:          "provider network drop stays resumable",
 			failureReason: "agent_error.provider_network",
 			errorText:     "Connection closed mid-response",

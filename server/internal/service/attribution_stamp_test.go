@@ -86,6 +86,9 @@ func TestEnqueueTaskForIssueStampsDirectHumanAttribution(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnqueueTaskForIssue: %v", err)
 	}
+	if !task.ForceFreshSession {
+		t.Fatal("new issue task must request a fresh CLI session")
+	}
 
 	// Read the stored row so we assert what actually persisted, not just the
 	// returned struct.

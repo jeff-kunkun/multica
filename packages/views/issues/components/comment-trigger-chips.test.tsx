@@ -98,6 +98,29 @@ describe("CommentTriggerChips", () => {
     expect(onActionChange).toHaveBeenCalledWith("agent-1", "after_run");
   });
 
+  it("offers interrupting a run that can stop its step, as the default (DENE-2667)", async () => {
+    const task = { ...turn("running"), supplement_interrupt: true } as AgentTask;
+    const state: AgentRunState = { kind: "running", task, steerable: true };
+    const opts = { canSteer: true, canRestart: true, canInterrupt: true, steerByDefault: true };
+    const onActionChange = vi.fn();
+    renderWithI18n(<CommentTriggerChips
+      recipients={[{ agent: walt, state, action: resolveRecipientAction(state, undefined, opts), actions: recipientActions(state, opts) }]}
+      onActionChange={onActionChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "Walt trigger: Interrupt" }));
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).getAllByRole("menuitemradio").map((item) => item.textContent)).toEqual([
+      expect.stringContaining("Interrupt"),
+      expect.stringContaining("Steer"),
+      expect.stringContaining("Queue"),
+      expect.stringContaining("Interrupt and restart"),
+      expect.stringContaining("Don't wake"),
+    ]);
+    expect(within(menu).getByText("Stops the current step now, a running command included, and follows this message")).toBeInTheDocument();
+    expect(within(menu).getByText("Same process · same session · files allowed")).toBeInTheDocument();
+    fireEvent.click(within(menu).getByRole("menuitemradio", { name: /^Steer/ }));
+    expect(onActionChange).toHaveBeenCalledWith("agent-1", "steer");
+  });
+
   it("says an ACP CLI stops the current step to take a message", async () => {
     const task = { ...turn("running"), supplement_steer_mode: "handoff" } as AgentTask;
     const state: AgentRunState = { kind: "running", task, steerable: true };

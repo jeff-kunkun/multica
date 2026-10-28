@@ -31,6 +31,8 @@
     "steer_badge": "Added to {{names}}'s run",
     "steer_waiting": "Waiting for {{name}} to read it",
     "steer_read": "Read by {{name}}",
+    "steer_badge_interrupt": "Interrupted {{names}}'s run",
+    "steer_read_after": "Delivered · read by {{name}} after {{seconds}}s",
     "steer_not_received": "{{name}} didn't get it · {{reason}}",
     "steer_resend": "Send as a new run",
     "steer_resend_failed": "Couldn't send it as a new run.",
@@ -153,6 +155,12 @@
   "stage": {
     "none": "No stage",
     "value": "Stage {{n}}"
+  },
+  "after": {
+    "none": "No order",
+    "value": "After {{list}}",
+    "hint": "Waits in backlog until these are done, then starts by itself",
+    "empty": "No open sibling sub-issues"
   },
   "blocker_summary": {
     "title": "Blocked · {{count}} root cause(s)",
@@ -464,6 +472,7 @@
     "prop_status": "Status",
     "prop_priority": "Priority",
     "prop_stage": "Stage",
+    "prop_after": "Starts after",
     "prop_assignee": "Assignee",
     "prop_start_date": "Start date",
     "prop_due_date": "Due date",
@@ -688,6 +697,9 @@
     "recipient_steer_desc_handoff": "Stops this step to read it; the original work continues",
     "recipient_steer_restart_desc": "Reads it right away, then continues the original work; the current step is cut off",
     "recipient_after_run": "Queue",
+    "recipient_interrupt": "Interrupt",
+    "recipient_interrupt_desc": "Stops the current step now, a running command included, and follows this message",
+    "recipient_interrupt_process": "Same process · same session · files allowed",
     "recipient_after_run_desc": "Handled after this run",
     "recipient_restart": "Interrupt and restart",
     "recipient_restart_desc": "Stops now and starts over from this message",
@@ -828,7 +840,19 @@
     "status_deferred": "Retrying",
     "status_capacity_retry": "Model at capacity · retry {{retry}}, next at {{time}}",
     "usage_label": "Token cost",
-    "machine_full": "Queued: machine full ({{active}}/{{limit}})"
+    "machine_full": "Queued: machine full ({{active}}/{{limit}})",
+    "idle_unlimited": "No idle limit",
+    "live_label": "Live status",
+    "live_quiet": "Quiet {{duration}}",
+    "live_quiet_under_second": "under a second",
+    "live_running": "Running: {{command}}",
+    "live_no_command": "No command running",
+    "live_last_output": "Last: {{line}}",
+    "live_command_label": "Command",
+    "live_output_label": "Output",
+    "live_quiet_label": "Quiet",
+    "live_tool_running": "A tool is running",
+    "live_no_output": "No output yet"
   },
   "runs_timeline": {
     "title": "Runs",
@@ -1854,5 +1878,34 @@
     "reason_runtime_changed": "last session is on another machine",
     "reason_session_lost": "session could not be restored",
     "reason_fresh_requested": "fresh session requested"
+  },
+  "watchdog_reminder": {
+    "label": "Group reminded",
+    "detail_one": "The assignee is still running but has gone quiet in this issue. The project group was reminded once, last at {{time}}.",
+    "detail_other": "The assignee is still running but has gone quiet in this issue. The project group was reminded {{count}} times, last at {{time}}."
+  },
+  "plan_first": {
+    "title": "Plan first",
+    "waiting_for_plan": "The agent proposes a plan here before it starts. It cannot hand in or link a PR until the plan is approved.",
+    "version_title": "Plan v{{version}}",
+    "state_waiting": "Waiting for approval",
+    "state_approved": "Approved",
+    "state_changes": "Sent back",
+    "state_superseded": "Replaced",
+    "goal": "Do",
+    "out_of_scope": "Not doing",
+    "steps": "Steps",
+    "done_when": "Done when",
+    "approve": "Approve and start",
+    "request_changes": "Change it first",
+    "feedback_label": "What should change?",
+    "feedback_placeholder": "e.g. Drop step 3 and keep the old API",
+    "send_back": "Send back",
+    "cancel": "Cancel",
+    "approved_toast": "Plan v{{version}} approved. The agent continues in the same session.",
+    "changes_toast": "Plan v{{version}} sent back. The agent will propose a new version.",
+    "answer_failed": "Could not answer the plan. Try again.",
+    "not_woken_toast": "Approved, but no agent was woken. Wake it again to continue.",
+    "retry_wake": "Wake the agent again"
   }
 }

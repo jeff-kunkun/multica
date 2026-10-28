@@ -90,6 +90,7 @@ import { RemoteRuntimeDialog } from "./remote-runtime-dialog";
 import { ConnectRemoteDialog } from "./connect-remote-dialog";
 import { CloudRuntimeDialog } from "./cloud-runtime-dialog";
 import { MachineCapacityControl } from "./machine-capacity-control";
+import { MachineDefaultDirControl } from "./machine-default-dir-control";
 import { ProviderLogo } from "./provider-logo";
 import { RuntimeList, buildWorkloadIndex } from "./runtime-list";
 import { pendingRuntimeFromProfile } from "./pending-runtime";
@@ -929,9 +930,12 @@ function MachineRow({
       </ListGridCell>
       <RowChevron />
     </ListGridRow>
-    {/* Outside the row: the row is a link, the capacity form is not. */}
-    <div className="col-span-full border-b px-4 py-3 empty:hidden">
+    {/* Outside the row: the row is a link, the machine forms are not. Capped
+        at the card's width: on a phone the grid's fixed tracks run wider than
+        the card, which clips the overflow. */}
+    <div className="col-span-full flex max-w-[100cqw] flex-col gap-3 border-b px-4 py-3 empty:hidden">
       <MachineCapacityControl runtimes={machine.runtimes} />
+      <MachineDefaultDirControl runtimes={machine.runtimes} />
     </div>
     </>
   );

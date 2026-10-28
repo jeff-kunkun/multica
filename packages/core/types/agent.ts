@@ -60,12 +60,24 @@ export interface MachineCapacity {
   max_concurrent_runs: number;
 }
 
+/**
+ * The machine's default working directory (DENE-2667 PR 8): where a run goes
+ * when its project binds no folder. Sent only to the runtime's owner.
+ * `exists` is the machine's last report of whether the folder is there, null
+ * until it has looked.
+ */
+export interface RuntimeDefaultDir {
+  path: string;
+  exists: boolean | null;
+}
+
 export interface MachineQueueReason extends MachineCapacity {
   code: "machine_capacity";
 }
 
 export interface RuntimeDevice {
   machine_capacity?: MachineCapacity;
+  default_work_dir?: RuntimeDefaultDir;
   id: string;
   workspace_id: string;
   daemon_id: string | null;
@@ -357,6 +369,27 @@ export type SessionBreakReason =
   | "session_lost"
   | "fresh_requested";
 
+/**
+ * A running issue run's latest live view, as its daemon reported it every 15
+ * seconds (DENE-2667 PR 4). Every text is redacted before it is stored.
+ */
+export interface TaskLive {
+  task_id: string;
+  issue_id: string;
+  agent_id: string;
+  /** The tool in flight; absent when none is running. */
+  tool?: string;
+  /** The command (or tool and its target) in flight; absent when none is running. */
+  command?: string;
+  /** The last line the run printed or wrote. */
+  last_output?: string;
+  tools_in_flight: number;
+  /** Seconds the run had made no activity when this view was read. */
+  idle_seconds: number;
+  last_activity_at: string;
+  reported_at: string;
+}
+
 export interface AgentTask {
   queue_reason?: MachineQueueReason;
   wakeup_id?: string;
@@ -455,6 +488,10 @@ export interface AgentTask {
   can_supplement?: boolean;
   /** How a message reaches this run (DENE-1349): "same" in the running CLI, "restart" stops it and resumes the session, "handoff" (DENE-1347) stops the current step in the same session. */
   supplement_steer_mode?: string;
+  /** The run can stop its current step, a running command included, and continue the same session with a message (DENE-2667). */
+  supplement_interrupt?: boolean;
+  /** A person labelled the issue 长任务, so an active run is never stopped for going quiet (DENE-2667). Absent when off and on older servers. */
+  idle_unlimited?: boolean;
   /**
    * Canonical short description of what triggered this task — snapshot
    * taken at creation time. For comment-triggered tasks it's the

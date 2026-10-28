@@ -51,6 +51,7 @@ func (h *Handler) hydrateTaskSupplementMetadata(ctx context.Context, r *http.Req
 		resp[i].SupplementCapability = row.Capability
 		resp[i].SupplementCommentIDs = uuidsToStrings(row.CommentIds)
 		resp[i].SupplementSteerMode = row.SteerMode
+		resp[i].SupplementInterrupt = row.InterruptSupported
 		if task.Status != "running" || row.Capability != protocol.DaemonCapabilityTaskSupplementV1 || userID == "" {
 			continue
 		}
@@ -91,6 +92,30 @@ type CommentSupplementResponse struct {
 	Status        string  `json:"status"`
 	FailureReason *string `json:"failure_reason,omitempty"`
 	DeliveredAt   *string `json:"delivered_at,omitempty"`
+	// DeliveryMode is "interrupt" when the run was asked to stop its current
+	// step first; omitted for the default supplement (DENE-2667).
+	DeliveryMode string `json:"delivery_mode,omitempty"`
+	// DeliveredAfterMs is how long after sending the run read the message.
+	DeliveredAfterMs *int64 `json:"delivered_after_ms,omitempty"`
+}
+
+// supplementDeliveredAfterMs is the send-to-read latency of a delivered receipt.
+func supplementDeliveredAfterMs(createdAt, deliveredAt pgtype.Timestamptz) *int64 {
+	if !createdAt.Valid || !deliveredAt.Valid {
+		return nil
+	}
+	ms := deliveredAt.Time.Sub(createdAt.Time).Milliseconds()
+	if ms < 0 {
+		ms = 0
+	}
+	return &ms
+}
+
+func receiptDeliveryMode(mode string) string {
+	if mode == protocol.TaskSupplementDeliveryInterrupt {
+		return mode
+	}
+	return ""
 }
 
 // listCommentSupplements groups every receipt by comment id, oldest first.
@@ -109,11 +134,13 @@ func (h *Handler) listCommentSupplements(ctx context.Context, workspaceID pgtype
 	for _, row := range rows {
 		id := uuidToString(row.CommentID)
 		out[id] = append(out[id], CommentSupplementResponse{
-			TaskID:        uuidToString(row.TaskID),
-			AgentID:       uuidToString(row.AgentID),
-			Status:        row.Status,
-			FailureReason: textToPtr(row.FailureReason),
-			DeliveredAt:   timestampToPtr(row.DeliveredAt),
+			TaskID:           uuidToString(row.TaskID),
+			AgentID:          uuidToString(row.AgentID),
+			Status:           row.Status,
+			FailureReason:    textToPtr(row.FailureReason),
+			DeliveredAt:      timestampToPtr(row.DeliveredAt),
+			DeliveryMode:     receiptDeliveryMode(row.DeliveryMode),
+			DeliveredAfterMs: supplementDeliveredAfterMs(row.CreatedAt, row.DeliveredAt),
 		})
 	}
 	return out
@@ -165,6 +192,7 @@ func (h *Handler) steerCommentAgentTriggers(ctx context.Context, issue db.Issue,
 		bound, err := h.Queries.BindCommentTaskSupplement(ctx, db.BindCommentTaskSupplementParams{
 			TaskID: taskID, IssueID: issue.ID, AgentID: trigger.Agent.ID, WorkspaceID: issue.WorkspaceID,
 			CommentID: comment.ID, AuthorID: comment.AuthorID, ClientRequestID: comment.ID,
+			WantInterrupt: commentInterrupts(ctx, taskID),
 		})
 		if err != nil {
 			if !errors.Is(err, pgx.ErrNoRows) {
@@ -396,9 +424,40 @@ func (h *Handler) ClaimTaskSupplement(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to claim additional message")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
+	payload := map[string]any{
 		"comment_id": uuidToString(row.CommentID), "author_name": row.AuthorName, "content": row.Content,
-	})
+	}
+	// Optional fields (DENE-2667); older daemons ignore them and read the
+	// message as a supplement.
+	if row.DeliveryMode == protocol.TaskSupplementDeliveryInterrupt {
+		payload["delivery_mode"] = row.DeliveryMode
+	}
+	if files := h.supplementAttachments(r.Context(), row.CommentID, row.WorkspaceID); len(files) > 0 {
+		payload["attachments"] = files
+	}
+	writeJSON(w, http.StatusOK, payload)
+}
+
+// supplementAttachment names one file of a mid-run message. The run fetches
+// it with `multica attachment download <id>`, as for any comment attachment.
+type supplementAttachment struct {
+	ID          string `json:"id"`
+	Filename    string `json:"filename"`
+	ContentType string `json:"content_type,omitempty"`
+	SizeBytes   int64  `json:"size_bytes"`
+}
+
+func (h *Handler) supplementAttachments(ctx context.Context, commentID, workspaceID pgtype.UUID) []supplementAttachment {
+	rows, err := h.Queries.ListAttachmentsByComment(ctx, db.ListAttachmentsByCommentParams{CommentID: commentID, WorkspaceID: workspaceID})
+	if err != nil {
+		slog.Warn("list mid-run message attachments failed", "comment_id", uuidToString(commentID), "error", err)
+		return nil
+	}
+	out := make([]supplementAttachment, 0, len(rows))
+	for _, a := range rows {
+		out = append(out, supplementAttachment{ID: uuidToString(a.ID), Filename: a.Filename, ContentType: a.ContentType, SizeBytes: a.SizeBytes})
+	}
+	return out
 }
 
 func (h *Handler) AckTaskSupplement(w http.ResponseWriter, r *http.Request) {

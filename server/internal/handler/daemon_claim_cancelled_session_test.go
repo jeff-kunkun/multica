@@ -130,10 +130,11 @@ func TestClaimTask_IssueResumesCancelledTaskSession(t *testing.T) {
 		)
 		VALUES ($1, $2, $3, 'cancelled', 0, now(), now(), 'cancelled-issue-session', '/tmp/cancelled-issue-workdir')
 	`, agentID, runtimeID, issueID)
+	commentID := dbfx.Comment(t, issueID, "continue the cancelled issue run")
 	dbfx.Exec(t, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
-		VALUES ($1, $2, $3, 'queued', 0)
-	`, agentID, runtimeID, issueID)
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, status, priority)
+		VALUES ($1, $2, $3, $4, 'queued', 0)
+	`, agentID, runtimeID, issueID, commentID)
 
 	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
 	if task.PriorSessionID != "cancelled-issue-session" {

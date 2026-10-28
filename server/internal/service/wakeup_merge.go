@@ -26,7 +26,7 @@ func SeparateIssueRun(ctx context.Context) bool {
 
 // lockDefaultIssueEnqueue serializes the active read and insert across comment
 // roots and replicas. Callers build network overlays before taking this lock.
-func (s *TaskService) lockDefaultIssueEnqueue(ctx context.Context, issueID, agentID pgtype.UUID, fresh bool, triggerCommentID, actorUserID pgtype.UUID, attr attribution.Result) (*db.Queries, pgx.Tx, error) {
+func (s *TaskService) lockDefaultIssueEnqueue(ctx context.Context, issueID, agentID pgtype.UUID, mergeActive bool, triggerCommentID, actorUserID pgtype.UUID, attr attribution.Result) (*db.Queries, pgx.Tx, error) {
 	if s.TxStarter == nil {
 		return s.Queries, nil, nil
 	}
@@ -49,7 +49,7 @@ func (s *TaskService) lockDefaultIssueEnqueue(ctx context.Context, issueID, agen
 			err = ErrAgentChainBudgetExceeded
 		}
 	}
-	if err == nil && !fresh && !SeparateIssueRun(ctx) {
+	if err == nil && mergeActive && !SeparateIssueRun(ctx) {
 		var active bool
 		active, err = q.HasActiveTaskForIssueAndAgent(ctx, db.HasActiveTaskForIssueAndAgentParams{IssueID: issueID, AgentID: agentID})
 		if err == nil && active {

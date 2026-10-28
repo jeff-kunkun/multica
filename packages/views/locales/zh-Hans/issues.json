@@ -30,6 +30,8 @@
     "steer_badge": "插话给 {{names}}",
     "steer_waiting": "等待 {{name}} 读取",
     "steer_read": "{{name}} 已读取",
+    "steer_badge_interrupt": "打断了 {{names}}",
+    "steer_read_after": "已送达，第 {{seconds}} 秒被 {{name}} 读到",
     "steer_not_received": "{{name}} 未收到 · {{reason}}",
     "steer_resend": "作为新一轮发送",
     "steer_resend_failed": "没能作为新一轮发送。",
@@ -151,6 +153,12 @@
   "stage": {
     "none": "无阶段",
     "value": "阶段 {{n}}"
+  },
+  "after": {
+    "none": "不排顺序",
+    "value": "排在 {{list}} 之后",
+    "hint": "先在待规划里等它们做完，然后自动开工",
+    "empty": "没有未完成的同级子任务"
   },
   "blocker_summary": {
     "title": "已阻塞 · {{count}} 个根因",
@@ -459,6 +467,7 @@
     "prop_status": "状态",
     "prop_priority": "优先级",
     "prop_stage": "阶段",
+    "prop_after": "开工顺序",
     "prop_assignee": "负责人",
     "prop_start_date": "开始日期",
     "prop_due_date": "截止日期",
@@ -669,6 +678,9 @@
     "recipient_steer_desc_handoff": "停下这一步马上读到，接着干原来的活",
     "recipient_steer_restart_desc": "马上读到，接着干原来的活，当前这步会中断",
     "recipient_after_run": "排队",
+    "recipient_interrupt": "打断改方向",
+    "recipient_interrupt_desc": "马上停下手上这步（正在跑的命令也停），按这句接着干",
+    "recipient_interrupt_process": "同一个进程 · 同一段会话 · 可带文件",
     "recipient_after_run_desc": "这轮做完再处理",
     "recipient_restart": "打断重来",
     "recipient_restart_desc": "立刻停，按这句重新开始",
@@ -797,7 +809,19 @@
     "status_deferred": "重试中",
     "status_capacity_retry": "模型满载，第 {{retry}} 次重试，下次 {{time}}",
     "usage_label": "Token 成本",
-    "machine_full": "排队中：机器已满（{{active}}/{{limit}}）"
+    "machine_full": "排队中：机器已满（{{active}}/{{limit}}）",
+    "idle_unlimited": "不限空闲时间",
+    "live_label": "实时实况",
+    "live_quiet": "已安静 {{duration}}",
+    "live_quiet_under_second": "不到 1 秒",
+    "live_running": "正在跑：{{command}}",
+    "live_no_command": "当前没有命令在跑",
+    "live_last_output": "最后输出：{{line}}",
+    "live_command_label": "当前命令",
+    "live_output_label": "最后输出",
+    "live_quiet_label": "已安静",
+    "live_tool_running": "有工具在跑",
+    "live_no_output": "还没有输出"
   },
   "runs_timeline": {
     "title": "运行记录",
@@ -1784,5 +1808,33 @@
     "reason_runtime_changed": "上次的会话在另一台机器上",
     "reason_session_lost": "会话没能恢复",
     "reason_fresh_requested": "按要求新开"
+  },
+  "watchdog_reminder": {
+    "label": "已提醒过群",
+    "detail_other": "员工还在跑，但很久没在单子里汇报，已在项目群提醒 {{count}} 次，最近一次 {{time}}。"
+  },
+  "plan_first": {
+    "title": "先计划",
+    "waiting_for_plan": "agent 会先在这里交一份计划。计划批准前，它不能转待审，也不能关联 PR。",
+    "version_title": "计划 v{{version}}",
+    "state_waiting": "等待批准",
+    "state_approved": "已批准",
+    "state_changes": "已退回",
+    "state_superseded": "已被新版本替代",
+    "goal": "要做",
+    "out_of_scope": "不做",
+    "steps": "步骤",
+    "done_when": "做完的标准",
+    "approve": "批准执行",
+    "request_changes": "改一下再做",
+    "feedback_label": "要改什么？",
+    "feedback_placeholder": "例如：去掉第 3 步，旧接口不动",
+    "send_back": "退回",
+    "cancel": "取消",
+    "approved_toast": "计划 v{{version}} 已批准，agent 在同一个会话里接着做。",
+    "changes_toast": "计划 v{{version}} 已退回，agent 会交新版本。",
+    "answer_failed": "没能提交，请再试一次。",
+    "not_woken_toast": "已批准，但没有叫醒任何 agent。再叫醒一次才能接着做。",
+    "retry_wake": "再叫醒一次"
   }
 }

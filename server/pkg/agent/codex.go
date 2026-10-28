@@ -976,6 +976,24 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		sessionMu.RUnlock()
 		return session != nil && session.SupplementReady != nil && session.SupplementReady()
 	}
+	interrupt := func(interruptCtx context.Context, instruction string) error {
+		sessionMu.RLock()
+		session := currentSession
+		sessionMu.RUnlock()
+		if session == nil || session.Interrupt == nil {
+			return errors.New("codex turn cannot be interrupted")
+		}
+		return session.Interrupt(interruptCtx, instruction)
+	}
+	outputActivity := func() time.Duration {
+		sessionMu.RLock()
+		session := currentSession
+		sessionMu.RUnlock()
+		if session == nil || session.OutputActivity == nil {
+			return 0
+		}
+		return session.OutputActivity()
+	}
 
 	go func() {
 		defer func() {
@@ -1075,7 +1093,7 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		}
 	}()
 
-	return &Session{Supplement: supplement, SupplementReady: supplementReady, Messages: msgCh, Result: resCh}, nil
+	return &Session{Supplement: supplement, SupplementReady: supplementReady, Interrupt: interrupt, OutputActivity: outputActivity, Messages: msgCh, Result: resCh}, nil
 }
 
 func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts ExecOptions, attempt int) (*Session, error) {
@@ -1175,10 +1193,13 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	// default sends SIGKILL only to cmd.Process (the leader); we instead
 	// signal the whole process group so descendants die too. Returning
 	// nil keeps exec from logging a spurious error; cmd.WaitDelay below
-	// still backstops cmd.Wait() if the kill leaves an open pipe.
+	// still backstops cmd.Wait() if the kill leaves an open pipe. One group
+	// kill can miss a child forked at that instant, so keep killing until
+	// the group is gone.
 	cmd.Cancel = func() error {
 		if cmd.Process != nil {
 			signalProcessGroup(cmd, syscall.SIGKILL)
+			go killProcessGroupUntilGone(cmd, codexProcessWaitDelay())
 		}
 		return nil
 	}
@@ -1240,7 +1261,14 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	resCh := make(chan Result, 1)
 	semanticActivityCh := make(chan string, 256)
 	guardianRateLimitTrip := make(chan struct{}, 1)
+	// interruptRequests hands Session.Interrupt to the lifecycle goroutine,
+	// which owns the turn boundary (DENE-2667). lifecycleDone ends admission.
+	interruptRequests := make(chan codexInterruptRequest)
+	lifecycleDone := make(chan struct{})
 	var guardianRateLimitTripped atomic.Bool
+	// lines stamps every app-server line, reasoning deltas included, so the
+	// office idle policy sees a model that is thinking as active (DENE-2667).
+	var lines outputActivity
 
 	var outputMu sync.Mutex
 	// Result.Output is "final user-facing output selected by the backend"
@@ -1344,6 +1372,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		defer close(readerDone)
 		scanner := newAgentStreamScanner(stdout)
 		for scanner.Scan() {
+			lines.mark()
 			line := strings.TrimSpace(scanner.Text())
 			if line == "" {
 				continue
@@ -1404,12 +1433,16 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 				// codex did not close stdout within the grace window. Force
 				// the shutdown via context cancellation — cmd.Cancel
 				// group-kills the tree, the reader unblocks when stdout
-				// EOFs, and we proceed to phase 2.
+				// EOFs, and we proceed to phase 2. If the context was
+				// already cancelled, stopProcess does nothing, so signal the
+				// group directly too; Wait has not run, so the leader's pid
+				// still names this group.
 				b.cfg.Logger.Warn("codex did not close stdout after stdin EOF; forcing shutdown",
 					"pid", cmd.Process.Pid,
 					"grace", grace.String(),
 				)
 				stopProcess()
+				signalProcessGroup(cmd, syscall.SIGKILL)
 				// On Windows, Cancel terminates only the direct child. A
 				// descendant may keep inherited stdout open indefinitely. Start
 				// Wait now so os/exec's WaitDelay closes the pipe after its
@@ -1482,6 +1515,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	// codex process exits → reader goroutine's scanner.Scan() returns false →
 	// readerDone closes → lifecycle goroutine collects final output and sends Result.
 	go func() {
+		defer close(lifecycleDone)
 		defer activeCodexLaunches.Add(-1)
 		defer cancel()
 		defer stopProcess()
@@ -1722,8 +1756,62 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		}
 		defer stopFirstTurnNoProgressTimer()
 
+		// interruptAndContinue stops the active turn and starts the next one on
+		// the same thread with the human's instruction (DENE-2667). Run in this
+		// goroutine, it cannot race the turn boundary the loop below watches.
+		interruptAndContinue := func(text string) error {
+			select {
+			case aborted := <-turnDone:
+				// The turn ended on its own first; the run ends with it.
+				finishTurn(aborted)
+				return errors.New("codex turn ended before the interrupt")
+			default:
+			}
+			turnID := c.activeTurnID()
+			if turnID == "" {
+				return errors.New("codex turn has not started")
+			}
+			interruptTimeout := opts.TurnInterruptTimeout
+			if interruptTimeout <= 0 {
+				interruptTimeout = defaultCodexTurnInterruptTimeout
+			}
+			interruptCtx, cancelInterrupt := context.WithTimeout(runCtx, interruptTimeout)
+			defer cancelInterrupt()
+			if _, err := c.request(interruptCtx, "turn/interrupt", map[string]any{"threadId": threadID, "turnId": turnID}); err != nil {
+				return fmt.Errorf("codex turn/interrupt: %w", err)
+			}
+			select {
+			case <-turnDone:
+			case <-interruptCtx.Done():
+				return fmt.Errorf("codex interrupted turn did not end: %w", interruptCtx.Err())
+			}
+			b.cfg.Logger.Info("codex turn interrupted for a new instruction", "thread_id", threadID, "turn_id", turnID,
+				"commands_stopped", stopCodexTurnCommands(cmd.Process.Pid))
+			c.prepareNextTurn()
+			nextParams := map[string]any{
+				"threadId": threadID,
+				"input":    []map[string]any{{"type": "text", "text": text}},
+			}
+			applyCodexReasoningEffort(nextParams, opts.ThinkingLevel)
+			applyCodexServiceTier(nextParams, opts.ServiceTier)
+			if _, err := c.request(runCtx, "turn/start", nextParams); err != nil {
+				// The interrupted turn is gone and no new one started: the run
+				// ends here instead of waiting out the inactivity timeout.
+				waitingForTurn = false
+				finalStatus = "failed"
+				finalError = fmt.Sprintf("codex turn/start after interrupt failed: %v", err)
+				return err
+			}
+			lastSemanticActivity = time.Now()
+			lastSemanticActivityDescription = "turn/start (interrupt)"
+			resetTimer(semanticTimer, semanticInactivityTimeout)
+			return nil
+		}
+
 		for waitingForTurn {
 			select {
+			case req := <-interruptRequests:
+				req.done <- interruptAndContinue(req.text)
 			case aborted := <-turnDone:
 				finishTurn(aborted)
 			case <-guardianRateLimitTrip:
@@ -1951,7 +2039,34 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	supplementReady := func() bool {
 		return c.getThreadID() != "" && c.activeTurnID() != ""
 	}
-	return &Session{Supplement: supplement, SupplementReady: supplementReady, Messages: msgCh, Result: resCh}, nil
+	interrupt := func(interruptCtx context.Context, instruction string) error {
+		req := codexInterruptRequest{text: instruction, done: make(chan error, 1)}
+		select {
+		case interruptRequests <- req:
+		case <-lifecycleDone:
+			return context.Canceled
+		case <-interruptCtx.Done():
+			return interruptCtx.Err()
+		}
+		// Once taken, the lifecycle goroutine always answers.
+		return <-req.done
+	}
+	return &Session{Supplement: supplement, SupplementReady: supplementReady, Interrupt: interrupt, OutputActivity: lines.last, Messages: msgCh, Result: resCh}, nil
+}
+
+type codexInterruptRequest struct {
+	text string
+	done chan error
+}
+
+// prepareNextTurn reopens the one-shot turn state after an interrupted turn
+// ended, before the next turn/start on the same thread. The stdout reader
+// only touches this state while a turn is open, and none is now.
+func (c *codexClient) prepareNextTurn() {
+	c.turnCompleted.Store(false)
+	c.turnErrorMu.Lock()
+	c.turnError = ""
+	c.turnErrorMu.Unlock()
 }
 
 func supplementCodexTurn(ctx context.Context, c *codexClient, instruction string) error {
@@ -2449,7 +2564,7 @@ type codexClient struct {
 	agentMessageOrder   []string
 
 	notificationProtocol string // "unknown", "legacy", "raw"
-	turnCompleted        bool
+	turnCompleted        atomic.Bool
 
 	usageMu sync.Mutex
 	usage   TokenUsage // accumulated from turn events
@@ -3553,10 +3668,10 @@ func (c *codexClient) handleRawNotification(method string, params map[string]any
 		status := extractNestedString(params, "turn", "status")
 		threadID, _ := params["threadId"].(string)
 		c.cfg.Logger.Info("codex turn/completed received", "thread_id", threadID, "turn_id", turnID, "status", status)
-		if c.turnCompleted {
+		if c.turnCompleted.Load() {
 			return
 		}
-		c.turnCompleted = true
+		c.turnCompleted.Store(true)
 		c.setActiveTurnID("")
 		aborted := status == "cancelled" || status == "canceled" ||
 			status == "aborted" || status == "interrupted"

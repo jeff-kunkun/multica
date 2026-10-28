@@ -133,12 +133,12 @@ interface CommentCardProps {
    * `CommentRow` has to rerun the rule per row.
    */
   canModerate?: boolean;
-  onReply: (parentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[], steerTaskIds?: string[], mode?: CommentSendMode) => Promise<string | boolean>;
+  onReply: (parentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[], steerTaskIds?: string[], mode?: CommentSendMode, interruptTaskIds?: string[]) => Promise<string | boolean>;
   onReplyAccepted?: (commentId: string) => void;
   onEdit: (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[], contentBase?: string) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
-  onCreateSubIssue?: (commentId: string) => void;
+  onCreateSubIssue?: (commentId: string, content?: string) => void;
   /** Resolve/unresolve any comment in this thread (commentId = the target row). */
   onResolveToggle?: (commentId: string, resolved: boolean) => void;
   /** Copy a deep link (`#comment-…`) to a single comment in this thread. */
@@ -657,7 +657,7 @@ function CommentRow({
   onEdit: (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[], contentBase?: string) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
-  onCreateSubIssue?: (commentId: string) => void;
+  onCreateSubIssue?: (commentId: string, content?: string) => void;
   onResolveToggle?: (commentId: string, resolved: boolean) => void;
   onCopyLink?: (commentId: string) => void;
 }) {
@@ -798,7 +798,7 @@ function CommentRow({
                 </DropdownMenuItem>
               )}
               {onCreateSubIssue && entry.comment_type === "comment" && (
-                <DropdownMenuItem onClick={() => onCreateSubIssue(entry.id)}>
+                <DropdownMenuItem onClick={() => onCreateSubIssue(entry.id, entry.content)}>
                   <MessageSquarePlus className="h-3.5 w-3.5" aria-hidden />
                   {t(($) => $.source_context.create_action)}
                 </DropdownMenuItem>
@@ -1342,7 +1342,7 @@ function CommentCardImpl({
                         </DropdownMenuItem>
                       )}
                       {onCreateSubIssue && entry.comment_type === "comment" && (
-                        <DropdownMenuItem onClick={() => onCreateSubIssue(entry.id)}>
+                        <DropdownMenuItem onClick={() => onCreateSubIssue(entry.id, entry.content)}>
                           <MessageSquarePlus className="h-3.5 w-3.5" aria-hidden />
                           {t(($) => $.source_context.create_action)}
                         </DropdownMenuItem>
@@ -1534,7 +1534,7 @@ function CommentCardImpl({
                   draftKey={`reply:${issueId}:${entry.id}`}
                   onEditAnnotation={(id) => annotation.editAnnotation(id, true)}
                   steerByDefault={steerThreadRunByDefault}
-                  onSubmit={(content, attachmentIds, suppressAgentIds, steerTaskIds, mode) => replyTargetMissing ? Promise.resolve(false) : onReply(replyTargetId, content, attachmentIds, suppressAgentIds, steerTaskIds, mode)}
+                  onSubmit={(content, attachmentIds, suppressAgentIds, steerTaskIds, mode, interruptTaskIds) => replyTargetMissing ? Promise.resolve(false) : onReply(replyTargetId, content, attachmentIds, suppressAgentIds, steerTaskIds, mode, interruptTaskIds)}
                   onAccepted={onReplyAccepted}
                 />
               </div>

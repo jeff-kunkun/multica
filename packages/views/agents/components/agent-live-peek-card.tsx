@@ -12,10 +12,13 @@ import {
   useAgentPresenceDetail,
 } from "@multica/core/agents";
 import { issueDetailOptions } from "@multica/core/issues";
+import { useFeatureEnabled } from "@multica/core/config";
+import { OFFICE_LIVE_STATUS_FLAG } from "@multica/core/feature-flags";
 import type { AgentTask } from "@multica/core/types";
 import { AlertTriangle } from "lucide-react";
 import { AppLink } from "../../navigation";
 import { useT, useTimeAgo } from "../../i18n";
+import { TaskLiveLine } from "../../common/task-live-line";
 import { availabilityConfig, workloadConfig } from "../presence";
 
 interface AgentLivePeekCardProps {
@@ -23,7 +26,8 @@ interface AgentLivePeekCardProps {
 }
 
 // Live "peek" card for an agent avatar — shows the three live signals the
-// squad members tab cares about (workload, current issue, last activity).
+// squad members tab cares about (workload, current issue, last activity), plus,
+// in office test builds, the current issue run's live status.
 // Companion to AgentProfileCard, which surfaces static identity (description,
 // runtime, skills, owner). Keeping them separate avoids polluting the 23+
 // existing AgentProfileCard call sites with live-only concerns.
@@ -36,6 +40,7 @@ export function AgentLivePeekCard({ agentId }: AgentLivePeekCardProps) {
   );
   const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
   const presence = useAgentPresenceDetail(wsId, agentId);
+  const liveEnabled = useFeatureEnabled(OFFICE_LIVE_STATUS_FLAG);
 
   const agent = agents.find((a) => a.id === agentId);
 
@@ -130,6 +135,9 @@ export function AgentLivePeekCard({ agentId }: AgentLivePeekCardProps) {
           emptyLabel={t(($) => $.live_peek.no_current_issue)}
           issueHref={(id) => p.issueDetail(id)}
         />
+        {/* What the current issue run is doing right now, as its daemon
+            last reported it (office test builds). */}
+        {liveEnabled && runningTask && <TaskLiveLine task={runningTask} details />}
         <LastActivityRow
           task={lastTerminal}
           label={t(($) => $.live_peek.last_activity_label)}

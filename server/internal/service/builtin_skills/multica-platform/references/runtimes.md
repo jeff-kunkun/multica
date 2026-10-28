@@ -32,6 +32,7 @@ multica runtime capacity <runtime-id> --max-concurrent-runs 8 --output json
 multica runtime usage <runtime-id> --output json
 multica runtime activity <runtime-id> --output json
 multica runtime update <runtime-id> --target-version <version> --output json
+multica runtime update <runtime-id> --default-dir /Users/me/work --output json
 multica runtime models <runtime-id> [--refresh] --output json
 multica runtime agent-cli <runtime-id> --output json
 multica runtime agent-cli <runtime-id> --update-now --output json
@@ -69,6 +70,19 @@ it prints the daemon's last `cli_update` report — `phase`
 only, upgrades once its running tasks finish (other CLIs keep working), and
 gives the tasks back after at most 30 minutes if they never drain. It returns
 right away; read the command again for the next report.
+
+`runtime update --default-dir` sets the machine's default working directory
+instead (`""` clears it; owner only). A run whose project binds no folder and
+names no repository starts there, with its instruction files in a separate
+directory beside it; squad leaders, runs with a repository, and runtimes that
+cannot keep their instructions outside the work directory ignore it. When the
+directory is missing, or is one a run may not use (the home directory, `/` and
+other protected system folders), the run falls back to its scratch directory.
+`runtime list --output json` shows `default_work_dir.path` and `exists` to the
+owner only. `exists` is the machine's last report of whether the folder is
+there, not whether a run may use it: a protected folder that exists reports
+`true` and its runs still go to scratch. Office test builds show the same
+setting to the owner on the runtimes page.
 
 `runtime update`, `runtime agent-cli --update-now/--follow` and
 `runtime delete` are writes. Starting a runtime update is
