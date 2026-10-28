@@ -2242,6 +2242,7 @@ func (h *Handler) triggerTasksForCommentReport(ctx context.Context, issue db.Iss
 		outcomes = append(outcomes, CommentTriggerOutcome{TargetType: "agent", TargetID: agentID, Status: DispatchBlocked, ReasonCode: ReasonBotWakeChainLimit})
 		namedAgents[agentID] = true
 	}
+	h.noteCommentInvocationDenied(ctx, issue, comment, outcomes)
 	woken := commentWokenRuns(resolved, enqueued)
 	return outcomes, woken
 }
