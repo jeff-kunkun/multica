@@ -254,7 +254,9 @@
       "error_daemon_version": "このエージェントのデーモン CLI（{{current}}）が必要なバージョン {{min}} を下回っています。エージェントで作成を使用するには、デーモンをアップグレードしてください。",
       "error_unknown": "送信できませんでした。再試行してください。",
       "sub_issue_of": "{{identifier}} のサブタスク"
-    }
+    },
+    "plan_first": "先に計画",
+    "plan_first_tooltip": "エージェントが計画を提案し、承認を待ってから作業します"
   },
   "mark_duplicate": {
     "title": "重複としてマーク",

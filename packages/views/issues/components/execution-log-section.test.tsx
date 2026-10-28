@@ -42,6 +42,8 @@ import { act, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { issueKeys } from "@multica/core/issues/queries";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
+import { configStore } from "@multica/core/config";
+import { OFFICE_IDLE_STOP_FLAG } from "@multica/core/feature-flags";
 
 function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
   return {
@@ -116,6 +118,27 @@ describe("ActiveTaskRow", () => {
       screen.getByText(`Model at capacity · retry 4, next at ${time}`),
     ).toBeInTheDocument();
     expect(screen.queryByText("Retrying")).not.toBeInTheDocument();
+  });
+
+  // DENE-2667: a 长任务 run is never stopped for going quiet. Only office
+  // test builds say so.
+  it("says a 长任务 run has no idle limit only with the office flag", () => {
+    const task = makeTask({ idle_unlimited: true });
+    configStore.getState().setLocalFeatureFlags({});
+    const { unmount } = renderWithI18n(<ActiveTaskRow task={task} issueId="issue-1" />);
+    expect(screen.queryByText("No idle limit")).not.toBeInTheDocument();
+    unmount();
+
+    configStore.getState().setLocalFeatureFlags({ [OFFICE_IDLE_STOP_FLAG]: true });
+    try {
+      renderWithI18n(<ActiveTaskRow task={task} issueId="issue-1" />);
+      expect(screen.getByText("No idle limit")).toBeInTheDocument();
+      cleanup();
+      renderWithI18n(<ActiveTaskRow task={makeTask()} issueId="issue-1" />);
+      expect(screen.queryByText("No idle limit")).not.toBeInTheDocument();
+    } finally {
+      configStore.getState().setLocalFeatureFlags({});
+    }
   });
 
   it("keeps the plain retrying label on other deferred waits", () => {

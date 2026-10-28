@@ -214,34 +214,38 @@ func TestGetLastChatTaskSessionExcludesAntigravityNotLoggedIn(t *testing.T) {
 	}
 }
 
-// TestGetLastChatTaskSessionKeepsSessionOnAuthAdjacentError is the chat
-// narrowness half: the ILIKE guard must match the exact provider phrase, not an
-// error that merely resembles it, or a healthy conversation loses its resume
-// context on every follow-up.
-func TestGetLastChatTaskSessionKeepsSessionOnAuthAdjacentError(t *testing.T) {
+// TestGetLastChatTaskSessionKeepsBenignFailure is the narrowness half of the
+// shared text guards: each must match its exact provider phrase, not an error
+// that merely resembles it, or a healthy conversation loses its resume context
+// on every follow-up. Chat resume still accepts failed turns, so this is where
+// the guards decide; an issue lookup breaks continuity at any failed turn.
+func TestGetLastChatTaskSessionKeepsBenignFailure(t *testing.T) {
 	if testPool == nil {
 		t.Skip("no database connection")
 	}
 
-	_, agentID, runtimeID := setupRerunTestFixture(t)
-	chatSessionID := newPoisonTestChatSession(t, agentID, runtimeID, "poison-auth-adjacent")
-	ctx := context.Background()
+	for _, tc := range benignFailureCases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, agentID, runtimeID := setupRerunTestFixture(t)
+			chatSessionID := newPoisonTestChatSession(t, agentID, runtimeID, "benign-failure")
+			ctx := context.Background()
 
-	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, chat_session_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason, error)
-		VALUES ($1, $2, $3, 'failed', 0, now() - interval '1 minute', now() - interval '1 minute', 'CHAT-HEALTHY-AUTH', '/tmp/chat', 'agent_error.unknown',
-		        'hermes provider error: could not resolve an authentication method for this model')
-	`, agentID, runtimeID, chatSessionID); err != nil {
-		t.Fatalf("insert task: %v", err)
-	}
+			if _, err := testPool.Exec(ctx, `
+				INSERT INTO agent_task_queue (agent_id, runtime_id, chat_session_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason, error)
+				VALUES ($1, $2, $3, 'failed', 0, now() - interval '1 minute', now() - interval '1 minute', 'CHAT-HEALTHY', '/tmp/chat', $4, $5)
+			`, agentID, runtimeID, chatSessionID, tc.failureReason, tc.errText); err != nil {
+				t.Fatalf("insert task: %v", err)
+			}
 
-	queries := db.New(testPool)
-	prior, err := queries.GetLastChatTaskSession(ctx, lastChatTaskSessionParams(chatSessionID))
-	if err != nil {
-		t.Fatalf("GetLastChatTaskSession failed: %v", err)
-	}
-	if !prior.SessionID.Valid || prior.SessionID.String != "CHAT-HEALTHY-AUTH" {
-		t.Fatalf("an auth-adjacent but non-matching error must not retire the session, got %+v", prior.SessionID)
+			queries := db.New(testPool)
+			prior, err := queries.GetLastChatTaskSession(ctx, lastChatTaskSessionParams(chatSessionID))
+			if err != nil {
+				t.Fatalf("GetLastChatTaskSession failed: %v", err)
+			}
+			if !prior.SessionID.Valid || prior.SessionID.String != "CHAT-HEALTHY" {
+				t.Fatalf("a benign failure must not retire the session, got %+v", prior.SessionID)
+			}
+		})
 	}
 }
 

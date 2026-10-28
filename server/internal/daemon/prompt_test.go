@@ -2177,6 +2177,54 @@ func TestBuildPromptIssueStateFallsBackToTheRead(t *testing.T) {
 	}
 }
 
+// TestBuildPromptIssueSnapshotSkipsAnUnchangedDescription pins DENE-2679: a
+// resumed session already holds the description, so the snapshot leaves it
+// out only when the server compared it and found it unchanged. Every doubt —
+// a changed description, no comparison, a cold start, a dropped resume —
+// sends it in full.
+func TestBuildPromptIssueSnapshotSkipsAnUnchangedDescription(t *testing.T) {
+	const description = "Step 1: slim the brief.\nStep 2: measure tokens."
+	const skipped = "Description: unchanged since your previous run on this issue, so it is not repeated; `multica issue get` re-reads it.\n"
+	base := func() Task {
+		task := issueStateTask("issue-desc-1")
+		task.IssueTitle = "Slim the brief"
+		task.IssueStatus = "in_progress"
+		task.IssueDescription = description
+		task.IssueStateDeltaKnown = true
+		return task
+	}
+
+	unchanged := base()
+	unchanged.IssueChangedFields = []string{"status"}
+	out := BuildPrompt(unchanged, "claude")
+	if !strings.Contains(out, skipped) {
+		t.Errorf("an unchanged description on a resumed run must be left out, got:\n%s", out)
+	}
+	if strings.Contains(out, description) {
+		t.Errorf("an unchanged description was sent again, got:\n%s", out)
+	}
+
+	cases := map[string]func(*Task){
+		"description changed": func(task *Task) { task.IssueChangedFields = []string{"title", "description"} },
+		"delta not computed":  func(task *Task) { task.IssueStateDeltaKnown = false },
+		"cold start":          func(task *Task) { task.PriorSessionID = "" },
+		"resume dropped":      func(task *Task) { task.PriorSessionResumeUnavailable = true },
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			task := base()
+			mutate(&task)
+			out := BuildPrompt(task, "claude")
+			if !strings.Contains(out, "Description:\n"+description+"\n") {
+				t.Errorf("expected the full description, got:\n%s", out)
+			}
+			if strings.Contains(out, skipped) {
+				t.Errorf("nothing may claim the description is unchanged here, got:\n%s", out)
+			}
+		})
+	}
+}
+
 func TestBuildPromptIssueContextSnapshotAndBudget(t *testing.T) {
 	out := BuildPrompt(Task{IssueID: "issue-1", IssueTitle: "Fix cache", IssueDescription: "details", IssueStatus: "in_progress", IssueAssigneeType: "agent", IssueAssigneeID: "agent-1", IssueContextGeneratedAt: "2026-09-20T00:00:00Z", IssueCommentSummaries: []IssueContextComment{{ID: "c1", ThreadID: "c1", Content: "root"}}, IssueTriggerThread: []IssueContextComment{{ID: "c2", Content: "trigger"}}}, "claude")
 	for _, want := range []string{"## Issue context (server snapshot)", "Title: Fix cache", "Comment thread summaries:", "Triggering thread"} {

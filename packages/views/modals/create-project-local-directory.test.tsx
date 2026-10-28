@@ -8,6 +8,8 @@ import { renderWithI18n } from "../test/i18n";
 
 // What the desktop validator reports for the picked folder.
 let pickedIsGitRepo: boolean | undefined = true;
+let folderOnly = false;
+let desktopShell = true;
 
 const createProjectMock = vi.fn().mockResolvedValue({ id: "p1", slug: "p1" });
 
@@ -55,6 +57,10 @@ vi.mock("@multica/core/projects", () => ({
 }));
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "workspace-1" }));
+vi.mock("@multica/core/config", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/config")>()),
+  useFeatureEnabled: (key: string) => key === "office_project_folder" && folderOnly,
+}));
 vi.mock("../workflows/workflow-pill", () => ({ WorkflowPill: () => null }));
 vi.mock("@multica/core/paths", () => ({
   useCurrentWorkspace: () => ({ id: "workspace-1", slug: "ws", repos: [] }),
@@ -96,7 +102,7 @@ vi.mock("../projects/components/project-due-date-picker", () => ({
 
 // Desktop-only surface: without these the Local directory tab never renders.
 vi.mock("../platform/local-directory", () => ({
-  isDesktopShell: () => true,
+  isDesktopShell: () => desktopShell,
   pickDirectory: () =>
     Promise.resolve({ ok: true, path: "/Users/dev/work/game-client", basename: "game-client" }),
   validateLocalDirectory: () => Promise.resolve({ ok: true, is_git_repo: pickedIsGitRepo }),
@@ -141,6 +147,8 @@ describe("CreateProjectModal — local directory", () => {
   beforeEach(() => {
     createProjectMock.mockClear();
     pickedIsGitRepo = true;
+    folderOnly = false;
+    desktopShell = true;
   });
 
   // Tasks always run directly in the bound folder, so there is no mode to pick.
@@ -170,6 +178,57 @@ describe("CreateProjectModal — local directory", () => {
 
     expect(screen.queryByRole("textbox", { name: /description/i })).not.toBeInTheDocument();
     expect(screen.queryByPlaceholderText(/description/i)).not.toBeInTheDocument();
+  });
+});
+
+describe("CreateProjectModal — office project folder", () => {
+  beforeEach(() => {
+    createProjectMock.mockClear();
+    pickedIsGitRepo = false;
+    folderOnly = true;
+    desktopShell = true;
+  });
+
+  it("offers only a folder, and leaves Git to the CLI", async () => {
+    const user = userEvent.setup();
+    renderWithI18n(<CreateProjectModal onClose={vi.fn()} />);
+
+    expect(screen.queryByRole("button", { name: /GitHub repos/i })).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Choose directory/i }));
+    await waitFor(() => expect(screen.getByText("/Users/dev/work/game-client")).toBeInTheDocument());
+
+    expect(screen.queryByRole("button", { name: /create local git/i })).not.toBeInTheDocument();
+    expect(screen.getAllByText(/the CLI notices on its own/i).length).toBeGreaterThan(0);
+  });
+
+  it("binds the picked folder to the project", async () => {
+    const user = userEvent.setup();
+    renderWithI18n(<CreateProjectModal onClose={vi.fn()} />);
+
+    await user.click(screen.getByRole("button", { name: /Choose directory/i }));
+    await waitFor(() => expect(screen.getByText("/Users/dev/work/game-client")).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: /^Create project$/i }));
+
+    await waitFor(() => expect(createProjectMock).toHaveBeenCalled());
+    expect(createProjectMock.mock.calls[0]![0].resources).toEqual([
+      {
+        resource_type: "local_directory",
+        resource_ref: {
+          local_path: "/Users/dev/work/game-client",
+          daemon_id: "daemon-1",
+          label: "game-client",
+          is_git_repo: false,
+        },
+      },
+    ]);
+  });
+
+  it("has nothing to pick on the web", () => {
+    desktopShell = false;
+    renderWithI18n(<CreateProjectModal onClose={vi.fn()} />);
+
+    expect(screen.queryByRole("button", { name: /Choose directory/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Repos$/)).not.toBeInTheDocument();
   });
 });
 

@@ -127,14 +127,17 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	}
 	inputWriter := &claudeInputWriter{w: stdin}
 	var supplements *claudeSupplementSession
+	var interrupts *claudeInterrupter
 	if opts.EnableTaskSupplement {
 		supplements = newClaudeSupplementSession(runCtx)
+		interrupts = newClaudeInterrupter(inputWriter)
 	}
 	var closeStdinOnce sync.Once
 	closeStdin := func() {
 		closeStdinOnce.Do(func() { _ = stdin.Close() })
 		if supplements != nil {
 			supplements.end()
+			interrupts.end()
 		}
 	}
 	// Capture stderr into both the daemon log (as before) and a bounded tail
@@ -191,10 +194,13 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			if supplements != nil {
 				cancel()
 			}
+		} else if interrupts != nil {
+			interrupts.started()
 		}
 		writeDone <- err
 	}()
 
+	var lines outputActivity
 	go func() {
 		defer cancel()
 		defer close(msgCh)
@@ -260,6 +266,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		scanner := newAgentStreamScanner(stdout)
 
 		for scanner.Scan() {
+			lines.mark()
 			line := strings.TrimSpace(scanner.Text())
 			if line == "" {
 				continue
@@ -312,7 +319,22 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 					usageMsg := msg
 					lastUsageResult = &usageMsg
 				}
-				closeStdin()
+				// An interrupted turn's result makes room for the waiting
+				// message: stdin stays open and the run goes on in the same
+				// session (DENE-2667). Every other result ends the run.
+				var next func()
+				if interrupts != nil {
+					next = interrupts.resultSeen()
+				}
+				if next == nil {
+					closeStdin()
+					break
+				}
+				controlWrites.Add(1)
+				go func() {
+					defer controlWrites.Done()
+					next()
+				}()
 			case "log":
 				if msg.Log != nil {
 					trySend(msgCh, Message{
@@ -344,6 +366,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			case "control_response":
 				if supplements != nil {
 					supplements.handleResponse(msg.Response)
+					interrupts.controlResponse(msg.Response)
 				}
 			}
 		}
@@ -475,10 +498,11 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		}
 	}()
 
-	session := &Session{Messages: msgCh, Result: resCh}
+	session := &Session{Messages: msgCh, Result: resCh, OutputActivity: lines.last}
 	if supplements != nil {
 		session.Supplement = supplements.supplement
 		session.SupplementReady = supplements.ready
+		session.Interrupt = interrupts.interrupt
 	}
 	return session, nil
 }
@@ -1264,7 +1288,7 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 		"--output-format", "stream-json",
 		"--input-format", "stream-json",
 		"--verbose",
-		"--permission-mode", "bypassPermissions",
+		"--permission-mode", ClaudePermissionMode,
 		// AskUserQuestion is Claude Code's built-in interactive question tool.
 		// The daemon runs Claude in non-interactive stream-json mode and has
 		// no UI for the prompt to render in, so a call returns an empty
@@ -1272,6 +1296,12 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 		// never sees the question (see GitHub #2588). User-facing
 		// clarification belongs in an issue comment instead.
 		"--disallowedTools", "AskUserQuestion",
+	}
+	if opts.OfficeIdleStop {
+		// Word-by-word stream_event lines keep a long reply visibly alive for
+		// the office idle policy. The reader ignores their content: the full
+		// assistant message still arrives as before (DENE-2667).
+		args = append(args, "--include-partial-messages")
 	}
 	if hasManagedMcpConfig(opts.McpConfig) {
 		// A saved agent-level config is authoritative, including an explicitly
@@ -1451,7 +1481,7 @@ func argsRequestBypassPermissions(args []string) bool {
 		if arg == "--dangerously-skip-permissions" {
 			return true
 		}
-		if arg == "--permission-mode" && i+1 < len(args) && args[i+1] == "bypassPermissions" {
+		if arg == "--permission-mode" && i+1 < len(args) && args[i+1] == ClaudePermissionMode {
 			return true
 		}
 	}

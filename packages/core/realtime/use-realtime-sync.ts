@@ -33,7 +33,8 @@ import {
   agentTasksKeys,
 } from "../agents/queries";
 import { patchAgentListStatus, readAgentStatusChange } from "../agents/list-freshness";
-import type { Agent } from "../types/agent";
+import { applyTaskLiveUpdate, removeTaskLive } from "../agents/task-live";
+import type { Agent, TaskLive } from "../types/agent";
 import { githubKeys } from "../github/queries";
 import { vcsKeys } from "../vcs/queries";
 import { larkKeys } from "../lark/queries";
@@ -1171,6 +1172,10 @@ export function useRealtimeSync(
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: telegramKeys.installations(wsId) });
       },
+      // Plan first (DENE-2670): the plan list is keyed by issue id.
+      issue_plan: () => {
+        qc.invalidateQueries({ queryKey: ["issue-plans"] });
+      },
       pull_request: () => {
         // PR list is keyed by issue id, not workspace, so we invalidate all
         // PR queries — the open issue detail page will refetch its own list.
@@ -1311,6 +1316,9 @@ export function useRealtimeSync(
       // every message would flood the network. Specific chat handlers below
       // still receive it via ws.on() (a separate subscription channel).
       "task:message",
+      // Live status reports arrive every 15 seconds per running run; they
+      // patch their own cache below and must never refetch anything.
+      "task_live:updated",
       // task:completed / task:failed deliberately NOT here. They go through
       // both the task-prefix invalidate (refreshes the agent-task-snapshot
       // cache) AND the chat-specific ws.on() handlers below. The two
@@ -1397,6 +1405,20 @@ export function useRealtimeSync(
       if (!wsId) return;
       applyIssueInvalidatedToCache(qc, wsId, p as IssueInvalidatedPayload);
     });
+
+    // Live status (DENE-2667 PR 4): patch the cached list in place; a run that
+    // ends drops its live view.
+    const unsubTaskLive = ws.on("task_live:updated", (p) => {
+      const wsId = getCurrentWsId();
+      if (wsId) applyTaskLiveUpdate(qc, wsId, p as TaskLive);
+    });
+    const unsubTaskLiveEnded = (["task:completed", "task:failed", "task:cancelled"] as const).map((type) =>
+      ws.on(type, (p) => {
+        const wsId = getCurrentWsId();
+        const taskId = (p as { task_id?: string } | undefined)?.task_id;
+        if (wsId && taskId) removeTaskLive(qc, wsId, taskId);
+      }),
+    );
 
     const unsubIssueLabelsChanged = ws.on("issue_labels:changed", (p) => {
       const { issue_id, labels, issue_revision } = p as IssueLabelsChangedPayload;
@@ -2126,6 +2148,8 @@ export function useRealtimeSync(
       unsubIssueInvalidated();
       unsubIssueAttachmentsChanged();
       unsubIssueLabelsChanged();
+      unsubTaskLive();
+      unsubTaskLiveEnded.forEach((unsub) => unsub());
       unsubIssueMetadataChanged();
       unsubIssuePropertiesChanged();
       unsubPropertyChanged.forEach((unsub) => unsub());

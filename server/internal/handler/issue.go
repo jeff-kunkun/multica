@@ -141,6 +141,9 @@ type IssueResponse struct {
 	// CapacityRetry is detail-only: the waiting in-place retry after a full
 	// model (DENE-1093), absent when nothing is waiting.
 	CapacityRetry *CapacityRetryResponse `json:"capacity_retry,omitempty"`
+	// WatchdogReminder is detail-only: the office watchdog's project-group
+	// reminders about a live but silent run, absent when none was sent.
+	WatchdogReminder *WatchdogReminderResponse `json:"watchdog_reminder,omitempty"`
 	// duplicateOfIssueID is the raw mark, kept off the wire; see DuplicateOf.
 	duplicateOfIssueID pgtype.UUID
 }
@@ -1187,6 +1190,9 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 
 func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	if writeSearchCancellation(w, r, ctx.Err()) {
+		return
+	}
 	workspaceID := h.resolveWorkspaceID(r)
 
 	q := r.URL.Query().Get("q")
@@ -2659,6 +2665,7 @@ func (h *Handler) GetIssue(w http.ResponseWriter, r *http.Request) {
 	if row, err := h.Queries.GetIssueCapacityRetry(r.Context(), issue.ID); err == nil {
 		resp.CapacityRetry = capacityRetryResponse(row.ID, row.Attempt, row.FireAt)
 	}
+	resp.WatchdogReminder = h.watchdogReminder(r.Context(), issue.WorkspaceID, issue.ID)
 
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -3292,9 +3299,20 @@ type CreateIssueRequest struct {
 
 	AllowDuplicate bool `json:"allow_duplicate,omitempty"`
 
+	// PlanFirst asks the agent for a plan before the work (DENE-2670): until a
+	// person approves one, the agent cannot move the issue to review or done or
+	// link a PR. Older clients leave it out and see no change; with the
+	// office_plan_first server flag off it is ignored.
+	PlanFirst bool `json:"plan_first,omitempty"`
+
 	// WaitingFor is the one line a backlog ticket waits for (DENE-1638). An
 	// agent creating a backlog ticket without it is refused.
 	WaitingFor *string `json:"waiting_for,omitempty"`
+
+	// AfterIssueIDs are sibling sub-issues this one starts after (DENE-2671).
+	// While one is unfinished the new issue waits in backlog; the last to
+	// finish moves it to todo. Older servers ignore the field.
+	AfterIssueIDs []string `json:"after_issue_ids,omitempty"`
 }
 
 // UnmarshalJSON rejects duplicate object members before Go's ordinary map
@@ -3529,6 +3547,10 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 		projectID = id
 	}
+	after, ok := h.resolveIssueAfter(w, r.Context(), wsUUID, parentIssueID, projectID, req.AfterIssueIDs, &status, &req.WaitingFor)
+	if !ok {
+		return
+	}
 
 	// Project workflow (MUL-7420). A new issue in a project on a named
 	// workflow must start on a status the workflow lists, and a column the
@@ -3725,6 +3747,8 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		LabelIDs:            labelIDs,
 		Properties:          properties,
 		AllowDuplicate:      req.AllowDuplicate,
+		PlanFirst:           req.PlanFirst && h.planFirstEnabled(r.Context()),
+		AfterIssueIDs:       after.ids,
 	}, service.IssueCreateOpts{
 		ActorID:          actualCreatorID,
 		AnalyticsAgentID: analyticsAgentID,
@@ -3790,6 +3814,7 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 
 	issue := res.Issue
 	issue = h.syncBacklogWaitingFor(r.Context(), issue, req.WaitingFor)
+	issue = h.startIfPredecessorsFinished(r.Context(), after, issue)
 	slog.Info("issue created", append(logger.RequestAttrs(r), "issue_id", uuidToString(issue.ID), "title", issue.Title, "status", issue.Status, "workspace_id", workspaceID)...)
 
 	resp := issueToResponse(issue, prefix)
@@ -4248,6 +4273,14 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, reject)
 			return
 		}
+	}
+	// Plan first (DENE-2670): no review or done before a person approves a plan.
+	if reject, err := h.planGateRejection(r.Context(), prevIssue, statusActorType, statusKeyForGuard); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to check plan approval")
+		return
+	} else if reject != "" {
+		writePlanNotApproved(w)
+		return
 	}
 	if req.Priority != nil {
 		if !validateIssueEnum(w, "priority", *req.Priority, validIssuePriorities) {
@@ -5057,6 +5090,9 @@ func (h *Handler) deleteIssuesAndCollectAttachmentURLs(ctx context.Context, issu
 		}); err != nil {
 			return issueDeleteResult{}, fmt.Errorf("delete issue shares: %w", err)
 		}
+		if err := qtx.DeleteIssuePlanRows(ctx, db.DeleteIssuePlanRowsParams{IssueID: issue.ID, WorkspaceID: issue.WorkspaceID}); err != nil {
+			return issueDeleteResult{}, fmt.Errorf("delete issue plans: %w", err)
+		}
 		if err := qtx.DeleteIssue(ctx, db.DeleteIssueParams{ID: issue.ID, WorkspaceID: issue.WorkspaceID}); err != nil {
 			return issueDeleteResult{}, fmt.Errorf("delete issue: %w", err)
 		}
@@ -5105,6 +5141,8 @@ type BatchUpdateIssuesRequest struct {
 type BatchUpdateIssueRejection struct {
 	IssueID string `json:"issue_id"`
 	Reason  string `json:"reason"`
+	// Code names a refusal a caller can act on, e.g. plan_not_approved.
+	Code string `json:"code,omitempty"`
 }
 
 func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
@@ -5432,6 +5470,13 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 		}
+		if rejection, err := h.planGateRejection(r.Context(), prevIssue, batchActorType, issueStatusGuard); err != nil {
+			reject(issueID, "failed to check plan approval")
+			continue
+		} else if rejection != "" {
+			rejected = append(rejected, BatchUpdateIssueRejection{IssueID: issueID, Reason: rejection, Code: planNotApprovedCode})
+			continue
+		}
 		// The workflow may have remapped the status of an issue moving projects.
 		statusKeyForWrite := issueStatusGuard
 
@@ -5546,6 +5591,17 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	h.processChildEvents(r.Context(), changedParents...)
 
 	slog.Info("batch update issues", append(logger.RequestAttrs(r), "count", updated)...)
+	// Plan first (DENE-2670): a batch the plan gate stopped outright answers
+	// 409 plan_not_approved like the single update. A batch that changed other
+	// issues stays 200 so the caller does not read it as nothing applied; the
+	// gated items still carry the code.
+	if updated == 0 && batchPlanGated(rejected) {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error": planNotApprovedMsg, "code": planNotApprovedCode,
+			"updated": updated, "rejected": rejected,
+		})
+		return
+	}
 	writeJSON(w, http.StatusOK, map[string]any{"updated": updated, "rejected": rejected})
 }
 

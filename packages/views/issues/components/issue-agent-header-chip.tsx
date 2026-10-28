@@ -40,7 +40,8 @@ import { compareActiveIssueTasks } from "./active-task-order";
 // Hovering the chip opens a compact Popover card with the same active rows as
 // the right panel (click / keyboard still toggle it for touch and a11y). Those
 // rows show necessary status/time and task entry actions, but do not render
-// event counts or prefetch task messages for a count.
+// event counts or prefetch task messages for a count. In office test builds a
+// running row also lists its live status (command, last output, quiet time).
 
 interface IssueAgentHeaderChipProps {
   issueId: string;
@@ -229,6 +230,7 @@ function ActiveChip({
                 key={task.id}
                 task={task}
                 issueId={issueId}
+                liveDetails
                 onTranscriptOpenChange={(open, fromKeyboard) => {
                   onTranscriptOpenChange(task, open, fromKeyboard === true);
                 }}

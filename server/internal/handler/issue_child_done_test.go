@@ -161,13 +161,15 @@ func childDoneEntries(t *testing.T, parentID string) []childDoneEntry {
 type childDoneRunRow struct {
 	ID, AgentID, SquadID, Note, Status, WakeupID string
 	Leader                                       bool
+	ForceFreshSession                            bool
 }
 
 // childDoneRuns lists the runs the parent's rule started, oldest first.
 func childDoneRuns(t *testing.T, parentID string) []childDoneRunRow {
 	t.Helper()
 	rows, err := testPool.Query(context.Background(), `SELECT id::text, agent_id::text, COALESCE(squad_id::text, ''),
-		COALESCE(handoff_note, ''), status, context->>'wakeup_id', COALESCE(is_leader_task, false)
+		COALESCE(handoff_note, ''), status, context->>'wakeup_id', COALESCE(is_leader_task, false),
+		force_fresh_session
 		FROM agent_task_queue WHERE issue_id = $1 AND context->>'wakeup_system' = 'child_done'
 		ORDER BY created_at, id`, parentID)
 	if err != nil {
@@ -177,7 +179,7 @@ func childDoneRuns(t *testing.T, parentID string) []childDoneRunRow {
 	runs := []childDoneRunRow{}
 	for rows.Next() {
 		var r childDoneRunRow
-		if err := rows.Scan(&r.ID, &r.AgentID, &r.SquadID, &r.Note, &r.Status, &r.WakeupID, &r.Leader); err != nil {
+		if err := rows.Scan(&r.ID, &r.AgentID, &r.SquadID, &r.Note, &r.Status, &r.WakeupID, &r.Leader, &r.ForceFreshSession); err != nil {
 			t.Fatal(err)
 		}
 		runs = append(runs, r)
@@ -206,7 +208,7 @@ func TestChildDoneWakesAgentAssignee(t *testing.T) {
 	updateChildStatus(t, fx.child.ID, "done")
 
 	runs := childDoneRuns(t, fx.parent.ID)
-	if len(runs) != 1 || runs[0].AgentID != agentID || runs[0].Leader || runs[0].WakeupID == "" {
+	if len(runs) != 1 || runs[0].AgentID != agentID || runs[0].Leader || runs[0].WakeupID == "" || !runs[0].ForceFreshSession {
 		t.Fatalf("runs = %+v, want one run for the parent's agent", runs)
 	}
 	for _, want := range []string{service.ChildDoneDefaultInstruction, "condition.met", `"all":true`} {

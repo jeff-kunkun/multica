@@ -7,7 +7,9 @@ import {
   type ReactElement,
   type ReactNode,
 } from "react";
-import { describe, it, expect, vi, beforeEach, onTestFinished } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished } from "vitest";
+import { configStore } from "@multica/core/config";
+import { OFFICE_SPLIT_FROM_COMMENT_FLAG } from "@multica/core/feature-flags";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -53,6 +55,7 @@ const mockShowIssueLimitUpgradePrompt = vi.hoisted(() => vi.fn());
 // `api.uploadFile(file, ctx, signal)` (MUL-5181 L2). Tests drive uploads by
 // mocking that call; it resolves a plain server Attachment row.
 const mockApiUploadFile = vi.hoisted(() => vi.fn());
+const mockChildIssues = vi.hoisted(() => ({ list: [] as Array<Record<string, unknown>> }));
 
 const sourceContextPanelData = () => ({
   anchor_comment_id: "comment-source",
@@ -235,7 +238,7 @@ vi.mock("@multica/core/issues/queries", () => ({
   }),
   childIssuesOptions: (wsId: string, id: string) => ({
     queryKey: ["issues", wsId, "children", id],
-    queryFn: () => Promise.resolve([]),
+    queryFn: () => Promise.resolve(mockChildIssues.list),
   }),
 }));
 
@@ -467,6 +470,12 @@ vi.mock("../issues/components", () => ({
     <div data-testid="priority-picker" onClick={() => onUpdate({ priority: "high" })} />
   ),
   StagePicker: () => <div data-testid="stage-picker" />,
+  // Picking orders the new sub-issue after every option it was offered.
+  AfterPicker: ({ options, onChange }: { options: { id: string; identifier: string }[]; onChange: (ids: string[]) => void }) => (
+    <button type="button" data-testid="after-picker" onClick={() => onChange(options.map((o) => o.id))}>
+      {options.map((o) => o.identifier).join(",")}
+    </button>
+  ),
   AssigneePicker: () => <div data-testid="assignee-picker" />,
   // Surface open/onOpenChange so tests can assert progressive-disclosure
   // behavior (mounted only when the user has opted in or has a value).
@@ -868,6 +877,42 @@ describe("CreateIssueModal", () => {
     await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledWith(
       expect.objectContaining({ status: "todo", parent_issue_id: "parent-1", stage: undefined }),
     ));
+  });
+
+  describe("starts after a sibling (office_split_from_comment)", () => {
+    beforeEach(() => {
+      mockChildIssues.list = [
+        { id: "child-open", identifier: "TES-2", title: "Open sibling", status: "in_progress", stage: null },
+        { id: "child-done", identifier: "TES-3", title: "Done sibling", status: "done", stage: null },
+      ];
+    });
+    afterEach(() => {
+      mockChildIssues.list = [];
+      configStore.getState().setLocalFeatureFlags({});
+    });
+
+    it("offers only unfinished siblings and sends the order", async () => {
+      configStore.getState().setLocalFeatureFlags({ [OFFICE_SPLIT_FROM_COMMENT_FLAG]: true });
+      const user = userEvent.setup();
+      renderModal(<CreateIssueModal onClose={vi.fn()} data={{ parent_issue_id: "parent-1" }} />);
+
+      const picker = await screen.findByTestId("after-picker");
+      await waitFor(() => expect(picker).toHaveTextContent("TES-2"));
+      expect(picker).not.toHaveTextContent("TES-3");
+      await user.click(picker);
+      fireEvent.change(screen.getByPlaceholderText("Issue title"), { target: { value: "Second step" } });
+      await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+      await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledWith(
+        expect.objectContaining({ parent_issue_id: "parent-1", after_issue_ids: ["child-open"] }),
+      ));
+    });
+
+    it("stays hidden without the flag", async () => {
+      renderModal(<CreateIssueModal onClose={vi.fn()} data={{ parent_issue_id: "parent-1" }} />);
+      await screen.findByPlaceholderText("Issue title");
+      expect(screen.queryByTestId("after-picker")).not.toBeInTheDocument();
+    });
   });
 
   it("forwards selected labels in the create payload so they attach in the same transaction", async () => {

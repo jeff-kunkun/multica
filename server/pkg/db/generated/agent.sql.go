@@ -3801,10 +3801,13 @@ SELECT
     CASE WHEN $2::timestamptz IS NOT NULL THEN 'deferred' ELSE 'queued' END,
     CASE WHEN p.chat_session_id IS NOT NULL THEN GREATEST(p.priority, 3) ELSE p.priority END,
     p.trigger_comment_id, p.coalesced_comment_ids, p.trigger_summary, p.context,
-    CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL ELSE p.session_id END,
+    CASE WHEN p.issue_id IS NOT NULL
+               OR p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity'
+         THEN NULL ELSE p.session_id END,
     p.work_dir,
     p.attempt + 1, COALESCE($3::int, p.max_attempts), p.id,
-    p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity',
+    p.issue_id IS NOT NULL
+        OR p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity',
     p.is_leader_task,
     p.squad_id,
     p.originator_user_id,
@@ -3863,8 +3866,8 @@ type CreateRetryTaskParams struct {
 // Preserve a NULL chat_input_task_id for legacy/channel parents rather than
 // promoting untagged history to the task-owned input path.
 //
-// Keep work_dir for every retry, but clear resume context for unsafe sessions.
-// Keep failure predicates aligned with resumeUnsafeFailureReason and resume lookups.
+// Keep work_dir for every retry. Issue retries always start a fresh session;
+// chat retries retain their existing resume policy except for poisoned sessions.
 // Composio uses the agent owner's connection; originator remains audit provenance.
 //
 // Owner-row locks fence workspace teardown. Slot conflicts yield no row instead
@@ -5909,16 +5912,12 @@ WITH retired_sessions AS (
     WHERE r.agent_id = $1 AND r.issue_id = $2
       AND COALESCE(r.context->>'type', '') <> 'triage'
       AND r.retired_session_id IS NOT NULL
-), resume_overflow_at AS (
+), session_break_at AS (
     SELECT MAX(COALESCE(t.completed_at, t.started_at, t.dispatched_at, t.created_at)) AS at
     FROM agent_task_queue t
     WHERE t.agent_id = $1 AND t.issue_id = $2
       AND COALESCE(t.context->>'type', '') <> 'triage'
       AND t.status = 'failed'
-      AND (
-        COALESCE(t.failure_reason, '') = 'codex_resume_oversized'
-        OR (COALESCE(t.error, '') ILIKE '%thread/resume failed%' AND COALESCE(t.error, '') ILIKE '%token too long%')
-      )
 ), latest_per_session AS (
     SELECT DISTINCT ON (t.session_id)
         t.session_id, t.work_dir, t.runtime_id, t.status, t.failure_reason, t.error,
@@ -5964,16 +5963,11 @@ WHERE session_id NOT IN (SELECT session_id FROM retired_sessions)
       AND NOT (COALESCE(error, '') ILIKE '%not logged into antigravity%')
     )
   )
-  -- MUL-5722: a resume that overflowed the reader names no session, so it can
-  -- only be excluded by time, not by matching the failed row. Drop every
-  -- session whose last terminal activity predates the newest such failure: one
-  -- of them IS the oversized thread, and the row that would tell us which is
-  -- exactly the row that could not be written. Anything that terminated after
-  -- the overflow is the fresh thread that replaced it, so this un-blocks itself
-  -- as soon as one succeeds.
+  -- Break continuity by time because a failed turn may have no usable session
+  -- id. A successful fresh retry restores eligibility by writing a later row.
   AND (
-    (SELECT at FROM resume_overflow_at) IS NULL
-    OR terminal_at > (SELECT at FROM resume_overflow_at)
+    (SELECT at FROM session_break_at) IS NULL
+    OR terminal_at > (SELECT at FROM session_break_at)
   )
 ORDER BY terminal_at DESC
 LIMIT 1
@@ -5993,9 +5987,10 @@ type GetLastTaskSessionRow struct {
 	IssueSnapshot []byte             `json:"issue_snapshot"`
 }
 
-// Find resume context for an agent/issue from completed, failed, or cancelled
-// execution tasks. Manual rerun uses its exact source task instead; its fresh
-// flag also protects older claim handlers during mixed-version deployment.
+// Find resume context for an agent/issue from completed or cancelled execution
+// tasks after the latest failed turn. A failed issue turn breaks continuity:
+// subsequent comments start a new session, including after provider errors or
+// reconnect retries.
 //
 // Reduce to the newest terminal row per session before applying safety filters;
 // otherwise an older healthy row could revive the same poisoned session.
@@ -6004,19 +5999,14 @@ type GetLastTaskSessionRow struct {
 //
 // Keep failure-reason and text guards aligned with GetLastChatTaskSession and
 // resumeUnsafeFailureReason. Text guards protect legacy or unclassified rows.
-// Resume overflow can leave no session ID, so its timestamp excludes earlier
-// sessions until a later healthy terminal row restores eligibility.
+// A failed turn can leave no resumable session ID, so its timestamp excludes
+// every earlier session until a later healthy terminal row restores eligibility.
 // status, started_at and issue_snapshot ride along because the row this query
 // picks IS the run whose context the next turn continues, and both of a claim's
 // deltas must be measured from THAT run rather than from whichever run started
-// last (MUL-7344). status is what says the run actually delivered its prompt to
-// the provider: this query deliberately accepts failed and cancelled rows so
-// their SESSION stays resumable, but such a row may have died before the agent
-// ever ran, and its snapshot would then describe an issue the session never
-// saw. The two are not always the same row: this query skips poisoned
-// and retired sessions, so it can legitimately return an OLDER run than the
-// newest one. Measuring against the newest one would then tell an agent whose
-// resumed memory predates an edit that the issue is unchanged.
+// last (MUL-7344). A successful fresh retry after a failure is eligible again;
+// measuring from the failed attempt would describe an issue snapshot the new
+// session never saw.
 func (q *Queries) GetLastTaskSession(ctx context.Context, arg GetLastTaskSessionParams) (GetLastTaskSessionRow, error) {
 	row := q.db.QueryRow(ctx, getLastTaskSession, arg.AgentID, arg.IssueID)
 	var i GetLastTaskSessionRow

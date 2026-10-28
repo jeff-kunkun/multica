@@ -421,34 +421,34 @@ SELECT
     $1, $2, $3, 'queued', $4, $5,
     COALESCE($6::uuid[], '{}'),
     $7,
+    TRUE,
     COALESCE($8::boolean, FALSE),
-    COALESCE($9::boolean, FALSE),
+    $9,
     $10,
-    $11,
     CASE
-        WHEN COALESCE($12::text, '') <> ''
-        THEN jsonb_build_object('head_sha', $12::text)
+        WHEN COALESCE($11::text, '') <> ''
+        THEN jsonb_build_object('head_sha', $11::text)
         ELSE '{}'::jsonb
-    END || $13::jsonb,
+    END || $12::jsonb,
+    $13,
     $14,
     $15,
     $16,
-    $17,
-    $18, $19, $20,
+    $17, $18, $19,
+    $20,
     $21,
     $22,
     $23,
     $24,
-    $25,
     -- The workflow step this run works on (MUL-7420). A wakeup continues the
     -- run that registered it, so it keeps that run's step: a status change it
     -- makes after someone else moved the issue is refused like the run's own
     -- would be. A wakeup a member registered starts from the issue's status.
     COALESCE(
-        (SELECT s.workflow_step FROM agent_task_queue s WHERE s.id = $21 AND s.issue_id = $3),
+        (SELECT s.workflow_step FROM agent_task_queue s WHERE s.id = $20 AND s.issue_id = $3),
         (SELECT i.status FROM issue i WHERE i.id = $3)
     ),
-    COALESCE($26::uuid, gen_random_uuid())
+    COALESCE($25::uuid, gen_random_uuid())
 WHERE lock_task_owner_rows($1, $3, $2)
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision, comment_thread_id, cancelled_by_type, cancelled_by_id, cancelled_by_name, issue_snapshot, code_decision, failure_input_version, failure_fingerprint, work_thread_id, context_generation, context_message_limit, context_token_budget, continuity_break_reason, session_mode, resumed_from_task_id, session_break_reason, via_bot_id, via_bot_name, wake_root_id, wake_hop, wake_generation, wake_reserved, wake_human_quote, pickup_deadline_at, on_behalf_of_user_id, workflow_step
 `
@@ -461,7 +461,6 @@ type CreateWakeupTaskParams struct {
 	TriggerCommentID     pgtype.UUID   `json:"trigger_comment_id"`
 	CoalescedCommentIds  []pgtype.UUID `json:"coalesced_comment_ids"`
 	TriggerSummary       pgtype.Text   `json:"trigger_summary"`
-	ForceFreshSession    pgtype.Bool   `json:"force_fresh_session"`
 	IsLeaderTask         pgtype.Bool   `json:"is_leader_task"`
 	HandoffNote          pgtype.Text   `json:"handoff_note"`
 	SquadID              pgtype.UUID   `json:"squad_id"`
@@ -482,6 +481,8 @@ type CreateWakeupTaskParams struct {
 	ID                   pgtype.UUID   `json:"id"`
 }
 
+// Wakeups are system-generated issue tasks, not comment-triggered follow-ups,
+// so they always start a fresh CLI session.
 // Fenced against workspace teardown: lock_task_owner_rows (migration 284)
 // locks the owners' workspace rows in the writer's own transaction and returns
 // false once they are gone, so this statement writes no row instead of stranding
@@ -509,7 +510,6 @@ func (q *Queries) CreateWakeupTask(ctx context.Context, arg CreateWakeupTaskPara
 		arg.TriggerCommentID,
 		arg.CoalescedCommentIds,
 		arg.TriggerSummary,
-		arg.ForceFreshSession,
 		arg.IsLeaderTask,
 		arg.HandoffNote,
 		arg.SquadID,

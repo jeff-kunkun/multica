@@ -18,7 +18,6 @@
   ],
   "backend": [
     "server/**",
-    "packages/core/runtimes/cli-version.ts",
     "scripts/agent-cli-command-names.txt",
     "scripts/go-test-with-agent-cli-guard.sh",
     "scripts/test-go.sh",
@@ -50,7 +49,6 @@
     "scripts/ci-scope.test.mjs"
   ],
   "runtime": [
-    "packages/core/runtimes/cli-version.ts",
     "scripts/agent-cli-command-names.txt",
     "scripts/go-test-with-agent-cli-guard.sh",
     "scripts/test-go.sh",

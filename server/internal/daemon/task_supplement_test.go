@@ -173,3 +173,38 @@ func TestExecuteAndDrainSupplementNegotiation(t *testing.T) {
 		})
 	}
 }
+
+func TestDeliverTaskSupplementRoutesInterruptsToCapableRuns(t *testing.T) {
+	files := []TaskSupplementAttachment{{ID: "att-1", Filename: "plan.txt", SizeBytes: 12}}
+	for _, tc := range []struct {
+		name         string
+		mode         string
+		canInterrupt bool
+		wantVia      string
+		wantPrefix   string
+	}{
+		{name: "interrupt on a run that can stop", mode: protocol.TaskSupplementDeliveryInterrupt, canInterrupt: true, wantVia: "interrupt", wantPrefix: "[INTERRUPTED]"},
+		{name: "interrupt degrades on a run that cannot", mode: protocol.TaskSupplementDeliveryInterrupt, canInterrupt: false, wantVia: "supplement", wantPrefix: "[ADDITIONAL GUIDANCE]"},
+		{name: "supplement stays a supplement", mode: "", canInterrupt: true, wantVia: "supplement", wantPrefix: "[ADDITIONAL GUIDANCE]"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var via, text string
+			session := &agent.Session{Supplement: func(_ context.Context, s string) error { via, text = "supplement", s; return nil }}
+			if tc.canInterrupt {
+				session.Interrupt = func(_ context.Context, s string) error { via, text = "interrupt", s; return nil }
+			}
+			err := deliverTaskSupplement(context.Background(), session, &TaskSupplement{
+				AuthorName: "Kun", Content: "改成写 hello", DeliveryMode: tc.mode, Attachments: files,
+			})
+			if err != nil {
+				t.Fatalf("deliver: %v", err)
+			}
+			if via != tc.wantVia || !strings.HasPrefix(text, tc.wantPrefix) {
+				t.Fatalf("delivered via %s: %q", via, text)
+			}
+			if !strings.Contains(text, "改成写 hello") || !strings.Contains(text, "plan.txt (id att-1, 12 bytes)") {
+				t.Fatalf("message lost its content or files: %q", text)
+			}
+		})
+	}
+}

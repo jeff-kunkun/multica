@@ -160,6 +160,7 @@ type Task struct {
 	IssueStatuses           []IssueStatusData     `json:"issue_statuses,omitempty"`
 	IssueStatusesOmitted    int                   `json:"issue_statuses_omitted,omitempty"`
 	ProjectWorkflow         *ProjectWorkflowData  `json:"project_workflow,omitempty"`
+	PlanGate                string                `json:"plan_gate,omitempty"`             // plan first (DENE-2670): needs_plan, awaiting_approval or changes_requested
 	ThreadName              string                `json:"thread_name,omitempty"`           // semantic title for provider-native session/thread history
 	MagpieGroup             string                `json:"magpie_group,omitempty"`          // issue metadata magpie_group; honoured only for a group in the agent's runtime_config.magpie_groups
 	MagpieGroupsEnabled     bool                  `json:"magpie_groups_enabled,omitempty"` // the workspace's magpie mode switch; off means no magpie group pin and an empty MagpieGroup
@@ -181,6 +182,10 @@ type Task struct {
 	// daemon still resolves the directory from the resource list. Mirror
 	// field: internal/handler/agent.go, same JSON name.
 	CodeDecision *coderesolve.Decision `json:"code_decision,omitempty"`
+	// DefaultWorkDir is this machine's default working directory, sent only
+	// when the run binds no folder and names no repository (DENE-2667 PR 8).
+	// Mirror field: internal/handler/agent.go, same JSON name.
+	DefaultWorkDir string `json:"default_work_dir,omitempty"`
 	// Projects is the task's project set in priority order (DENE-523) — every
 	// project a chat attached, one for the other surfaces. The singular
 	// Project* fields above mirror its first entry, so a server predating this
@@ -225,6 +230,7 @@ type Task struct {
 	IssueSubIssues            []SubIssueRef         `json:"issue_sub_issues,omitempty"` // the task issue's sub-issues; non-empty means this run holds a coordinator (DENE-812)
 	IssueContextGeneratedAt   string                `json:"issue_context_generated_at,omitempty"`
 	IssueContextTruncated     bool                  `json:"issue_context_truncated,omitempty"`
+	IdleUnlimited             bool                  `json:"idle_unlimited,omitempty"`               // DENE-2667: a person labelled the issue 长任务, so the office idle policy never stops the run for going quiet. Absent on old servers, which keeps the normal budgets
 	ChatSessionID             string                `json:"chat_session_id,omitempty"`              // non-empty for chat tasks
 	ChatChannelType           string                `json:"chat_channel_type,omitempty"`            // "slack" when the chat session is backed by an IM channel; empty for a web-only chat. Drives the channel-awareness block in the prompt
 	ChatChannelDeliversFiles  bool                  `json:"chat_channel_delivers_files,omitempty"`  // server capability: this deployment carries a file the agent produces the last hop into this conversation. Absent on a server predating it, which reads as false — the run is told to describe its file in words, and the worst case is a delivery that could have happened did not. Must never be re-derived from chat_channel_type: whether the hop exists depends on the SERVER's storage and adapter wiring, which no daemon can see (MUL-4899)

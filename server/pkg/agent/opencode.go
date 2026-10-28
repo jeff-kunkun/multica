@@ -100,7 +100,7 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	// handled together rather than one flag at a time.
 	usesV2 := opencodeUsesV2Contract(b.cfg)
 
-	args := []string{"run", "--format", "json", "--dangerously-skip-permissions"}
+	args := []string{"run", "--format", "json", OpenCodeSkipPermissionsFlag}
 	// Anchor OpenCode's project discovery (AGENTS.md walk-up + .opencode/skills/
 	// project config scan) at the task workdir. Without this, OpenCode falls
 	// back to PWD (inherited from the daemon process) or process.cwd(), which

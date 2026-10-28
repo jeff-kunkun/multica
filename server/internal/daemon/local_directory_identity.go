@@ -13,7 +13,7 @@ import (
 // is_git_repo for directories this daemon holds. Best-effort and never on
 // the assignment hot path's error return: a unique-index collision (two
 // legacy spellings of one directory) must not fail the task (DENE-618).
-func (d *Daemon) backfillLocalDirectoryIdentity(workspaceID string, chosen *localDirectoryAssignment, rest []*localDirectoryAssignment) {
+func (d *Daemon) backfillLocalDirectoryIdentity(task Task, chosen *localDirectoryAssignment, rest []*localDirectoryAssignment) {
 	if d == nil || d.client == nil {
 		return
 	}
@@ -29,11 +29,14 @@ func (d *Daemon) backfillLocalDirectoryIdentity(workspaceID string, chosen *loca
 		if strings.TrimSpace(a.Ref.RealPath) != "" {
 			continue
 		}
-		go d.reportLocalDirectoryIdentity(workspaceID, a)
+		go d.reportLocalDirectoryIdentity(task.WorkspaceID, task.RuntimeID, a)
 	}
 }
 
-func (d *Daemon) reportLocalDirectoryIdentity(workspaceID string, a *localDirectoryAssignment) {
+// reportLocalDirectoryIdentity sends the task's runtime id along: a daemon
+// signed in with a personal token has no daemon id on its credential, and the
+// server checks the runtime instead (DENE-2667 PR 8).
+func (d *Daemon) reportLocalDirectoryIdentity(workspaceID, runtimeID string, a *localDirectoryAssignment) {
 	if a == nil {
 		return
 	}
@@ -49,8 +52,8 @@ func (d *Daemon) reportLocalDirectoryIdentity(workspaceID string, a *localDirect
 		body["repo_key"] = probe.RepoKey
 	}
 	body["is_git_repo"] = probe.IsGitRepo
-	if len(body) == 0 {
-		return
+	if runtimeID != "" {
+		body["runtime_id"] = runtimeID
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()

@@ -41,6 +41,11 @@ const (
 	// makes those endpoints answer 404, so clients stop syncing and search
 	// through the server again without a client release.
 	LocalSearchIndex = "local_search_index"
+	// OfficePlanFirst gates plan first (DENE-2670): issues created with
+	// plan_first, the plan endpoints, and the review, done and PR-link
+	// refusals. Off by default; FF_OFFICE_PLAN_FIRST=on turns it on. It is not
+	// published to clients: the UI follows the office test build's own flag.
+	OfficePlanFirst = "office_plan_first"
 	// agentBuilderCompat is no longer a release flag. Keep publishing the key
 	// as enabled so installed desktop clients that still gate the AI creation
 	// entry on this config decision receive the permanently enabled behavior.
@@ -83,6 +88,10 @@ func TriageV1Enabled(ctx context.Context, flags *featureflag.Service) bool {
 
 func LocalSearchIndexEnabled(ctx context.Context, flags *featureflag.Service) bool {
 	return flags.IsEnabled(ctx, LocalSearchIndex, true)
+}
+
+func OfficePlanFirstEnabled(ctx context.Context, flags *featureflag.Service) bool {
+	return flags.IsEnabled(ctx, OfficePlanFirst, false)
 }
 
 func EvaluateFrontendPublicFlags(ctx context.Context, flags *featureflag.Service) map[string]bool {

@@ -30,6 +30,29 @@ multica issue status <child-id> todo   # promote when the previous step is truly
 
 Creating every serial step as `todo` enqueues the whole chain at once.
 
+### After: start a sub-issue when its siblings are done
+
+`--after <sibling>` (repeatable) ties a sub-issue to siblings under the same
+parent. While one of them is unfinished the new sub-issue waits in `backlog`
+with a waiting line naming them; when the last one is `done` the server moves it
+to `todo` and starts its assignee — nobody has to promote it. A cancelled
+sibling never finishes, so it is refused; if a sibling is cancelled later, the
+dependent stays parked for someone to decide.
+
+```bash
+multica issue create --title "Step 1" --parent <issue-id> --assignee <agent>
+multica issue create --title "Step 2" --parent <issue-id> --assignee <agent> --after <step-1-id>
+```
+
+Use stages for barrier groups the parent assignee steps through; use `--after`
+when one ticket needs a specific other one (e.g. "PR 13 needs PR 4").
+
+A need that surfaces mid-run and is unrelated to the current issue goes in its
+own sub-issue rather than widening the current one. People can also make one
+from a comment (comment menu, or `multica issue create --from-comment
+<comment-id>` with a personal token); it sits under the comment's issue and
+keeps the thread as its source. Agents use `--parent`.
+
 ### Stages: order sub-issues into barrier groups
 
 `--stage <N>` (N >= 1) groups sub-issues under the same parent into ordered

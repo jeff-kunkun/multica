@@ -436,6 +436,9 @@ deleted_plans AS (
 ),
 deleted_plan_approvers AS (
     DELETE FROM plan_approver WHERE plan_approver.workspace_id = $1
+),
+deleted_issue_plan_gates AS (
+    DELETE FROM issue_plan_gate WHERE issue_plan_gate.workspace_id = $1
 ), deleted_bot_webhook_receivers AS (
     DELETE FROM bot_webhook_receiver WHERE workspace_id = $1
 ), deleted_bot_wake_blocks AS (

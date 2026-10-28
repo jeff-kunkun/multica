@@ -948,6 +948,9 @@ func buildProjectSearchQuery(phrase string, terms []string, includeClosed bool, 
 
 func (h *Handler) SearchProjects(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+	if writeSearchCancellation(w, r, ctx.Err()) {
+		return
+	}
 	workspaceID := h.resolveWorkspaceID(r)
 
 	q := r.URL.Query().Get("q")

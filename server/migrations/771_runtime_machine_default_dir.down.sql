@@ -1,0 +1,1 @@
+DROP TABLE runtime_machine_default_dir;

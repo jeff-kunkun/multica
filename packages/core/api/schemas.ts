@@ -64,6 +64,7 @@ import type {
   GitHubConnectResponse,
   GitHubAppStatus,
   IssuePullRequestsResponse,
+  IssuePlansResponse,
   InboxItem,
   InboxWorkspaceUnread,
   Label,
@@ -495,6 +496,41 @@ export const IssuePullRequestsResponseSchema = z.object({
   pull_requests: z.array(GitHubPullRequestSchema).default([]),
   auto_complete: PRAutoCompleteSchema.nullable().optional().default(null).catch(null),
 }).loose();
+
+// Plan first (DENE-2670). A plan the client cannot read degrades to "no gate",
+// which hides the card; the server still enforces the gate.
+export const IssuePlanSchema = z.object({
+  id: z.string(),
+  issue_id: z.string(),
+  version: z.number(),
+  status: z.string(),
+  author_type: z.string(),
+  author_id: z.string(),
+  goal: z.string(),
+  out_of_scope: z.string(),
+  steps: z.array(z.object({ title: z.string() }).loose()).default([]),
+  done_when: z.string(),
+  comment_id: z.string().nullable().default(null),
+  approved_by: z.string().nullable().default(null),
+  approved_at: z.string().nullable().default(null),
+  changes_requested_by: z.string().nullable().default(null),
+  changes_requested_at: z.string().nullable().default(null),
+  created_at: z.string(),
+}).loose();
+
+export const IssuePlansResponseSchema = z.object({
+  gated: z.boolean().default(false),
+  approved: z.boolean().default(false),
+  can_approve: z.boolean().default(false),
+  plans: z.array(IssuePlanSchema).default([]),
+}).loose();
+
+export const EMPTY_ISSUE_PLANS_RESPONSE: IssuePlansResponse = {
+  gated: false,
+  approved: false,
+  can_approve: false,
+  plans: [],
+};
 
 export const EMPTY_ISSUE_PULL_REQUESTS_RESPONSE: IssuePullRequestsResponse = {
   pull_requests: [],
@@ -942,14 +978,6 @@ export interface AppConfigResponse {
    * Settings → Integrations "Git providers" section. */
   vcs_integration_available?: boolean;
   feature_flags?: Record<string, boolean>;
-  /** Whether this server understands local_directory `execution_mode` and
-   * gates worktree mode at save time. Absent on every server that predates this
-   * capability signal, which includes the ones that silently DROPPED an unknown
-   * `execution_mode` and answered 201 — the resource then ran in place while
-   * the user was promised isolation (#7113). Servers between that fix and this
-   * signal do validate but cannot say so, and are treated as unable: the client
-   * has no way to tell them apart, and only one of the two answers is safe. */
-  local_worktree_supported?: boolean;
   /** Whether agent create/update persists `conversation_starters`. Older servers
    * silently ignored the unknown field, so absent must be treated as false. */
   agent_conversation_starters_supported?: boolean;
@@ -1120,6 +1148,8 @@ const CommentSupplementReceiptSchema = z.object({
   status: z.enum(["pending", "delivering", "delivered", "failed"]),
   failure_reason: z.string().optional().catch(undefined),
   delivered_at: z.string().optional().catch(undefined),
+  delivery_mode: z.literal("interrupt").optional().catch(undefined),
+  delivered_after_ms: z.number().optional().catch(undefined),
 });
 
 const CommentSupplementReceiptsSchema = z.array(z.unknown()).optional().catch(undefined)
@@ -1237,7 +1267,6 @@ export const AppConfigSchema = z.object({
   workspace_creation_disabled: BooleanWithDefaultSchema(false).optional(),
   vcs_integration_available: BooleanWithDefaultSchema(false).optional(),
   feature_flags: FeatureFlagsSchema,
-  local_worktree_supported: BooleanWithDefaultSchema(false),
   agent_conversation_starters_supported: BooleanWithDefaultSchema(false),
   issue_create_properties_supported: BooleanWithDefaultSchema(false),
   comment_delete_keep_replies_supported: BooleanWithDefaultSchema(false),
@@ -1256,9 +1285,6 @@ export const EMPTY_APP_CONFIG: AppConfigResponse = {
   daemon_app_url: "",
   workspace_creation_disabled: false,
   vcs_integration_available: false,
-  // Fail closed: an unreadable config must not look like a server that
-  // validates execution_mode.
-  local_worktree_supported: false,
   // Fail closed: old servers returned success while dropping the field.
   agent_conversation_starters_supported: false,
   // Fail closed: old servers returned success while dropping create properties.
@@ -2023,6 +2049,10 @@ export const EMPTY_CLOUD_RUNTIME_NODE: CloudRuntimeNode = {
 // Runtime schemas.
 export const AgentRuntimeSchema = z.object({
   machine_capacity: MachineCapacitySchema.optional().catch(undefined),
+  default_work_dir: z.object({
+    path: z.string(),
+    exists: z.boolean().nullable().default(null),
+  }).optional().catch(undefined),
   id: z.string(),
   workspace_id: z.string(),
   daemon_id: z.string().nullable(),
@@ -2424,6 +2454,7 @@ export const AgentTaskSchema = z.object({
   supplement_comment_ids: OptionalStringArraySchema,
   can_supplement: z.boolean().optional().catch(undefined),
   supplement_steer_mode: z.string().optional().catch(undefined),
+  supplement_interrupt: z.boolean().optional().catch(undefined),
   trigger_summary: z.string().optional(),
   kind: z.string().optional(),
   work_dir: z.string().optional().catch(undefined),

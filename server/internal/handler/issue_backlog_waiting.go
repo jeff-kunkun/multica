@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -18,7 +19,7 @@ import (
 // ticket it meant to start strands it; asking for the reason makes "nothing to
 // wait for" visible as "use todo". The ticket detail shows it while the ticket
 // is in backlog; leaving backlog drops it.
-const metaKeyBacklogWaitingFor = "backlog.waiting_for"
+const metaKeyBacklogWaitingFor = service.MetaKeyBacklogWaitingFor
 
 const maxBacklogWaitingForRunes = 80
 
@@ -44,22 +45,27 @@ func (h *Handler) isBacklogStatus(ctx context.Context, workspaceID pgtype.UUID, 
 }
 
 // syncBacklogWaitingFor records the reason when a write leaves the ticket in
-// backlog with one, and drops it once the ticket is out of backlog. It returns
-// the issue with the metadata the write left, so the response and the
-// broadcast carry the line.
+// backlog with one, and drops it once the ticket is out of backlog, together
+// with the siblings it was ordered after (DENE-2671): a person who moved it on
+// has started it, so their finishing must not start it again. It returns the
+// issue with the metadata the write left, so the response and the broadcast
+// carry the line.
 func (h *Handler) syncBacklogWaitingFor(ctx context.Context, issue db.Issue, waitingFor *string) db.Issue {
 	if !h.isBacklogStatus(ctx, issue.WorkspaceID, issue.Status) {
-		if _, ok := parseIssueMetadata(issue.Metadata)[metaKeyBacklogWaitingFor]; !ok {
-			return issue
-		}
-		row, err := h.Queries.DeleteIssueMetadataKey(ctx, db.DeleteIssueMetadataKeyParams{ID: issue.ID, WorkspaceID: issue.WorkspaceID, Key: metaKeyBacklogWaitingFor})
-		if err != nil {
-			if !errors.Is(err, pgx.ErrNoRows) {
-				slog.Warn("backlog waiting_for: metadata delete failed", "error", err, "issue_id", uuidToString(issue.ID))
+		metadata := parseIssueMetadata(issue.Metadata)
+		for _, key := range []string{metaKeyBacklogWaitingFor, service.MetaKeyBacklogAfter} {
+			if _, ok := metadata[key]; !ok {
+				continue
 			}
-			return issue
+			row, err := h.Queries.DeleteIssueMetadataKey(ctx, db.DeleteIssueMetadataKeyParams{ID: issue.ID, WorkspaceID: issue.WorkspaceID, Key: key})
+			if err != nil {
+				if !errors.Is(err, pgx.ErrNoRows) {
+					slog.Warn("backlog waiting_for: metadata delete failed", "error", err, "issue_id", uuidToString(issue.ID), "key", key)
+				}
+				continue
+			}
+			issue.Metadata, issue.Revision = row.Metadata, row.Revision
 		}
-		issue.Metadata, issue.Revision = row.Metadata, row.Revision
 		return issue
 	}
 	reason := strings.TrimSpace(deref(waitingFor))

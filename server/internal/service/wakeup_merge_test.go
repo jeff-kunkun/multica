@@ -39,7 +39,7 @@ func TestIssueWakeWaitsForStopCommitAndRechecksHalt(t *testing.T) {
 			}
 			result := make(chan error, 1)
 			go func() {
-				_, tx, e := svc.lockDefaultIssueEnqueue(ctx, id, agent, false, pgtype.UUID{}, pgtype.UUID{}, attribution.Result{})
+				_, tx, e := svc.lockDefaultIssueEnqueue(ctx, id, agent, true, pgtype.UUID{}, pgtype.UUID{}, attribution.Result{})
 				if tx != nil {
 					_ = tx.Rollback(ctx)
 				}

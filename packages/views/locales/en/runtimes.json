@@ -140,6 +140,20 @@
       "running": "Running {{active}}/{{limit}}",
       "owner_only": "Only the machine owner can change this limit.",
       "failed": "Could not save. Try again."
+    },
+    "default_dir": {
+      "label": "Default working directory",
+      "hint": "Runs whose project has no folder start here. Leave empty to use a fresh temporary folder.",
+      "placeholder": "/Users/me/work",
+      "clear": "Clear",
+      "exists": "Found on this machine.",
+      "missing": "This folder isn't on this machine. Runs will use a temporary folder until it exists.",
+      "checking": "Waiting for this machine to check the folder (about a minute).",
+      "checking_offline": "The machine checks the folder when it comes online.",
+      "relative": "Enter a full path, such as /Users/me/work.",
+      "invalid": "The server rejected this path. Enter a full path to a folder.",
+      "owner_only": "Only the machine owner can change the default working directory.",
+      "failed": "Could not save. Try again."
     }
   },
   "health": {

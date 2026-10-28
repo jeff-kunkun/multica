@@ -75,6 +75,11 @@ type issueStateSnapshot struct {
 	Version           int    `json:"v"`
 	TitleSHA256       string `json:"title_sha256"`
 	DescriptionSHA256 string `json:"description_sha256"`
+	// IdleUnlimited records the 长任务 policy this claim handed the daemon, so
+	// the run row shows what the run actually got (DENE-2667). It is not
+	// compared, so it needs no version bump; rows without it read as false,
+	// which is what a claim made before the field existed handed out.
+	IdleUnlimited bool `json:"idle_unlimited,omitempty"`
 }
 
 func sha256Hex(s string) string {
@@ -136,12 +141,12 @@ const taskStatusCompleted = "completed"
 //
 // The distinction that makes this type necessary: "the run that started most
 // recently" and "the run whose session we resume" are not the same row.
-// GetLastTaskSession skips poisoned and retired sessions, and a manual rerun
-// resumes an operator-chosen source, so both legitimately hand back an OLDER
-// run. Measuring a delta against the newest run while resuming an older one
-// reports "unchanged" to an agent whose resumed memory predates the change —
-// the one failure mode this whole mechanism exists to avoid, and one with no
-// symptom at runtime (MUL-7344, found in review).
+// GetLastTaskSession skips poisoned, retired, and pre-failure sessions, so it
+// can legitimately hand back an OLDER run. Issue reruns start fresh and do not
+// use this anchor. Measuring a delta against the newest run while resuming an
+// older session reports "unchanged" to an agent whose resumed memory predates
+// the change — the one failure mode this whole mechanism exists to avoid, and
+// one with no symptom at runtime (MUL-7344, found in review).
 //
 // A nil *resumedRunAnchor means this claim resumes nothing it can date, so
 // neither delta is computed and the daemon falls back to the reads it has
@@ -172,10 +177,10 @@ type resumedRunAnchor struct {
 // started_at precedes the launch. The only terminal status that PROVES delivery
 // is 'completed' — a run cannot finish a turn it never started.
 //
-// So failed and cancelled sources date nothing. Their SESSION is still resumed
-// (GetLastTaskSession accepts them on purpose, and that behaviour is unchanged);
-// the run simply performs the context reads it always did. That is the cheap
-// side of the trade: those paths are the ones already recovering from a
+// So failed and cancelled sources date nothing. A failed issue turn breaks
+// session continuity; a cancelled session may still be resumed by a later
+// comment, but the run performs the context reads it always did. That is the
+// cheap side of the trade: those paths are the ones already recovering from a
 // problem, and the optimization's main case — an ordinary follow-up after a
 // healthy run — is untouched.
 func newResumedRunAnchor(status string, startedAt pgtype.Timestamptz, snapshot []byte) *resumedRunAnchor {

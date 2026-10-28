@@ -376,7 +376,10 @@ func realtimeIssueEvent(eventType string) bool {
 		protocol.EventSubscriberRemoved,
 		protocol.EventPinCreated,
 		protocol.EventPinDeleted,
-		protocol.EventActivityCreated:
+		protocol.EventActivityCreated,
+		// A run's live view shows its command and output, which is issue
+		// content (DENE-2667 PR 4).
+		protocol.EventTaskLiveUpdated:
 		return true
 	default:
 		return false

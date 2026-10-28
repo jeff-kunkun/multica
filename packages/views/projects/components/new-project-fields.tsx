@@ -19,6 +19,7 @@ export function NewProjectFields({
   directory,
   onDirectoryChange,
   directoryAvailable,
+  offerGitInit = true,
   disabled = false,
 }: {
   name: string;
@@ -28,6 +29,7 @@ export function NewProjectFields({
   directory: NewProjectDirectoryDraft;
   onDirectoryChange: (next: NewProjectDirectoryDraft) => void;
   directoryAvailable: boolean;
+  offerGitInit?: boolean;
   disabled?: boolean;
 }) {
   const { t } = useT("projects");
@@ -107,15 +109,17 @@ export function NewProjectFields({
                   onChange={(event) => patch({ dirName: event.target.value })}
                 />
               </label>
-              <label className="flex items-center gap-2 text-caption">
-                <input
-                  type="checkbox"
-                  checked={directory.gitInit}
-                  disabled={disabled}
-                  onChange={(event) => patch({ gitInit: event.target.checked })}
-                />
-                {t(($) => $.new_project.directory_git)}
-              </label>
+              {offerGitInit ? (
+                <label className="flex items-center gap-2 text-caption">
+                  <input
+                    type="checkbox"
+                    checked={directory.gitInit}
+                    disabled={disabled}
+                    onChange={(event) => patch({ gitInit: event.target.checked })}
+                  />
+                  {t(($) => $.new_project.directory_git)}
+                </label>
+              ) : null}
             </>
           )}
         </div>

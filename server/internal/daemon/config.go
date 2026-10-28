@@ -181,12 +181,24 @@ type Config struct {
 	CodexThreadHandshakeTimeout time.Duration
 	OpenCodeIdleWatchdog        time.Duration // OpenCode-specific no-message window; 0 falls back to AgentIdleWatchdog and values above it cannot extend the global bound
 	AgentIdleWatchdog           time.Duration // force-stop a run when the backend goes silent this long with an empty queue (0 = disabled)
-	AgentToolWatchdog           time.Duration // force-stop a run when a single tool call stays in flight (silent) this long (0 = never force-stop during a tool call, which now also covers a live Cursor background shell); defaults to AgentIdleWatchdog, so operators tune one number unless they deliberately want a wider tool budget
-	ClaudeArgs                  []string
-	CodexArgs                   []string
-	CodebuddyArgs               []string
-	QwenArgs                    []string
-	QwenpawArgs                 []string
+	// IdleStopPolicy picks how a quiet run is stopped: "" is the legacy
+	// watchdog above, "office" the office policy (MULTICA_IDLE_STOP_POLICY,
+	// DENE-2667; see office_idle_policy.go). Only the office's test desktop
+	// build sets it.
+	IdleStopPolicy    string
+	AgentToolWatchdog time.Duration // force-stop a run when a single tool call stays in flight (silent) this long (0 = never force-stop during a tool call, which now also covers a live Cursor background shell); defaults to AgentIdleWatchdog, so operators tune one number unless they deliberately want a wider tool budget
+	ClaudeArgs        []string
+	CodexArgs         []string
+	CodebuddyArgs     []string
+	QwenArgs          []string
+	QwenpawArgs       []string
+
+	// LiveStatus turns on the 15-second live report of each run
+	// (MULTICA_LIVE_STATUS=on, DENE-2667 PR 4; see office_live_status.go).
+	// Only the office's test desktop build sets it. LiveStatusInterval zero
+	// means the 15-second default.
+	LiveStatus         bool
+	LiveStatusInterval time.Duration
 
 	// ProfileCommandOverrides maps a custom runtime profile_id -> the absolute
 	// executable path to use for that profile on THIS machine (MUL-3284).
@@ -373,6 +385,14 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// cannot extend the global bound, and the global zero still disables the
 	// whole mechanism.
 	openCodeIdleWatchdog, err := durationFromEnv("MULTICA_OPENCODE_IDLE_WATCHDOG", DefaultOpenCodeIdleWatchdog)
+	if err != nil {
+		return Config{}, err
+	}
+	idleStopPolicy, err := idleStopPolicyFromEnv()
+	if err != nil {
+		return Config{}, err
+	}
+	liveStatus, err := liveStatusFromEnv()
 	if err != nil {
 		return Config{}, err
 	}
@@ -724,6 +744,8 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		OpenCodeIdleWatchdog:            openCodeIdleWatchdog,
 		AgentIdleWatchdog:               agentIdleWatchdog,
 		AgentToolWatchdog:               agentToolWatchdog,
+		IdleStopPolicy:                  idleStopPolicy,
+		LiveStatus:                      liveStatus,
 		ClaudeArgs:                      claudeArgs,
 		CodexArgs:                       codexArgs,
 		CodebuddyArgs:                   codebuddyArgs,

@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { clientErrorMessage } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
+import { useFeatureEnabled } from "@multica/core/config";
+import { OFFICE_PROJECT_FOLDER_FLAG } from "@multica/core/feature-flags";
 import { provisionedDirectoryShouldBeRemoved } from "@multica/core/projects";
 import { useCreateProject } from "@multica/core/projects/mutations";
 import { useT } from "../../i18n";
@@ -35,6 +37,8 @@ export function NewProjectCreateForm({
   const { t } = useT("projects");
   const userId = useAuthStore((state) => state.user?.id ?? "");
   const daemon = useLocalDaemonStatus();
+  // Office test builds leave Git to the CLI, so the folder is made plain.
+  const folderOnly = useFeatureEnabled(OFFICE_PROJECT_FOLDER_FLAG);
   const createProject = useCreateProject();
   const [name, setName] = useState(initialName);
   const [icon, setIcon] = useState("");
@@ -85,7 +89,7 @@ export function NewProjectCreateForm({
     setError(null);
     if (daemon.daemonId) writeBusinessProjectRoot(userId, daemon.daemonId, directory.root);
     const prepared = await prepareNewProjectDirectory({
-      draft: directory,
+      draft: folderOnly ? { ...directory, gitInit: false } : directory,
       daemonId: daemon.daemonId,
       title,
     });
@@ -133,6 +137,7 @@ export function NewProjectCreateForm({
           if (daemon.daemonId) writeBusinessProjectRoot(userId, daemon.daemonId, next.root);
         }}
         directoryAvailable={isDesktopShell()}
+        offerGitInit={!folderOnly}
         disabled={pending}
       />
       {error ? (

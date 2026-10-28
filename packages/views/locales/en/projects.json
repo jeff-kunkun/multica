@@ -217,5 +217,30 @@
     "cancel": "Cancel",
     "loading": "Loading…",
     "load_more": "Load more"
+  },
+  "folder": {
+    "title": "Folder",
+    "intro": "Agents start work in this folder. If it is a Git repository, the CLI notices on its own.",
+    "choose": "Choose folder",
+    "change": "Change folder",
+    "remove": "Remove folder",
+    "picking": "Choosing…",
+    "this_machine": "This machine",
+    "other_machine": "Another machine",
+    "git": "Git",
+    "empty": "No folder yet. Runs start in the machine's default working directory (set on the Runtimes page), or in a fresh temporary folder if there is none.",
+    "web_hint": "Choose a folder in the desktop app, or run `multica project resource add --type local_directory`.",
+    "offline": "The local daemon is not running, so no folder can be chosen right now.",
+    "invalid": "That folder can't be used.",
+    "load_failed": "Couldn't load the folder.",
+    "toast_saved": "Folder saved",
+    "toast_save_failed": "Failed to save the folder",
+    "toast_remove_failed": "Failed to remove the folder",
+    "shared_one": "{{count}} run is working in this folder right now.",
+    "shared_other": "{{count}} runs are working in this folder right now. They edit the same files on the same branch.",
+    "shared_folder": "Shared folder {{name}}",
+    "this_issue": "This issue",
+    "chat_run": "Chat",
+    "create_hint": "Agents start work in this folder. If it is a Git repository, the CLI notices on its own."
   }
 }

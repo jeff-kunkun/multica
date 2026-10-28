@@ -27,6 +27,7 @@ func TestClassifySessionBreak(t *testing.T) {
 		{"own run on another machine", task, sessionBreakContext{ownLastRuntimeID: "22222222-2222-2222-2222-222222222222"}, sessionBreakRuntimeChanged},
 		{"own run here, nothing resumable", task, sessionBreakContext{ownLastRuntimeID: uuidToString(rt), otherAgentRan: true}, sessionBreakSessionLost},
 		{"fresh asked for", db.AgentTaskQueue{RuntimeID: rt, ForceFreshSession: true}, sessionBreakContext{ownLastRuntimeID: uuidToString(rt)}, sessionBreakFreshRequested},
+		{"manual rerun starts fresh", db.AgentTaskQueue{RuntimeID: rt, ForceFreshSession: true, RerunOfTaskID: parseUUID("44444444-4444-4444-8444-444444444444")}, sessionBreakContext{ownLastRuntimeID: uuidToString(rt)}, sessionBreakFreshRequested},
 		{"poisoned retry is a lost session", db.AgentTaskQueue{RuntimeID: rt, ForceFreshSession: true, RetryOfTaskID: parseUUID("33333333-3333-3333-3333-333333333333")}, sessionBreakContext{ownLastRuntimeID: uuidToString(rt)}, sessionBreakSessionLost},
 	}
 	for _, tc := range cases {
@@ -52,11 +53,12 @@ func readLineage(t *testing.T, taskID string) lineageRow {
 
 func queueIssueTask(t *testing.T, agentID, runtimeID, issueID string) string {
 	t.Helper()
+	commentID := dbfx.Comment(t, issueID, "continue this issue")
 	var id string
 	dbfx.QueryRow(t, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
-		VALUES ($1, $2, $3, 'queued', 0) RETURNING id
-	`, agentID, runtimeID, issueID).Scan(&id)
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, status, priority)
+		VALUES ($1, $2, $3, $4, 'queued', 0) RETURNING id
+	`, agentID, runtimeID, issueID, commentID).Scan(&id)
 	return id
 }
 
@@ -118,5 +120,56 @@ func TestClaimTask_RecordsSessionLineage(t *testing.T) {
 	claimTaskForRuntimeGuard(t, runtimeID, daemonID)
 	if r := readLineage(t, third); r.mode.String != "new" || r.reason.String != sessionBreakAgentChanged {
 		t.Fatalf("other agent lineage = %+v, want new/agent_changed", r)
+	}
+}
+
+func TestClaimTask_CommentAfterFailedIssueRunStartsFresh(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
+	issueID := dbfx.Issue(t, "failed session continuity fixture", testutil.Cols{"status": "in_progress", "number": 91346})
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id":   runtimeID,
+		"issue_id":     issueID,
+		"status":       "completed",
+		"started_at":   testutil.Raw("now() - interval '5 minutes'"),
+		"completed_at": testutil.Raw("now() - interval '4 minutes'"),
+		"session_id":   "before-failure-session",
+		"work_dir":     "/tmp/before-failure",
+	})
+	dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id":     runtimeID,
+		"issue_id":       issueID,
+		"status":         "failed",
+		"failure_reason": "agent_error.provider_network",
+		"error":          "API Error: Connection closed mid-response",
+		"started_at":     testutil.Raw("now() - interval '3 minutes'"),
+		"completed_at":   testutil.Raw("now() - interval '2 minutes'"),
+		"session_id":     "failed-upstream-session",
+	})
+
+	firstComment := queueIssueTask(t, agentID, runtimeID, issueID)
+	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	if task.PriorSessionID != "" {
+		t.Fatalf("comment after failed run resumed %q, want a fresh session", task.PriorSessionID)
+	}
+
+	dbfx.Exec(t, `
+		UPDATE agent_task_queue
+		SET status = 'completed', started_at = now() - interval '1 minute',
+		    completed_at = now(), session_id = 'fresh-after-failure-session'
+		WHERE id = $1
+	`, firstComment)
+	queueIssueTask(t, agentID, runtimeID, issueID)
+	task = claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	if task.PriorSessionID != "fresh-after-failure-session" {
+		t.Fatalf("later comment PriorSessionID = %q, want fresh-after-failure-session", task.PriorSessionID)
 	}
 }

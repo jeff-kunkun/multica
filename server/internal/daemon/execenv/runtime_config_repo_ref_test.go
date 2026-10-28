@@ -106,97 +106,23 @@ func TestProjectContextSaysThePinIsAlreadyApplied(t *testing.T) {
 	}
 }
 
-// A resumed task can outlive a change to the project's starting point. The
-// checkout is kept as it was — holding work branched off the OLD value — while
-// the brief, rebuilt from the current claim, names the new one. An agent that
-// retargeted on the brief alone would deliver the old line's work into the new
-// line, and would contradict what the edit dialog promises: work already
-// underway keeps the branch it started on.
-//
-// The brief cannot resolve this itself; whether a checkout was reused is only
-// known once `repo checkout` runs. So it warns, and is careful about what it
-// claims the checkout can tell the agent — see the next test.
-func TestDeliveryRuleWarnsAboutAKeptCheckout(t *testing.T) {
+// What a KEPT checkout means — the branch it reports is a pull request's head,
+// never its base, and the project's current starting point may have changed
+// since the work began — is said by `multica repo checkout` itself when it
+// keeps one (DENE-2679; TestRepoCheckoutSummary pins the wording). The brief
+// used to carry it on every run, including the ones that never check out.
+func TestKeptCheckoutRuleLivesInTheCheckoutOutput(t *testing.T) {
 	t.Parallel()
-	ctx := TaskContextForEnv{
-		IssueID: "i-1", AgentName: "Eve", AgentID: "eve-1",
-		Repos: []RepoContextForEnv{{URL: "https://github.com/o/r", Ref: "release/b"}},
-	}
-	out := buildMetaSkillContent("claude", ctx)
-
-	if !strings.Contains(out, "KEPT an existing checkout") {
-		t.Errorf("brief should name the kept-checkout case; got:\n%s", out)
-	}
-	if !strings.Contains(out, "Do not retarget it to a starting point listed above") {
-		t.Errorf("brief should say the listed starting point is not authoritative on a resume; got:\n%s", out)
-	}
-}
-
-// A kept checkout reports the branch the worktree is ON — the task's own
-// `agent/...` branch, resolved by `git symbolic-ref`. That is the HEAD of a
-// pull request, never its base, and nothing in the result carries the ref the
-// branch was cut from.
-//
-// An earlier revision of this text said to deliver "to the branch it actually
-// started from, which the checkout names". An agent following that would read
-// the `agent/...` branch and pass it as --base, producing a pull request whose
-// base equals its head. The brief must not name the checkout as a source for
-// the original target at all.
-func TestKeptCheckoutIsNotOfferedAsTheDeliveryTarget(t *testing.T) {
-	t.Parallel()
-	ctx := TaskContextForEnv{
-		IssueID: "i-1", AgentName: "Eve", AgentID: "eve-1",
-		Repos: []RepoContextForEnv{{URL: "https://github.com/o/r", Ref: "release/b"}},
-	}
-	out := buildMetaSkillContent("claude", ctx)
-
-	if strings.Contains(out, "which the checkout names") {
-		t.Errorf("brief must not point at the checkout for the original target; got:\n%s", out)
-	}
-	if !strings.Contains(out, "head of a pull request, never its base") {
-		t.Errorf("brief should say what the reported branch actually is; got:\n%s", out)
-	}
-	// The sources that DO settle it.
-	if !strings.Contains(out, "the base of its existing pull request") {
-		t.Errorf("brief should point at the existing PR's base; got:\n%s", out)
-	}
-	if !strings.Contains(out, "ask if neither settles it") {
-		t.Errorf("brief should tell the agent to ask rather than guess; got:\n%s", out)
-	}
-}
-
-// The resume warning does NOT ride with the pin. A project cleared back to its
-// default branch renders no starting point at all, yet a task resumed after
-// that change still holds a checkout cut from the old one — so gating the
-// warning on `pinned` would drop it exactly where the mismatch is invisible.
-func TestResumeWarningSurvivesTheStartingPointBeingCleared(t *testing.T) {
-	t.Parallel()
-	ctx := TaskContextForEnv{
-		IssueID: "i-1", AgentName: "Eve", AgentID: "eve-1",
-		Repos: []RepoContextForEnv{{URL: "https://github.com/o/r"}}, // A -> cleared
-	}
-	out := buildMetaSkillContent("claude", ctx)
-
-	if !strings.Contains(out, "KEPT an existing checkout") {
-		t.Errorf("resume warning must survive a cleared starting point; got:\n%s", out)
-	}
-	// The pinned-only halves stay out: there is no branch to target, and
-	// nothing listed above to be warned off retargeting to.
-	if strings.Contains(out, "gh pr create --base") {
-		t.Errorf("nothing is pinned, so the --base rule is noise; got:\n%s", out)
-	}
-	if strings.Contains(out, "Do not retarget it to a starting point listed above") {
-		t.Errorf("nothing is listed above, so the sentence points at nothing; got:\n%s", out)
-	}
-}
-
-// No repos, nothing to say — the section is skipped whole.
-func TestResumeWarningAbsentWithoutRepos(t *testing.T) {
-	t.Parallel()
-	out := buildMetaSkillContent("claude", TaskContextForEnv{
-		IssueID: "i-1", AgentName: "Eve", AgentID: "eve-1",
-	})
-	if strings.Contains(out, "KEPT an existing checkout") {
-		t.Errorf("no repositories, so no checkout guidance; got:\n%s", out)
+	for _, repo := range []RepoContextForEnv{
+		{URL: "https://github.com/o/r", Ref: "release/b"},
+		{URL: "https://github.com/o/r"},
+	} {
+		out := buildMetaSkillContent("claude", TaskContextForEnv{
+			IssueID: "i-1", AgentName: "Eve", AgentID: "eve-1",
+			Repos: []RepoContextForEnv{repo},
+		})
+		if strings.Contains(out, "KEPT an existing checkout") {
+			t.Errorf("the kept-checkout rule belongs to `repo checkout` output, not the brief; got:\n%s", out)
+		}
 	}
 }

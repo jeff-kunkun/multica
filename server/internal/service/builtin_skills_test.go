@@ -372,6 +372,7 @@ func TestPlatformSkillDescriptionNamesEveryDomain(t *testing.T) {
 		"references/chats.md":           "chat",
 		"references/run-control.md":     "halt",
 		"references/external-bots.md":   "bot",
+		"references/plans.md":           "plan",
 	}
 
 	skill, ok := findSkill(t, PlatformSkillName)
@@ -563,6 +564,17 @@ func TestPlatformSkillCoversPlatformContracts(t *testing.T) {
 		{
 			file: "references/mentions.md",
 			want: []string{
+				// DENE-2679 moved the whether-to-mention facts here from the
+				// brief's Mentions section (MUL-6417, MUL-6528, #7245); each
+				// one closes an incident class, so each stays pinned.
+				"**notifies a person**",
+				"**starts a run for\nthat agent**",
+				"Followers already see your comment",
+				"Mention only to pull someone into work they are not doing yet",
+				"For someone who does not follow the issue, a mention is how they find out",
+				"A thank-you or FYI mention of an agent costs a paid run",
+				"Naming someone in prose stays plain text",
+				"a missed mention costs one follow-up ask, a stray\n  one costs a run",
 				"(member|agent|bot|squad|issue|all)/([0-9a-fA-F-]+|all)",
 				"multica workspace member list --output json",
 				"enqueues a run for that agent",

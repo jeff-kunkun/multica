@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  AgentRuntimeSchema,
   AppConfigSchema,
   WecomInstallationSchema,
   ListWecomInstallationsResponseSchema,
@@ -645,6 +646,25 @@ describe("TimelineEntriesSchema", () => {
     });
   });
 
+  it("preserves an interrupt receipt's mode and read latency (DENE-2667)", () => {
+    const parsed = TimelineEntriesSchema.parse([{
+      type: "comment",
+      id: "interrupt-1",
+      actor_type: "member",
+      actor_id: "user-1",
+      created_at: "2026-01-01T00:00:00Z",
+      content: "write hello instead",
+      supplements: [
+        { task_id: "task-1", status: "delivered", delivery_mode: "interrupt", delivered_after_ms: 2400 },
+        { task_id: "task-2", status: "delivered", delivery_mode: "restart", delivered_after_ms: "soon" },
+      ],
+    }]);
+    expect(parsed[0]?.supplements).toEqual([
+      { task_id: "task-1", status: "delivered", delivery_mode: "interrupt", delivered_after_ms: 2400 },
+      { task_id: "task-2", status: "delivered" },
+    ]);
+  });
+
   it("preserves source_task_id for agent failure comments", () => {
     const parsed = TimelineEntriesSchema.parse([
       {
@@ -729,6 +749,11 @@ describe("AgentTaskListSchema", () => {
       supplement_comment_ids: ["comment-1", "comment-2"],
       can_supplement: true,
     });
+  });
+
+  it.each([true, false, undefined, "yes"])("keeps whether the run can be interrupted only when it is a boolean: %s", (value) => {
+    const parsed = AgentTaskListSchema.parse([{ id: "run", supplement_interrupt: value }]);
+    expect(parsed[0]?.supplement_interrupt).toBe(typeof value === "boolean" ? value : undefined);
   });
 
   it.each([true, false, undefined, null, "true", 1])("safely parses comment cancellation metadata: %s", (value) => {
@@ -1589,29 +1614,6 @@ describe("AppConfigSchema comment_delete_keep_replies_supported drift", () => {
       comment_delete_keep_replies_supported: value,
     });
     expect(parsed.comment_delete_keep_replies_supported).toBe(expected);
-  });
-});
-
-describe("AppConfigSchema local_worktree_supported drift", () => {
-  it("defaults to false when the server predates the signal", () => {
-    const parsed = AppConfigSchema.parse({ cdn_domain: "cdn.example.com" });
-    expect(parsed.local_worktree_supported).toBe(false);
-  });
-
-  it("coerces a malformed value to false rather than trusting it", () => {
-    const parsed = AppConfigSchema.parse({
-      cdn_domain: "cdn.example.com",
-      local_worktree_supported: "yes",
-    });
-    expect(parsed.local_worktree_supported).toBe(false);
-  });
-
-  it("carries a genuine true through", () => {
-    const parsed = AppConfigSchema.parse({
-      cdn_domain: "cdn.example.com",
-      local_worktree_supported: true,
-    });
-    expect(parsed.local_worktree_supported).toBe(true);
   });
 });
 
@@ -2789,5 +2791,19 @@ describe("Machine capacity queue diagnostics", () => {
     expect(ChatPendingTaskSchema.parse({ status: "queued" }).queue_reason).toBeUndefined();
     expect(ChatPendingTaskSchema.parse({ status: "queued", queue_reason: { ...queue_reason, max_concurrent_runs: 0 } }).queue_reason).toBeUndefined();
     expect(ChatPendingTaskSchema.parse({ status: "queued", queue_reason: "full" }).queue_reason).toBeUndefined();
+  });
+});
+
+describe("Runtime default working directory", () => {
+  const rt = {
+    id: "rt-1", workspace_id: "ws-1", daemon_id: "d-1", name: "Claude", runtime_mode: "local",
+    provider: "claude", launch_header: "", status: "online", device_info: "", metadata: {},
+    owner_id: "u-1", last_seen_at: null, created_at: "", updated_at: "",
+  };
+  it("keeps the owner's path, treats an unreported check as null, and drops malformed values", () => {
+    expect(AgentRuntimeSchema.parse({ ...rt, default_work_dir: { path: "/w", exists: false } }).default_work_dir).toEqual({ path: "/w", exists: false });
+    expect(AgentRuntimeSchema.parse({ ...rt, default_work_dir: { path: "/w" } }).default_work_dir).toEqual({ path: "/w", exists: null });
+    expect(AgentRuntimeSchema.parse(rt).default_work_dir).toBeUndefined();
+    expect(AgentRuntimeSchema.parse({ ...rt, default_work_dir: "/w" }).default_work_dir).toBeUndefined();
   });
 });

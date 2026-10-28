@@ -4,34 +4,24 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"regexp"
 	"runtime"
-	"strconv"
 	"strings"
 
 	"github.com/pelletier/go-toml/v2"
 )
 
-// Background
-//
-// On macOS, Codex's Seatbelt sandbox in the `workspace-write` mode silently
-// ignores `[sandbox_workspace_write] network_access = true`. DNS resolution is
-// blocked at the syscall layer, so processes inside the sandbox see
-// `no such host` errors when calling out (for example, `multica issue get`
-// hitting the Multica API). See upstream issue openai/codex#10390.
-//
-// Until a fixed Codex release ships, the per-task Codex config on macOS needs
-// to fall back to `sandbox_mode = "danger-full-access"` so the agent can
-// actually reach the Multica API.
-//
-// Linux runs danger-full-access as a deliberate product decision (MUL-5578,
-// #6218), not as a compatibility fallback — see codexSandboxPolicyFor.
-//
-// CodexDarwinNetworkAccessFixedVersion is the earliest Codex CLI version in
-// which `network_access = true` is honored under Seatbelt on macOS. Bump this
-// constant when the upstream fix ships. Empty string means "no known fixed
-// release yet — always treat macOS Codex as broken for network access".
-const CodexDarwinNetworkAccessFixedVersion = ""
+// Every platform defaults Codex to danger-full-access, written explicitly into
+// the per-task config.toml. The daemon used to keep macOS on a version gate
+// waiting for openai/codex#10390 (Seatbelt ignoring network_access under
+// workspace-write); with no fixed release named, that gate always fell back to
+// full access anyway, so the default is now stated rather than derived.
+// Linux runs full access as a product decision (MUL-5578, #6218) and Windows as
+// a compatibility choice (MUL-4957) — see codexSandboxPolicyFor.
+
+// CodexFullAccessSandboxMode is the sandbox_mode every platform gets by default.
+const CodexFullAccessSandboxMode = "danger-full-access"
 
 // codexSandboxPolicy describes how the per-task Codex config.toml should
 // configure the sandbox.
@@ -46,9 +36,8 @@ type codexSandboxPolicy struct {
 	// Hint is an optional, actionable remediation surfaced in warn-level logs
 	// when Mode is danger-full-access. It is empty when there is no generic
 	// action to surface (e.g. the Windows compatibility fallback, where
-	// enabling Codex's native sandbox is deferred follow-up work rather than a
-	// version bump), so the log omits the hint instead of showing an irrelevant
-	// one.
+	// enabling Codex's native sandbox is deferred follow-up work), so the log
+	// omits the hint instead of showing an irrelevant one.
 	Hint string
 }
 
@@ -61,15 +50,15 @@ func resolveGOOS(goos string) string {
 	return goos
 }
 
-// codexSandboxPolicyFor picks the default policy for the given platform and
-// detected Codex CLI version. It is the platform baseline; per-task user config
-// can refine it (see codexSandboxPolicyForConfig).
+// codexSandboxPolicyFor picks the default policy for the given platform. It is
+// the platform baseline; per-task user config can refine it on Windows (see
+// codexSandboxPolicyForConfig). Every platform gets danger-full-access:
 //
-//   - Linux (and any other non-darwin, non-windows platform):
-//     danger-full-access on the daemon user's real HOME. Landlock could enforce
-//     workspace-write here, but enforcing it meant redirecting HOME/XDG per task
-//     and seeding a hand-maintained allowlist of credential paths back into it,
-//     which left every un-listed host CLI (aws, kube, gcloud, glab, rclone, …)
+//   - Linux (and any other non-darwin, non-windows platform): tasks run on the
+//     daemon user's real HOME. Landlock could enforce workspace-write here, but
+//     enforcing it meant redirecting HOME/XDG per task and seeding a
+//     hand-maintained allowlist of credential paths back into it, which left
+//     every un-listed host CLI (aws, kube, gcloud, glab, rclone, …)
 //     unconfigured inside tasks and could not converge. The containment it
 //     bought was also narrower than it looked: workspace-write restricts writes
 //     only — reads and network were already unrestricted, so credentials under
@@ -77,57 +66,72 @@ func resolveGOOS(goos string) string {
 //     filesystem boundary is therefore the boundary the daemon itself runs
 //     inside (VM, container, or dedicated Unix user), matching macOS/Windows.
 //     See MUL-5578 / #6218, and apps/docs security-model.
-//   - Windows: danger-full-access, as a deliberate compatibility choice.
-//     Codex ships a native Windows sandbox (windows.sandbox = "unelevated" via
-//     a Restricted Token, or "elevated"), but it is still experimental with
-//     known reliability limitations, so the daemon does not enable it by
-//     default. When no native windows.sandbox is configured, Codex cannot
-//     enforce workspace-write on Windows (it downgrades to read-only) and then
-//     rejects non-safe mutation commands "by policy" — e.g. `multica issue
-//     create` fails — because under approval_policy = "never" the request never
-//     reaches the daemon's auto-approver. danger-full-access sidesteps that.
-//     Enabling the native sandbox is tracked as separate follow-up work. See
-//     MUL-4957. A user who has opted into windows.sandbox (via config.toml or a
-//     `-c` custom arg) keeps workspace-write instead of this fallback, and an
-//     undecidable config fails closed; that logic lives in
+//   - macOS: Seatbelt under workspace-write blocks DNS even with
+//     network_access = true (openai/codex#10390), so the Multica CLI could not
+//     reach the API from inside a sandboxed task. Full access is the explicit
+//     default regardless of the Codex version.
+//   - Windows: a deliberate compatibility choice. Codex ships a native Windows
+//     sandbox (windows.sandbox = "unelevated" via a Restricted Token, or
+//     "elevated"), but it is still experimental with known reliability
+//     limitations, so the daemon does not enable it by default. When no native
+//     windows.sandbox is configured, Codex cannot enforce workspace-write on
+//     Windows (it downgrades to read-only) and then rejects non-safe mutation
+//     commands "by policy" — e.g. `multica issue create` fails — because under
+//     approval_policy = "never" the request never reaches the daemon's
+//     auto-approver. Enabling the native sandbox is tracked as separate
+//     follow-up work. See MUL-4957. A user who has opted into windows.sandbox
+//     (via config.toml or a `-c` custom arg) keeps workspace-write instead, and
+//     an undecidable config fails closed; that logic lives in
 //     codexSandboxPolicyForConfig / resolveWindowsSandboxState.
-//   - darwin with a version at or above CodexDarwinNetworkAccessFixedVersion:
-//     workspace-write with network access (upstream bug fixed).
-//   - darwin otherwise (including when the version is unknown): fall back to
-//     danger-full-access so the Multica CLI can reach the API.
-func codexSandboxPolicyFor(goos, detectedVersion string) codexSandboxPolicy {
-	if goos == "" {
-		goos = runtime.GOOS
-	}
-	if goos == "windows" {
+func codexSandboxPolicyFor(goos string) codexSandboxPolicy {
+	goos = resolveGOOS(goos)
+	switch goos {
+	case "windows":
 		return codexSandboxPolicy{
-			Mode:   "danger-full-access",
+			Mode:   CodexFullAccessSandboxMode,
 			Reason: "codex on windows: compatibility fallback; no native windows.sandbox configured, so workspace-write cannot be enforced (MUL-4957)",
 		}
-	}
-	if goos != "darwin" {
+	case "darwin":
 		return codexSandboxPolicy{
-			Mode:   "danger-full-access",
+			Mode:   CodexFullAccessSandboxMode,
+			Reason: "codex on macOS: full access by default; seatbelt workspace-write blocks network access (openai/codex#10390)",
+			Hint:   codexHostIsolationHint(),
+		}
+	default:
+		return codexSandboxPolicy{
+			Mode:   CodexFullAccessSandboxMode,
 			Reason: "codex on " + goos + ": tasks run with the daemon user's real HOME and full filesystem access; isolation comes from the boundary the daemon runs inside (MUL-5578)",
-			Hint:   codexLinuxIsolationHint(),
+			Hint:   codexHostIsolationHint(),
 		}
 	}
-	if codexDarwinNetworkAccessFixed(detectedVersion) {
-		return codexSandboxPolicy{
-			Mode:          "workspace-write",
-			NetworkAccess: true,
-			Reason:        "codex version includes macOS network_access fix",
-		}
+}
+
+// CodexStartupSandboxMode is the sandbox_mode Codex tasks on goos get from the
+// shared Codex config ($CODEX_HOME or ~/.codex). The daemon logs it at startup
+// so the effective permission is visible without opening a task home. On
+// Windows it reads the shared config.toml the same way a task does: a
+// windows.sandbox opt-in, or a config that cannot be read or parsed, keeps
+// workspace-write. A per-agent `-c windows.sandbox=…` custom arg can still move
+// that agent's tasks to workspace-write; it is only known per task.
+func CodexStartupSandboxMode(goos string) string {
+	state := windowsSandboxAbsent
+	if resolveGOOS(goos) == "windows" {
+		state = sharedWindowsSandboxState(resolveSharedCodexHome())
 	}
-	reason := "codex on macOS: seatbelt ignores sandbox_workspace_write.network_access (openai/codex#10390)"
-	if detectedVersion == "" {
-		reason += " — version unknown, assuming broken"
-	}
-	return codexSandboxPolicy{
-		Mode:          "danger-full-access",
-		NetworkAccess: false,
-		Reason:        reason,
-		Hint:          codexUpgradeHint(),
+	return codexSandboxPolicyForConfig(goos, state).Mode
+}
+
+// sharedWindowsSandboxState classifies windows.sandbox in the shared
+// config.toml, failing closed when the file exists but cannot be read.
+func sharedWindowsSandboxState(sharedHome string) windowsSandboxConfig {
+	data, err := os.ReadFile(filepath.Join(sharedHome, "config.toml"))
+	switch {
+	case err == nil:
+		return windowsSandboxFromConfig(string(data))
+	case os.IsNotExist(err):
+		return windowsSandboxAbsent
+	default:
+		return windowsSandboxUndecidable
 	}
 }
 
@@ -160,14 +164,12 @@ const (
 // This is intentionally the branch point for the eventual native-sandbox
 // rollout: flipping the Windows default later means writing windows.sandbox
 // ourselves and defaulting winState to native, not restructuring callers.
-func codexSandboxPolicyForConfig(goos, detectedVersion string, winState windowsSandboxConfig) codexSandboxPolicy {
-	if goos == "" {
-		goos = runtime.GOOS
-	}
+func codexSandboxPolicyForConfig(goos string, winState windowsSandboxConfig) codexSandboxPolicy {
+	goos = resolveGOOS(goos)
 	if goos == "windows" {
 		return codexSandboxPolicyForWindows(winState)
 	}
-	return codexSandboxPolicyFor(goos, detectedVersion)
+	return codexSandboxPolicyFor(goos)
 }
 
 // codexSandboxPolicyForWindows maps a resolved native-sandbox state to a
@@ -190,7 +192,7 @@ func codexSandboxPolicyForWindows(state windowsSandboxConfig) codexSandboxPolicy
 		}
 	default: // windowsSandboxAbsent
 		return codexSandboxPolicy{
-			Mode:   "danger-full-access",
+			Mode:   CodexFullAccessSandboxMode,
 			Reason: "codex on windows: compatibility fallback; no native windows.sandbox configured (MUL-4957)",
 		}
 	}
@@ -295,33 +297,9 @@ func resolveWindowsSandbox(states ...windowsSandboxConfig) windowsSandboxConfig 
 	return result
 }
 
-// codexDarwinNetworkAccessFixed returns true if the given detected version is
-// known to honor `network_access = true` under Seatbelt on macOS.
-func codexDarwinNetworkAccessFixed(detectedVersion string) bool {
-	if CodexDarwinNetworkAccessFixedVersion == "" || detectedVersion == "" {
-		return false
-	}
-	fixed, err := parseCodexSemver(CodexDarwinNetworkAccessFixedVersion)
-	if err != nil {
-		return false
-	}
-	got, err := parseCodexSemver(detectedVersion)
-	if err != nil {
-		return false
-	}
-	return !got.lessThan(fixed)
-}
-
-// codexUpgradeHint returns a short, actionable hint for users running a Codex
-// version that suffers from the macOS network_access bug.
-func codexUpgradeHint() string {
-	return "upgrade Codex CLI (e.g. `brew upgrade codex` or `npm i -g @openai/codex`) once a release including openai/codex#10390 is available to restore workspace-write + network_access"
-}
-
-// codexLinuxIsolationHint returns the actionable remediation for the Linux
-// full-access default: unlike the macOS bug, there is no version to upgrade to —
-// the containment has to come from the boundary the daemon runs inside.
-func codexLinuxIsolationHint() string {
+// codexHostIsolationHint returns the actionable remediation for the full-access
+// default: the containment has to come from the boundary the daemon runs inside.
+func codexHostIsolationHint() string {
 	return "run the daemon inside a VM, container, or dedicated Unix user — tasks can read and write everything that user can"
 }
 
@@ -455,7 +433,7 @@ func ensureCodexSandboxConfig(configPath string, policy codexSandboxPolicy, dete
 		return nil
 	}
 
-	if policy.Mode == "danger-full-access" && logger != nil {
+	if policy.Mode == CodexFullAccessSandboxMode && logger != nil {
 		version := detectedVersion
 		if version == "" {
 			version = "unknown"
@@ -475,35 +453,4 @@ func ensureCodexSandboxConfig(configPath string, policy codexSandboxPolicy, dete
 		return fmt.Errorf("write config.toml: %w", err)
 	}
 	return nil
-}
-
-// --- small semver helper, scoped to this package to avoid an import cycle
-// with server/pkg/agent. The agent package already has a similar parser; we
-// duplicate the minimal bits here because execenv cannot depend on agent.
-
-type codexSemver struct {
-	Major, Minor, Patch int
-}
-
-var codexSemverRe = regexp.MustCompile(`v?(\d+)\.(\d+)\.(\d+)`)
-
-func parseCodexSemver(raw string) (codexSemver, error) {
-	m := codexSemverRe.FindStringSubmatch(raw)
-	if m == nil {
-		return codexSemver{}, fmt.Errorf("cannot parse version %q", raw)
-	}
-	maj, _ := strconv.Atoi(m[1])
-	min, _ := strconv.Atoi(m[2])
-	pat, _ := strconv.Atoi(m[3])
-	return codexSemver{Major: maj, Minor: min, Patch: pat}, nil
-}
-
-func (v codexSemver) lessThan(o codexSemver) bool {
-	if v.Major != o.Major {
-		return v.Major < o.Major
-	}
-	if v.Minor != o.Minor {
-		return v.Minor < o.Minor
-	}
-	return v.Patch < o.Patch
 }

@@ -87,6 +87,8 @@ export function useUpdateRuntime(wsId: string) {
         // Empty string clears the custom name; omit to leave unchanged.
         custom_name?: string;
         apply_to_machine?: boolean;
+        // The machine's default working directory; "" clears it.
+        default_work_dir?: string;
       };
     }) => api.updateRuntime(runtimeId, patch),
     onSettled: () => {

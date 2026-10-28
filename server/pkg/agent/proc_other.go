@@ -63,6 +63,28 @@ func signalProcessGroup(cmd *exec.Cmd, sig syscall.Signal) {
 	}
 }
 
+// killProcessGroupUntilGone keeps sending SIGKILL to the command's process
+// group until the group is gone or timeout passes. Call it after the first
+// group kill: on darwin a member that is forking at that instant can produce a
+// child the kill misses, and that child keeps the agent's stdout open. It stays
+// in the group, so a later send reaches it. No send happens after timeout: by
+// then Wait may have reaped the leader and the pgid may name another group.
+func killProcessGroupUntilGone(cmd *exec.Cmd, timeout time.Duration) {
+	if cmd == nil || cmd.Process == nil {
+		return
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		time.Sleep(10 * time.Millisecond)
+		if !time.Now().Before(deadline) {
+			return
+		}
+		if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); errors.Is(err, syscall.ESRCH) {
+			return
+		}
+	}
+}
+
 func waitProcessGroupGone(cmd *exec.Cmd, timeout time.Duration) bool {
 	if cmd == nil || cmd.Process == nil {
 		return false

@@ -1009,7 +1009,34 @@ async function probeLocalRuntimes(): Promise<LocalRuntimeProbe> {
 // applied by fix-path in main/index.ts — as a top-level const it would
 // snapshot process.env at import time, before that block runs.
 function desktopSpawnEnv(): NodeJS.ProcessEnv {
-  return { ...process.env, MULTICA_LAUNCHED_BY: "desktop" };
+  return {
+    ...process.env,
+    MULTICA_LAUNCHED_BY: "desktop",
+    ...officeIdleStopEnv(officeFeatureFlags()),
+    ...officeLiveStatusEnv(officeFeatureFlags()),
+  };
+}
+
+function officeFeatureFlags(): string | undefined {
+  return (import.meta.env as ImportMetaEnv & { readonly VITE_MULTICA_FEATURE_FLAGS?: string })
+    .VITE_MULTICA_FEATURE_FLAGS;
+}
+
+function officeFlagOn(flags: string | undefined, flag: string): boolean {
+  return (flags ?? "").split(",").some((entry) => entry.trim() === flag);
+}
+
+// DENE-2667 PR 3: an office test build (VITE_MULTICA_FEATURE_FLAGS lists
+// office_idle_stop) runs its daemon under the office idle policy. Release
+// builds leave the flag unset, so the daemon keeps the legacy watchdog.
+export function officeIdleStopEnv(flags: string | undefined): NodeJS.ProcessEnv {
+  return officeFlagOn(flags, "office_idle_stop") ? { MULTICA_IDLE_STOP_POLICY: "office" } : {};
+}
+
+// DENE-2667 PR 4: an office test build listing office_live_status has its daemon
+// report each running issue run's live status every 15 seconds.
+export function officeLiveStatusEnv(flags: string | undefined): NodeJS.ProcessEnv {
+  return officeFlagOn(flags, "office_live_status") ? { MULTICA_LIVE_STATUS: "on" } : {};
 }
 
 export async function resolveDesktopCliBinary(): Promise<string | null> {

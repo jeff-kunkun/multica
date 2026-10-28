@@ -77,10 +77,10 @@ func cleanupRerunFixture(t *testing.T, issueID string) {
 }
 
 // TestGetLastTaskSessionExcludesPoisonedFailures asserts that the
-// (agent_id, issue_id) resume lookup skips failed tasks whose
-// failure_reason classifies them as poisoned terminal output. This is the
-// SQL-level half of the rerun-poisoned-session fix: without the filter, a
-// rerun would inherit the same session and replay the same bad output.
+// (agent_id, issue_id) resume lookup never hands a poisoned failed session to
+// the next turn. Since DENE-2664 a failed issue turn breaks continuity
+// outright, so the lookup does not fall back to the healthy session that
+// completed before it either: the next turn starts fresh.
 func TestGetLastTaskSessionExcludesPoisonedFailures(t *testing.T) {
 	if testPool == nil {
 		t.Skip("no database connection")
@@ -91,14 +91,11 @@ func TestGetLastTaskSessionExcludesPoisonedFailures(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Insert an older failed task with a poisoned classifier and a session_id.
-	// The poisoned task is the *most recent* one, so without the filter the
-	// resume lookup would return its session_id.
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason)
-		VALUES ($1, $2, $3, 'failed', 0, now() - interval '2 minutes', now() - interval '2 minutes', 'HEALTHY-SESSION', '/tmp/healthy', 'timeout')
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir)
+		VALUES ($1, $2, $3, 'completed', 0, now() - interval '2 minutes', now() - interval '2 minutes', 'HEALTHY-SESSION', '/tmp/healthy')
 	`, agentID, runtimeID, issueID); err != nil {
-		t.Fatalf("insert healthy failed task: %v", err)
+		t.Fatalf("insert healthy completed task: %v", err)
 	}
 
 	if _, err := testPool.Exec(ctx, `
@@ -113,27 +110,17 @@ func TestGetLastTaskSessionExcludesPoisonedFailures(t *testing.T) {
 		AgentID: pgtype.UUID{Bytes: parseUUIDBytes(agentID), Valid: true},
 		IssueID: pgtype.UUID{Bytes: parseUUIDBytes(issueID), Valid: true},
 	})
-	if err != nil {
-		t.Fatalf("GetLastTaskSession failed: %v", err)
-	}
-	if !prior.SessionID.Valid {
-		t.Fatal("expected to fall back to the healthy failed session, got no session")
-	}
-	if prior.SessionID.String == "POISONED-SESSION" {
-		t.Fatal("rerun would inherit poisoned session — filter is not active")
-	}
-	if prior.SessionID.String != "HEALTHY-SESSION" {
-		t.Fatalf("expected HEALTHY-SESSION, got %q", prior.SessionID.String)
-	}
+	requireSessionExcluded(t, prior.SessionID, err)
 }
 
 // TestGetLastTaskSessionFallsBackWhenLatestSessionBlanked is the claim-side
-// half of MUL-5305: when the most recent task recorded NO session_id (the
-// daemon withheld an unresumable Codex session so it would not poison the next
-// follow-up), the resume lookup skips that row via `session_id IS NOT NULL`
-// and falls back to the most recent task that does have a session — so the next
-// follow-up continues from the last real conversation instead of the dropped
-// pointer that produced the reported regression.
+// half of MUL-5305: when the most recent task completed but recorded NO
+// session_id (the daemon withheld an unresumable Codex session so it would not
+// poison the next follow-up), the resume lookup skips that row via
+// `session_id IS NOT NULL` and falls back to the most recent task that does
+// have a session — so the next follow-up continues from the last real
+// conversation instead of the dropped pointer that produced the reported
+// regression. A blanked FAILED row breaks continuity instead (DENE-2664).
 func TestGetLastTaskSessionFallsBackWhenLatestSessionBlanked(t *testing.T) {
 	if testPool == nil {
 		t.Skip("no database connection")
@@ -152,11 +139,11 @@ func TestGetLastTaskSessionFallsBackWhenLatestSessionBlanked(t *testing.T) {
 		t.Fatalf("insert older completed task: %v", err)
 	}
 
-	// Newer failed task whose unresumable session was withheld (session_id NULL).
-	// This is the row a naive lookup would return, cold-starting the next run.
+	// Newer completed task whose unresumable session was withheld (session_id
+	// NULL). This is the row a naive lookup would return, cold-starting the next run.
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason)
-		VALUES ($1, $2, $3, 'failed', 0, now() - interval '1 minute', now() - interval '1 minute', NULL, '/tmp/blanked', 'timeout')
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir)
+		VALUES ($1, $2, $3, 'completed', 0, now() - interval '1 minute', now() - interval '1 minute', NULL, '/tmp/blanked')
 	`, agentID, runtimeID, issueID); err != nil {
 		t.Fatalf("insert newer blanked task: %v", err)
 	}
@@ -211,38 +198,84 @@ func TestGetLastTaskSessionExcludesEmptyHistoryMessage(t *testing.T) {
 	requireSessionExcluded(t, prior.SessionID, err)
 }
 
-// TestGetLastTaskSessionKeepsToolEmptinessError is the narrowness half: the
-// text guard must not swallow a healthy session because some tool complained
-// that a field was empty. A false positive here silently drops conversation
-// context on every follow-up, which is worse than the bug it guards against.
-func TestGetLastTaskSessionKeepsToolEmptinessError(t *testing.T) {
+// benignFailureCases are failed turns whose error text resembles a poisoned
+// session but must not match the text guards. The guards still decide chat
+// resume, so the narrowness half lives on GetLastChatTaskSession
+// (TestGetLastChatTaskSessionKeepsBenignFailure); an issue lookup breaks
+// continuity at any failed turn (TestGetLastTaskSessionBreaksOnBenignFailure).
+var benignFailureCases = []struct {
+	name          string
+	failureReason string
+	errText       string
+}{
+	{
+		// A tool complaining that a field was empty is not an empty history message.
+		name:          "tool emptiness error",
+		failureReason: "agent_error.unknown",
+		errText:       "validation error: field must not be empty",
+	},
+	{
+		// DENE-724: only Antigravity's own wording retires a session, not any 401.
+		name:          "ordinary unauthorized",
+		failureReason: "agent_error.provider_auth_or_access",
+		errText:       "API Error: 401 Unauthorized",
+	},
+	{
+		// The auth-resolution guard matches the exact provider phrase only.
+		name:          "auth-adjacent error",
+		failureReason: "agent_error.unknown",
+		errText:       "hermes provider error: could not resolve an authentication method for this model",
+	},
+	{
+		// MUL-1921: ordinary agent_error failures are not API 400s.
+		name:          "benign agent error",
+		failureReason: "agent_error",
+		errText:       "tool execution failed: connection refused",
+	},
+	{
+		// GH #5975: the dimension phrase alone, without the image-content marker.
+		name:          "dimension phrase without image marker",
+		failureReason: "agent_error",
+		errText:       "tool reported: image dimensions exceed max allowed size: 8000 pixels while generating a thumbnail",
+	},
+}
+
+// TestGetLastTaskSessionBreaksOnBenignFailure pins DENE-2664 for failures the
+// text guards let through: a failed issue turn still breaks continuity, so the
+// lookup returns neither the failed turn's session nor the healthy session
+// that completed before it.
+func TestGetLastTaskSessionBreaksOnBenignFailure(t *testing.T) {
 	if testPool == nil {
 		t.Skip("no database connection")
 	}
 
-	issueID, agentID, runtimeID := setupRerunTestFixture(t)
-	t.Cleanup(func() { cleanupRerunFixture(t, issueID) })
+	for _, tc := range benignFailureCases {
+		t.Run(tc.name, func(t *testing.T) {
+			issueID, agentID, runtimeID := setupRerunTestFixture(t)
+			t.Cleanup(func() { cleanupRerunFixture(t, issueID) })
 
-	ctx := context.Background()
+			ctx := context.Background()
 
-	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason, error)
-		VALUES ($1, $2, $3, 'failed', 0, now() - interval '1 minute', now() - interval '1 minute', 'HEALTHY-SESSION', '/tmp/healthy', 'agent_error.unknown',
-		        'validation error: field must not be empty')
-	`, agentID, runtimeID, issueID); err != nil {
-		t.Fatalf("insert task: %v", err)
-	}
+			if _, err := testPool.Exec(ctx, `
+				INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir)
+				VALUES ($1, $2, $3, 'completed', 0, now() - interval '2 minutes', now() - interval '2 minutes', 'EARLIER-SESSION', '/tmp/earlier')
+			`, agentID, runtimeID, issueID); err != nil {
+				t.Fatalf("insert earlier completed task: %v", err)
+			}
+			if _, err := testPool.Exec(ctx, `
+				INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason, error)
+				VALUES ($1, $2, $3, 'failed', 0, now() - interval '1 minute', now() - interval '1 minute', 'BENIGN-FAILED-SESSION', '/tmp/benign', $4, $5)
+			`, agentID, runtimeID, issueID, tc.failureReason, tc.errText); err != nil {
+				t.Fatalf("insert benign failed task: %v", err)
+			}
 
-	queries := db.New(testPool)
-	prior, err := queries.GetLastTaskSession(ctx, db.GetLastTaskSessionParams{
-		AgentID: pgtype.UUID{Bytes: parseUUIDBytes(agentID), Valid: true},
-		IssueID: pgtype.UUID{Bytes: parseUUIDBytes(issueID), Valid: true},
-	})
-	if err != nil {
-		t.Fatalf("GetLastTaskSession failed: %v", err)
-	}
-	if !prior.SessionID.Valid || prior.SessionID.String != "HEALTHY-SESSION" {
-		t.Fatalf("a tool emptiness error must not retire the session, got %+v", prior.SessionID)
+			queries := db.New(testPool)
+			prior, err := queries.GetLastTaskSession(ctx, db.GetLastTaskSessionParams{
+				AgentID: pgtype.UUID{Bytes: parseUUIDBytes(agentID), Valid: true},
+				IssueID: pgtype.UUID{Bytes: parseUUIDBytes(issueID), Valid: true},
+			})
+			requireSessionExcluded(t, prior.SessionID, err)
+		})
 	}
 }
 
@@ -408,78 +441,6 @@ func TestGetLastTaskSessionExcludesAntigravityNotLoggedIn(t *testing.T) {
 			})
 			requireSessionExcluded(t, prior.SessionID, err)
 		})
-	}
-}
-
-// TestGetLastTaskSessionKeepsSessionOnOrdinaryUnauthorized is the narrowness
-// half of DENE-724: the guard must match Antigravity's own wording, not any
-// 401. A plain unauthorized failure replays identically on a fresh session, so
-// retiring the conversation would cost the member their context and buy
-// nothing.
-func TestGetLastTaskSessionKeepsSessionOnOrdinaryUnauthorized(t *testing.T) {
-	if testPool == nil {
-		t.Skip("no database connection")
-	}
-
-	issueID, agentID, runtimeID := setupRerunTestFixture(t)
-	t.Cleanup(func() { cleanupRerunFixture(t, issueID) })
-
-	ctx := context.Background()
-
-	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason, error)
-		VALUES ($1, $2, $3, 'failed', 0, now() - interval '1 minute', now() - interval '1 minute', 'HEALTHY-OTHER-401', '/tmp/healthy', 'agent_error.provider_auth_or_access',
-		        'API Error: 401 Unauthorized')
-	`, agentID, runtimeID, issueID); err != nil {
-		t.Fatalf("insert task: %v", err)
-	}
-
-	queries := db.New(testPool)
-	prior, err := queries.GetLastTaskSession(ctx, db.GetLastTaskSessionParams{
-		AgentID: pgtype.UUID{Bytes: parseUUIDBytes(agentID), Valid: true},
-		IssueID: pgtype.UUID{Bytes: parseUUIDBytes(issueID), Valid: true},
-	})
-	if err != nil {
-		t.Fatalf("GetLastTaskSession failed: %v", err)
-	}
-	if !prior.SessionID.Valid || prior.SessionID.String != "HEALTHY-OTHER-401" {
-		t.Fatalf("an ordinary 401 must not retire the session, got %+v", prior.SessionID)
-	}
-}
-
-// TestGetLastTaskSessionKeepsSessionOnAuthAdjacentError is the narrowness half:
-// the ILIKE guard must match the exact provider phrase, not any error that
-// merely talks about authentication. A false positive silently drops
-// conversation context on every follow-up, which is worse than the bug it
-// guards against.
-func TestGetLastTaskSessionKeepsSessionOnAuthAdjacentError(t *testing.T) {
-	if testPool == nil {
-		t.Skip("no database connection")
-	}
-
-	issueID, agentID, runtimeID := setupRerunTestFixture(t)
-	t.Cleanup(func() { cleanupRerunFixture(t, issueID) })
-
-	ctx := context.Background()
-
-	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason, error)
-		VALUES ($1, $2, $3, 'failed', 0, now() - interval '1 minute', now() - interval '1 minute', 'HEALTHY-AUTH', '/tmp/healthy', 'agent_error.unknown',
-		        'hermes provider error: could not resolve an authentication method for this model')
-	`, agentID, runtimeID, issueID); err != nil {
-		t.Fatalf("insert task: %v", err)
-	}
-
-	queries := db.New(testPool)
-	prior, err := queries.GetLastTaskSession(ctx, db.GetLastTaskSessionParams{
-		AgentID: pgtype.UUID{Bytes: parseUUIDBytes(agentID), Valid: true},
-		IssueID: pgtype.UUID{Bytes: parseUUIDBytes(issueID), Valid: true},
-	})
-	if err != nil {
-		t.Fatalf("GetLastTaskSession failed: %v", err)
-	}
-	if !prior.SessionID.Valid || prior.SessionID.String != "HEALTHY-AUTH" {
-		t.Fatalf("an auth-adjacent but non-matching error must not retire the session, got %+v", prior.SessionID)
 	}
 }
 
@@ -680,7 +641,8 @@ func TestGetLastTaskSessionExcludesAPIInvalidRequest(t *testing.T) {
 // TestGetLastTaskSessionExcludesCodexSemanticInactivity covers Codex
 // semantic inactivity timeouts: the failed task did establish a session, but
 // resuming it can replay the same stuck Codex state. The resume lookup must
-// skip that session.
+// skip that session, and since DENE-2664 it does not fall back to the session
+// that completed before the stuck turn either.
 func TestGetLastTaskSessionExcludesCodexSemanticInactivity(t *testing.T) {
 	if testPool == nil {
 		t.Skip("no database connection")
@@ -692,10 +654,10 @@ func TestGetLastTaskSessionExcludesCodexSemanticInactivity(t *testing.T) {
 	ctx := context.Background()
 
 	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason)
-		VALUES ($1, $2, $3, 'failed', 0, now() - interval '2 minutes', now() - interval '2 minutes', 'HEALTHY-SESSION', '/tmp/healthy', 'timeout')
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir)
+		VALUES ($1, $2, $3, 'completed', 0, now() - interval '2 minutes', now() - interval '2 minutes', 'HEALTHY-SESSION', '/tmp/healthy')
 	`, agentID, runtimeID, issueID); err != nil {
-		t.Fatalf("insert healthy failed task: %v", err)
+		t.Fatalf("insert healthy completed task: %v", err)
 	}
 
 	if _, err := testPool.Exec(ctx, `
@@ -711,12 +673,7 @@ func TestGetLastTaskSessionExcludesCodexSemanticInactivity(t *testing.T) {
 		AgentID: pgtype.UUID{Bytes: parseUUIDBytes(agentID), Valid: true},
 		IssueID: pgtype.UUID{Bytes: parseUUIDBytes(issueID), Valid: true},
 	})
-	if err != nil {
-		t.Fatalf("GetLastTaskSession failed: %v", err)
-	}
-	if prior.SessionID.String != "HEALTHY-SESSION" {
-		t.Fatalf("expected HEALTHY-SESSION, got %q", prior.SessionID.String)
-	}
+	requireSessionExcluded(t, prior.SessionID, err)
 }
 
 func TestCreateRetryTaskFreshensCodexSemanticInactivity(t *testing.T) {
@@ -764,46 +721,74 @@ func TestCreateRetryTaskFreshensCodexSemanticInactivity(t *testing.T) {
 	}
 }
 
-func TestCreateRetryTaskKeepsOrdinaryTimeoutSession(t *testing.T) {
+// TestCreateRetryTaskOrdinaryTimeoutSession pins the retry session split from
+// DENE-2664: an issue retry always starts a fresh session, while a chat retry
+// after an ordinary timeout keeps resuming. Both keep the parent's work_dir.
+func TestCreateRetryTaskOrdinaryTimeoutSession(t *testing.T) {
 	if testPool == nil {
 		t.Skip("no database connection")
 	}
 
-	issueID, agentID, runtimeID := setupRerunTestFixture(t)
-	t.Cleanup(func() { cleanupRerunFixture(t, issueID) })
+	for _, tc := range []struct {
+		name        string
+		chat        bool
+		wantSession bool
+	}{
+		{name: "issue retry starts fresh"},
+		{name: "chat retry keeps the session", chat: true, wantSession: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			issueID, agentID, runtimeID := setupRerunTestFixture(t)
+			t.Cleanup(func() { cleanupRerunFixture(t, issueID) })
 
-	ctx := context.Background()
+			ctx := context.Background()
 
-	var parentID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (
-			agent_id, runtime_id, issue_id, status, priority,
-			started_at, completed_at, session_id, work_dir, failure_reason,
-			attempt, max_attempts
-		)
-		VALUES ($1, $2, $3, 'failed', 0, now() - interval '1 minute', now() - interval '1 minute',
-		        'ORDINARY-TIMEOUT-SESSION', '/tmp/ordinary-timeout', 'timeout', 1, 2)
-		RETURNING id
-	`, agentID, runtimeID, issueID).Scan(&parentID); err != nil {
-		t.Fatalf("insert ordinary timeout parent task: %v", err)
-	}
+			var parentIssueID, parentChatID any = issueID, nil
+			if tc.chat {
+				parentIssueID, parentChatID = nil, newPoisonTestChatSession(t, agentID, runtimeID, "ordinary-timeout-retry")
+			}
 
-	queries := db.New(testPool)
-	child, err := queries.CreateRetryTask(ctx, db.CreateRetryTaskParams{ID: pgtype.UUID{Bytes: parseUUIDBytes(parentID), Valid: true}})
-	if err != nil {
-		t.Fatalf("CreateRetryTask failed: %v", err)
-	}
-	if !child.SessionID.Valid || child.SessionID.String != "ORDINARY-TIMEOUT-SESSION" {
-		t.Fatalf("expected retry child to inherit session_id, got %+v", child.SessionID)
-	}
-	if !child.WorkDir.Valid || child.WorkDir.String != "/tmp/ordinary-timeout" {
-		t.Fatalf("expected retry child to inherit work_dir, got %+v", child.WorkDir)
-	}
-	if child.ForceFreshSession {
-		t.Fatal("expected ordinary timeout retry child to keep resume enabled")
-	}
-	if child.Attempt != 2 {
-		t.Fatalf("expected attempt 2, got %d", child.Attempt)
+			var parentID string
+			if err := testPool.QueryRow(ctx, `
+				INSERT INTO agent_task_queue (
+					agent_id, runtime_id, issue_id, chat_session_id, status, priority,
+					started_at, completed_at, session_id, work_dir, failure_reason,
+					attempt, max_attempts
+				)
+				VALUES ($1, $2, $3, $4, 'failed', 0, now() - interval '1 minute', now() - interval '1 minute',
+				        'ORDINARY-TIMEOUT-SESSION', '/tmp/ordinary-timeout', 'timeout', 1, 2)
+				RETURNING id
+			`, agentID, runtimeID, parentIssueID, parentChatID).Scan(&parentID); err != nil {
+				t.Fatalf("insert ordinary timeout parent task: %v", err)
+			}
+
+			queries := db.New(testPool)
+			child, err := queries.CreateRetryTask(ctx, db.CreateRetryTaskParams{ID: pgtype.UUID{Bytes: parseUUIDBytes(parentID), Valid: true}})
+			if err != nil {
+				t.Fatalf("CreateRetryTask failed: %v", err)
+			}
+			if tc.wantSession {
+				if !child.SessionID.Valid || child.SessionID.String != "ORDINARY-TIMEOUT-SESSION" {
+					t.Fatalf("expected retry child to inherit session_id, got %+v", child.SessionID)
+				}
+				if child.ForceFreshSession {
+					t.Fatal("expected ordinary timeout retry child to keep resume enabled")
+				}
+			} else {
+				if child.SessionID.Valid {
+					t.Fatalf("expected issue retry child to drop session_id, got %q", child.SessionID.String)
+				}
+				if !child.ForceFreshSession {
+					t.Fatal("expected issue retry child to force a fresh session")
+				}
+			}
+			if !child.WorkDir.Valid || child.WorkDir.String != "/tmp/ordinary-timeout" {
+				t.Fatalf("expected retry child to inherit work_dir, got %+v", child.WorkDir)
+			}
+			if child.Attempt != 2 {
+				t.Fatalf("expected attempt 2, got %d", child.Attempt)
+			}
+		})
 	}
 }
 
@@ -859,42 +844,6 @@ func TestGetLastTaskSessionExcludesLegacyAPI400(t *testing.T) {
 		IssueID: pgtype.UUID{Bytes: parseUUIDBytes(issueID), Valid: true},
 	})
 	requireSessionExcluded(t, prior.SessionID, err)
-}
-
-// TestGetLastTaskSessionKeepsBenignAgentErrorWithSession asserts the
-// ILIKE clause is narrow enough that ordinary 'agent_error' failures
-// (timeouts, tool errors, transient glue failures) still let the next
-// task resume the prior session. Without this guard rail, the MUL-1921
-// fix would regress MUL-1128's resume contract for everything else.
-func TestGetLastTaskSessionKeepsBenignAgentErrorWithSession(t *testing.T) {
-	if testPool == nil {
-		t.Skip("no database connection")
-	}
-
-	issueID, agentID, runtimeID := setupRerunTestFixture(t)
-	t.Cleanup(func() { cleanupRerunFixture(t, issueID) })
-
-	ctx := context.Background()
-
-	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason, error)
-		VALUES ($1, $2, $3, 'failed', 0, now() - interval '30 seconds', now() - interval '30 seconds', 'HEALTHY-RESUMABLE', '/tmp/healthy', 'agent_error',
-		        'tool execution failed: connection refused')
-	`, agentID, runtimeID, issueID); err != nil {
-		t.Fatalf("insert benign failed task: %v", err)
-	}
-
-	queries := db.New(testPool)
-	prior, err := queries.GetLastTaskSession(ctx, db.GetLastTaskSessionParams{
-		AgentID: pgtype.UUID{Bytes: parseUUIDBytes(agentID), Valid: true},
-		IssueID: pgtype.UUID{Bytes: parseUUIDBytes(issueID), Valid: true},
-	})
-	if err != nil {
-		t.Fatalf("GetLastTaskSession failed: %v", err)
-	}
-	if !prior.SessionID.Valid || prior.SessionID.String != "HEALTHY-RESUMABLE" {
-		t.Fatalf("expected to resume HEALTHY-RESUMABLE, got %q (valid=%v)", prior.SessionID.String, prior.SessionID.Valid)
-	}
 }
 
 // TestRerunIssueSetsForceFreshSession asserts the manual rerun flow flags
@@ -1146,11 +1095,11 @@ func TestRerunIssueInheritsTriggerCommentFromSourceTask(t *testing.T) {
 	}
 }
 
-// TestEnqueueTaskForIssueDoesNotForceFreshSession is the negative control
-// for the rerun flag: the normal enqueue path must leave the flag false so
-// auto-retry / comment-triggered tasks keep resuming the prior session
-// (MUL-1128 contract).
-func TestEnqueueTaskForIssueDoesNotForceFreshSession(t *testing.T) {
+// TestEnqueueTaskForIssueForcesFreshSession pins DENE-2664: an assign or
+// promote enqueue starts the issue in a fresh session. Only a run triggered
+// by a comment may continue one; that half is covered by
+// service.TestEnqueueCommentRunResumesOnlyWhenTriggeredByComment.
+func TestEnqueueTaskForIssueForcesFreshSession(t *testing.T) {
 	if testPool == nil {
 		t.Skip("no database connection")
 	}
@@ -1173,8 +1122,8 @@ func TestEnqueueTaskForIssueDoesNotForceFreshSession(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnqueueTaskForIssue failed: %v", err)
 	}
-	if task.ForceFreshSession {
-		t.Fatal("expected normal enqueue to leave force_fresh_session=false")
+	if !task.ForceFreshSession {
+		t.Fatal("expected issue enqueue to set force_fresh_session=true")
 	}
 }
 
@@ -1337,44 +1286,6 @@ func TestGetLastTaskSessionRestoresRecoveredSession(t *testing.T) {
 	}
 	if prior.SessionID.String != "RECOVER-SESS" {
 		t.Fatalf("expected the recovered session to be resumable again, got %q", prior.SessionID.String)
-	}
-}
-
-// TestGetLastTaskSessionKeepsDimensionPhraseWithoutImageMarker is the
-// review-tightening negative control: the oversized-image ILIKE now requires
-// BOTH the dimension phrase AND the image-content marker, matching the Kiro
-// detector / classifyPoisonedError precision. An unrelated error that merely
-// mentions image dimensions (without the image.source.base64.data marker) must
-// NOT be filtered — otherwise a benign failure would needlessly drop a
-// resumable session.
-func TestGetLastTaskSessionKeepsDimensionPhraseWithoutImageMarker(t *testing.T) {
-	if testPool == nil {
-		t.Skip("no database connection")
-	}
-
-	issueID, agentID, runtimeID := setupRerunTestFixture(t)
-	t.Cleanup(func() { cleanupRerunFixture(t, issueID) })
-
-	ctx := context.Background()
-
-	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason, error)
-		VALUES ($1, $2, $3, 'failed', 0, now() - interval '30 seconds', now() - interval '30 seconds', 'DIM-ONLY-RESUMABLE', '/tmp/dim', 'agent_error',
-		        'tool reported: image dimensions exceed max allowed size: 8000 pixels while generating a thumbnail')
-	`, agentID, runtimeID, issueID); err != nil {
-		t.Fatalf("insert dimension-phrase-only task: %v", err)
-	}
-
-	queries := db.New(testPool)
-	prior, err := queries.GetLastTaskSession(ctx, db.GetLastTaskSessionParams{
-		AgentID: pgtype.UUID{Bytes: parseUUIDBytes(agentID), Valid: true},
-		IssueID: pgtype.UUID{Bytes: parseUUIDBytes(issueID), Valid: true},
-	})
-	if err != nil {
-		t.Fatalf("GetLastTaskSession failed: %v", err)
-	}
-	if !prior.SessionID.Valid || prior.SessionID.String != "DIM-ONLY-RESUMABLE" {
-		t.Fatalf("expected the dimension-phrase-only session to stay resumable, got %q (valid=%v)", prior.SessionID.String, prior.SessionID.Valid)
 	}
 }
 

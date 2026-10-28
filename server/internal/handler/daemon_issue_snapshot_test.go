@@ -267,117 +267,85 @@ func TestClaimTaskByRuntime_BothDeltasShareOneAnchor(t *testing.T) {
 // may only report a delta measured from the run whose session it hands back.
 //
 // "Newest run" and "resumed run" are different rows more often than they look.
-// GetLastTaskSession skips poisoned sessions, so a newer run that died on an
-// unprocessable conversation is passed over for an older healthy one; a manual
-// rerun resumes whatever source the operator clicked. In both cases the newest
-// run's snapshot describes an issue the resumed session never saw — so
-// comparing against it can report "unchanged" to an agent whose memory predates
-// the edit, which is the exact failure this mechanism exists to prevent, and
-// the only one with no symptom at runtime.
-//
-// Both sub-cases put the CURRENT issue in the state the newer run recorded, so
-// a claim that anchors on the newest run finds nothing changed and says so.
-func TestClaimTaskByRuntime_DeltasDateFromTheResumedRun(t *testing.T) {
+// The newest cancelled task never recorded a session, so the claim resumes an
+// older healthy one. Its snapshot describes an issue the resumed session never
+// saw — comparing against the newest task can report "unchanged" to an agent
+// whose memory predates the edit, which is the exact failure this mechanism
+// exists to prevent, and the only one with no symptom at runtime.
+func TestClaimTaskByRuntime_CommentDeltaDatesFromTheResumedRun(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
-	for _, manualRerun := range []bool{false, true} {
-		label := "older healthy session after a poisoned newer run"
-		if manualRerun {
-			label = "manual rerun of an older run"
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "resumed anchor runtime")
+	name := "resumed anchor agent"
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, name)
+
+	// The run we will resume. Its snapshot says the description was
+	// "older instructions" — which is NOT what the issue says now.
+	dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id": runtimeID,
+		"issue_id":   issueID,
+		// Completed: it finished a turn, so it proved its prompt
+		// reached the session and may date a delta.
+		"status":         "completed",
+		"session_id":     "older-healthy-session",
+		"work_dir":       "/tmp/resumed-anchor-workdir",
+		"started_at":     testutil.Raw("now() - interval '2 hours'"),
+		"completed_at":   testutil.Raw("now() - interval '110 minutes'"),
+		"issue_snapshot": issueSnapshotJSON(t, issueSnapshotVersion, name+" issue", "older instructions"),
+	})
+	// A NEWER cancelled run that saw the issue as it is now but never recorded
+	// a session. Anchoring here is the bug: its snapshot is not the one being
+	// resumed.
+	dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id":     runtimeID,
+		"issue_id":       issueID,
+		"status":         "cancelled",
+		"work_dir":       "/tmp/resumed-anchor-other-workdir",
+		"started_at":     testutil.Raw("now() - interval '1 hour'"),
+		"completed_at":   testutil.Raw("now() - interval '50 minutes'"),
+		"issue_snapshot": issueSnapshotJSON(t, issueSnapshotVersion, name+" issue", ""),
+	})
+
+	dbfx.Comment(t, issueID, "context between the two runs", testutil.Cols{
+		"created_at": testutil.Raw("now() - interval '90 minutes'"),
+	})
+	triggerID := dbfx.Comment(t, issueID, "continue")
+	dbfx.Task(t, agentID, testutil.Cols{"runtime_id": runtimeID, "issue_id": issueID, "trigger_comment_id": triggerID})
+
+	resp := claimCommentTask(t, runtimeID, "resumed-anchor-claim")
+	if resp.Task.PriorSessionID != "older-healthy-session" {
+		t.Fatalf("fixture did not exercise the older-session resume path: prior_session_id = %q", resp.Task.PriorSessionID)
+	}
+	// The resumed run's snapshot says "older instructions"; the issue
+	// says something else now. That IS a change, and the claim must say
+	// so rather than comparing against the run it is not resuming.
+	if !resp.Task.IssueStateDeltaKnown {
+		t.Fatalf("the resumed run carries a snapshot, so the comparison must run")
+	}
+	if got := strings.Join(resp.Task.IssueChangedFields, ","); got != "description" {
+		t.Errorf("issue_changed_fields = %q, want \"description\" — measured from the RESUMED run, not the newest one", got)
+	}
+	// Same rule for the comment anchor: dating it from the newest run
+	// would hide comments the resumed session never saw.
+	if !resp.Task.DeltaKnown || resp.Task.NewCommentCount != 1 || resp.Task.NewCommentsSince == "" {
+		t.Fatalf("comment delta must include the intervening comment: known=%v count=%d since=%q", resp.Task.DeltaKnown, resp.Task.NewCommentCount, resp.Task.NewCommentsSince)
+	}
+	if resp.Task.NewCommentsSince != "" {
+		since, err := time.Parse(time.RFC3339, resp.Task.NewCommentsSince)
+		if err != nil {
+			t.Fatalf("new_comments_since is not RFC3339: %v", err)
 		}
-		t.Run(label, func(t *testing.T) {
-			ctx := context.Background()
-			runtimeID := createClaimReclaimRuntime(t, ctx, "resumed anchor runtime "+label)
-			name := "resumed anchor agent " + label
-			agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, name)
-
-			// The run we will resume. Its snapshot says the description was
-			// "older instructions" — which is NOT what the issue says now.
-			olderID := dbfx.Task(t, agentID, testutil.Cols{
-				"runtime_id": runtimeID,
-				"issue_id":   issueID,
-				// Completed: it finished a turn, so it proved its prompt
-				// reached the session and may date a delta.
-				"status":         "completed",
-				"session_id":     "older-healthy-session",
-				"work_dir":       "/tmp/resumed-anchor-workdir",
-				"started_at":     testutil.Raw("now() - interval '2 hours'"),
-				"completed_at":   testutil.Raw("now() - interval '110 minutes'"),
-				"issue_snapshot": issueSnapshotJSON(t, issueSnapshotVersion, name+" issue", "older instructions"),
-			})
-			// A NEWER run that saw the issue as it is now. Anchoring here is the
-			// bug: its session is not the one being resumed.
-			newer := testutil.Cols{
-				"runtime_id":     runtimeID,
-				"issue_id":       issueID,
-				"status":         "failed",
-				"failure_reason": "api_invalid_request", // poisons the session
-				"session_id":     "newer-unresumable-session",
-				"work_dir":       "/tmp/resumed-anchor-other-workdir",
-				"started_at":     testutil.Raw("now() - interval '1 hour'"),
-				"completed_at":   testutil.Raw("now() - interval '50 minutes'"),
-				"issue_snapshot": issueSnapshotJSON(t, issueSnapshotVersion, name+" issue", ""),
-			}
-			if manualRerun {
-				// Nothing wrong with the newer run here; the operator simply
-				// chose to resume the older one.
-				newer["status"] = "completed"
-				delete(newer, "failure_reason")
-			}
-			dbfx.Task(t, agentID, newer)
-
-			dbfx.Comment(t, issueID, "context between the two runs", testutil.Cols{
-				"created_at": testutil.Raw("now() - interval '90 minutes'"),
-			})
-			triggerID := dbfx.Comment(t, issueID, "continue")
-			current := testutil.Cols{"runtime_id": runtimeID, "issue_id": issueID, "trigger_comment_id": triggerID}
-			if manualRerun {
-				current["rerun_of_task_id"] = olderID
-				current["force_fresh_session"] = true
-			}
-			dbfx.Task(t, agentID, current)
-
-			resp := claimCommentTask(t, runtimeID, "resumed-anchor-claim")
-			if resp.Task.PriorSessionID != "older-healthy-session" {
-				t.Fatalf("fixture did not exercise the older-session resume path: prior_session_id = %q", resp.Task.PriorSessionID)
-			}
-			// The resumed run's snapshot says "older instructions"; the issue
-			// says something else now. That IS a change, and the claim must say
-			// so rather than comparing against the run it is not resuming.
-			if !resp.Task.IssueStateDeltaKnown {
-				t.Fatalf("the resumed run carries a snapshot, so the comparison must run")
-			}
-			if got := strings.Join(resp.Task.IssueChangedFields, ","); got != "description" {
-				t.Errorf("issue_changed_fields = %q, want \"description\" — measured from the RESUMED run, not the newest one", got)
-			}
-			// Same rule for the comment anchor: dating it from the newest run
-			// would hide comments the resumed session never saw.
-			if !resp.Task.DeltaKnown || resp.Task.NewCommentCount != 1 || resp.Task.NewCommentsSince == "" {
-				t.Fatalf("comment delta must include the intervening comment: known=%v count=%d since=%q", resp.Task.DeltaKnown, resp.Task.NewCommentCount, resp.Task.NewCommentsSince)
-			}
-			if resp.Task.NewCommentsSince != "" {
-				since, err := time.Parse(time.RFC3339, resp.Task.NewCommentsSince)
-				if err != nil {
-					t.Fatalf("new_comments_since is not RFC3339: %v", err)
-				}
-				if time.Since(since) < 90*time.Minute {
-					t.Errorf("new_comments_since = %s — that is the newer run's start, not the resumed run's", resp.Task.NewCommentsSince)
-				}
-			}
-		})
+		if time.Since(since) < 90*time.Minute {
+			t.Errorf("new_comments_since = %s — that is the newer run's start, not the resumed run's", resp.Task.NewCommentsSince)
+		}
 	}
 }
 
-// TestClaimTaskByRuntime_NeverStartedAnchorRowReportsNoIssueDelta closes the
-// gap between "the row whose session we resume" and "the run whose memory we
-// resume". GetLastTaskSession returns the session's latest TERMINAL row, and a
-// retry child that inherited the session can be claimed — writing its snapshot
-// — and then fail before the agent ever ran (runtime offline during prepare).
-// Its snapshot describes the issue as of ITS claim, which the session's memory
-// never saw. Anchoring on it would report "unchanged" across an edit made after
-// the last run that actually executed: the silent failure this mechanism must
-// never produce. A never-started anchor row dates neither delta.
+// TestClaimTaskByRuntime_NeverStartedAnchorRowReportsNoIssueDelta verifies that
+// a never-started retry does not resume the session it inherited from its
+// parent or date either delta from a prompt the provider never received.
 func TestClaimTaskByRuntime_NeverStartedAnchorRowReportsNoIssueDelta(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
@@ -396,13 +364,12 @@ func TestClaimTaskByRuntime_NeverStartedAnchorRowReportsNoIssueDelta(t *testing.
 		"completed_at":   testutil.Raw("now() - interval '110 minutes'"),
 		"issue_snapshot": issueSnapshotJSON(t, issueSnapshotVersion, name+" issue", "older instructions"),
 	})
-	// A retry child that inherited session S: claimed after the description
-	// was edited to what it is now (so its snapshot matches the current issue),
-	// then the runtime went offline before it started. started_at stays NULL.
+	// A retry child is claimed after the description changed, then the runtime
+	// goes offline before it starts. The retry must not inherit session S.
 	dbfx.Task(t, agentID, testutil.Cols{
 		"runtime_id": runtimeID, "issue_id": issueID, "status": "failed",
 		"failure_reason": "runtime_offline", "error": "runtime went offline",
-		"session_id": "never-started-anchor-session", "work_dir": "/tmp/never-started-anchor",
+		"work_dir":       "/tmp/never-started-anchor",
 		"dispatched_at":  testutil.Raw("now() - interval '1 hour'"),
 		"completed_at":   testutil.Raw("now() - interval '50 minutes'"),
 		"issue_snapshot": issueSnapshotJSON(t, issueSnapshotVersion, name+" issue", ""),
@@ -411,11 +378,10 @@ func TestClaimTaskByRuntime_NeverStartedAnchorRowReportsNoIssueDelta(t *testing.
 	dbfx.Task(t, agentID, testutil.Cols{"runtime_id": runtimeID, "issue_id": issueID, "trigger_comment_id": triggerID})
 
 	resp := claimCommentTask(t, runtimeID, "never-started-anchor-claim")
-	if resp.Task.PriorSessionID != "never-started-anchor-session" {
-		t.Fatalf("fixture did not resume the session through its never-started row: prior_session_id = %q", resp.Task.PriorSessionID)
+	if resp.Task.PriorSessionID != "" {
+		t.Fatalf("retry after a runtime failure must start fresh, prior_session_id = %q", resp.Task.PriorSessionID)
 	}
-	// The resumed memory predates the edit; the only true answers are "not
-	// compared" or "description changed". Never "unchanged".
+	// With no adopted session, the claim must not report either delta as known.
 	if resp.Task.IssueStateDeltaKnown && len(resp.Task.IssueChangedFields) == 0 {
 		t.Errorf("issue reported unchanged against a snapshot the resumed memory never saw")
 	}
@@ -440,7 +406,7 @@ func TestClaimTaskByRuntime_NoAdoptedSessionHasNoDeltas(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
-	for _, mode := range []string{"missing_session", "different_runtime", "force_fresh", "poisoned_rerun"} {
+	for _, mode := range []string{"missing_session", "different_runtime", "force_fresh", "poisoned_rerun", "legacy_rerun"} {
 		t.Run(mode, func(t *testing.T) {
 			ctx := context.Background()
 			runtimeID := createClaimReclaimRuntime(t, ctx, "no-adopted-session runtime "+mode)
@@ -471,7 +437,7 @@ func TestClaimTaskByRuntime_NoAdoptedSessionHasNoDeltas(t *testing.T) {
 			if mode == "force_fresh" || mode == "poisoned_rerun" {
 				current["force_fresh_session"] = true
 			}
-			if mode == "poisoned_rerun" {
+			if mode == "poisoned_rerun" || mode == "legacy_rerun" {
 				current["rerun_of_task_id"] = priorID
 			}
 			dbfx.Task(t, agentID, current)
@@ -579,8 +545,8 @@ func TestClaimTaskByRuntime_StartedRetryWithoutProviderMustNotWaiveReads(t *test
 		"created_at": testutil.Raw("now() - interval '30 minutes'"),
 	})
 
-	// The retry inherits the session and is claimed, which writes ITS snapshot —
-	// of the issue as it is NOW.
+	// The retry starts without inheriting the failed parent's session and is
+	// claimed, which writes its own snapshot of the issue as it is NOW.
 	child, err := testHandler.Queries.CreateRetryTask(ctx, db.CreateRetryTaskParams{ID: parseUUID(parentID)})
 	if err != nil {
 		t.Fatalf("create retry task: %v", err)
@@ -604,14 +570,14 @@ func TestClaimTaskByRuntime_StartedRetryWithoutProviderMustNotWaiveReads(t *test
 	}
 	// The fixture's whole point: a row that is failed, carries the inherited
 	// session, HAS started_at, and has a snapshot of the current issue.
-	if failed := recovered[0]; !failed.StartedAt.Valid || failed.SessionID.String != "session-before-edit" {
-		t.Fatalf("fixture must preserve the inherited session with started_at: %+v", failed)
+	if failed := recovered[0]; !failed.StartedAt.Valid || failed.SessionID.Valid {
+		t.Fatalf("retry must remain sessionless when it fails before provider launch: %+v", failed)
 	}
 
 	createCommentTriggeredClaimTask(t, ctx, agentID, runtimeID, issueID, nil)
 	got := claimCommentTask(t, runtimeID, "after-provider-gap").Task
-	if got.PriorSessionID != "session-before-edit" {
-		t.Fatalf("fixture did not resume the inherited session: %+v", got)
+	if got.PriorSessionID != "" {
+		t.Fatalf("follow-up after retry failure must not revive the old session: %+v", got)
 	}
 	if got.IssueStateDeltaKnown {
 		t.Errorf("a run that never reached the provider must not date the issue delta: known=%v changed=%v",

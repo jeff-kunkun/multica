@@ -73,7 +73,8 @@ func TestClaimTask_ColdThickSessionStartsFresh(t *testing.T) {
 			} else {
 				dbfx.Exec(t, `INSERT INTO task_usage (task_id, provider, model) VALUES ($1, 'claude', 'claude-opus-5')`, priorID)
 			}
-			dbfx.Exec(t, `INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority) VALUES ($1, $2, $3, 'queued', 0)`, agentID, runtimeID, issueID)
+			commentID := dbfx.Comment(t, issueID, "continue the prior issue session")
+			dbfx.Exec(t, `INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, status, priority) VALUES ($1, $2, $3, $4, 'queued', 0)`, agentID, runtimeID, issueID, commentID)
 
 			task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
 			if task.PriorWorkDir != "/tmp/gate-workdir" {

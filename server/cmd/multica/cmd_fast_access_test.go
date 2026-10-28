@@ -265,7 +265,7 @@ func TestFastAccessBudgetBoundaryAndTable(t *testing.T) {
 	dec.UseNumber()
 	dec.Decode(&snapshot)
 	var out bytes.Buffer
-	if err := printFastAccess(&out, snapshot); err != nil {
+	if err := printFastAccess(&out, snapshot, nil); err != nil {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"coverage_from:", "complete: true", "active_runs_complete: true", "checkpoint:", `"status":"deferred"`, `"phase":"waiting"`, "中文🙂", "9007199254740993"} {

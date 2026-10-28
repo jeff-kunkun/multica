@@ -260,7 +260,18 @@ func TestRepoCheckoutSummary(t *testing.T) {
 				"Kept the existing checkout of " + repoURL + " at /work/repo (branch: agent/test/old; 2 uncommitted files, 1 unpushed commit)",
 				"nothing was reset, cleaned, or switched",
 				"re-run with --fresh",
+				// DENE-2679 moved the delivery rule here from every run's brief.
+				// The branch a kept checkout reports is the head of a pull
+				// request; an earlier wording offered it as the target, and an
+				// agent passed it as --base (base == head). The sources that do
+				// settle the target are named, and the project's current
+				// starting point is not one of them on a resume.
+				"that branch is a pull request's head, never its base",
+				"the base of its existing pull request",
+				"not the project's current starting point",
+				"ask if neither settles it",
 			},
+			absent: []string{"which the checkout names"},
 		},
 		{
 			name:   "kept on the task branch",

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"testing"
@@ -106,6 +107,75 @@ func TestBackfillLocalDirectoryIdentityRefusesAnotherDaemonsRow(t *testing.T) {
 	}, testWorkspaceID, "daemon-this")
 	req = withURLParam(req, "resourceId", created.ID)
 	testutil.Call(t, testHandler.BackfillLocalDirectoryIdentity, req).Want(http.StatusForbidden)
+}
+
+// A daemon signed in with a personal token has no daemon id on its credential.
+// It names its task's runtime instead; before DENE-2667 PR 8 every such
+// daemon logged a 401 here on every task.
+func TestBackfillLocalDirectoryIdentityWithAPersonalToken(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	project := createTestProjectForResources(t, "DENE-2673 identity backfill with a personal token")
+	const daemonID = "daemon-backfill-pat"
+	created := createLocalDirectoryResourceFor(t, project.ID, map[string]any{
+		"local_path": "/tmp/pat-dir",
+		"daemon_id":  daemonID,
+	})
+	newRuntime := func(workspaceID, daemonID string) string {
+		var id string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at)
+			VALUES ($1, $2, 'PAT backfill runtime', 'local', 'claude', 'online', 'pat test', '{}'::jsonb, $3, now())
+			RETURNING id
+		`, workspaceID, daemonID, testUserID).Scan(&id); err != nil {
+			t.Fatalf("create runtime: %v", err)
+		}
+		t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, id) })
+		return id
+	}
+	runtimeID := newRuntime(testWorkspaceID, daemonID)
+
+	call := func(userID string, body map[string]any) *testutil.Response {
+		req := newRequestAs(userID, "POST", "/api/daemon/project-resources/"+created.ID+"/identity", body)
+		return testutil.Call(t, testHandler.BackfillLocalDirectoryIdentity, withURLParam(req, "resourceId", created.ID))
+	}
+	call(testUserID, map[string]any{"real_path": "/private/tmp/pat-dir"}).Want(http.StatusUnauthorized)
+
+	// Someone else's personal token cannot borrow the runtime.
+	_, otherUser, _ := runtimeVisibilityFixture(t)
+	call(otherUser, map[string]any{"real_path": "/private/tmp/pat-dir", "runtime_id": runtimeID}).Want(http.StatusNotFound)
+	// The caller's own runtime on another machine does not hold this folder.
+	call(testUserID, map[string]any{"real_path": "/private/tmp/pat-dir", "runtime_id": newRuntime(testWorkspaceID, daemonID+"-elsewhere")}).Want(http.StatusForbidden)
+	// Nor does the same machine registered in another workspace.
+	call(testUserID, map[string]any{"real_path": "/private/tmp/pat-dir", "runtime_id": newRuntime(createOtherTestWorkspace(t), daemonID)}).Want(http.StatusForbidden)
+	// A daemon token speaks for its own daemon; a runtime_id in the body
+	// cannot make it another one.
+	req := newDaemonTokenRequest("POST", "/api/daemon/project-resources/"+created.ID+"/identity", map[string]any{
+		"real_path": "/private/tmp/pat-dir", "runtime_id": runtimeID,
+	}, testWorkspaceID, "daemon-not-this-one")
+	testutil.Call(t, testHandler.BackfillLocalDirectoryIdentity, withURLParam(req, "resourceId", created.ID)).Want(http.StatusForbidden)
+	var before localDirectoryRef
+	if err := json.Unmarshal(getProjectResource(t, project.ID, created.ID).ResourceRef, &before); err != nil || before.RealPath != "" {
+		t.Fatalf("a refused call wrote the identity: %+v %v", before, err)
+	}
+
+	w := call(testUserID, map[string]any{"real_path": "/private/tmp/pat-dir", "is_git_repo": false, "runtime_id": runtimeID}).Want(http.StatusOK)
+	var resp struct {
+		Applied bool `json:"applied"`
+	}
+	w.JSON(&resp)
+	if !resp.Applied {
+		t.Fatal("expected the identity to be written")
+	}
+	var ref localDirectoryRef
+	if err := json.Unmarshal(getProjectResource(t, project.ID, created.ID).ResourceRef, &ref); err != nil {
+		t.Fatal(err)
+	}
+	if ref.RealPath != "/private/tmp/pat-dir" {
+		t.Errorf("real_path = %q", ref.RealPath)
+	}
 }
 
 func getProjectResource(t *testing.T, projectID, resourceID string) ProjectResourceResponse {

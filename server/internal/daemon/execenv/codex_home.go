@@ -46,10 +46,9 @@ var codexModelsCacheConfigFiles = []string{
 // CodexHomeOptions carries optional inputs for prepareCodexHomeWithOpts that
 // affect the generated per-task config.toml.
 type CodexHomeOptions struct {
-	// CodexVersion is the detected Codex CLI version (e.g. "0.121.0"). Empty
-	// means unknown; on macOS, unknown is treated as "probably broken" so the
-	// daemon falls back to danger-full-access for network access. See
-	// codex_sandbox.go for details.
+	// CodexVersion is the detected Codex CLI version (e.g. "0.121.0"), shown in
+	// the full-access warning. Empty means unknown. It does not change the
+	// sandbox policy; see codex_sandbox.go.
 	CodexVersion string
 	// GOOS overrides the target platform when deciding the sandbox policy.
 	// Empty means use runtime.GOOS. Primarily exists so tests can exercise
@@ -273,10 +272,9 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 		logger.Warn("execenv: codex-home plugin cache exposure failed", "error", err)
 	}
 
-	// Write a daemon-managed sandbox block into config.toml. On macOS we may
-	// need to fall back to danger-full-access because of openai/codex#10390,
-	// and on Windows the daemon defaults to danger-full-access unless the user
-	// opted into a native windows.sandbox; see codex_sandbox.go for the full
+	// Write a daemon-managed sandbox block into config.toml. Every platform
+	// defaults to danger-full-access; on Windows a user who opted into a native
+	// windows.sandbox keeps workspace-write. See codex_sandbox.go for the full
 	// rationale. On Windows, resolve the native-sandbox state across the copied
 	// config and the effective custom args so an explicit user opt-in is honored
 	// and an undecidable config fails closed instead of loosening.
@@ -285,7 +283,7 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 	if resolveGOOS(opts.GOOS) == "windows" {
 		winState = resolveWindowsSandboxState(configFile, configSyncErr, statSharedCodexConfig(sharedHome), opts.CodexCustomArgs, logger)
 	}
-	policy := codexSandboxPolicyForConfig(opts.GOOS, opts.CodexVersion, winState)
+	policy := codexSandboxPolicyForConfig(opts.GOOS, winState)
 	if err := ensureCodexSandboxConfig(configFile, policy, opts.CodexVersion, logger); err != nil {
 		// The managed block is the authoritative on-disk sandbox policy. If it
 		// can't be written, config.toml keeps whatever it already had — on a

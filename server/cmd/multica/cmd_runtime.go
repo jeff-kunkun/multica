@@ -44,9 +44,15 @@ var runtimeActivityCmd = &cobra.Command{
 
 var runtimeUpdateCmd = &cobra.Command{
 	Use:   "update <runtime-id>",
-	Short: "Initiate a CLI update on a runtime",
-	Args:  exactArgs(1),
-	RunE:  runRuntimeUpdate,
+	Short: "Initiate a CLI update on a runtime, or set its machine's default working directory",
+	Long: "Initiate a CLI update with --target-version.\n\n" +
+		"--default-dir sets the machine's default working directory: a run whose project binds no folder " +
+		"and names no repository starts there, with its instruction files kept in a separate directory beside it. " +
+		"Pass an empty value (\"\") to clear it. Only the machine owner may change it; " +
+		"`multica runtime list --output json` shows the path and whether the machine reported it exists.",
+	Example: "  multica runtime update <runtime-id> --default-dir /Users/me/work\n  multica runtime update <runtime-id> --target-version v1.2.3",
+	Args:    exactArgs(1),
+	RunE:    runRuntimeUpdate,
 }
 
 var runtimeRenameCmd = &cobra.Command{
@@ -94,7 +100,8 @@ func init() {
 	runtimeActivityCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// runtime update
-	runtimeUpdateCmd.Flags().String("target-version", "", "Target version to update to (required)")
+	runtimeUpdateCmd.Flags().String("target-version", "", "Target version to update to (required unless --default-dir is given)")
+	runtimeUpdateCmd.Flags().String("default-dir", "", "Set the machine's default working directory (absolute path; \"\" clears it)")
 	runtimeUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 	runtimeUpdateCmd.Flags().Bool("wait", false, "Wait for update to complete (poll until done)")
 
@@ -313,6 +320,14 @@ func runRuntimeUpdate(cmd *cobra.Command, args []string) error {
 	}
 
 	targetVersion, _ := cmd.Flags().GetString("target-version")
+	if cmd.Flags().Changed("default-dir") {
+		if err := setRuntimeDefaultDir(cmd, client, args[0]); err != nil {
+			return err
+		}
+		if targetVersion == "" {
+			return nil
+		}
+	}
 	if targetVersion == "" {
 		return fmt.Errorf("--target-version is required")
 	}
@@ -366,6 +381,30 @@ func runRuntimeUpdate(cmd *cobra.Command, args []string) error {
 			return nil
 		}
 	}
+}
+
+// setRuntimeDefaultDir saves --default-dir through the same PATCH the
+// settings page uses. The server stores it per machine and cannot see the
+// disk, so whether the path exists arrives later from the daemon.
+func setRuntimeDefaultDir(cmd *cobra.Command, client *cli.APIClient, runtimeID string) error {
+	dir, _ := cmd.Flags().GetString("default-dir")
+	dir = strings.TrimSpace(dir)
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+	var rt map[string]any
+	if err := client.PatchJSON(ctx, "/api/runtimes/"+runtimeID, map[string]any{"default_work_dir": dir}, &rt); err != nil {
+		return fmt.Errorf("set default working directory: %w", err)
+	}
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, rt)
+	}
+	if dir == "" {
+		fmt.Fprintln(os.Stderr, "Default working directory cleared.")
+	} else {
+		fmt.Fprintf(os.Stderr, "Default working directory set to %q; the machine reports whether it exists within a minute.\n", dir)
+	}
+	return nil
 }
 
 // serverConflictMessage pulls the server's own sentence out of a 409 body.

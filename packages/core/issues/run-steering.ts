@@ -63,6 +63,8 @@ export function agentRunState(tasks: readonly AgentTask[], agentId: string): Age
 
 /** How a message reaches one recipient. */
 export type RecipientAction =
+  /** Stop the running turn's current step, a command included, and continue the same session with this message. */
+  | "interrupt"
   /** Into the running turn, read at its next step. */
   | "steer"
   /** Normal trigger while the recipient is busy: handled once this turn ends. */
@@ -83,7 +85,9 @@ export interface RecipientActionOptions {
   canSteer: boolean;
   /** False while editing: an edit never stops a run. */
   canRestart: boolean;
-  /** Steer by default. The composer sets this for the running turn's own thread. */
+  /** Offer interrupting runs that can stop their step (office flag; files allowed, never while editing). */
+  canInterrupt?: boolean;
+  /** Steer by default, by interrupting where offered. The composer sets this for the running turn's own thread. */
   steerByDefault: boolean;
   /** Another agent, not a recipient, has an active run on the issue (and this is not an edit). */
   othersRunning?: boolean;
@@ -94,6 +98,7 @@ export function recipientActions(state: AgentRunState, opts: RecipientActionOpti
     return opts.othersRunning ? ["handoff", "parallel", "skip"] : ["start", "skip"];
   }
   const actions: RecipientAction[] = [];
+  if (state.kind === "running" && state.steerable && opts.canInterrupt && state.task.supplement_interrupt === true) actions.push("interrupt");
   if (state.kind === "running" && state.steerable && opts.canSteer) actions.push("steer");
   actions.push("after_run");
   if (opts.canRestart) actions.push("restart");
@@ -109,14 +114,17 @@ export function resolveRecipientAction(
 ): RecipientAction {
   const actions = recipientActions(state, opts);
   if (chosen && actions.includes(chosen)) return chosen;
+  if (opts.steerByDefault && actions.includes("interrupt")) return "interrupt";
   if (opts.steerByDefault && actions.includes("steer")) return "steer";
-  return actions.find((action) => action !== "steer")!;
+  return actions.find((action) => action !== "steer" && action !== "interrupt")!;
 }
 
 export interface RecipientRouting {
   suppressAgentIds: string[];
   /** The exact running turns chosen: a turn that ends first is never swapped for another. */
   steerTaskIds: string[];
+  /** Running turns that stop their current step and continue with this message. */
+  interruptTaskIds: string[];
   /** Turns to stop before the comment is posted, so it starts a fresh run. */
   restartTaskIds: string[];
   /** "handoff" when any recipient takes the issue over: the server stops every other agent's run. */
@@ -126,10 +134,11 @@ export interface RecipientRouting {
 export function recipientRouting(
   recipients: readonly { agentId: string; action: RecipientAction; state: AgentRunState }[],
 ): RecipientRouting {
-  const routing: RecipientRouting = { suppressAgentIds: [], steerTaskIds: [], restartTaskIds: [] };
+  const routing: RecipientRouting = { suppressAgentIds: [], steerTaskIds: [], interruptTaskIds: [], restartTaskIds: [] };
   for (const { agentId, action, state } of recipients) {
     if (action === "skip") routing.suppressAgentIds.push(agentId);
     else if (action === "steer" && state.kind === "running") routing.steerTaskIds.push(state.task.id);
+    else if (action === "interrupt" && state.kind === "running") routing.interruptTaskIds.push(state.task.id);
     else if (action === "restart" && state.kind !== "idle") routing.restartTaskIds.push(state.task.id);
     else if (action === "handoff") routing.mode = "handoff";
   }

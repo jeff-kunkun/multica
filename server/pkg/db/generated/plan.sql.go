@@ -40,7 +40,7 @@ const approvePlan = `-- name: ApprovePlan :one
 UPDATE plan
 SET status = 'approved', approved_by = $1, approved_at = now()
 WHERE id = $2 AND workspace_id = $3 AND status = 'proposed'
-RETURNING id, workspace_id, issue_id, version, author_type, author_id, goal, out_of_scope, steps, done_when, status, project_id, comment_id, approved_by, approved_at, created_at
+RETURNING id, workspace_id, issue_id, version, author_type, author_id, goal, out_of_scope, steps, done_when, status, project_id, comment_id, approved_by, approved_at, created_at, changes_requested_by, changes_requested_at, approval_comment_id
 `
 
 type ApprovePlanParams struct {
@@ -69,8 +69,36 @@ func (q *Queries) ApprovePlan(ctx context.Context, arg ApprovePlanParams) (Plan,
 		&i.ApprovedBy,
 		&i.ApprovedAt,
 		&i.CreatedAt,
+		&i.ChangesRequestedBy,
+		&i.ChangesRequestedAt,
+		&i.ApprovalCommentID,
 	)
 	return i, err
+}
+
+const createIssuePlanGate = `-- name: CreateIssuePlanGate :exec
+INSERT INTO issue_plan_gate (issue_id, workspace_id, requested_by_type, requested_by_id)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (issue_id) DO NOTHING
+`
+
+type CreateIssuePlanGateParams struct {
+	IssueID         pgtype.UUID `json:"issue_id"`
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	RequestedByType string      `json:"requested_by_type"`
+	RequestedByID   pgtype.UUID `json:"requested_by_id"`
+}
+
+// Plan first (migration 772): written in the issue's create transaction, so the
+// first run already sees the gate.
+func (q *Queries) CreateIssuePlanGate(ctx context.Context, arg CreateIssuePlanGateParams) error {
+	_, err := q.db.Exec(ctx, createIssuePlanGate,
+		arg.IssueID,
+		arg.WorkspaceID,
+		arg.RequestedByType,
+		arg.RequestedByID,
+	)
+	return err
 }
 
 const createPlan = `-- name: CreatePlan :one
@@ -82,7 +110,7 @@ SELECT $1, $2, COALESCE(MAX(version), 0) + 1, $3, $4,
        $5, $6, $7, $8, $9::uuid
 FROM plan
 WHERE issue_id = $2 AND workspace_id = $1
-RETURNING id, workspace_id, issue_id, version, author_type, author_id, goal, out_of_scope, steps, done_when, status, project_id, comment_id, approved_by, approved_at, created_at
+RETURNING id, workspace_id, issue_id, version, author_type, author_id, goal, out_of_scope, steps, done_when, status, project_id, comment_id, approved_by, approved_at, created_at, changes_requested_by, changes_requested_at, approval_comment_id
 `
 
 type CreatePlanParams struct {
@@ -127,7 +155,61 @@ func (q *Queries) CreatePlan(ctx context.Context, arg CreatePlanParams) (Plan, e
 		&i.ApprovedBy,
 		&i.ApprovedAt,
 		&i.CreatedAt,
+		&i.ChangesRequestedBy,
+		&i.ChangesRequestedAt,
+		&i.ApprovalCommentID,
 	)
+	return i, err
+}
+
+const deleteIssuePlanRows = `-- name: DeleteIssuePlanRows :exec
+WITH deleted_gate AS (
+    DELETE FROM issue_plan_gate
+    WHERE issue_plan_gate.issue_id = $1 AND issue_plan_gate.workspace_id = $2
+)
+DELETE FROM plan
+WHERE plan.issue_id = $1 AND plan.workspace_id = $2
+`
+
+type DeleteIssuePlanRowsParams struct {
+	IssueID     pgtype.UUID `json:"issue_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// No foreign keys: deleting an issue clears its gate and plan versions here.
+func (q *Queries) DeleteIssuePlanRows(ctx context.Context, arg DeleteIssuePlanRowsParams) error {
+	_, err := q.db.Exec(ctx, deleteIssuePlanRows, arg.IssueID, arg.WorkspaceID)
+	return err
+}
+
+const getIssuePlanGateState = `-- name: GetIssuePlanGateState :one
+SELECT
+    EXISTS (
+        SELECT 1 FROM issue_plan_gate g
+        WHERE g.issue_id = $1 AND g.workspace_id = $2
+    )::bool AS gated,
+    EXISTS (
+        SELECT 1 FROM plan p
+        WHERE p.issue_id = $1 AND p.workspace_id = $2 AND p.status = 'approved'
+    )::bool AS approved
+`
+
+type GetIssuePlanGateStateParams struct {
+	IssueID     pgtype.UUID `json:"issue_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+type GetIssuePlanGateStateRow struct {
+	Gated    bool `json:"gated"`
+	Approved bool `json:"approved"`
+}
+
+// gated without approved is the only state that refuses an agent's review,
+// done and PR-link moves.
+func (q *Queries) GetIssuePlanGateState(ctx context.Context, arg GetIssuePlanGateStateParams) (GetIssuePlanGateStateRow, error) {
+	row := q.db.QueryRow(ctx, getIssuePlanGateState, arg.IssueID, arg.WorkspaceID)
+	var i GetIssuePlanGateStateRow
+	err := row.Scan(&i.Gated, &i.Approved)
 	return i, err
 }
 
@@ -149,7 +231,7 @@ func (q *Queries) GetLatestPlanVersion(ctx context.Context, arg GetLatestPlanVer
 }
 
 const getPlanVersionForUpdate = `-- name: GetPlanVersionForUpdate :one
-SELECT id, workspace_id, issue_id, version, author_type, author_id, goal, out_of_scope, steps, done_when, status, project_id, comment_id, approved_by, approved_at, created_at FROM plan
+SELECT id, workspace_id, issue_id, version, author_type, author_id, goal, out_of_scope, steps, done_when, status, project_id, comment_id, approved_by, approved_at, created_at, changes_requested_by, changes_requested_at, approval_comment_id FROM plan
 WHERE issue_id = $1 AND workspace_id = $2 AND version = $3
 FOR UPDATE
 `
@@ -180,6 +262,9 @@ func (q *Queries) GetPlanVersionForUpdate(ctx context.Context, arg GetPlanVersio
 		&i.ApprovedBy,
 		&i.ApprovedAt,
 		&i.CreatedAt,
+		&i.ChangesRequestedBy,
+		&i.ChangesRequestedAt,
+		&i.ApprovalCommentID,
 	)
 	return i, err
 }
@@ -235,7 +320,7 @@ func (q *Queries) ListPlanApprovers(ctx context.Context, workspaceID pgtype.UUID
 }
 
 const listPlansByIssue = `-- name: ListPlansByIssue :many
-SELECT id, workspace_id, issue_id, version, author_type, author_id, goal, out_of_scope, steps, done_when, status, project_id, comment_id, approved_by, approved_at, created_at FROM plan
+SELECT id, workspace_id, issue_id, version, author_type, author_id, goal, out_of_scope, steps, done_when, status, project_id, comment_id, approved_by, approved_at, created_at, changes_requested_by, changes_requested_at, approval_comment_id FROM plan
 WHERE issue_id = $1 AND workspace_id = $2
 ORDER BY version DESC
 `
@@ -271,6 +356,9 @@ func (q *Queries) ListPlansByIssue(ctx context.Context, arg ListPlansByIssuePara
 			&i.ApprovedBy,
 			&i.ApprovedAt,
 			&i.CreatedAt,
+			&i.ChangesRequestedBy,
+			&i.ChangesRequestedAt,
+			&i.ApprovalCommentID,
 		); err != nil {
 			return nil, err
 		}
@@ -301,6 +389,30 @@ func (q *Queries) LockIssueForPlan(ctx context.Context, arg LockIssueForPlanPara
 	return id, err
 }
 
+const planApprovalPickedUp = `-- name: PlanApprovalPickedUp :one
+SELECT EXISTS (
+    SELECT 1 FROM agent_task_queue
+    WHERE issue_id = $1
+      AND (created_at >= $2::timestamptz
+           OR completed_at >= $2::timestamptz
+           OR status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred'))
+)::bool AS picked_up
+`
+
+type PlanApprovalPickedUpParams struct {
+	IssueID pgtype.UUID        `json:"issue_id"`
+	Since   pgtype.Timestamptz `json:"since"`
+}
+
+// Whether any run on the issue is active, or started or finished since the
+// approval: then the approval reply reached the agent.
+func (q *Queries) PlanApprovalPickedUp(ctx context.Context, arg PlanApprovalPickedUpParams) (bool, error) {
+	row := q.db.QueryRow(ctx, planApprovalPickedUp, arg.IssueID, arg.Since)
+	var picked_up bool
+	err := row.Scan(&picked_up)
+	return picked_up, err
+}
+
 const removePlanApprover = `-- name: RemovePlanApprover :execrows
 DELETE FROM plan_approver
 WHERE workspace_id = $1 AND user_id = $2
@@ -317,6 +429,62 @@ func (q *Queries) RemovePlanApprover(ctx context.Context, arg RemovePlanApprover
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const requestPlanChanges = `-- name: RequestPlanChanges :one
+UPDATE plan
+SET changes_requested_by = $1, changes_requested_at = now()
+WHERE id = $2 AND workspace_id = $3 AND status = 'proposed'
+RETURNING id, workspace_id, issue_id, version, author_type, author_id, goal, out_of_scope, steps, done_when, status, project_id, comment_id, approved_by, approved_at, created_at, changes_requested_by, changes_requested_at, approval_comment_id
+`
+
+type RequestPlanChangesParams struct {
+	RequestedBy pgtype.UUID `json:"requested_by"`
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) RequestPlanChanges(ctx context.Context, arg RequestPlanChangesParams) (Plan, error) {
+	row := q.db.QueryRow(ctx, requestPlanChanges, arg.RequestedBy, arg.ID, arg.WorkspaceID)
+	var i Plan
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.IssueID,
+		&i.Version,
+		&i.AuthorType,
+		&i.AuthorID,
+		&i.Goal,
+		&i.OutOfScope,
+		&i.Steps,
+		&i.DoneWhen,
+		&i.Status,
+		&i.ProjectID,
+		&i.CommentID,
+		&i.ApprovedBy,
+		&i.ApprovedAt,
+		&i.CreatedAt,
+		&i.ChangesRequestedBy,
+		&i.ChangesRequestedAt,
+		&i.ApprovalCommentID,
+	)
+	return i, err
+}
+
+const setPlanApprovalComment = `-- name: SetPlanApprovalComment :exec
+UPDATE plan SET approval_comment_id = $1
+WHERE id = $2 AND workspace_id = $3
+`
+
+type SetPlanApprovalCommentParams struct {
+	ApprovalCommentID pgtype.UUID `json:"approval_comment_id"`
+	ID                pgtype.UUID `json:"id"`
+	WorkspaceID       pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) SetPlanApprovalComment(ctx context.Context, arg SetPlanApprovalCommentParams) error {
+	_, err := q.db.Exec(ctx, setPlanApprovalComment, arg.ApprovalCommentID, arg.ID, arg.WorkspaceID)
+	return err
 }
 
 const setPlanComment = `-- name: SetPlanComment :exec
@@ -338,7 +506,7 @@ func (q *Queries) SetPlanComment(ctx context.Context, arg SetPlanCommentParams) 
 const setPlanSteps = `-- name: SetPlanSteps :one
 UPDATE plan SET steps = $1
 WHERE id = $2 AND workspace_id = $3
-RETURNING id, workspace_id, issue_id, version, author_type, author_id, goal, out_of_scope, steps, done_when, status, project_id, comment_id, approved_by, approved_at, created_at
+RETURNING id, workspace_id, issue_id, version, author_type, author_id, goal, out_of_scope, steps, done_when, status, project_id, comment_id, approved_by, approved_at, created_at, changes_requested_by, changes_requested_at, approval_comment_id
 `
 
 type SetPlanStepsParams struct {
@@ -367,6 +535,9 @@ func (q *Queries) SetPlanSteps(ctx context.Context, arg SetPlanStepsParams) (Pla
 		&i.ApprovedBy,
 		&i.ApprovedAt,
 		&i.CreatedAt,
+		&i.ChangesRequestedBy,
+		&i.ChangesRequestedAt,
+		&i.ApprovalCommentID,
 	)
 	return i, err
 }

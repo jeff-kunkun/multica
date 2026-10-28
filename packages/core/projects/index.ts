@@ -36,6 +36,14 @@ export {
 } from "./source-rule";
 export type { TaskCodeSource } from "./source-rule";
 export {
+  issueSharedFolders,
+  normalizeFolderPath,
+  runFolder,
+  runsInFolder,
+  runsInProjectFolder,
+} from "./folder-runs";
+export type { DaemonOfRuntime, RunFolder } from "./folder-runs";
+export {
   provisionedDirectoryShouldBeRemoved,
   sanitizeProjectDirectoryName,
 } from "./directory-plan";

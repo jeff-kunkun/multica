@@ -363,3 +363,34 @@ func TestBuildResourceRefFromFlagsLocalDirectoryPreservesIdentityFields(t *testi
 		}
 	}
 }
+
+// A new path that this machine cannot see still has to drop the old folder's
+// identity. Omitting the keys is not enough: the server fills an omitted
+// identity field from the stored row (DENE-2667 PR 12).
+func TestBuildResourceRefFromFlagsLocalDirectoryNewPathClearsIdentity(t *testing.T) {
+	cmd := newProjectResourceUpdateTestCmd()
+	_ = cmd.Flags().Set("local-path", "/nonexistent-dene-2677/elsewhere")
+	existing := map[string]any{
+		"local_path":  "/Users/foo/work/a",
+		"daemon_id":   "d1",
+		"real_path":   "/private/tmp/a",
+		"repo_key":    "github.com/acme/a",
+		"is_git_repo": true,
+	}
+	ref, has, err := buildResourceRefFromFlags(cmd, "local_directory", existing)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !has {
+		t.Fatal("expected has=true")
+	}
+	if ref["local_path"] != "/nonexistent-dene-2677/elsewhere" {
+		t.Errorf("local_path = %v", ref["local_path"])
+	}
+	for _, key := range []string{"real_path", "repo_key", "is_git_repo"} {
+		value, present := ref[key]
+		if !present || value != nil {
+			t.Errorf("%s = %v (present=%v), want an explicit null", key, value, present)
+		}
+	}
+}

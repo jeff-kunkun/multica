@@ -267,6 +267,11 @@ func signalProcessGroup(cmd *exec.Cmd, _ syscall.Signal) {
 	_ = cmd.Process.Kill()
 }
 
+// killProcessGroupUntilGone is a no-op on Windows: signalProcessGroup
+// terminates the Job Object as a whole rather than signalling a group of pids,
+// so there is no member for a repeat to catch.
+func killProcessGroupUntilGone(cmd *exec.Cmd, timeout time.Duration) {}
+
 // waitProcessGroupGone reports whether every process in the owned tree is gone,
 // polling the job's accounting information until the timeout. Without an owned
 // tree there is nothing to observe, so it reports false — callers treat that as

@@ -27,6 +27,21 @@ import (
 const (
 	watchdogCommentMarker = "<!-- office-issue-watchdog -->"
 	defaultHeartbeatFile  = "/var/lib/multica/issue-watchdog/last-run"
+
+	// RunningSilentEventType is the project-group reminder for an assignee
+	// whose run is alive but has not reported in the issue. The issue detail
+	// endpoint reads the same value back from the attempt log.
+	RunningSilentEventType = "employee_running_silent"
+	projectGroupTarget     = "project_group"
+
+	// liveCommandFreshness is how recent the run's live report must be for a
+	// reminder to name its command (DENE-2667 PR 4). The daemon reports every
+	// 15 seconds, so an older report means it stopped reporting and the
+	// command may have finished long ago.
+	liveCommandFreshness = 2 * time.Minute
+	// reasonCommandMaxRunes keeps the reminder line readable in a group chat;
+	// current_command carries the command as reported.
+	reasonCommandMaxRunes = 120
 )
 
 type Config struct {
@@ -40,6 +55,31 @@ type Config struct {
 	ManagerWait      time.Duration
 	MaxEmployeeRound int
 	HeartbeatFile    string
+	// RunAware stops issue-comment wakes while the assignee's run is alive;
+	// a run that stays silent in the issue for SilentInterval gets one
+	// project-group reminder per interval instead.
+	RunAware       bool
+	SilentInterval time.Duration
+	// Review wakes, each off by default. HoldWake wakes the developer when a
+	// hold does not @mention them, at once and again after HoldWait with no
+	// run. ReviewWake wakes the reviewer once when a review request has no
+	// verdict after ReviewWait. StuckWake routes an in_progress issue with no
+	// run for NoRunWait to whoever it waits on. ChildWake wakes the parent's
+	// owner when a stalled sub-issue has nobody looking after it.
+	HoldWake   bool
+	HoldWait   time.Duration
+	ReviewWake bool
+	ReviewWait time.Duration
+	StuckWake  bool
+	NoRunWait  time.Duration
+	ChildWake  bool
+	ChildWait  time.Duration
+	// RoundStop, off by default: once RoundLimit review rounds in a row end in
+	// hold, the watchdog stops waking anyone on the issue and lays the case out
+	// as options for Kun, until the developer asks for another review or a
+	// pass lands.
+	RoundStop  bool
+	RoundLimit int
 }
 
 func ConfigFromEnv() (Config, error) {
@@ -78,11 +118,68 @@ func ConfigFromEnv() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	silentInterval, err := parseDuration("MULTICA_ISSUE_WATCHDOG_SILENT_INTERVAL", 20*time.Minute)
+	if err != nil {
+		return Config{}, err
+	}
+	parseBool := func(name string) (bool, error) {
+		raw := strings.TrimSpace(os.Getenv(name))
+		if raw == "" {
+			return false, nil
+		}
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			return false, fmt.Errorf("%s must be true or false", name)
+		}
+		return value, nil
+	}
+	var holdWake, reviewWake, stuckWake, childWake, roundStop bool
+	for name, dst := range map[string]*bool{
+		"MULTICA_ISSUE_WATCHDOG_HOLD_WAKE":   &holdWake,
+		"MULTICA_ISSUE_WATCHDOG_REVIEW_WAKE": &reviewWake,
+		"MULTICA_ISSUE_WATCHDOG_STUCK_WAKE":  &stuckWake,
+		"MULTICA_ISSUE_WATCHDOG_CHILD_WAKE":  &childWake,
+		"MULTICA_ISSUE_WATCHDOG_ROUND_STOP":  &roundStop,
+	} {
+		if *dst, err = parseBool(name); err != nil {
+			return Config{}, err
+		}
+	}
+	holdWait, err := parseDuration("MULTICA_ISSUE_WATCHDOG_HOLD_WAIT", 10*time.Minute)
+	if err != nil {
+		return Config{}, err
+	}
+	reviewWait, err := parseDuration("MULTICA_ISSUE_WATCHDOG_REVIEW_WAIT", 20*time.Minute)
+	if err != nil {
+		return Config{}, err
+	}
+	noRunWait, err := parseDuration("MULTICA_ISSUE_WATCHDOG_NO_RUN_WAIT", 15*time.Minute)
+	if err != nil {
+		return Config{}, err
+	}
+	childWait, err := parseDuration("MULTICA_ISSUE_WATCHDOG_CHILD_WAIT", 30*time.Minute)
+	if err != nil {
+		return Config{}, err
+	}
 	rounds := 2
 	if raw := strings.TrimSpace(os.Getenv("MULTICA_ISSUE_WATCHDOG_EMPLOYEE_ROUNDS")); raw != "" {
 		rounds, err = strconv.Atoi(raw)
 		if err != nil || rounds <= 0 {
 			return Config{}, errors.New("MULTICA_ISSUE_WATCHDOG_EMPLOYEE_ROUNDS must be a positive integer")
+		}
+	}
+	roundLimit := 2
+	if raw := strings.TrimSpace(os.Getenv("MULTICA_ISSUE_WATCHDOG_ROUND_LIMIT")); raw != "" {
+		roundLimit, err = strconv.Atoi(raw)
+		if err != nil || roundLimit <= 0 {
+			return Config{}, errors.New("MULTICA_ISSUE_WATCHDOG_ROUND_LIMIT must be a positive integer")
+		}
+	}
+	runAware := false
+	if raw := strings.TrimSpace(os.Getenv("MULTICA_ISSUE_WATCHDOG_RUN_AWARE")); raw != "" {
+		runAware, err = strconv.ParseBool(raw)
+		if err != nil {
+			return Config{}, errors.New("MULTICA_ISSUE_WATCHDOG_RUN_AWARE must be true or false")
 		}
 	}
 	cfg := Config{
@@ -96,6 +193,18 @@ func ConfigFromEnv() (Config, error) {
 		ManagerWait:      managerWait,
 		MaxEmployeeRound: rounds,
 		HeartbeatFile:    strings.TrimSpace(os.Getenv("MULTICA_ISSUE_WATCHDOG_HEARTBEAT_FILE")),
+		RunAware:         runAware,
+		SilentInterval:   silentInterval,
+		HoldWake:         holdWake,
+		HoldWait:         holdWait,
+		ReviewWake:       reviewWake,
+		ReviewWait:       reviewWait,
+		StuckWake:        stuckWake,
+		NoRunWait:        noRunWait,
+		ChildWake:        childWake,
+		ChildWait:        childWait,
+		RoundStop:        roundStop,
+		RoundLimit:       roundLimit,
 	}
 	if cfg.HeartbeatFile == "" {
 		cfg.HeartbeatFile = defaultHeartbeatFile
@@ -111,7 +220,8 @@ func ConfigFromEnv() (Config, error) {
 		if err != nil || u.Host == "" || (u.Scheme != "https" && !(u.Scheme == "http" && isLoopbackHost(u.Hostname()))) {
 			return Config{}, errors.New("issue watchdog webhook must use HTTPS (HTTP is allowed only for loopback test receivers)")
 		}
-		if cfg.TickInterval <= 0 || cfg.TodoStartDelay <= 0 || cfg.IdleInterval <= 0 || cfg.ManagerWait <= 0 || cfg.MaxEmployeeRound < 1 {
+		if cfg.TickInterval <= 0 || cfg.TodoStartDelay <= 0 || cfg.IdleInterval <= 0 || cfg.ManagerWait <= 0 ||
+			cfg.MaxEmployeeRound < 1 || cfg.SilentInterval <= 0 {
 			return Config{}, errors.New("issue watchdog thresholds must be positive")
 		}
 	}
@@ -128,6 +238,8 @@ type Watchdog struct {
 	pool   *pgxpool.Pool
 	cfg    Config
 	nudge  NudgeFunc
+	wake   WakeFunc
+	note   NoteFunc
 	client *http.Client
 	now    func() time.Time
 }
@@ -149,6 +261,8 @@ func New(pool *pgxpool.Pool, cfg Config, nudge NudgeFunc) *Watchdog {
 
 type Issue struct {
 	ID              string
+	ParentID        string
+	Reviewer        actor
 	WorkspaceID     string
 	Number          int32
 	Identifier      string
@@ -179,6 +293,19 @@ type webhookEvent struct {
 	WakeTarget  string    `json:"wake_target"`
 	Reason      string    `json:"reason"`
 	OccurredAt  time.Time `json:"occurred_at"`
+	// Set only on project-group reminders for a live run.
+	TaskID        string `json:"task_id,omitempty"`
+	SilentMinutes int    `json:"silent_minutes,omitempty"`
+	// CurrentCommand is the command the run has in flight, from its live
+	// report; omitted when it runs none or reports no live status.
+	CurrentCommand string `json:"current_command,omitempty"`
+}
+
+// activeRun is the assignee's live run on an issue and the last time the
+// assignee reported in the issue during or after its start.
+type activeRun struct {
+	TaskID       string
+	LastReportAt time.Time
 }
 
 type issueState struct {
@@ -248,6 +375,9 @@ func (w *Watchdog) HandleEvent(e events.Event) {
 		if err != nil {
 			return
 		}
+		if w.cfg.HoldWake || w.cfg.RoundStop {
+			w.onHold(ctx, issue, commentID, actor{Type: authorType, ID: authorID}, content)
+		}
 		if authorType == "member" && isManagerReply(content, issue.ManagerName) {
 			w.resolveManagerWaitsForReply(ctx, issue.ID, content)
 		}
@@ -313,7 +443,8 @@ SELECT i.id::text, i.workspace_id::text, i.number, w.issue_prefix || '-' || i.nu
                    WHERE e.workspace_id = i.workspace_id AND e.issue_id = i.id
                      AND e.event_type = 'issue.status_changed'), i.created_at)
        ) AS progress_at,
-       i.revision
+       i.revision, COALESCE(i.parent_issue_id::text, ''),
+       COALESCE(i.reviewer_type, ''), COALESCE(i.reviewer_id::text, '')
 FROM issue i
 JOIN workspace w ON w.id = i.workspace_id
 LEFT JOIN project p ON p.id = i.project_id AND p.workspace_id = i.workspace_id
@@ -332,7 +463,8 @@ WHERE i.workspace_id = $1::uuid AND i.id = $2::uuid`,
 		workspaceID, issueID, watchdogCommentMarker,
 	).Scan(&out.ID, &out.WorkspaceID, &out.Number, &out.Identifier, &out.Title, &out.Status,
 		&out.AssigneeType, &out.AssigneeID, &out.EmployeeName, &out.ManagerName, &out.ProjectName,
-		&out.CreatedAt, &out.UpdatedAt, &firstExecutedAt, &out.ProgressAt, &out.IssueRevision)
+		&out.CreatedAt, &out.UpdatedAt, &firstExecutedAt, &out.ProgressAt, &out.IssueRevision,
+		&out.ParentID, &out.Reviewer.Type, &out.Reviewer.ID)
 	if err != nil {
 		return Issue{}, err
 	}
@@ -403,6 +535,15 @@ func (w *Watchdog) checkIssue(ctx context.Context, issue Issue, now time.Time) e
 	if err != nil {
 		return err
 	}
+	if w.cfg.ChildWake && issue.ParentID != "" {
+		if err := w.checkChild(ctx, issue, now); err != nil {
+			slog.WarnContext(ctx, "issue watchdog sub-issue check failed", "issue_id", issue.ID)
+		}
+	}
+	handled, stuckDue, err := w.checkReviewWakes(ctx, issue, now)
+	if err != nil || handled {
+		return err
+	}
 	if issue.Status != "todo" && issue.Status != "in_progress" {
 		return nil
 	}
@@ -411,6 +552,15 @@ func (w *Watchdog) checkIssue(ctx context.Context, issue Issue, now time.Time) e
 	}
 	if issue.Status == "todo" && issue.FirstExecutedAt != nil {
 		return nil
+	}
+	if w.cfg.RunAware && issue.AssigneeType == "agent" {
+		run, running, err := w.loadActiveRun(ctx, issue)
+		if err != nil {
+			return err
+		}
+		if running {
+			return w.remindSilentRun(ctx, issue, run, now)
+		}
 	}
 	if state.EmployeeRounds >= w.cfg.MaxEmployeeRound {
 		if !state.ManagerEscalated {
@@ -433,6 +583,9 @@ WHERE issue_id = $1::uuid`, issue.ID, now)
 		dueAt = state.AssignedAt.Add(w.cfg.TodoStartDelay)
 	} else if state.EmployeeRounds > 0 && state.LastNudgeAt != nil {
 		dueAt = state.LastNudgeAt.Add(w.cfg.IdleInterval)
+	}
+	if stuckDue != nil && state.EmployeeRounds == 0 && stuckDue.Before(dueAt) {
+		dueAt = *stuckDue
 	}
 	if now.Before(dueAt) {
 		return nil
@@ -511,6 +664,142 @@ func employeeNudgeReason(issue Issue, round int, age time.Duration) string {
 		return fmt.Sprintf("已派给你，但 %d 分钟仍未开工（第 %d 轮提醒）。请开始处理并在单子里写进展。", int(age.Minutes()), round)
 	}
 	return fmt.Sprintf("这张单已 %d 分钟没有有效进展（第 %d 轮提醒）。请继续处理并在单子里更新进展或状态。", int(age.Minutes()), round)
+}
+
+// loadActiveRun finds the assignee agent's running task on the issue. A
+// report is the assignee's own substantive comment, its latest non-empty line
+// in the progress history (the issue's summary is overwritten by whoever
+// writes next, so it can hide the assignee's report), or any status change;
+// the run's start is the floor, so a fresh run is never silent.
+func (w *Watchdog) loadActiveRun(ctx context.Context, issue Issue) (activeRun, bool, error) {
+	var run activeRun
+	err := w.pool.QueryRow(ctx, `
+SELECT t.id::text,
+       GREATEST(
+         COALESCE(t.started_at, t.dispatched_at, t.created_at),
+         COALESCE((SELECT max(c.created_at)
+                   FROM comment c
+                   WHERE c.workspace_id = i.workspace_id AND c.issue_id = i.id
+                     AND c.author_type = 'agent' AND c.author_id = t.agent_id AND c.type = 'comment'
+                     AND regexp_replace(lower(trim(c.content)),
+                         '[[:space:][:punct:]，。！？、；：…]+', '', 'g') <> '收到'), '-infinity'::timestamptz),
+         COALESCE((SELECT max(p.created_at)
+                   FROM issue_progress p
+                   WHERE p.workspace_id = i.workspace_id AND p.issue_id = i.id
+                     AND p.author_type = 'agent' AND p.author_id = t.agent_id
+                     AND btrim(p.text) <> ''), '-infinity'::timestamptz),
+         COALESCE((SELECT max(e.occurred_at)
+                   FROM office_event e
+                   WHERE e.workspace_id = i.workspace_id AND e.issue_id = i.id
+                     AND e.event_type = 'issue.status_changed'), '-infinity'::timestamptz)
+       )
+FROM agent_task_queue t
+JOIN issue i ON i.id = t.issue_id
+WHERE i.workspace_id = $1::uuid AND t.issue_id = $2::uuid
+  AND t.agent_id = $3::uuid AND t.status = 'running'
+ORDER BY t.started_at DESC NULLS LAST, t.id DESC
+LIMIT 1`, issue.WorkspaceID, issue.ID, issue.AssigneeID).Scan(&run.TaskID, &run.LastReportAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return activeRun{}, false, nil
+	}
+	if err != nil {
+		return activeRun{}, false, err
+	}
+	return run, true, nil
+}
+
+// remindSilentRun never comments on the issue: a comment would be steered
+// into the live run and interrupt it. A run silent for SilentInterval gets a
+// project-group reminder, and one run gets at most one reminder per interval
+// whether or not it reported in between. The key numbers the run's reminders,
+// so two scanners racing on the same run claim the same key.
+func (w *Watchdog) remindSilentRun(ctx context.Context, issue Issue, run activeRun, now time.Time) error {
+	silentFor := now.Sub(run.LastReportAt)
+	if silentFor < w.cfg.SilentInterval {
+		return nil
+	}
+	prefix := "running-silent:" + run.TaskID + ":"
+	var (
+		sent   int
+		lastAt pgtype.Timestamptz
+	)
+	if err := w.pool.QueryRow(ctx, `
+SELECT count(*), max(attempted_at)
+FROM office_issue_watchdog_attempt
+WHERE workspace_id = $1::uuid AND issue_id = $2::uuid
+  AND event_type = $3 AND starts_with(event_key, $4)`,
+		issue.WorkspaceID, issue.ID, RunningSilentEventType, prefix).Scan(&sent, &lastAt); err != nil {
+		return err
+	}
+	if lastAt.Valid && now.Sub(lastAt.Time) < w.cfg.SilentInterval {
+		return nil
+	}
+	// attempted_at is the scan's clock, not the database's, because the
+	// interval guard above compares it against that clock.
+	key := prefix + strconv.Itoa(sent+1)
+	var id int64
+	err := w.pool.QueryRow(ctx, `
+INSERT INTO office_issue_watchdog_attempt
+    (workspace_id, issue_id, event_key, event_type, target, manager_name, attempted_at)
+VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7)
+ON CONFLICT (workspace_id, issue_id, event_key) DO NOTHING
+RETURNING id`, issue.WorkspaceID, issue.ID, key,
+		RunningSilentEventType, projectGroupTarget, issue.ManagerName, now).Scan(&id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	minutes := int(silentFor.Minutes())
+	reason := fmt.Sprintf("负责员工正在跑，但已 %d 分钟没在单子里汇报", minutes)
+	command := w.runCommand(ctx, run.TaskID, now)
+	if command != "" {
+		reason += "；当前命令：" + clipRunes(command, reasonCommandMaxRunes)
+	}
+	err = w.post(ctx, webhookEvent{
+		EventID: key, EventType: RunningSilentEventType, IssueID: issue.ID,
+		IssueNumber: issue.Identifier, Title: issue.Title, Status: issue.Status,
+		Employee: issue.EmployeeName, Manager: issue.ManagerName, ProjectName: issue.ProjectName,
+		WakeTarget: projectGroupTarget,
+		Reason:     reason,
+		OccurredAt: now.UTC(), TaskID: run.TaskID, SilentMinutes: minutes,
+		CurrentCommand: command,
+	})
+	w.finishAttempt(ctx, id, err == nil)
+	if err != nil {
+		return errors.New("issue watchdog project-group reminder failed")
+	}
+	return nil
+}
+
+// runCommand returns the command the run's daemon last reported in flight,
+// already redacted by the daemon and the server. It is empty when the run
+// runs no command, its daemon reports no live status, or the report is
+// older than liveCommandFreshness at the scan's clock. A failed read only
+// leaves the command out of the reminder.
+func (w *Watchdog) runCommand(ctx context.Context, taskID string, now time.Time) string {
+	var command string
+	err := w.pool.QueryRow(ctx, `
+SELECT command FROM task_live_status
+WHERE task_id = $1::uuid AND tools_in_flight > 0 AND reported_at >= $2::timestamptz`,
+		taskID, now.Add(-liveCommandFreshness)).Scan(&command)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.Debug("issue watchdog: read run command failed", "task_id", taskID, "error", err)
+		}
+		return ""
+	}
+	return command
+}
+
+// clipRunes keeps at most n runes of s, marking a cut with an ellipsis.
+func clipRunes(s string, n int) string {
+	runes := []rune(s)
+	if len(runes) <= n {
+		return s
+	}
+	return string(runes[:n]) + "…"
 }
 
 func (w *Watchdog) loadOrUpdateState(ctx context.Context, issue Issue, now time.Time) (issueState, error) {

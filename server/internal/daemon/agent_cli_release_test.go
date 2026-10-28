@@ -77,7 +77,7 @@ func TestPlanAgentCLIUpgradeKeepsTheOtherCopy(t *testing.T) {
 	if !ok {
 		t.Fatal("claude release missing")
 	}
-	steps, why := planAgentCLIUpgrade(spec, "/usr/local/bin/claude")
+	steps, why := planAgentCLIUpgrade(spec, "/usr/local/bin/claude", "")
 	if why != "" {
 		t.Fatal(why)
 	}
@@ -100,7 +100,7 @@ func TestPlanAgentCLIUpgradeAddsNPMForThatPrefix(t *testing.T) {
 		t.Fatal(err)
 	}
 	spec, _ := agentCLIReleaseFor("codex")
-	steps, why := planAgentCLIUpgrade(spec, bin)
+	steps, why := planAgentCLIUpgrade(spec, bin, "")
 	if why != "" {
 		t.Fatal(why)
 	}
@@ -152,7 +152,7 @@ func TestPlanAgentCLIUpgradeCodexStandaloneUsesNativeUpdate(t *testing.T) {
 		t.Skipf("symlink: %v", err)
 	}
 	spec, _ := agentCLIReleaseFor("codex")
-	steps, why := planAgentCLIUpgrade(spec, launcher)
+	steps, why := planAgentCLIUpgrade(spec, launcher, "")
 	if why != "" {
 		t.Fatal(why)
 	}
@@ -167,8 +167,61 @@ func TestPlanAgentCLIUpgradeCodexStandaloneUsesNativeUpdate(t *testing.T) {
 func TestPlanAgentCLIUpgradeCodexElsewhereHasNoUpdater(t *testing.T) {
 	t.Parallel()
 	spec, _ := agentCLIReleaseFor("codex")
-	steps, why := planAgentCLIUpgrade(spec, "/opt/homebrew/bin/codex")
+	steps, why := planAgentCLIUpgrade(spec, "/opt/homebrew/bin/codex", "")
 	if len(steps) != 0 || why == "" {
 		t.Fatalf("an unknown codex copy must not be upgraded; plan = %#v, why = %q", steps, why)
+	}
+}
+
+func TestCLIVersionAllowedHonorsCeiling(t *testing.T) {
+	t.Parallel()
+	opencode, ok := agentCLIReleaseFor("opencode")
+	if !ok {
+		t.Fatal("opencode release missing")
+	}
+	claude, _ := agentCLIReleaseFor("claude")
+	cases := []struct {
+		spec    agentCLIRelease
+		version string
+		want    bool
+	}{
+		{opencode, "1.19.4", true},
+		{opencode, "v1.99.99", true},
+		{opencode, "2.0.0", false},
+		{opencode, "2.1.0", false},
+		{opencode, "dev", false},
+		{claude, "9.0.0", true},
+	}
+	for _, tc := range cases {
+		if got := cliVersionAllowed(tc.spec, tc.version); got != tc.want {
+			t.Errorf("cliVersionAllowed(%s, %q) = %v, want %v", tc.spec.Provider, tc.version, got, tc.want)
+		}
+	}
+}
+
+func TestPlanAgentCLIUpgradePinsCeilingedTarget(t *testing.T) {
+	t.Parallel()
+	spec, ok := agentCLIReleaseFor("opencode")
+	if !ok {
+		t.Fatal("opencode release missing")
+	}
+	root := t.TempDir()
+	bin := filepath.Join(root, "lib", "node_modules", "opencode-ai", "bin", "opencode")
+	steps, why := planAgentCLIUpgrade(spec, bin, "v1.19.4")
+	if why != "" || len(steps) != 2 {
+		t.Fatalf("steps = %#v, why = %q", steps, why)
+	}
+	native := steps[0].Argv
+	if steps[0].Name != "native" || len(native) != 3 || native[1] != "upgrade" || native[2] != "1.19.4" {
+		t.Fatalf("native = %#v, want `opencode upgrade 1.19.4`", native)
+	}
+	if npm := steps[1].Argv; steps[1].Name != "npm" || npm[3] != "opencode-ai@1.19.4" {
+		t.Fatalf("npm = %#v, want opencode-ai@1.19.4", npm)
+	}
+
+	claude, _ := agentCLIReleaseFor("claude")
+	steps, _ = planAgentCLIUpgrade(claude, "/usr/local/bin/claude", "2.1.9")
+	if len(steps) != 1 || len(steps[0].Argv) != 2 {
+		t.Fatalf("claude without a ceiling must not pin: %#v", steps)
 	}
 }

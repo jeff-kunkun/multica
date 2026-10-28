@@ -69,6 +69,7 @@ func TestConfigIsDisabledByDefaultAndRejectsInvalidThresholds(t *testing.T) {
 		"MULTICA_ISSUE_WATCHDOG_TICK", "MULTICA_ISSUE_WATCHDOG_TODO_DELAY",
 		"MULTICA_ISSUE_WATCHDOG_IDLE_INTERVAL", "MULTICA_ISSUE_WATCHDOG_MANAGER_WAIT",
 		"MULTICA_ISSUE_WATCHDOG_EMPLOYEE_ROUNDS", "MULTICA_ISSUE_WATCHDOG_HEARTBEAT_FILE",
+		"MULTICA_ISSUE_WATCHDOG_RUN_AWARE", "MULTICA_ISSUE_WATCHDOG_SILENT_INTERVAL",
 	} {
 		t.Setenv(name, "")
 	}
@@ -78,6 +79,12 @@ func TestConfigIsDisabledByDefaultAndRejectsInvalidThresholds(t *testing.T) {
 	}
 	if cfg.Enabled {
 		t.Fatal("watchdog must default to disabled")
+	}
+	if cfg.RunAware {
+		t.Fatal("run-aware reminders must default to off so a deploy alone keeps the old behavior")
+	}
+	if cfg.SilentInterval != 20*time.Minute {
+		t.Fatalf("silent-run reminder interval = %s, want 20m", cfg.SilentInterval)
 	}
 	if cfg.TickInterval != time.Minute {
 		t.Fatalf("watchdog scan interval = %s, want 1m", cfg.TickInterval)
@@ -99,6 +106,26 @@ func TestConfigIsDisabledByDefaultAndRejectsInvalidThresholds(t *testing.T) {
 	t.Setenv("MULTICA_ISSUE_WATCHDOG_IDLE_INTERVAL", "not-a-duration")
 	if _, err := ConfigFromEnv(); err == nil {
 		t.Fatal("invalid threshold was accepted")
+	}
+	t.Setenv("MULTICA_ISSUE_WATCHDOG_IDLE_INTERVAL", "")
+
+	t.Setenv("MULTICA_ISSUE_WATCHDOG_RUN_AWARE", "true")
+	t.Setenv("MULTICA_ISSUE_WATCHDOG_SILENT_INTERVAL", "25m")
+	cfg, err = ConfigFromEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.RunAware || cfg.SilentInterval != 25*time.Minute {
+		t.Fatalf("run-aware config = %v / %s, want on / 25m", cfg.RunAware, cfg.SilentInterval)
+	}
+	t.Setenv("MULTICA_ISSUE_WATCHDOG_RUN_AWARE", "sometimes")
+	if _, err := ConfigFromEnv(); err == nil {
+		t.Fatal("non-boolean run-aware switch was accepted")
+	}
+	t.Setenv("MULTICA_ISSUE_WATCHDOG_RUN_AWARE", "true")
+	t.Setenv("MULTICA_ISSUE_WATCHDOG_SILENT_INTERVAL", "0s")
+	if _, err := ConfigFromEnv(); err == nil {
+		t.Fatal("zero silent-run interval was accepted")
 	}
 }
 

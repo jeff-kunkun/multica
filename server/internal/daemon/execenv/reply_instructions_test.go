@@ -320,8 +320,8 @@ func TestInjectRuntimeConfigWindowsAssignmentBriefStaysFileOnly(t *testing.T) {
 			// The brief's comment contract is file-only and defers the
 			// details to the command's --help.
 			for _, want := range []string{
-				"`issue comment list | add` — read / post comments (bodies via `--content-file`)",
-				"Run `multica <command> --help` for flags.",
+				"Post comment and issue bodies via `--content-file`",
+				"run `multica <command> --help` for verbs and flags.",
 			} {
 				if !strings.Contains(s, want) {
 					t.Errorf("%s missing file-only comment guidance %q\n---\n%s", fileName, want, s)

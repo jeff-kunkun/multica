@@ -1,6 +1,9 @@
 package protocol
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"time"
+)
 
 const (
 	DaemonCapabilitySkillBundlesV1      = "skill-bundles-v1"
@@ -116,6 +119,17 @@ const (
 	// the additional text by cancelling the current ACP step and prompting the
 	// same session in the same process (DENE-1347).
 	DaemonCapabilitySteerHandoffV1 = "steer-handoff-v1"
+	// DaemonCapabilitySteerInterruptV1 qualifies task-supplement-v1: besides
+	// reading a message at its next step, the run can stop the step it is in
+	// (a running command included) and continue the same session with the
+	// message (DENE-2667). Offered only together with task-supplement-v1.
+	DaemonCapabilitySteerInterruptV1 = "steer-interrupt-v1"
+
+	// Delivery modes of one mid-run message. A supplement is read at the next
+	// step; an interrupt stops the current step first. A run without
+	// steer-interrupt-v1 reads every message as a supplement.
+	TaskSupplementDeliverySupplement = "supplement"
+	TaskSupplementDeliveryInterrupt  = "interrupt"
 
 	// Steer modes: how a run with task-supplement-v1 takes the text. "same"
 	// reads it inside the running process; "restart" restarts the CLI on the
@@ -240,6 +254,30 @@ type TaskProgressPayload struct {
 	Summary string `json:"summary"`
 	Step    int    `json:"step,omitempty"`
 	Total   int    `json:"total,omitempty"`
+}
+
+// TaskLivePayload is one running issue run's latest live view (DENE-2667 PR 4):
+// the command in flight, the last output line, and how long the run has made
+// no activity. The daemon redacts every text field before sending it and the
+// server redacts it again on arrival. The same shape is pushed as
+// task_live:updated and served by GET /api/task-live.
+type TaskLivePayload struct {
+	TaskID  string `json:"task_id"`
+	IssueID string `json:"issue_id"`
+	AgentID string `json:"agent_id"`
+	// Tool and Command describe the newest tool call still in flight; both
+	// are empty while none is.
+	Tool       string `json:"tool,omitempty"`
+	Command    string `json:"command,omitempty"`
+	LastOutput string `json:"last_output,omitempty"`
+	// ToolsInFlight counts every unfinished tool call, including ones the
+	// backend tracks without a transcript row.
+	ToolsInFlight int `json:"tools_in_flight"`
+	// IdleSeconds is the silence measured when the payload was built:
+	// at the report for the push, at the read for the list.
+	IdleSeconds    int64     `json:"idle_seconds"`
+	LastActivityAt time.Time `json:"last_activity_at"`
+	ReportedAt     time.Time `json:"reported_at"`
 }
 
 // TaskCompletedPayload is sent from daemon to server when a task finishes.

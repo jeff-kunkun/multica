@@ -2175,6 +2175,7 @@ func (d *Daemon) run(ctx context.Context, healthLn net.Listener) error {
 		logFields = append(logFields, "profile", d.cfg.Profile)
 	}
 	d.logger.Info("starting daemon", logFields...)
+	d.logger.Info("agent permissions", agentPermissionLogFields(runtime.GOOS)...)
 	d.logger.Debug("daemon config resolved",
 		"daemon_id", d.cfg.DaemonID,
 		"device_name", d.cfg.DeviceName,
@@ -2189,6 +2190,7 @@ func (d *Daemon) run(ctx context.Context, healthLn net.Listener) error {
 		// without it an operator cannot read the tool budget actually in effect.
 		"tool_watchdog", d.cfg.AgentToolWatchdog,
 		"opencode_idle_watchdog", d.cfg.OpenCodeIdleWatchdog,
+		"idle_stop_policy", d.cfg.IdleStopPolicy,
 		// Derived from the watchdog budget too (Codex's own timer is not
 		// tool-aware), so it needs the same treatment as tool_watchdog: without
 		// it the effective Codex budget is invisible until a timeout fires.
@@ -2246,6 +2248,7 @@ func (d *Daemon) run(ctx context.Context, healthLn net.Listener) error {
 	// interval — far too slow for "install a CLI, see it under Runtimes".
 	go d.agentDiscoveryLoop(ctx)
 	go d.magpieRouteLoop(ctx)
+	go d.defaultDirLoop(ctx)
 	go d.agentCLIUpdateLoop(ctx)
 
 	taskWakeups := make(chan taskWakeup, 256)
@@ -6204,6 +6207,10 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 			// access).
 			if assignment, _ := d.resolveLocalDirectoryAssignment(task); assignment != nil {
 				meta.LocalDirectory = true
+			} else if sameExistingDir(result.WorkDir, task.DefaultWorkDir) {
+				// Ran in the machine's default directory: the workdir is the
+				// user's own folder, exactly like a bound one.
+				meta.LocalDirectory = true
 			}
 			if err := execenv.WriteGCMeta(result.EnvRoot, meta, taskLog); err != nil {
 				taskLog.Warn("write gc meta failed (non-fatal)", "error", err)
@@ -8262,10 +8269,21 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if planErr != nil {
 		return TaskResult{}, planErr
 	}
+	// No bound folder: the machine's default directory, when the server sent
+	// one and it is usable here (DENE-2667 PR 8).
+	if localAssignment == nil {
+		var skipped string
+		localAssignment, skipped = defaultDirAssignment(task, provider)
+		if skipped != "" {
+			taskLog.Warn("default working directory not used; running in a scratch directory", "default_dir", task.DefaultWorkDir, "reason", skipped)
+		} else if localAssignment != nil {
+			taskLog.Info("running in the machine's default working directory", "default_dir", localAssignment.AbsPath)
+		}
+	}
 	// The task is committed to this directory, so this is the first moment the
 	// identity backfill is paid for by a run that will actually use the path
 	// (DENE-730).
-	d.backfillLocalDirectoryIdentity(task.WorkspaceID, localAssignment, readOnlyLocalDirs)
+	d.backfillLocalDirectoryIdentity(task, localAssignment, readOnlyLocalDirs)
 	// Read the folder's branch now and register this run, so its brief can name
 	// the other tasks running in the same folder (and theirs can name it).
 	var folderBranch string
@@ -8824,6 +8842,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			taskCapabilities = append(taskCapabilities, protocol.DaemonCapabilitySteerRestartV1)
 		} else if agent.SteersByHandoff(provider) {
 			taskCapabilities = append(taskCapabilities, protocol.DaemonCapabilitySteerHandoffV1)
+		} else if agent.SteersByInterrupt(provider) {
+			taskCapabilities = append(taskCapabilities, protocol.DaemonCapabilitySteerInterruptV1)
 		}
 	}
 	taskSupplementNegotiated, err := d.client.StartTask(prepareCtx, task, taskCapabilities...)
@@ -8847,7 +8867,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Resolve the code source now that env.WorkDir exists. A bound folder's
 	// brief also names its branch at task start and the other tasks this
 	// daemon is running in it, so the agent knows who else is working there.
-	codeSource := resolveTaskCodeSource(localAssignment, readOnlyLocalDirs, repoURLsOf(task.Repos), nil)
+	codeSource := resolveTaskCodeSource(localAssignment.projectFolder(), readOnlyLocalDirs, repoURLsOf(task.Repos), nil)
 	codeSource.Branch = folderBranch
 	codeSource.CoRunners = folderCoRunners
 	taskCtx.CodeSource = codeSourceForEnv(codeSource)
@@ -9197,6 +9217,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ClaudeSettingsPath:     env.ClaudeSettingsPath,
 		QwenpawWorkspace:       env.QwenpawWorkspace,
 	}
+	if d.cfg.IdleStopPolicy == idleStopPolicyOffice {
+		applyOfficeIdlePolicy(&execOpts, provider, task.IdleUnlimited)
+	}
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:
 	//   - openclaw is pinned to the task workdir via the per-task config we
@@ -9272,7 +9295,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		WorkDir:     env.WorkDir,
 		// The endpoint needs to know whether this project pinned a directory
 		// on this machine before it decides to clone anything (DENE-595).
-		LocalDirectory: localAssignment,
+		LocalDirectory: localAssignment.projectFolder(),
 		CheckoutPaths:  task.CheckoutPaths,
 	})
 	defer d.clearActiveRepoCheckoutTask(agentToken)
@@ -9288,6 +9311,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"resume_session", execOpts.ResumeSessionID != "",
 		"timeout", execOpts.Timeout,
 		"idle_watchdog", execOpts.IdleWatchdogTimeout,
+		"office_idle_stop", execOpts.OfficeIdleStop,
+		"idle_unlimited", execOpts.IdleUnlimited,
 	)
 
 	// Shared across the resume-retry below so the retry's transcript rows
@@ -9377,6 +9402,26 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// session keeps firstResult so the bad session stays excluded rather
 		// than being relabeled resumable by a benign-looking second error.
 		result, tools = reconcileFreshRetryResult(firstResult, firstUsage, firstTools, retryResult, retryTools, retryErr)
+	}
+	if shouldResumeAfterIdleStop(result, execOpts) {
+		// One resume of the same session after the office policy stopped it
+		// for silence (DENE-2667). A second stop ends the run as blocked.
+		taskLog.Warn("idle stop: resuming the same session once", "session_id", result.SessionID, "error", result.Error)
+		execOpts.ResumeSessionID = result.SessionID
+		execOpts.ResumeExpected = true
+		if briefInline && resumedSessionHoldsBrief(provider, execOpts.ResumeSessionID) {
+			execOpts.SystemPrompt = ""
+		}
+		resumeResult, resumeTools, resumeErr := d.executeAndDrainDetectingSkills(ctx, backend, officeIdleResumePrompt, execOpts, taskLog, task.ID, env.CodexHome, skillUsage, &msgSeq)
+		if resumeErr != nil {
+			taskLog.Error("idle stop: resume failed to start; keeping the stopped result", "error", resumeErr)
+		} else {
+			resumeResult.Usage = mergeUsage(result.Usage, resumeResult.Usage)
+			if resumeResult.SessionID == "" {
+				resumeResult.SessionID = result.SessionID
+			}
+			result, tools = resumeResult, tools+resumeTools
+		}
 	}
 	// Record the account-level quota hit on the SAME terminal result, and only
 	// here: the AGY path above already accounts for antigravity while it fails
@@ -9967,27 +10012,21 @@ func (d *Daemon) executeAndDrainDetectingSkills(ctx context.Context, backend age
 	// idleWatchdogThreshold records (as nanos) which silence budget actually
 	// tripped the watchdog — the idle window or the larger in-flight-tool
 	// window — so the failure message reports the real duration.
-	idleWindow := d.cfg.AgentIdleWatchdog
-	// A provider may opt into a shorter per-run no-message budget. The global
-	// zero remains authoritative so MULTICA_AGENT_IDLE_WATCHDOG=0 still disables
-	// the entire watchdog suite. Tool calls continue to use AgentToolWatchdog.
-	if idleWindow > 0 && opts.IdleWatchdogTimeout > 0 && opts.IdleWatchdogTimeout < idleWindow {
-		idleWindow = opts.IdleWatchdogTimeout
-	}
+	idleWindow, toolWindow := idleWatchdogBudgets(d.cfg, opts)
 	var idleWatchdogThreshold atomic.Int64
 	idleWatchdogThreshold.Store(int64(idleWindow))
 	watchdogToolCount := inFlightTools.Load
 	if session.ToolActivity != nil {
 		watchdogToolCount = func() int32 {
 			count, at := session.ToolActivity()
-			for {
-				previous := lastActivityAt.Load()
-				if int64(at) <= previous || lastActivityAt.CompareAndSwap(previous, int64(at)) {
-					break
-				}
-			}
+			advanceActivity(&lastActivityAt, at)
 			return count
 		}
+	}
+	// The watchdog refreshes tool accounting before every reading of
+	// lastActivityAt, so the office policy merges raw CLI output there too.
+	if opts.OfficeIdleStop && session.OutputActivity != nil {
+		watchdogToolCount = countingOutputActivity(watchdogToolCount, &lastActivityAt, session.OutputActivity)
 	}
 	// A backend that can prove its outcome is already decided outranks every
 	// liveness policy below: a run whose terminal result has been read is not a
@@ -10005,9 +10044,25 @@ func (d *Daemon) executeAndDrainDetectingSkills(ctx context.Context, backend age
 	watchdogCtx, stopWatchdog := context.WithCancel(agentCtx)
 	defer stopWatchdog()
 	if idleWindow > 0 {
-		go d.runIdleWatchdog(watchdogCtx, idleWindow, d.cfg.AgentToolWatchdog, &lastActivityAt, watchdogToolCount, &idleWatchdogFired, &idleWatchdogThreshold, agentCancel, session.Messages, session.InterruptBackgroundTools, terminalObserved, taskLog)
+		go d.runIdleWatchdog(watchdogCtx, idleWindow, toolWindow, &lastActivityAt, watchdogToolCount, &idleWatchdogFired, &idleWatchdogThreshold, agentCancel, session.Messages, session.InterruptBackgroundTools, terminalObserved, taskLog)
+	}
+	// The live report (DENE-2667 PR 4) reads the silence on the watchdog's
+	// clock: watchdogToolCount merges the backend's tool and output activity
+	// into lastActivityAt before every reading, exactly as the watchdog does.
+	var live *liveTracker
+	if d.cfg.LiveStatus && taskID != "" {
+		live = &liveTracker{}
+		liveActivity := func() (time.Duration, int32) {
+			inFlight := watchdogToolCount()
+			return awakeclock.Now() - time.Duration(lastActivityAt.Load()), inFlight
+		}
+		go d.runLiveReporter(watchdogCtx, taskID, live, liveActivity, taskLog)
 	}
 
+	// observedSessionID is the last session id a status message revealed. A
+	// run the watchdog stops usually ends before its backend reports a result,
+	// and the office policy needs the id to resume that session (DENE-2667).
+	var observedSessionID atomic.Value
 	// drainFinished closes after the drain goroutine has flushed the last
 	// message batch, so the result hand-off below can wait for the transcript
 	// tail to be persisted.
@@ -10140,6 +10195,7 @@ func (d *Daemon) executeAndDrainDetectingSkills(ctx context.Context, backend age
 				// can't be misattributed to backend silence.
 				observedAt := time.Now().UTC()
 				lastActivityAt.Store(int64(awakeclock.Now()))
+				live.observe(msg)
 				switch msg.Type {
 				case agent.MessageStatus:
 					// Persist the session/work_dir as soon as the backend
@@ -10158,6 +10214,9 @@ func (d *Daemon) executeAndDrainDetectingSkills(ctx context.Context, backend age
 					// preserved), while a session whose rollout never lands is never
 					// pinned. The terminal report is the authoritative writer.
 					// Non-Codex providers (codexHome == "") pin immediately.
+					if msg.SessionID != "" {
+						observedSessionID.Store(msg.SessionID)
+					}
 					if msg.SessionID != "" && !sessionPinned.Swap(true) {
 						sid := msg.SessionID
 						wd := opts.Cwd
@@ -10322,6 +10381,17 @@ func (d *Daemon) executeAndDrainDetectingSkills(ctx context.Context, backend age
 	// delivered non-authoritative result is still returned to the idle-watchdog
 	// caller for re-tagging; ordinary upstream cancellation deliberately ignores
 	// it and keeps the existing generic cancelled disposition.
+	// idleStopped tags a result the idle watchdog stopped.
+	idleStopped := func(result agent.Result) agent.Result {
+		result.Status = "idle_watchdog"
+		if result.Error == "" {
+			result.Error = idleWatchdogReason(time.Duration(idleWatchdogThreshold.Load()))
+		}
+		if sid, _ := observedSessionID.Load().(string); opts.OfficeIdleStop && result.SessionID == "" {
+			result.SessionID = sid
+		}
+		return result
+	}
 	awaitTerminalResult := func(trigger string) (result agent.Result, delivered, authoritative bool) {
 		if !handsOverTerminal {
 			return agent.Result{}, false, false
@@ -10370,10 +10440,7 @@ func (d *Daemon) executeAndDrainDetectingSkills(ctx context.Context, backend age
 			// Re-tag it as "idle_watchdog" so runTask routes the
 			// disposition through a dedicated failure_reason, not the
 			// generic "agent_error" bucket the aborted path falls into.
-			result.Status = "idle_watchdog"
-			if result.Error == "" {
-				result.Error = idleWatchdogReason(time.Duration(idleWatchdogThreshold.Load()))
-			}
+			result = idleStopped(result)
 		}
 		return result, toolCount.Load(), nil
 	case <-drainCtx.Done():
@@ -10408,16 +10475,9 @@ func (d *Daemon) executeAndDrainDetectingSkills(ctx context.Context, backend age
 				// SIGKILL we delivered via agentCancel into Status="aborted".
 				// Re-tag it so runTask routes the disposition through the
 				// dedicated liveness failure_reason.
-				result.Status = "idle_watchdog"
-				if result.Error == "" {
-					result.Error = idleWatchdogReason(time.Duration(idleWatchdogThreshold.Load()))
-				}
-				return result, toolCount.Load(), nil
+				return idleStopped(result), toolCount.Load(), nil
 			}
-			return agent.Result{
-				Status: "idle_watchdog",
-				Error:  idleWatchdogReason(time.Duration(idleWatchdogThreshold.Load())),
-			}, toolCount.Load(), nil
+			return idleStopped(agent.Result{}), toolCount.Load(), nil
 		}
 		// Distinguish external cancellation (e.g. server-initiated cancel
 		// because the issue was reassigned, or the user invoked CancelTask)
@@ -10602,6 +10662,46 @@ func (d *Daemon) runIdleWatchdogWithClock(agentCtx context.Context, window, tool
 			firedThreshold.Store(int64(threshold))
 			fired.Store(true)
 			cancel()
+			return
+		}
+	}
+}
+
+// idleWatchdogBudgets returns one execution's silence budgets: idle with no
+// tool in flight (zero means no watchdog at all) and tool while one is.
+func idleWatchdogBudgets(cfg Config, opts agent.ExecOptions) (idle, tool time.Duration) {
+	idle = cfg.AgentIdleWatchdog
+	// A provider may opt into a shorter per-run no-message budget. The global
+	// zero remains authoritative so MULTICA_AGENT_IDLE_WATCHDOG=0 still disables
+	// the entire watchdog suite. Tool calls continue to use AgentToolWatchdog.
+	if idle > 0 && opts.IdleWatchdogTimeout > 0 && opts.IdleWatchdogTimeout < idle {
+		idle = opts.IdleWatchdogTimeout
+	}
+	// The office idle policy never stops a 长任务 run for silence (DENE-2667).
+	if opts.IdleUnlimited {
+		idle = 0
+	}
+	tool = cfg.AgentToolWatchdog
+	if opts.ToolWatchdogTimeout > 0 {
+		tool = opts.ToolWatchdogTimeout
+	}
+	return idle, tool
+}
+
+// countingOutputActivity wraps the watchdog's tool accounting so each reading
+// first merges the CLI's last output line into lastActivityAt.
+func countingOutputActivity(countTools func() int32, lastActivityAt *atomic.Int64, output func() time.Duration) func() int32 {
+	return func() int32 {
+		advanceActivity(lastActivityAt, output())
+		return countTools()
+	}
+}
+
+// advanceActivity moves an awakeclock activity stamp forward to at, never back.
+func advanceActivity(last *atomic.Int64, at time.Duration) {
+	for {
+		previous := last.Load()
+		if int64(at) <= previous || last.CompareAndSwap(previous, int64(at)) {
 			return
 		}
 	}

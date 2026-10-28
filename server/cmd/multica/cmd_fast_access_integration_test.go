@@ -9,11 +9,13 @@ import (
 	"net/http/httptest"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -23,12 +25,44 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
+// openPrivateEpochDatabase opens the run's database with a private copy of
+// fast_access_meta first on the search_path. Its permission_revision is one
+// global epoch that every membership or visibility write bumps, and a resumed
+// cursor page whose epoch moved answers scope_reset. Under the full suite the
+// other DB-backed packages bump it dozens of times a second in the shared
+// database, so the cursor walk below rebuilt until the read quota answered
+// 429. The capture/flush triggers and the handler SQL name the table
+// unqualified, so through this pool only this test's own writes move its
+// epoch; every other table stays shared and is exercised as in production.
+func openPrivateEpochDatabase(ctx context.Context, t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	admin := testutil.OpenTestDatabase(ctx, t)
+	schema := fmt.Sprintf("fast_access_cli_%d", time.Now().UnixNano())
+	for _, stmt := range []string{
+		`CREATE SCHEMA ` + schema,
+		`CREATE TABLE ` + schema + `.fast_access_meta (LIKE public.fast_access_meta INCLUDING ALL)`,
+		`INSERT INTO ` + schema + `.fast_access_meta SELECT * FROM public.fast_access_meta`,
+	} {
+		if _, err := admin.Exec(ctx, stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() {
+		if _, err := admin.Exec(context.Background(), `DROP SCHEMA `+schema+` CASCADE`); err != nil {
+			t.Errorf("drop private epoch schema: %v", err)
+		}
+	})
+	return testutil.OpenTestDatabaseConfig(ctx, t, func(config *pgxpool.Config) {
+		config.ConnConfig.RuntimeParams["search_path"] = schema + ",public"
+	})
+}
+
 // This exercises real HTTP handlers, authorization/projection SQL, and cursor
 // packing against the runner's disposable database. Identity is injected at the
 // authenticated middleware boundary; login/token validation is not under test.
 func TestFastAccessCLIHandlerIntegration(t *testing.T) {
 	ctx := context.Background()
-	pool := testutil.OpenTestDatabase(ctx, t)
+	pool := openPrivateEpochDatabase(ctx, t)
 	f := testutil.New(pool, "", "")
 	user := f.User(t, "CLI reader", fmt.Sprintf("cli-%d@example.test", time.Now().UnixNano()))
 	f.UserID = user
@@ -91,32 +125,43 @@ func TestFastAccessCLIHandlerIntegration(t *testing.T) {
 
 	invoke := func(runs bool, args ...string) (map[string]any, error) {
 		t.Helper()
-		before := requests.Load()
-		var out, notes bytes.Buffer
 		args = append(args, "--output", "json")
+		var out, notes bytes.Buffer
 		var err error
-		if binary := os.Getenv("MULTICA_FAST_ACCESS_BINARY"); binary != "" {
-			name := "changes"
-			if runs {
-				name = "runs"
+		// The CLI does not retry a 429 itself; its documented contract is to
+		// wait for Retry-After and retry. Do that, a bounded number of times.
+		for attempt := 1; ; attempt++ {
+			before := requests.Load()
+			out.Reset()
+			notes.Reset()
+			if binary := os.Getenv("MULTICA_FAST_ACCESS_BINARY"); binary != "" {
+				name := "changes"
+				if runs {
+					name = "runs"
+				}
+				c := exec.CommandContext(ctx, binary, append([]string{name}, args...)...)
+				c.Stdout = &out
+				c.Stderr = &notes
+				err = c.Run()
+			} else {
+				c := newFastAccessCommand(runs)
+				c.SilenceErrors = true
+				c.SilenceUsage = true
+				c.SetOut(&out)
+				c.SetErr(&notes)
+				c.SetArgs(args)
+				err = c.Execute()
 			}
-			c := exec.CommandContext(ctx, binary, append([]string{name}, args...)...)
-			c.Stdout = &out
-			c.Stderr = &notes
-			err = c.Run()
-		} else {
-			c := newFastAccessCommand(runs)
-			c.SilenceErrors = true
-			c.SilenceUsage = true
-			c.SetOut(&out)
-			c.SetErr(&notes)
-			c.SetArgs(args)
-			err = c.Execute()
+			if requests.Load()-before != 1 {
+				t.Fatalf("command made %d business requests", requests.Load()-before)
+			}
+			t.Logf("command runs=%v args=%q error=%v bytes=%d stdout=%s stderr=%s", runs, args, err, out.Len(), out.String(), notes.String())
+			wait, limited := fastAccessRetryAfter(notes.String())
+			if err == nil || !limited || attempt == 3 {
+				break
+			}
+			time.Sleep(wait)
 		}
-		if requests.Load()-before != 1 {
-			t.Fatalf("command made %d business requests", requests.Load()-before)
-		}
-		t.Logf("command runs=%v args=%q error=%v bytes=%d stdout=%s stderr=%s", runs, args, err, out.Len(), out.String(), notes.String())
 		if err != nil {
 			if out.Len() != 0 {
 				t.Fatal("failure emitted stdout")
@@ -162,64 +207,44 @@ func TestFastAccessCLIHandlerIntegration(t *testing.T) {
 			t.Fatal("scope escaped")
 		}
 	}
-	// The permission epoch is one global counter: any membership or visibility
-	// write anywhere in the shared test database between two pages of one
-	// batch answers the cursor page with scope_reset, which is the documented
-	// contract (discard the cursor and rebuild). The walk below does exactly
-	// that, a bounded number of times; a cursor that never resumes still fails.
-	var page map[string]any
-	var unique map[string]bool
-	var pages int
-	for rebuild := 0; ; rebuild++ {
-		page, err = invoke(false, "--all-workspaces", "--limit", "5")
+	// The epoch is private to this test (openPrivateEpochDatabase) and nothing
+	// writes during the walk, so a scope_reset here is a real failure.
+	page, err := invoke(false, "--all-workspaces", "--limit", "5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page["complete"] != false || page["checkpoint"] != nil {
+		t.Fatal("first page falsely complete")
+	}
+	unique := map[string]bool{}
+	pages := 0
+	batchAsOf := page["as_of"]
+	for {
+		pages++
+		if page["as_of"] != batchAsOf {
+			t.Fatal("batch boundary changed")
+		}
+		for _, section := range []string{"active_runs", "changes"} {
+			for _, raw := range page[section].([]any) {
+				r := raw.(map[string]any)
+				key := fmt.Sprint(r["workspace_id"], r["kind"], r["id"])
+				if unique[key] {
+					t.Fatal("duplicate item")
+				}
+				unique[key] = true
+			}
+		}
+		if page["complete"] == true {
+			break
+		}
+		cursor, ok := page["next_cursor"].(string)
+		if !ok || pages > 8 {
+			t.Fatal("pagination did not progress")
+		}
+		page, err = invoke(false, "--cursor", cursor, "--limit", "5")
 		if err != nil {
 			t.Fatal(err)
 		}
-		if page["complete"] != false || page["checkpoint"] != nil {
-			t.Fatal("first page falsely complete")
-		}
-		unique = map[string]bool{}
-		pages = 0
-		batchAsOf := page["as_of"]
-		reset := false
-		for {
-			pages++
-			if page["as_of"] != batchAsOf {
-				t.Fatal("batch boundary changed")
-			}
-			for _, section := range []string{"active_runs", "changes"} {
-				for _, raw := range page[section].([]any) {
-					r := raw.(map[string]any)
-					key := fmt.Sprint(r["workspace_id"], r["kind"], r["id"])
-					if unique[key] {
-						t.Fatal("duplicate item")
-					}
-					unique[key] = true
-				}
-			}
-			if page["complete"] == true {
-				break
-			}
-			cursor, ok := page["next_cursor"].(string)
-			if !ok || pages > 8 {
-				t.Fatal("pagination did not progress")
-			}
-			page, err = invoke(false, "--cursor", cursor, "--limit", "5")
-			if err != nil && strings.Contains(err.Error(), `"scope_reset"`) {
-				reset = true
-				break
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-		}
-		if !reset {
-			break
-		}
-		if rebuild >= 4 {
-			t.Fatal("cursor pages kept answering scope_reset across five rebuilt batches")
-		}
-		t.Logf("cursor page answered scope_reset (permission epoch moved elsewhere in the shared database); rebuilding batch %d", rebuild+2)
 	}
 	want := len(full["active_runs"].([]any)) + len(full["changes"].([]any))
 	if len(unique) != want || page["active_runs_complete"] != true || page["checkpoint"] == nil {
@@ -229,4 +254,19 @@ func TestFastAccessCLIHandlerIntegration(t *testing.T) {
 		t.Fatal("durable checkpoint must be accepted as a cursor", err)
 	}
 	t.Logf("REAL HANDLER/POSTGRES CLI: two workspaces, 17 active runs; explicit scope; %d pages, %d unique items; durable checkpoint resumed; token middleware not exercised", pages, len(unique))
+}
+
+// fastAccessRetryAfter reads the wait the CLI reports for a 429 from its
+// stderr note, capped at five seconds.
+func fastAccessRetryAfter(notes string) (time.Duration, bool) {
+	_, after, found := strings.Cut(notes, "Rate limited; Retry-After: ")
+	if !found {
+		return 0, false
+	}
+	seconds, _, _ := strings.Cut(after, ".")
+	n, err := strconv.Atoi(strings.TrimSpace(seconds))
+	if err != nil || n < 1 {
+		n = 1
+	}
+	return time.Duration(min(n, 5)) * time.Second, true
 }

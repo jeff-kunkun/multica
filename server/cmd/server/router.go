@@ -1683,6 +1683,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Get("/runtimes/{runtimeId}/tasks/pending", h.ListPendingTasksByRuntime)
 		r.Post("/runtimes/{runtimeId}/update/{updateId}/result", h.ReportUpdateResult)
 		r.Post("/runtimes/{runtimeId}/magpie", h.ReportRuntimeMagpie)
+		r.Post("/runtimes/{runtimeId}/default-dir", h.ReportRuntimeDefaultDir)
 		r.Post("/runtimes/{runtimeId}/agent-cli/status", h.ReportAgentCLIStatus)
 		r.Post("/runtimes/{runtimeId}/model-catalog/refresh", h.RefreshRuntimeModelCatalog)
 		r.Post("/runtimes/{runtimeId}/models/{requestId}/result", h.ReportModelListResult)
@@ -1694,6 +1695,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/tasks/{taskId}/supplements/claim", h.ClaimTaskSupplement)
 		r.Post("/tasks/{taskId}/supplements/{commentId}/ack", h.AckTaskSupplement)
 		r.Post("/tasks/{taskId}/progress", h.ReportTaskProgress)
+		r.Post("/tasks/{taskId}/live", h.ReportTaskLive)
 		r.Post("/tasks/{taskId}/complete", h.CompleteTask)
 		r.Post("/tasks/{taskId}/fail", h.FailTask)
 		r.Post("/tasks/{taskId}/usage", h.ReportTaskUsage)
@@ -2311,6 +2313,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// One-shot handoff (DENE-863): server checks the target and
 					// reports what actually landed — `multica issue handoff`.
 					r.Post("/handoff", h.HandoffIssue)
+					// Plan first (DENE-2670): `multica issue plan`.
+					r.Get("/plans", h.ListIssuePlans)
+					r.Post("/plans", h.ProposeIssuePlan)
+					r.With(handler.RequireHumanActor).Post("/plans/{version}/approve", h.ApproveIssuePlan)
+					r.With(handler.RequireHumanActor).Post("/plans/{version}/request-changes", h.RequestIssuePlanChanges)
 					r.Post("/quick-actions/{quickActionId}/run", h.RunQuickAction)
 					r.Post("/quick-actions/{quickActionId}/render", h.RenderQuickAction)
 					r.Get("/task-runs", h.ListTasksByIssue)
@@ -2724,6 +2731,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Workspace-wide agent task snapshot for presence derivation:
 			// every active task + each agent's most recent terminal task.
 			r.Get("/api/agent-task-snapshot", h.ListWorkspaceAgentTaskSnapshot)
+			// Live views of the workspace's running issue runs (DENE-2667 PR 4).
+			r.Get("/api/task-live", h.ListTaskLive)
 			r.Post("/api/fast-access/v1/read", h.ReadFastAccess)
 			r.Get("/api/fast-access/v1/runs", h.ListFastAccessRuns)
 			r.Get("/api/fast-access/v1/events", h.FastAccessEvents)

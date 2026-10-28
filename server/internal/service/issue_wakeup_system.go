@@ -177,9 +177,16 @@ func (s *IssueWakeupService) processChildEvents(ctx context.Context, parentID pg
 	// nothing, so it does not count.
 	var sources []string
 	allSourced := true
+	var closed, attached []pgtype.UUID
 	for _, e := range events {
 		ids = append(ids, e.ID)
 		kinds[e.Kind] = true
+		switch e.Kind {
+		case "closed":
+			closed = append(closed, e.ChildID)
+		case "attached":
+			attached = append(attached, e.ChildID)
+		}
 		if e.Kind == "attached" || e.Kind == "reopened" {
 			continue
 		}
@@ -187,6 +194,16 @@ func (s *IssueWakeupService) processChildEvents(ctx context.Context, parentID pg
 			sources = append(sources, util.UUIDToString(e.SourceTaskID))
 		} else {
 			allSourced = false
+		}
+	}
+	// Siblings waiting on a sub-issue that just closed, and a just-attached
+	// sub-issue whose siblings all closed already, start before the events
+	// count as handled, whatever the parent's state; a failure leaves them for
+	// the sweep to retry (DENE-2671). The parent's rules below then see the
+	// started sibling as open.
+	if len(closed) > 0 || len(attached) > 0 {
+		if _, err := s.issues().StartReadyDependents(ctx, closed, attached); err != nil {
+			return fmt.Errorf("start dependents: %w", err)
 		}
 	}
 	finish := func() error {

@@ -50,6 +50,10 @@ const (
 	EventTaskFailed                = "task:failed"    // running → failed
 	EventTaskMessage               = "task:message"
 	EventTaskCancelled             = "task:cancelled" // * → cancelled
+	// EventTaskLiveUpdated carries a running issue run's latest live view
+	// (DENE-2667 PR 4). Its own prefix keeps clients that predate it from
+	// treating every 15-second report as a task lifecycle change and refetching.
+	EventTaskLiveUpdated = "task_live:updated"
 
 	// Inbox events
 	EventInboxNew           = "inbox:new"
@@ -201,6 +205,9 @@ const (
 	EventPullRequestLinked         = "pull_request:linked"
 	EventPullRequestUpdated        = "pull_request:updated"
 	EventPullRequestUnlinked       = "pull_request:unlinked"
+
+	// Plan first (DENE-2670): a plan was proposed, approved or sent back.
+	EventIssuePlanChanged = "issue_plan:changed"
 
 	// VCS integration events (Forgejo / Gitea / GitLab)
 	EventVCSConnectionCreated = "vcs_connection:created"

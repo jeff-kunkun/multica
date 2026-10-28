@@ -29,7 +29,7 @@ func platformSkillFixture() SkillContextForEnv {
 	}
 }
 
-func TestSubIssueCreationSectionPresentForIssueRuns(t *testing.T) {
+func TestSubIssueRuleRidesInTheIssueWorkflow(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name string
@@ -57,22 +57,21 @@ func TestSubIssueCreationSectionPresentForIssueRuns(t *testing.T) {
 			t.Parallel()
 			out := buildMetaSkillContent("claude", tc.ctx)
 
-			if !strings.Contains(out, "## Sub-issue Creation") {
-				t.Fatalf("expected Sub-issue Creation section in %s brief", tc.name)
-			}
+			// DENE-2671's rule, folded into workflow step 3 by DENE-2679. The
+			// flag map (`--status todo|backlog`, `--waiting-for`, `--after`)
+			// moved to the skill reference this step names; the skill side is
+			// asserted in internal/service (TestPlatformSkillCoversPlatformContracts)
+			// and the flags stay discoverable through `issue create --help`
+			// (TestIssueHelpCarriesMovedBriefRules).
 			for _, want := range []string{
-				// MUL-5442 demotes the full todo/backlog/stage playbook to the
-				// multica-platform skill. The brief keeps a one-line map (all
-				// three flags stay discoverable, MUL-3508 follow-up) plus the
-				// skill pointer; the skill side of the contract is asserted in
-				// internal/service (TestPlatformSkillCoversPlatformContracts).
-				"`--status todo` starts an agent-assigned child immediately",
-				"`--status backlog` parks it",
-				"read `references/issues.md` in the `multica-platform` skill",
+				"A new need unrelated to this issue goes in a sub-issue, not this one (flags: `references/sub-issues.md` in the `multica-platform` skill).\n",
 			} {
 				if !strings.Contains(out, want) {
-					t.Errorf("[%s] section missing %q", tc.name, want)
+					t.Errorf("[%s] workflow missing %q\n---\n%s", tc.name, want, out)
 				}
+			}
+			if strings.Contains(out, "## Sub-issue Creation") {
+				t.Errorf("[%s] the Sub-issue Creation section re-grew (DENE-2679)", tc.name)
 			}
 		})
 	}
@@ -516,14 +515,12 @@ func TestIssueWorkflowHonorsAgentIdentity(t *testing.T) {
 	out := buildMetaSkillContent("claude", TaskContextForEnv{IssueID: issueID})
 
 	for _, want := range []string{
-		"## Instruction Precedence",
-		"Agent Identity instructions outrank the workflow below: skip any step they forbid",
-		// One enumeration, in Instruction Precedence, covering every action
-		// type Agent Identity can forbid (MUL-5442). DENE-1329 dropped the
-		// per-step restatements; this list is the single source.
-		"status changes, comments, investigating, implementing, creating or updating issues, delegating — and do the rest",
-		"The workflow is never permission to act beyond your Agent Identity",
-		// What the enumeration cannot express: a delegation-only role stops
+		// MUL-5442's precedence rule, one clause leading the workflow steps
+		// since DENE-2679 (the Instruction Precedence section is gone): it
+		// covers every step, so any action Agent Identity forbids is skipped.
+		"Your Agent Identity outranks these steps: skip any it forbids and do the rest",
+		"they never permit acting beyond it",
+		// What "skip a step" cannot express: a delegation-only role stops
 		// once the delegation is delivered.
 		"a delegation-only role stops once the delegation is delivered",
 	} {
@@ -606,16 +603,17 @@ func TestProtocolHeadingInInstructionsGetsNoLeaderBrief(t *testing.T) {
 	}
 }
 
-// Instruction Precedence belongs to the issue workflow only; the issue-less
-// kinds must not inherit it. After MUL-5377 it applies to every issue run,
-// comment-triggered or not, because there is a single issue workflow.
+// The Agent Identity precedence clause belongs to the issue workflow only;
+// the issue-less kinds must not inherit it. After MUL-5377 it applies to every
+// issue run, comment-triggered or not, because there is a single issue
+// workflow. DENE-2679 folded the former section into that workflow.
 func TestInstructionPrecedenceOnlyAppliesToIssueWorkflow(t *testing.T) {
 	t.Parallel()
 	if out := buildMetaSkillContent("claude", TaskContextForEnv{
 		IssueID:          "11111111-2222-3333-4444-555555555555",
 		TriggerCommentID: "22222222-3333-4444-5555-666666666666",
-	}); !strings.Contains(out, "## Instruction Precedence") {
-		t.Errorf("comment-triggered issue brief must carry Instruction Precedence\n---\n%s", out)
+	}); !strings.Contains(out, "Your Agent Identity outranks these steps") {
+		t.Errorf("comment-triggered issue brief must carry the Agent Identity precedence\n---\n%s", out)
 	}
 
 	cases := []struct {
@@ -633,8 +631,8 @@ func TestInstructionPrecedenceOnlyAppliesToIssueWorkflow(t *testing.T) {
 			out := buildMetaSkillContent("claude", tc.ctx)
 			for _, banned := range []string{
 				"## Instruction Precedence",
-				"outrank the workflow below",
-				"The workflow is never permission to act beyond your Agent Identity",
+				"outranks these steps",
+				"a delegation-only role stops",
 			} {
 				if strings.Contains(out, banned) {
 					t.Errorf("%s brief must not inherit issue-only precedence text %q\n---\n%s", tc.name, banned, out)
@@ -713,33 +711,20 @@ func TestOutputForbidsMidRunProgressComments(t *testing.T) {
 	run(t, "brief")
 }
 
-// The sub-issue creation rule must reach top-level parents that have no
+// The sub-issue rule must reach top-level parents that have no
 // `parent_issue_id` of their own — that is where the `todo` vs `backlog`
-// decision matters most. The section must not gate on this issue being
-// a child, and must not even mention `parent_issue_id`.
-func TestSubIssueCreationSectionIsUnconditional(t *testing.T) {
+// decision matters most. It must not gate on this issue being a child, and the
+// brief must not even mention `parent_issue_id`.
+func TestSubIssueRuleIsUnconditional(t *testing.T) {
 	t.Parallel()
-	ctx := TaskContextForEnv{
+	out := buildMetaSkillContent("claude", TaskContextForEnv{
 		IssueID: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+	})
+	if !strings.Contains(out, "A new need unrelated to this issue goes in a sub-issue, not this one") {
+		t.Fatalf("sub-issue rule missing from a top-level issue's brief\n---\n%s", out)
 	}
-	out := buildMetaSkillContent("claude", ctx)
-
-	const header = "## Sub-issue Creation"
-	start := strings.Index(out, header)
-	if start == -1 {
-		t.Fatalf("sub-issue creation section missing")
-	}
-	rest := out[start:]
-	end := strings.Index(rest[len(header):], "\n## ")
-	var section string
-	if end == -1 {
-		section = rest
-	} else {
-		section = rest[:len(header)+end]
-	}
-
-	if strings.Contains(section, "parent_issue_id") {
-		t.Errorf("Sub-issue Creation section must not reference `parent_issue_id` — it applies to any issue-bound run, including top-level parents:\n%s", section)
+	if strings.Contains(out, "parent_issue_id") {
+		t.Errorf("brief must not reference `parent_issue_id` — the sub-issue rule applies to any issue-bound run, including top-level parents:\n%s", out)
 	}
 }
 
@@ -2214,14 +2199,22 @@ func TestBriefSkillsListIsNamesOnly(t *testing.T) {
 			t.Parallel()
 			out := buildMetaSkillContent(provider, ctx)
 
-			if !strings.Contains(out, "- **pr-review**\n") {
-				t.Errorf("brief does not list the skill by slug:\n%s", out)
-			}
 			if strings.Contains(out, "Use when reviewing a pull request") {
 				t.Errorf("brief still carries the skill description; the CLI's own listing already has it:\n%s", out)
 			}
 			if strings.Contains(out, ".agent_context/skills/") {
 				t.Errorf("brief still points at the removed fallback path:\n%s", out)
+			}
+			// Claude Code lists the skills it discovers in its own system
+			// prompt, so its brief carries no second index (DENE-2679).
+			if provider == "claude" {
+				if strings.Contains(out, "pr-review") || strings.Contains(out, "discovered automatically") {
+					t.Errorf("claude brief repeats the skill listing Claude Code builds itself:\n%s", out)
+				}
+				return
+			}
+			if !strings.Contains(out, "- **pr-review**\n") {
+				t.Errorf("brief does not list the skill by slug:\n%s", out)
 			}
 			if !strings.Contains(out, "discovered automatically") {
 				t.Errorf("brief lost the native-discovery framing:\n%s", out)
@@ -2231,7 +2224,7 @@ func TestBriefSkillsListIsNamesOnly(t *testing.T) {
 }
 
 // TestBriefIssuePointerFollowsTheInstalledSkill ensures the sub-issue pointer
-// names the platform skill only when installed. The retired legacy skill is
+// names the platform skill's sub-issue reference only when it is installed. The retired legacy skill is
 // no longer a fallback, even when an older backend still supplies it.
 func TestBriefIssuePointerFollowsTheInstalledSkill(t *testing.T) {
 	t.Parallel()
@@ -2248,7 +2241,7 @@ func TestBriefIssuePointerFollowsTheInstalledSkill(t *testing.T) {
 		{
 			name:   "current backend",
 			skills: []SkillContextForEnv{skill("multica-platform")},
-			want:   "`references/issues.md` in the `multica-platform` skill",
+			want:   "`references/sub-issues.md` in the `multica-platform` skill",
 		},
 		{
 			name:   "retired legacy skill alone has no pointer",
@@ -2258,7 +2251,7 @@ func TestBriefIssuePointerFollowsTheInstalledSkill(t *testing.T) {
 		{
 			name:   "platform pointer ignores the retired legacy skill",
 			skills: []SkillContextForEnv{skill("multica-working-on-issues"), skill("multica-platform")},
-			want:   "`references/issues.md` in the `multica-platform` skill",
+			want:   "`references/sub-issues.md` in the `multica-platform` skill",
 		},
 		{
 			name:   "neither installed",
@@ -2275,23 +2268,20 @@ func TestBriefIssuePointerFollowsTheInstalledSkill(t *testing.T) {
 				AgentSkills: tc.skills,
 			})
 
-			// The flags themselves are unconditional: they stay discoverable
-			// with or without a skill to point at.
-			for _, always := range []string{
-				"`--status todo` starts an agent-assigned child immediately",
-			} {
-				if !strings.Contains(out, always) {
-					t.Errorf("brief lost unconditional content %q", always)
-				}
+			// The rule itself is unconditional; with no skill to point at, the
+			// flags stay discoverable through `issue create --help`.
+			const rule = "A new need unrelated to this issue goes in a sub-issue, not this one"
+			if !strings.Contains(out, rule) {
+				t.Errorf("brief lost unconditional content %q", rule)
 			}
 
 			if tc.want == "" {
-				if strings.Contains(out, "Before creating sub-issues, read") {
+				if !strings.Contains(out, rule+".\n") || strings.Contains(out, "(flags: ") {
 					t.Errorf("brief points at a skill with none installed:\n%s", out)
 				}
 				return
 			}
-			if !strings.Contains(out, "Before creating sub-issues, read "+tc.want+" —") {
+			if !strings.Contains(out, rule+" (flags: "+tc.want+").\n") {
 				t.Errorf("sub-issue pointer does not name %q:\n%s", tc.want, out)
 			}
 		})

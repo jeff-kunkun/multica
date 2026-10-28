@@ -1544,6 +1544,11 @@ type CreateCommentRequest struct {
 	// has ended, or cannot take additional input, is never swapped for another
 	// one: its agent keeps the normal trigger.
 	SteerTaskIDs []string `json:"steer_task_ids"`
+	// InterruptTaskIDs are running turns the author chose to interrupt
+	// (DENE-2667): each stops its current step and continues the same session
+	// with this comment. Same binding rules as SteerTaskIDs, and files are
+	// allowed. A turn that cannot stop its step reads it at the next step.
+	InterruptTaskIDs []string `json:"interrupt_task_ids,omitempty"`
 	// Mode is the one-word form of the same choice (DENE-1346): steer adds the
 	// comment to the running turns of every agent it wakes, explicit queue
 	// waits for them, restart stops them first. Omitted mode merges into existing work. Steer is refused with the
@@ -1840,6 +1845,10 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	interruptTaskIDs, ok := parseUUIDSliceOrBadRequest(w, req.InterruptTaskIDs, "interrupt_task_ids")
+	if !ok {
+		return
+	}
 	// A running turn receives text only, so a comment that carries files is
 	// always a normal trigger.
 	if len(attachmentIDs) > 0 {
@@ -1857,13 +1866,18 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	if handoffMode || req.Mode == commentModeParallel {
 		sendMode = sendModeQueue
 	}
+	interruptMode := req.Mode == sendModeInterrupt
+	defaultInterrupt := req.Mode == "" && len(interruptTaskIDs) == 0 && interruptByDefault(authorID)
+	if interruptMode {
+		sendMode = sendModeQueue
+	}
 	mode, ok := normalizeSendMode(sendMode)
 	if !ok {
-		writeError(w, http.StatusBadRequest, "mode must be steer, queue, restart, handoff or parallel")
+		writeError(w, http.StatusBadRequest, "mode must be steer, interrupt, queue, restart, handoff or parallel")
 		return
 	}
 	var modeTriggers []commentAgentTrigger
-	if req.Mode != "" && !isNoteComment(req.Content) {
+	if (req.Mode != "" || defaultInterrupt) && !isNoteComment(req.Content) {
 		modeTriggers, _ = h.computeCommentAgentTriggers(r.Context(), issue, req.Content, parentComment, authorType, authorID, commentTriggerComputeOptions{
 			OriginatorUserID: h.invokeOriginatorFromRequest(r, authorType, authorID),
 		})
@@ -1879,6 +1893,20 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		steerTaskIDs = ids
+	}
+	if interruptMode || defaultInterrupt {
+		ids, anyRunning, unsupported, err := h.interruptTargets(r.Context(), issue, modeTriggers, authorType, authorID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to load running replies")
+			return
+		}
+		// Only an explicit interrupt is refused; a default one degrades to the
+		// author's ordinary comment.
+		if interruptMode && anyRunning && len(ids) == 0 {
+			writeSteerUnsupported(w, steerUnsupportedReason(unsupported))
+			return
+		}
+		interruptTaskIDs = ids
 	}
 
 	// sourceTaskID captures the agent's currently-executing task when it posts
@@ -2101,7 +2129,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	if mode == sendModeRestart {
 		h.stopCommentRecipients(r.Context(), issue, modeTriggers, authorType, authorID)
 	}
-	triggerCtx := r.Context()
+	triggerCtx := withCommentInterrupt(r.Context(), interruptTaskIDs)
 	if handoffMode {
 		resp.HandoffStoppedTaskIDs = h.stopForCommentHandoff(r, issue, modeTriggers, authorType, authorID)
 		triggerCtx = withFreshCommentSession(triggerCtx)
@@ -2112,7 +2140,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	var woken []CommentWokenRun
 	resp.TriggerOutcomes, woken = h.triggerTasksForCommentReport(triggerCtx, issue, comment, parentComment, authorType, authorID, originatorUserID, suppressAgentIDs, steerTaskIDs)
 	resp.Wake = h.commentWake(r.Context(), issue, comment, woken)
-	if len(steerTaskIDs) > 0 {
+	if len(steerTaskIDs) > 0 || len(interruptTaskIDs) > 0 {
 		applyCommentSupplements(&resp, h.listCommentSupplements(r.Context(), issue.WorkspaceID, []pgtype.UUID{comment.ID})[uuidToString(comment.ID)])
 	}
 
@@ -2181,6 +2209,7 @@ func (h *Handler) triggerTasksForCommentReport(ctx context.Context, issue db.Iss
 	h.noteBlockedRuntimeTargets(ctx, issue, targets)
 	resolved := triggers
 	attachments, attachmentErr := h.Queries.ListAttachmentsByComment(ctx, db.ListAttachmentsByCommentParams{CommentID: comment.ID, WorkspaceID: issue.WorkspaceID})
+	steerTaskIDs = append(steerTaskIDs, commentInterruptTaskIDs(ctx)...)
 	if !service.SeparateIssueRun(ctx) && len(steerTaskIDs) == 0 && attachmentErr == nil && len(attachments) == 0 {
 		running, err := h.Queries.ListIssueSteerTargets(ctx, issue.ID)
 		if err == nil {

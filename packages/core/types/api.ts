@@ -19,6 +19,10 @@ export interface CreateIssueRequest {
   domain_id?: string;
   /** Ordered stage (>= 1) grouping this sub-issue under its parent. */
   stage?: number;
+  /** Sibling sub-issues this one starts after (DENE-2671). While one is
+   *  unfinished the server parks it in backlog; the last to finish moves it to
+   *  todo. Older servers ignore it. */
+  after_issue_ids?: string[];
   start_date?: string;
   due_date?: string;
   attachment_ids?: string[];
@@ -28,6 +32,8 @@ export interface CreateIssueRequest {
   /** ID-keyed custom-property values validated and persisted atomically with
    * the issue. */
   properties?: IssuePropertyValues;
+  /** Ask the agent for a plan before the work (DENE-2670). Omitted = no gate. */
+  plan_first?: boolean;
 }
 
 export interface CreateCommentSubIssueManualRequest {

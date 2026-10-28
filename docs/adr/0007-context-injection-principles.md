@@ -28,7 +28,7 @@
 
 ### 体积闸门怎么用
 
-- 测试 `TestBriefSizeBudget` 用不含项目和用户内容的最小上下文渲染四种简报，断言字节上限；上限先设在现状略上方，只防继续变厚。
+- 测试 `TestBriefSizeBudget` 用不含项目和用户内容的最小上下文渲染五种简报（另含 consult），断言字节上限；上限先设在现状略上方，只防继续变厚。另有一个「office」样例，按真实办公室工单的形状带上项目、本地目录、仓库和技能，量的是包在这些数据外面的固定文字。
 - 测试失败时不要抬高上限，按三问把新文字搬出简报。
 - 瘦身改动合入后，同一个 PR 里把上限收紧到新的实测值上方（`TestBriefSizeBudgetIsTight` 会在上限比实测宽 1.2KB 以上时报红）。目标值是 issue ≤ 8KB、chat ≤ 6KB，到位后去掉余量。
 
@@ -43,4 +43,5 @@
 - 上下文注入做减法这一组改动（状态卡、简报瘦身、续跑只带状态卡）按这份原则取舍，每一步合入后收紧体积上限。
 - DENE-1329 落地后实测：issue 约 5.5KB、chat 约 3.5KB、quick-create 约 4.8KB、autopilot 约 3.2KB，都低于目标；上限仍贴着实测值，目标与实测之间的差额不是可以长回去的空间。评论写法搬进 `multica issue comment add --help`，标题和正文格式搬进 `multica issue create --help`，验收席的通过/打回写进 `multica issue close --help`。
 - 新增魔改命令要自己写清报错和 `--help`，不能指望在简报里补一段。
-- 体积闸门只量平台固定文字，不量项目描述、用户画像、技能清单这些随任务而来的必要上下文。
+- DENE-2679 按整合方案（DENE-2666）第 6 节逐段再砍：项目绑了本地目录时不发 Repositories，Project Context 缩成一行指向 resources.json，Code Source 每类一行；Instruction Precedence 和 Sub-issue Creation 各并成工作流里的一句；Mentions 在 Output 里只留一行；命令清单只留 `issue status` 和 `issue handoff`，其余动词看 `--help`；Claude 自己会列技能，所以 Claude 的简报不再发技能清单。实测 office 样例 9,764 → 5,679 字节，issue 5,315 → 4,137，chat 3,321 → 2,811。「接着之前的工作」这条规矩搬进 `multica repo checkout` 保留旧工作区时的输出。被搬走的事实在新位置照样有测试钉住（`--help` 测试、platform skill 的合约测试），不是直接删掉断言。
+- 体积闸门不量项目描述、用户画像、技能清单这些随任务而来的数据本身；office 样例只防包在数据外面的固定文字长回去。

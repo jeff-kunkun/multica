@@ -29,6 +29,11 @@ type agentCLIRelease struct {
 	NativeOnlyUnder string
 	NPMPackage      string
 	GitHubRepo      string // owner/repo
+	// Below is an exclusive ceiling on the versions this daemon follows. A
+	// latest release at or above it is not installed, and an upgrade names
+	// the exact checked version so the updater cannot jump past the ceiling.
+	// Empty means no ceiling.
+	Below string
 }
 
 // agentCLIReleases is the CLIs this daemon knows how to follow. A provider
@@ -51,10 +56,13 @@ var agentCLIReleases = []agentCLIRelease{
 		GitHubRepo:      "openai/codex",
 	},
 	{
+		// 2.x drops the channels the daemon uses for the supplement plugin
+		// and MCP config (see pkg/agent/version.go), so only 1.x is followed.
 		Provider:   "opencode",
 		NativeArgs: []string{"upgrade"},
 		NPMPackage: "opencode-ai",
 		GitHubRepo: "anomalyco/opencode",
+		Below:      "2.0.0",
 	},
 }
 
@@ -124,6 +132,16 @@ func cliVersionNewer(latest, current string) (newer bool, ok bool) {
 		return l[1] > c[1], true
 	}
 	return l[2] > c[2], true
+}
+
+// cliVersionAllowed reports whether version is under spec's ceiling. A version
+// that cannot be compared with the ceiling is not allowed.
+func cliVersionAllowed(spec agentCLIRelease, version string) bool {
+	if spec.Below == "" {
+		return true
+	}
+	under, ok := cliVersionNewer(spec.Below, version)
+	return ok && under
 }
 
 func cliSemver(raw string) ([3]int, bool) {
@@ -197,20 +215,33 @@ type agentCLIUpgradeStep struct {
 
 // planAgentCLIUpgrade orders the commands that update the binary in use.
 // Native first. npm only when this path is that package's install, so a
-// global `npm install -g` cannot retarget a different copy.
-func planAgentCLIUpgrade(spec agentCLIRelease, binaryPath string) ([]agentCLIUpgradeStep, string) {
+// global `npm install -g` cannot retarget a different copy. A spec with a
+// ceiling installs exactly target, the version that was checked against it;
+// others take whatever is latest when the updater runs.
+func planAgentCLIUpgrade(spec agentCLIRelease, binaryPath, target string) ([]agentCLIUpgradeStep, string) {
+	pin := ""
+	if spec.Below != "" {
+		pin = strings.TrimPrefix(strings.TrimSpace(target), "v")
+	}
 	var steps []agentCLIUpgradeStep
 	if nativeUpdaterApplies(spec, binaryPath) {
-		argv := make([]string, 0, 1+len(spec.NativeArgs))
+		argv := make([]string, 0, 2+len(spec.NativeArgs))
 		argv = append(argv, binaryPath)
 		argv = append(argv, spec.NativeArgs...)
+		if pin != "" {
+			argv = append(argv, pin)
+		}
 		steps = append(steps, agentCLIUpgradeStep{Name: "native", Argv: argv})
 	}
 	if spec.NPMPackage != "" {
 		if prefix, owned := npmInstallOf(binaryPath, spec.NPMPackage); owned {
+			version := "latest"
+			if pin != "" {
+				version = pin
+			}
 			steps = append(steps, agentCLIUpgradeStep{
 				Name: "npm",
-				Argv: []string{"npm", "install", "-g", spec.NPMPackage + "@latest", "--prefix", prefix},
+				Argv: []string{"npm", "install", "-g", spec.NPMPackage + "@" + version, "--prefix", prefix},
 			})
 		}
 	}

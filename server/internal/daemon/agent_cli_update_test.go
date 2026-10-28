@@ -294,3 +294,81 @@ func lastCLIUpdate(t *testing.T, bodies *[][]byte) []byte {
 	}
 	return envelope.CLIUpdate
 }
+
+// newOpenCodeCLITestDaemon is newAgentCLITestDaemon for OpenCode, whose
+// release spec carries the below-2.0 ceiling; latest is what the registry
+// reports.
+func newOpenCodeCLITestDaemon(t *testing.T, bin, version, latest string) (*Daemon, *[][]byte) {
+	t.Helper()
+	d, bodies := newAgentCLITestDaemon(t, bin, version)
+	agents := map[string]AgentEntry{"opencode": {Path: bin, Command: "opencode"}}
+	d.cfg.Agents = agents
+	d.agentsAvailable.Store(&agents)
+	d.runtimeIndex = map[string]Runtime{"rt-opencode": {ID: "rt-opencode", Provider: "opencode"}}
+	d.agentVersions = map[string]string{"opencode": version}
+	d.agentCLIFetch = func(context.Context, string) ([]byte, error) {
+		return []byte(`{"version":"` + latest + `"}`), nil
+	}
+	return d, bodies
+}
+
+func TestReconcileOpenCodeUpgradesToTheCheckedVersionBelowCeiling(t *testing.T) {
+	bin := "/usr/local/bin/opencode"
+	d, bodies := newOpenCodeCLITestDaemon(t, bin, "1.18.0", "1.19.4")
+	var ran [][]string
+	d.agentCLIRun = func(_ context.Context, name string, args ...string) ([]byte, error) {
+		ran = append(ran, append([]string{name}, args...))
+		return []byte("ok"), nil
+	}
+	d.agentCLIAfterUpgrade = func(_ context.Context, provider string) {
+		d.versionsMu.Lock()
+		d.agentVersions[provider] = "1.19.4"
+		d.versionsMu.Unlock()
+	}
+
+	d.reconcileAgentCLIs(context.Background())
+
+	if len(ran) != 1 || len(ran[0]) != 3 || ran[0][0] != bin || ran[0][1] != "upgrade" || ran[0][2] != "1.19.4" {
+		t.Fatalf("ran = %#v, want `%s upgrade 1.19.4`", ran, bin)
+	}
+	var status agentCLIStatus
+	if err := json.Unmarshal(lastCLIUpdate(t, bodies), &status); err != nil {
+		t.Fatal(err)
+	}
+	if status.Phase != agentCLIPhaseCurrent || status.CurrentVersion != "1.19.4" {
+		t.Fatalf("status = %#v", status)
+	}
+}
+
+func TestReconcileOpenCodeDoesNotCrossTheCeiling(t *testing.T) {
+	bin := "/usr/local/bin/opencode"
+	d, bodies := newOpenCodeCLITestDaemon(t, bin, "1.19.4", "2.0.0")
+	d.agentCLIMu.Lock()
+	d.agentCLIManual = agentCLIManual{RuntimeID: "rt-opencode", Provider: "opencode", RequestID: "req-2"}
+	d.agentCLIMu.Unlock()
+	called := false
+	d.agentCLIRun = func(context.Context, string, ...string) ([]byte, error) {
+		called = true
+		return nil, nil
+	}
+
+	d.reconcileAgentCLIs(context.Background())
+
+	if called {
+		t.Fatal("upgraded OpenCode to 2.x")
+	}
+	var envelope struct {
+		CLIUpdate        agentCLIStatus `json:"cli_update"`
+		AppliedRequestID string         `json:"applied_request_id"`
+	}
+	if err := json.Unmarshal(lastStatusBody(t, bodies), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	status := envelope.CLIUpdate
+	if status.Phase != agentCLIPhaseUnsupported || status.LatestVersion != "2.0.0" || status.Error == "" {
+		t.Fatalf("status = %#v, want unsupported with the 2.0.0 ceiling named", status)
+	}
+	if envelope.AppliedRequestID != "req-2" {
+		t.Fatalf("manual request not acked: %#v", envelope)
+	}
+}

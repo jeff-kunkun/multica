@@ -206,6 +206,16 @@ export interface IssueDuplicateOf {
   status: IssueStatus;
 }
 
+/**
+ * The issue watchdog's project-group reminders for a live run that stopped
+ * reporting in the issue (DENE-2667). Absent on older servers.
+ */
+export interface WatchdogReminder {
+  group_reminded_at: string;
+  group_reminder_count: number;
+  task_id: string;
+}
+
 export interface Issue {
   id: string;
   workspace_id: string;
@@ -288,6 +298,8 @@ export interface Issue {
   source_chat?: IssueSourceChat | null;
   /** Detail only: the in-place retry waiting out a full model (DENE-1093). */
   capacity_retry?: CapacityRetry;
+  /** Detail only: the last project-group reminder about a live, silent run. */
+  watchdog_reminder?: WatchdogReminder;
   /** Detail and children responses only; absent on closed or backlog issues. */
   driver?: IssueDriver;
 }

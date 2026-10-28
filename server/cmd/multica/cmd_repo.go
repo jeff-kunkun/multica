@@ -565,8 +565,14 @@ func repoCheckoutSummary(repoURL string, result repoCheckoutResult) string {
 	case sparsecheckout.SkippedWidened:
 		keptAction = "the branch was left as it was, and the sparse checkout was widened so the newly declared directories are on disk."
 	}
+	// The delivery line used to sit in every run's brief; it is only true at
+	// the moment a checkout is kept, so it is said here (DENE-2679). The
+	// branch is where the work sits — a pull request's head, never its base —
+	// and the project's current starting point may have changed since.
 	return fmt.Sprintf("Kept the existing checkout of %s at %s (branch: %s; %d uncommitted file%s, %d unpushed commit%s): "+
 		"%s\n"+
+		"This continues earlier work: that branch is a pull request's head, never its base. Keep delivering where the work was already going — "+
+		"the base of its existing pull request, or the target the task states, not the project's current starting point — and ask if neither settles it.\n"+
 		"To discard its uncommitted changes and untracked files and start over on a new branch from the latest default branch (or --ref), "+
 		"re-run with --fresh; commits stay on the old branch, but push any you still need first.%s",
 		repoURL, result.Path, branch,

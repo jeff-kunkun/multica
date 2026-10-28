@@ -72,12 +72,16 @@ func TestEnqueueTaskForMentionCoalescesDuplicatePendingTask(t *testing.T) {
 	svc := &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}
 
 	// First mention creates the pending task.
-	if _, err := svc.EnqueueTaskForMention(ctx, issueStruct, util.MustParseUUID(agentID), pgtype.UUID{}, OriginNamed); err != nil {
+	first, err := svc.EnqueueTaskForMention(ctx, issueStruct, util.MustParseUUID(agentID), pgtype.UUID{}, OriginNamed)
+	if err != nil {
 		t.Fatalf("first EnqueueTaskForMention: %v", err)
+	}
+	if !first.ForceFreshSession {
+		t.Fatal("a mention without a trigger comment must start a fresh CLI session")
 	}
 
 	// Second mention for the same (issue, agent) collides on the unique index.
-	_, err := svc.EnqueueTaskForMention(ctx, issueStruct, util.MustParseUUID(agentID), pgtype.UUID{}, OriginNamed)
+	_, err = svc.EnqueueTaskForMention(ctx, issueStruct, util.MustParseUUID(agentID), pgtype.UUID{}, OriginNamed)
 	if !errors.Is(err, ErrDuplicatePendingTask) {
 		t.Fatalf("second EnqueueTaskForMention: err = %v, want ErrDuplicatePendingTask", err)
 	}

@@ -14,9 +14,9 @@ import (
 
 // TestServerInterruptRetriesAndThenBlocks is the DENE-813 regression: a daemon
 // that reports failure_reason=cancelled ("task cancelled by server") while the
-// row is still running must enqueue the next attempt on the same session and
-// workdir, leave a notice, and once the budget is spent move the issue off
-// in_progress.
+// row is still running must enqueue the next attempt with a fresh session and
+// retained workdir, leave a notice, and once the budget is spent move the issue
+// off in_progress.
 func TestServerInterruptRetriesAndThenBlocks(t *testing.T) {
 	pool := newResolveOriginatorPool(t)
 	ctx := context.Background()
@@ -54,7 +54,8 @@ func TestServerInterruptRetriesAndThenBlocks(t *testing.T) {
 
 	var childID pgtype.UUID
 	var childAttempt, childMax int32
-	var childSession, childWorkDir, childStatus string
+	var childSession pgtype.Text
+	var childWorkDir, childStatus string
 	if err := pool.QueryRow(ctx, `
 		SELECT id, attempt, max_attempts, session_id, work_dir, status
 		FROM agent_task_queue WHERE parent_task_id = $1
@@ -64,8 +65,8 @@ func TestServerInterruptRetriesAndThenBlocks(t *testing.T) {
 	if childAttempt != 2 || childMax != 2 {
 		t.Fatalf("retry attempt = %d/%d, want 2/2", childAttempt, childMax)
 	}
-	if childSession != "src-session" || childWorkDir != "/tmp/src-workdir" {
-		t.Fatalf("retry kept session %q workdir %q, want src-session /tmp/src-workdir", childSession, childWorkDir)
+	if childSession.Valid || childWorkDir != "/tmp/src-workdir" {
+		t.Fatalf("retry session = %+v workdir %q, want a fresh session and retained workdir", childSession, childWorkDir)
 	}
 	if childStatus != "queued" {
 		t.Fatalf("retry status = %q, want queued", childStatus)
@@ -79,7 +80,7 @@ func TestServerInterruptRetriesAndThenBlocks(t *testing.T) {
 		t.Fatalf("issue status after retry = %q, want in_progress", issueStatus)
 	}
 	firstNotice := latestComment(t, pool, issueID)
-	for _, want := range []string{"被平台中断", "已自动安排续跑", "第 2 次，共 2 次", "沿用原来的会话和工作目录"} {
+	for _, want := range []string{"被平台中断", "已自动安排续跑", "第 2 次，共 2 次", "新会话", "沿用原来的工作目录"} {
 		if !strings.Contains(firstNotice, want) {
 			t.Errorf("retry notice %q does not contain %q", firstNotice, want)
 		}

@@ -5,8 +5,11 @@ import { render, screen, cleanup } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enAgents from "../../locales/en/agents.json";
+import enIssues from "../../locales/en/issues.json";
+import { configStore } from "@multica/core/config";
+import { OFFICE_LIVE_STATUS_FLAG } from "@multica/core/feature-flags";
 
-const TEST_RESOURCES = { en: { common: enCommon, agents: enAgents } };
+const TEST_RESOURCES = { en: { common: enCommon, agents: enAgents, issues: enIssues } };
 
 // useWorkspaceId is a Context-backed hook in core; stub it to a static id so
 // the card runs outside a WorkspaceIdProvider in tests.
@@ -20,6 +23,7 @@ vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
     issueDetail: (id: string) => `/test/issues/${id}`,
   }),
+  useCurrentWorkspace: () => ({ id: "ws-1" }),
 }));
 
 vi.mock("@multica/core/api", () => ({
@@ -53,6 +57,8 @@ const mockIssue = vi.hoisted(() => ({ current: null as unknown }));
 const mockPresence = vi.hoisted(
   () => ({ current: "loading" as unknown }),
 );
+// The live status list; `read` records whether the card asked for it.
+const mockLive = vi.hoisted(() => ({ current: [] as unknown[], read: false }));
 
 // Distinguish queries by the function reference of the queryFn — the agent
 // list, snapshot, and issue detail are all `queryOptions(...)` records that
@@ -70,6 +76,7 @@ vi.mock("@tanstack/react-query", async () => {
       //   ["workspaces", wsId, "agents"]                       — agent list
       //   ["workspaces", wsId, "agent-task-snapshot", "list"]  — snapshot
       //   ["issues",     wsId, "detail", id]                   — issue detail
+      //   ["workspaces", wsId, "task-live", "list"]            — live status
       const root = key[0];
       const marker = key[2];
       if (root === "workspaces" && marker === "agents") {
@@ -77,6 +84,10 @@ vi.mock("@tanstack/react-query", async () => {
       }
       if (root === "workspaces" && marker === "agent-task-snapshot") {
         return { data: mockSnapshot.current, isLoading: false };
+      }
+      if (root === "workspaces" && marker === "task-live") {
+        if (opts.enabled !== false) mockLive.read = true;
+        return { data: opts.enabled === false ? undefined : mockLive.current, isLoading: false };
       }
       if (root === "issues" && marker === "detail") {
         return {
@@ -160,6 +171,9 @@ beforeEach(() => {
   mockAgents.current = [makeAgent()];
   mockSnapshot.current = [];
   mockIssue.current = null;
+  mockLive.current = [];
+  mockLive.read = false;
+  configStore.getState().setLocalFeatureFlags({});
   mockPresence.current = {
     availability: "online",
     workload: "idle",
@@ -199,6 +213,52 @@ describe("AgentLivePeekCard", () => {
     const link = screen.getByRole("link", { name: /MUL-42/ });
     expect(link).toHaveAttribute("href", "/test/issues/issue-42");
     expect(link.textContent).toContain("Wire up live peek");
+  });
+
+  it("adds the running run's live status in office test builds only", () => {
+    mockSnapshot.current = [
+      makeTask({ id: "task-running", status: "running", issue_id: "issue-42" }),
+    ];
+    mockIssue.current = { id: "issue-42", identifier: "MUL-42", title: "Wire up live peek" };
+    mockLive.current = [
+      {
+        task_id: "task-running",
+        issue_id: "issue-42",
+        agent_id: "agent-1",
+        tool: "Bash",
+        command: "GITHUB_TOKEN=[REDACTED GITHUB TOKEN] go test ./...",
+        last_output: "ok pkg/a",
+        tools_in_flight: 1,
+        idle_seconds: 90,
+        last_activity_at: "2026-10-27T17:28:30Z",
+        reported_at: "2026-10-27T17:30:00Z",
+      },
+    ];
+
+    const { unmount } = renderCard();
+    expect(screen.queryByTestId("task-live-details")).toBeNull();
+    expect(mockLive.read).toBe(false);
+    unmount();
+
+    configStore.getState().setLocalFeatureFlags({ [OFFICE_LIVE_STATUS_FLAG]: true });
+    renderCard();
+    const live = screen.getByTestId("task-live-details");
+    expect(live).toHaveTextContent("Command");
+    expect(live).toHaveTextContent("GITHUB_TOKEN=[REDACTED GITHUB TOKEN] go test ./...");
+    expect(live).toHaveTextContent("Output");
+    expect(live).toHaveTextContent("ok pkg/a");
+    expect(live).toHaveTextContent("Quiet");
+    expect(live).toHaveTextContent("1m 30s");
+  });
+
+  it("reads no live status when the agent runs no issue", () => {
+    configStore.getState().setLocalFeatureFlags({ [OFFICE_LIVE_STATUS_FLAG]: true });
+    mockSnapshot.current = [makeTask({ id: "task-chat", status: "running", issue_id: "" })];
+
+    renderCard();
+
+    expect(screen.queryByTestId("task-live-details")).toBeNull();
+    expect(mockLive.read).toBe(false);
   });
 
   it("renders Idle + empty issue copy when nothing is running", () => {

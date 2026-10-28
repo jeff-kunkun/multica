@@ -10,6 +10,9 @@ import {
 } from "@multica/core/issues";
 import { IssueFlowCard } from "../../workflows/issue-flow-card";
 import { useStatusLabel } from "../utils/status-label";
+import { commentSubIssueTitle } from "../utils/comment-sub-issue-title";
+import { useFeatureEnabled } from "@multica/core/config";
+import { OFFICE_SPLIT_FROM_COMMENT_FLAG } from "@multica/core/feature-flags";
 import { priorityLabel } from "../utils/priority-label";
 import { groupSubIssuesByStage } from "../utils/sub-issue-stages";
 // Re-exported for the callers that grew up with it living here; the function
@@ -114,6 +117,7 @@ import { SubIssueBlockerBadge, SubIssueBlockerSummary, blockerBadgeState, useSub
 import { IssueProjectPicker } from "../../projects/components/issue-project-picker";
 import { IssuePropertyPills } from "./issue-property-pills";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
+import { IssueSharedFolderNotice } from "../../projects/components/folder-runs-notice";
 import { useNewRunIds } from "./use-run-comment-motion";
 import { AgentRunComment, CommentCard } from "./comment-card";
 import { EMPTY_COMMENT_RUNS, buildCommentRunView, orderTimelineWithRuns, type CommentRun } from "./comment-runs";
@@ -129,6 +133,8 @@ import { collectThreadParticipants, collectThreadReplies, deriveThreadResolution
 import { IssueAgentHeaderChip } from "./issue-agent-header-chip";
 import { IssueLogExportButton } from "../../common/log-export";
 import { IssueWakeupHeaderChip } from "./issue-wakeup-header-chip";
+import { IssueGroupReminderChip } from "./issue-group-reminder-chip";
+import { IssuePlanCard } from "./issue-plan-card";
 import { ExecutionLogSection } from "./execution-log-section";
 import { WakeupsSection } from "./wakeups-section";
 import { QuickActionsSection } from "./quick-actions-section";
@@ -1565,9 +1571,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     label: t(($) => $.reply.annotations.add_comment),
     onSelect: descriptionAnnotations.addSelection,
   } : undefined, [canAnnotateDescription, t, descriptionAnnotations.addSelection]);
-  const openCommentSubIssue = useCallback((commentId: string) => {
+  const splitFromComment = useFeatureEnabled(OFFICE_SPLIT_FROM_COMMENT_FLAG);
+  const openCommentSubIssue = useCallback((commentId: string, content?: string) => {
     if (!issue) return;
-    openModal("quick-create-issue", {
+    // Office test builds split work by hand (DENE-2671): the manual form opens
+    // titled with the comment's first line, ready to order after a sibling.
+    const seedTitle = splitFromComment ? commentSubIssueTitle(content ?? "") : "";
+    openModal(splitFromComment ? "create-issue" : "quick-create-issue", {
+      ...(seedTitle ? { title: seedTitle } : {}),
       anchor_comment_id: commentId,
       parent_issue_id: issue.id,
       parent_issue_identifier: issue.identifier,
@@ -1576,7 +1587,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         ? { assignee_type: issue.assignee_type, assignee_id: issue.assignee_id }
         : {}),
     });
-  }, [issue, openModal]);
+  }, [issue, openModal, splitFromComment]);
 
   // Record recent visit
   const recordVisit = useRecentIssuesStore((s) => s.recordVisit);
@@ -3282,6 +3293,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     { key: "export", priority: 6, node: <IssueLogExportButton issueId={id} issueIdentifier={issue.identifier} /> },
     { key: "thread", priority: 7, node: <WorkThreadPanel kind="issue" id={id} /> },
     { key: "wakeup", priority: 4, node: <IssueWakeupHeaderChip issueId={id} onOpen={openWakeups} /> },
+    // The watchdog already told the project group this live run went quiet.
+    // Self-hides without the office flag or a reminder.
+    { key: "group-reminder", priority: 5, node: <IssueGroupReminderChip reminder={issue.watchdog_reminder} /> },
     {
       key: "done",
       priority: 1,
@@ -3941,6 +3955,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             );
           })()}
 
+          <IssuePlanCard issueId={issue.id} />
+
           <div className="my-8 border-t" />
 
           {/* Activity / Comments */}
@@ -4066,6 +4082,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             </div>
 
             <LocalDirectoryHint projectId={issue?.project_id} />
+            <IssueSharedFolderNotice issueId={issueId} />
 
             {/* The "agent is working" live signal now lives in the header
                 (IssueAgentHeaderChip) so it stays in one fixed place and
