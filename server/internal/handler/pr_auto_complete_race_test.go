@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // hookedTxStarter runs hook before starting a transaction, to schedule work
@@ -67,27 +66,17 @@ func fireTimedPRWebhook(t *testing.T, inst int64, identifier, state, timestamp s
 	testHandler.handlePullRequestEvent(context.Background(), raw)
 }
 
-// GitHub can deliver an old event late. It must not roll a merged PR back to
-// open, which would make a redelivered merge look new and complete an issue a
-// person reopened (MUL-7429 review).
-func TestPRAutoComplete_StaleGitHubEventDoesNotRecompleteReopenedIssue(t *testing.T) {
+// A merged PR records its mirror state but leaves issue acceptance to its
+// manager.
+func TestPRMergeLeavesIssueStatusForManagerAcceptance(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("handler test fixture not initialized (no DB?)")
 	}
 	const inst int64 = 8758003
-	issue := prAutoCompleteTestIssue(t, "stale GitHub event", inst)
-	fireTimedPRWebhook(t, inst, issue.Identifier, "open", "2026-09-22T01:00:00Z")
-	fireTimedPRWebhook(t, inst, issue.Identifier, "closed", "2026-09-22T02:00:00Z")
-	if got := issueStatusForTest(t, issue.ID); got != "done" {
-		t.Fatalf("initial merge got %s", got)
-	}
-	_, err := testHandler.Queries.UpdateIssueStatus(context.Background(), db.UpdateIssueStatusParams{ID: parseUUID(issue.ID), WorkspaceID: parseUUID(testWorkspaceID), Status: "in_progress"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	issue := prAutoCompleteTestIssue(t, "PR merge keeps status", inst)
 	fireTimedPRWebhook(t, inst, issue.Identifier, "open", "2026-09-22T01:00:00Z")
 	fireTimedPRWebhook(t, inst, issue.Identifier, "closed", "2026-09-22T02:00:00Z")
 	if got := issueStatusForTest(t, issue.ID); got != "in_progress" {
-		t.Fatalf("old deliveries re-completed reopened issue: got %s", got)
+		t.Fatalf("merged PR changed issue status: got %s, want in_progress", got)
 	}
 }

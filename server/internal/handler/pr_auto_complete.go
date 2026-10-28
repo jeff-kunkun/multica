@@ -16,7 +16,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/botsource"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
-	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
@@ -227,88 +226,6 @@ func (h *Handler) decidePRAutoComplete(ctx context.Context, ws db.Workspace, iss
 	return d, nil
 }
 
-// maybeAutoCompleteIssue runs the decision for one issue after a PR event and
-// moves it to the workspace's target status when every linked PR is merged.
-// Safe to call for any issue: every guard lives in decidePRAutoComplete, and
-// the status write is conditional on the status the decision saw, so
-// concurrent merges move the issue once. It starts no agent run: a merge is not
-// a person handing the issue to anyone.
-func (h *Handler) maybeAutoCompleteIssue(ctx context.Context, workspaceID, issueID pgtype.UUID, resolver *issuestatus.Resolver) {
-	issue, err := h.Queries.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: issueID, WorkspaceID: workspaceID})
-	if err != nil {
-		if !errors.Is(err, pgx.ErrNoRows) {
-			slog.Warn("pr auto-complete: load issue failed", "err", err, "issue_id", uuidToString(issueID))
-		}
-		return
-	}
-	ws, err := h.Queries.GetWorkspace(ctx, workspaceID)
-	if err != nil {
-		slog.Warn("pr auto-complete: load workspace failed", "err", err, "workspace_id", uuidToString(workspaceID))
-		return
-	}
-	d, err := h.decidePRAutoComplete(ctx, ws, issue, resolver)
-	if err != nil {
-		slog.Warn("pr auto-complete: decision failed", "err", err, "issue_id", uuidToString(issueID))
-		return
-	}
-	if d.State != prAutoCompleteAllMerged {
-		return
-	}
-
-	tx, err := h.TxStarter.Begin(ctx)
-	if err != nil {
-		slog.Warn("pr auto-complete: begin failed", "err", err)
-		return
-	}
-	defer tx.Rollback(ctx)
-	qtx := h.Queries.WithTx(tx)
-	updated, err := qtx.MoveIssueFromPullRequests(ctx, db.MoveIssueFromPullRequestsParams{
-		ID:             issue.ID,
-		WorkspaceID:    issue.WorkspaceID,
-		TargetStatus:   d.Target,
-		ExpectedStatus: issue.Status,
-	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		// Someone changed the status since the decision; their write wins.
-		return
-	}
-	var cancelledWakeups []db.AgentTaskQueue
-	if err == nil {
-		// A no-op unless the target closes the issue.
-		cancelledWakeups, err = service.StopClosedIssueWakeups(ctx, qtx, updated)
-	}
-	if err == nil {
-		err = tx.Commit(ctx)
-	}
-	if err != nil {
-		slog.Warn("pr auto-complete: status write failed", "err", err, "issue_id", uuidToString(issueID))
-		return
-	}
-	h.broadcastCancelledWakeups(ctx, updated.WorkspaceID, cancelledWakeups)
-	// A merged PR is the most common way a sub-issue reaches done; the parent
-	// hears about it on the same path as a manual status change.
-	if updated.ParentIssueID.Valid {
-		h.processChildEvents(ctx, updated.ParentIssueID)
-	}
-
-	prefix := h.getIssuePrefix(ctx, issue.WorkspaceID)
-	resp := issueToResponse(updated, prefix)
-	h.fillStatusCategory(ctx, updated.WorkspaceID, &resp)
-	h.publishWithSource(ctx, protocol.EventIssueUpdated, uuidToString(workspaceID), "system", "", map[string]any{
-		"issue":          resp,
-		"status_changed": true,
-		"prev_status":    issue.Status,
-		"creator_type":   issue.CreatorType,
-		"creator_id":     uuidToString(issue.CreatorID),
-		"source":         "pr_automation",
-		"pull_requests":  prNumberList(d.PRs),
-		// Moving out of cancelled clears a duplicate mark (MUL-7349); carry
-		// both ends so the activity log and clients see the mark go.
-		"duplicate_of_issue_id":      liveDuplicateMark(updated.Status, updated.DuplicateOfIssueID),
-		"prev_duplicate_of_issue_id": liveDuplicateMark(issue.Status, issue.DuplicateOfIssueID),
-	})
-}
-
 // prNumberList renders "#12, #15" for the activity entry.
 func prNumberList(prs []db.ListIssueLinkedPullRequestStatesRow) string {
 	parts := make([]string, 0, len(prs))
@@ -503,13 +420,12 @@ func (h *Handler) LinkIssuePullRequest(w http.ResponseWriter, r *http.Request) {
 	if parsed, err := util.ParseUUID(actorID); err == nil {
 		linkedBy = parsed
 	}
-	var rows int64
 	if pr.github {
-		rows, err = h.Queries.LinkIssueToPullRequestManually(r.Context(), db.LinkIssueToPullRequestManuallyParams{
+		_, err = h.Queries.LinkIssueToPullRequestManually(r.Context(), db.LinkIssueToPullRequestManuallyParams{
 			IssueID: issue.ID, PullRequestID: pr.ID, LinkedByID: linkedBy,
 		})
 	} else {
-		rows, err = h.Queries.LinkIssueToVCSPullRequestManually(r.Context(), db.LinkIssueToVCSPullRequestManuallyParams{
+		_, err = h.Queries.LinkIssueToVCSPullRequestManually(r.Context(), db.LinkIssueToVCSPullRequestManuallyParams{
 			IssueID: issue.ID, PullRequestID: pr.ID, LinkedByID: linkedBy,
 		})
 	}
@@ -520,9 +436,6 @@ func (h *Handler) LinkIssuePullRequest(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("link pull request failed", "err", err)
 		writeError(w, http.StatusInternalServerError, "failed to link pull request")
 		return
-	}
-	if rows > 0 {
-		h.maybeAutoCompleteIssue(r.Context(), issue.WorkspaceID, issue.ID, nil)
 	}
 	h.publishIssuePullRequestsChanged(workspaceID, issue.ID)
 	h.ListPullRequestsForIssue(w, r)
@@ -567,11 +480,10 @@ func (h *Handler) UnlinkIssuePullRequest(w http.ResponseWriter, r *http.Request)
 	}
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
-	var rows int64
 	if pr.github {
-		rows, err = qtx.UnlinkIssueFromPullRequest(r.Context(), db.UnlinkIssueFromPullRequestParams{IssueID: issue.ID, PullRequestID: pr.ID})
+		_, err = qtx.UnlinkIssueFromPullRequest(r.Context(), db.UnlinkIssueFromPullRequestParams{IssueID: issue.ID, PullRequestID: pr.ID})
 	} else {
-		rows, err = qtx.UnlinkIssueFromVCSPullRequest(r.Context(), db.UnlinkIssueFromVCSPullRequestParams{IssueID: issue.ID, PullRequestID: pr.ID})
+		_, err = qtx.UnlinkIssueFromVCSPullRequest(r.Context(), db.UnlinkIssueFromVCSPullRequestParams{IssueID: issue.ID, PullRequestID: pr.ID})
 	}
 	if err == nil {
 		err = qtx.ExcludePullRequestFromIssue(r.Context(), db.ExcludePullRequestFromIssueParams{
@@ -589,10 +501,6 @@ func (h *Handler) UnlinkIssuePullRequest(w http.ResponseWriter, r *http.Request)
 		slog.Warn("unlink pull request failed", "err", err)
 		writeError(w, http.StatusInternalServerError, "failed to unlink pull request")
 		return
-	}
-	if rows > 0 {
-		// Removing the last unmerged PR can leave only merged ones behind.
-		h.maybeAutoCompleteIssue(r.Context(), issue.WorkspaceID, issue.ID, nil)
 	}
 	h.publishIssuePullRequestsChanged(workspaceID, issue.ID)
 	h.ListPullRequestsForIssue(w, r)

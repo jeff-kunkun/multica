@@ -34,6 +34,13 @@ const (
 	RunningSilentEventType = "employee_running_silent"
 	projectGroupTarget     = "project_group"
 
+	// KunDecisionEventType asks the office group for Kun's decision when an
+	// issue takes the Kun-decision label (Config.KunLabel).
+	KunDecisionEventType = "kun_decision"
+	officeGroupTarget    = "office_group"
+	defaultKunLabel      = "等 Kun 拍板"
+	defaultKunGroup      = "Multica 办公室"
+
 	// liveCommandFreshness is how recent the run's live report must be for a
 	// reminder to name its command (DENE-2667 PR 4). The daemon reports every
 	// 15 seconds, so an older report means it stopped reporting and the
@@ -55,6 +62,16 @@ type Config struct {
 	ManagerWait      time.Duration
 	MaxEmployeeRound int
 	HeartbeatFile    string
+	// InReviewWait is how long an in_review issue, which only its responsible
+	// manager moves on, can go with no progress and no run before the manager
+	// is alerted; TodoStartDelay does the same for a started issue put back in
+	// todo. Zero turns the in_review alert off.
+	InReviewWait time.Duration
+	// An issue carrying the KunLabel label waits on Kun: it is pushed to the
+	// KunGroup chat group once each time it takes the label, and nobody is
+	// woken on it until the label comes off. Empty turns both off.
+	KunLabel string
+	KunGroup string
 	// RunAware stops issue-comment wakes while the assignee's run is alive;
 	// a run that stays silent in the issue for SilentInterval gets one
 	// project-group reminder per interval instead.
@@ -106,11 +123,17 @@ func ConfigFromEnv() (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	todoDelay, err := parseDuration("MULTICA_ISSUE_WATCHDOG_TODO_DELAY", 10*time.Minute)
+	// The office timeouts (Kun, 2026-10-28): todo 6h, in_progress and
+	// in_review 2h, a hold nobody answers 2h.
+	todoDelay, err := parseDuration("MULTICA_ISSUE_WATCHDOG_TODO_DELAY", 6*time.Hour)
 	if err != nil {
 		return Config{}, err
 	}
-	idleInterval, err := parseDuration("MULTICA_ISSUE_WATCHDOG_IDLE_INTERVAL", 30*time.Minute)
+	idleInterval, err := parseDuration("MULTICA_ISSUE_WATCHDOG_IDLE_INTERVAL", 2*time.Hour)
+	if err != nil {
+		return Config{}, err
+	}
+	inReviewWait, err := parseDuration("MULTICA_ISSUE_WATCHDOG_IN_REVIEW_WAIT", 2*time.Hour)
 	if err != nil {
 		return Config{}, err
 	}
@@ -145,7 +168,7 @@ func ConfigFromEnv() (Config, error) {
 			return Config{}, err
 		}
 	}
-	holdWait, err := parseDuration("MULTICA_ISSUE_WATCHDOG_HOLD_WAIT", 10*time.Minute)
+	holdWait, err := parseDuration("MULTICA_ISSUE_WATCHDOG_HOLD_WAIT", 2*time.Hour)
 	if err != nil {
 		return Config{}, err
 	}
@@ -193,6 +216,9 @@ func ConfigFromEnv() (Config, error) {
 		ManagerWait:      managerWait,
 		MaxEmployeeRound: rounds,
 		HeartbeatFile:    strings.TrimSpace(os.Getenv("MULTICA_ISSUE_WATCHDOG_HEARTBEAT_FILE")),
+		InReviewWait:     inReviewWait,
+		KunLabel:         lookupEnvOr("MULTICA_ISSUE_WATCHDOG_KUN_LABEL", defaultKunLabel),
+		KunGroup:         envOr("MULTICA_ISSUE_WATCHDOG_KUN_GROUP", defaultKunGroup),
 		RunAware:         runAware,
 		SilentInterval:   silentInterval,
 		HoldWake:         holdWake,
@@ -226,6 +252,23 @@ func ConfigFromEnv() (Config, error) {
 		}
 	}
 	return cfg, nil
+}
+
+// lookupEnvOr is the trimmed value of name, or fallback only when it is
+// unset, so an explicit empty value turns its feature off.
+func lookupEnvOr(name, fallback string) string {
+	if value, ok := os.LookupEnv(name); ok {
+		return strings.TrimSpace(value)
+	}
+	return fallback
+}
+
+// envOr is the trimmed value of name, or fallback when it is unset or blank.
+func envOr(name, fallback string) string {
+	if value := strings.TrimSpace(os.Getenv(name)); value != "" {
+		return value
+	}
+	return fallback
 }
 
 func isLoopbackHost(host string) bool {
@@ -278,6 +321,8 @@ type Issue struct {
 	FirstExecutedAt *time.Time
 	ProgressAt      time.Time
 	IssueRevision   int64
+	// KunLabel: the issue carries Config.KunLabel and waits on Kun.
+	KunLabel bool
 }
 
 type webhookEvent struct {
@@ -299,6 +344,8 @@ type webhookEvent struct {
 	// CurrentCommand is the command the run has in flight, from its live
 	// report; omitted when it runs none or reports no live status.
 	CurrentCommand string `json:"current_command,omitempty"`
+	// Group is the chat group to post to; set only on kun_decision events.
+	Group string `json:"group,omitempty"`
 }
 
 // activeRun is the assignee's live run on an issue and the last time the
@@ -353,6 +400,20 @@ func (w *Watchdog) HandleEvent(e events.Event) {
 				w.rebaselineAssignment(ctx, issue, w.now())
 			}
 		}
+	case protocol.EventIssueLabelsChanged:
+		payload, ok := payloadMap(e.Payload)
+		if !ok {
+			return
+		}
+		issueID, _ := payload["issue_id"].(string)
+		if issueID == "" {
+			return
+		}
+		issue, err := w.loadIssue(ctx, e.WorkspaceID, issueID)
+		if err != nil {
+			return
+		}
+		_ = w.checkKunDecision(ctx, issue, w.now())
 	case protocol.EventCommentCreated:
 		payload, ok := payloadMap(e.Payload)
 		if !ok {
@@ -444,7 +505,13 @@ SELECT i.id::text, i.workspace_id::text, i.number, w.issue_prefix || '-' || i.nu
                      AND e.event_type = 'issue.status_changed'), i.created_at)
        ) AS progress_at,
        i.revision, COALESCE(i.parent_issue_id::text, ''),
-       COALESCE(i.reviewer_type, ''), COALESCE(i.reviewer_id::text, '')
+       COALESCE(i.reviewer_type, ''), COALESCE(i.reviewer_id::text, ''),
+       $4 <> '' AND EXISTS (
+         SELECT 1 FROM issue_to_label il
+         JOIN issue_label l ON l.id = il.label_id
+         WHERE il.issue_id = i.id AND l.workspace_id = i.workspace_id
+           AND l.resource_type = 'issue' AND lower(l.name) = lower($4)
+       ) AS kun_label
 FROM issue i
 JOIN workspace w ON w.id = i.workspace_id
 LEFT JOIN project p ON p.id = i.project_id AND p.workspace_id = i.workspace_id
@@ -460,11 +527,11 @@ LEFT JOIN LATERAL (
     LIMIT 1
 ) manager_option ON true
 WHERE i.workspace_id = $1::uuid AND i.id = $2::uuid`,
-		workspaceID, issueID, watchdogCommentMarker,
+		workspaceID, issueID, watchdogCommentMarker, w.cfg.KunLabel,
 	).Scan(&out.ID, &out.WorkspaceID, &out.Number, &out.Identifier, &out.Title, &out.Status,
 		&out.AssigneeType, &out.AssigneeID, &out.EmployeeName, &out.ManagerName, &out.ProjectName,
 		&out.CreatedAt, &out.UpdatedAt, &firstExecutedAt, &out.ProgressAt, &out.IssueRevision,
-		&out.ParentID, &out.Reviewer.Type, &out.Reviewer.ID)
+		&out.ParentID, &out.Reviewer.Type, &out.Reviewer.ID, &out.KunLabel)
 	if err != nil {
 		return Issue{}, err
 	}
@@ -535,6 +602,12 @@ func (w *Watchdog) checkIssue(ctx context.Context, issue Issue, now time.Time) e
 	if err != nil {
 		return err
 	}
+	if err := w.checkKunDecision(ctx, issue, now); err != nil {
+		slog.WarnContext(ctx, "issue watchdog Kun-decision push failed", "issue_id", issue.ID)
+	}
+	if issue.KunLabel {
+		return nil // waits on Kun; nobody else can move it
+	}
 	if w.cfg.ChildWake && issue.ParentID != "" {
 		if err := w.checkChild(ctx, issue, now); err != nil {
 			slog.WarnContext(ctx, "issue watchdog sub-issue check failed", "issue_id", issue.ID)
@@ -544,14 +617,17 @@ func (w *Watchdog) checkIssue(ctx context.Context, issue Issue, now time.Time) e
 	if err != nil || handled {
 		return err
 	}
-	if issue.Status != "todo" && issue.Status != "in_progress" {
+	switch {
+	case issue.Status == "in_review":
+		return w.remindManagerIdle(ctx, issue, state, inReviewOverdue, w.cfg.InReviewWait, now)
+	case issue.Status != "todo" && issue.Status != "in_progress":
 		return nil
 	}
 	if issue.AssigneeID == "" || (issue.AssigneeType != "agent" && issue.AssigneeType != "member") {
 		return nil
 	}
 	if issue.Status == "todo" && issue.FirstExecutedAt != nil {
-		return nil
+		return w.remindManagerIdle(ctx, issue, state, todoOverdue, w.cfg.TodoStartDelay, now)
 	}
 	if w.cfg.RunAware && issue.AssigneeType == "agent" {
 		run, running, err := w.loadActiveRun(ctx, issue)
@@ -664,6 +740,98 @@ func employeeNudgeReason(issue Issue, round int, age time.Duration) string {
 		return fmt.Sprintf("已派给你，但 %d 分钟仍未开工（第 %d 轮提醒）。请开始处理并在单子里写进展。", int(age.Minutes()), round)
 	}
 	return fmt.Sprintf("这张单已 %d 分钟没有有效进展（第 %d 轮提醒）。请继续处理并在单子里更新进展或状态。", int(age.Minutes()), round)
+}
+
+const (
+	inReviewOverdue = "in_review_overdue"
+	todoOverdue     = "todo_overdue"
+)
+
+// remindManagerIdle alerts the responsible manager, once per stall, when an
+// issue only the manager moves on has had no progress and no run for wait:
+// an in_review issue, or a started issue put back in todo. The ordinary
+// manager wait and COO escalation follow.
+func (w *Watchdog) remindManagerIdle(ctx context.Context, issue Issue, state issueState, kind string, wait time.Duration, now time.Time) error {
+	if wait <= 0 {
+		return nil
+	}
+	runs, err := w.loadRuns(ctx, issue.ID)
+	if err != nil || runs.Active > 0 {
+		return err
+	}
+	anchor := later(state.LastProgressAt, runs.LastActivityAt)
+	idle := now.Sub(anchor)
+	if idle < wait {
+		return nil
+	}
+	key := fmt.Sprintf("%s:%s:%d", kind, issue.ID, anchor.UnixNano())
+	return w.notifyManager(ctx, issue, kind, key, w.managerIdleReason(kind, idle), "manager", now)
+}
+
+func (w *Watchdog) managerIdleReason(kind string, idle time.Duration) string {
+	minutes := int(idle.Minutes())
+	reason := fmt.Sprintf("单子待审已 %d 分钟没有动静。请验收，通过就关单", minutes)
+	if kind == todoOverdue {
+		reason = fmt.Sprintf("单子开工后放回了待办，已 %d 分钟没有动静。请决定恢复还是继续暂停", minutes)
+	}
+	if w.cfg.KunLabel != "" {
+		reason += "；要 Kun 看或拍板，就给单子打上「" + w.cfg.KunLabel + "」标签"
+	}
+	return reason
+}
+
+// checkKunDecision pushes an issue to the Kun group once each time it takes
+// the Kun-decision label. A push stays open, and blocks the next one, until a
+// scan or a label event sees the label gone; the push's manager_resolved_at
+// records that, and the idle clock restarts so Kun's answer gets fresh time.
+func (w *Watchdog) checkKunDecision(ctx context.Context, issue Issue, now time.Time) error {
+	if w.cfg.KunLabel == "" {
+		return nil
+	}
+	var (
+		pushes int
+		open   int64
+	)
+	if err := w.pool.QueryRow(ctx, `
+SELECT count(*), COALESCE(max(id) FILTER (WHERE manager_resolved_at IS NULL), 0)
+FROM office_issue_watchdog_attempt
+WHERE workspace_id = $1::uuid AND issue_id = $2::uuid AND event_type = $3`,
+		issue.WorkspaceID, issue.ID, KunDecisionEventType).Scan(&pushes, &open); err != nil {
+		return err
+	}
+	if !issue.KunLabel {
+		if open == 0 {
+			return nil
+		}
+		if _, err := w.pool.Exec(ctx, `
+UPDATE office_issue_watchdog_attempt SET manager_resolved_at = $2
+WHERE id = $1 AND manager_resolved_at IS NULL`, open, now); err != nil {
+			return err
+		}
+		w.deferIdleWake(ctx, issue.ID, now)
+		return nil
+	}
+	if open != 0 || issue.Status == "done" || issue.Status == "cancelled" {
+		return nil
+	}
+	key := fmt.Sprintf("kun-decision:%s:%d", issue.ID, pushes+1)
+	id, claimed, err := w.claim(ctx, issue, key, KunDecisionEventType, officeGroupTarget, issue.ManagerName, nil)
+	if err != nil || !claimed {
+		return err
+	}
+	err = w.post(ctx, webhookEvent{
+		EventID: key, EventType: KunDecisionEventType, IssueID: issue.ID,
+		IssueNumber: issue.Identifier, Title: issue.Title, Status: issue.Status,
+		Employee: issue.EmployeeName, Manager: issue.ManagerName, ProjectName: issue.ProjectName,
+		WakeTarget: officeGroupTarget, Group: w.cfg.KunGroup,
+		Reason:     fmt.Sprintf("单子打上了「%s」标签，请推到「%s」群请 Kun 拍板", w.cfg.KunLabel, w.cfg.KunGroup),
+		OccurredAt: now.UTC(),
+	})
+	w.finishAttempt(ctx, id, err == nil)
+	if err != nil {
+		return errors.New("issue watchdog Kun-decision push failed")
+	}
+	return nil
 }
 
 // loadActiveRun finds the assignee agent's running task on the issue. A
@@ -1175,25 +1343,25 @@ func isManagerReply(content, manager string) bool {
 	return false
 }
 
+// managerSignatures lists the prefixes that sign a comment as manager. A
+// manager signs with the name after the last 「·」 of its "负责经理" option
+// (CTO·扳手 signs 【负责经理·扳手】, 基建管家·扫帚 signs 【负责经理·扫帚】);
+// COO·Grok signs with its full name.
 func managerSignatures(manager string) []string {
-	names := map[string][]string{
-		"CTO·扳手":   {"扳手"},
-		"内容总监·小喇叭": {"小喇叭"},
-		"选品经理·放大镜": {"放大镜"},
-		"论文负责人·学霸": {"学霸"},
-		"COO·Grok": {"COO·Grok"},
+	manager = strings.TrimSpace(manager)
+	alias := manager
+	if i := strings.LastIndex(manager, "·"); i >= 0 && manager != "COO·Grok" {
+		alias = manager[i+len("·"):]
 	}
-	if aliases, ok := names[manager]; ok {
-		out := make([]string, 0, len(aliases)*6)
-		for _, alias := range aliases {
-			for _, prefix := range []string{"负责经理·" + alias, "负责经理" + alias} {
-				out = append(out, "【"+prefix+"】", "["+prefix+"]", prefix)
-			}
-		}
-		if manager == "COO·Grok" {
-			out = append(out, "【COO·Grok】", "[COO·Grok]", "COO·Grok")
-		}
-		return out
+	if alias == "" {
+		return nil
 	}
-	return nil
+	out := make([]string, 0, 9)
+	for _, prefix := range []string{"负责经理·" + alias, "负责经理" + alias} {
+		out = append(out, "【"+prefix+"】", "["+prefix+"]", prefix)
+	}
+	if manager == "COO·Grok" {
+		out = append(out, "【COO·Grok】", "[COO·Grok]", "COO·Grok")
+	}
+	return out
 }

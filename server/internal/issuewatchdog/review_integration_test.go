@@ -72,6 +72,10 @@ func (b *reviewBench) watchdog(cfg Config) *Watchdog {
 	}
 	base.HoldWake, base.ReviewWake, base.StuckWake, base.ChildWake = cfg.HoldWake, cfg.ReviewWake, cfg.StuckWake, cfg.ChildWake
 	base.RoundStop, base.RoundLimit = cfg.RoundStop, cfg.RoundLimit
+	base.InReviewWait, base.KunLabel, base.KunGroup = cfg.InReviewWait, cfg.KunLabel, cfg.KunGroup
+	if cfg.TodoStartDelay > 0 {
+		base.TodoStartDelay = cfg.TodoStartDelay
+	}
 	if cfg.WebhookURL != "" {
 		base.WebhookURL, base.WebhookKey = cfg.WebhookURL, cfg.WebhookKey
 	}

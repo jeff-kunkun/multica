@@ -12,7 +12,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/integrations/vcs"
-	"github.com/multica-ai/multica/server/internal/issuestatus"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -187,18 +186,6 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 		return
 	}
 
-	// The stored state before this event, so a merge completes issues once —
-	// when it happens — and not again on a later event of a merged PR.
-	prevState := ""
-	if prev, err := h.Queries.GetVCSPullRequestByKey(ctx, db.GetVCSPullRequestByKeyParams{
-		ConnectionID: conn.ID,
-		RepoOwner:    ev.RepoOwner,
-		RepoName:     ev.RepoName,
-		PrNumber:     ev.Number,
-	}); err == nil {
-		prevState = prev.State
-	}
-
 	pr, err := h.Queries.UpsertVCSPullRequest(ctx, db.UpsertVCSPullRequestParams{
 		WorkspaceID:     conn.WorkspaceID,
 		ConnectionID:    conn.ID,
@@ -246,14 +233,13 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 	// Auto-link to issues by identifiers in the title, branch, and closing
 	// keywords. Connecting a provider is the opt-in, so there is no separate
 	// per-workspace flag. The issue-side machinery is shared with GitHub
-	// (reconcileAutoLinks, maybeAutoCompleteIssue). A connection belongs to
+	// (reconcileAutoLinks). A connection belongs to
 	// exactly one workspace, so there is no cross-workspace ambiguity to settle.
 	linkedIssueIDs := make([]string, 0)
 	ws, err := h.Queries.GetWorkspace(ctx, conn.WorkspaceID)
 	if err == nil {
-		var touched map[pgtype.UUID]struct{}
 		idents := prClaimedIdentifiers(ev.Title, ev.Body, ev.Branch)
-		linkedIssueIDs, touched = h.reconcileAutoLinks(ctx, ws, pr.ID, ev.State, prAutoLinkInput{
+		linkedIssueIDs, _ = h.reconcileAutoLinks(ctx, ws, pr.ID, ev.State, prAutoLinkInput{
 			idents:    idents,
 			permits:   func(string) bool { return true },
 			ambiguous: func(string) bool { return false },
@@ -267,19 +253,6 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 				return h.Queries.ListAutoLinkedIssueIDsForVCSPullRequest(ctx, pr.ID)
 			},
 		})
-		if ev.State == "merged" && prevState != "merged" {
-			issueIDs, err := h.Queries.ListIssueIDsForVCSPullRequest(ctx, pr.ID)
-			if err != nil {
-				slog.Warn("vcs: list linked issues failed", "err", err)
-			}
-			for _, id := range issueIDs {
-				touched[id] = struct{}{}
-			}
-		}
-		resolver := issuestatus.NewResolver(conn.WorkspaceID)
-		for issueID := range touched {
-			h.maybeAutoCompleteIssue(ctx, conn.WorkspaceID, issueID, resolver)
-		}
 	} else {
 		slog.Warn("vcs: load workspace failed", "err", err)
 	}

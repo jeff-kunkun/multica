@@ -738,6 +738,7 @@ func main() {
 	watchdog.SetNote(h.CreateWatchdogNoteComment)
 	bus.Subscribe(protocol.EventIssueUpdated, watchdog.HandleEvent)
 	bus.Subscribe(protocol.EventCommentCreated, watchdog.HandleEvent)
+	bus.Subscribe(protocol.EventIssueLabelsChanged, watchdog.HandleEvent)
 
 	// Construct a LivenessStore that mirrors the one wired into the HTTP
 	// handler. Both the heartbeat write path (handler) and the sweeper read
