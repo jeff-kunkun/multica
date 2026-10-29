@@ -38,6 +38,7 @@ import { canAccessModule } from "@multica/core/workspace";
 import { useFeatureEnabled } from "@multica/core/config";
 import {
   BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG,
+  OFFICE_HIDE_WAKEUPS_FLAG,
   PLUGINS_V1_FLAG,
   PROJECT_WORKFLOWS_V1_FLAG,
 } from "@multica/core/feature-flags";
@@ -140,6 +141,7 @@ export function SettingsPage({ extraDeviceTabs: deviceTabs = [] }: SettingsPageP
     BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG,
     false,
   );
+  const wakeupsHidden = useFeatureEnabled(OFFICE_HIDE_WAKEUPS_FLAG, false);
   const appsAvailable = useComposioAvailable();
   const entry = (
     value: string,
@@ -155,6 +157,10 @@ export function SettingsPage({ extraDeviceTabs: deviceTabs = [] }: SettingsPageP
     <MembersTab />,
     { adminOnly: true },
   );
+  const wakeupsEntry = entry("wakeups", t(($) => $.page.tabs.wakeups), AlarmClock, <WakeupsTab />, {
+    wide: true,
+    adminOnly: true,
+  });
 
   // Office pages that are not official: they still open from a link (server
   // redirects, CLI hints), but the list stays the official one.
@@ -173,6 +179,9 @@ export function SettingsPage({ extraDeviceTabs: deviceTabs = [] }: SettingsPageP
       <ConfigTransferTab />,
       { wide: true },
     ),
+    // DENE-2761: hidden in office builds, kept reachable for the admin who
+    // turns the sub-issue default off.
+    ...(wakeupsHidden ? [wakeupsEntry] : []),
   ];
 
   const groups: SettingsScopeGroup[] = [
@@ -277,10 +286,7 @@ export function SettingsPage({ extraDeviceTabs: deviceTabs = [] }: SettingsPageP
                   wide: true,
                   adminOnly: true,
                 })]),
-            entry("wakeups", t(($) => $.page.tabs.wakeups), AlarmClock, <WakeupsTab />, {
-              wide: true,
-              adminOnly: true,
-            }),
+            ...(wakeupsHidden ? [] : [wakeupsEntry]),
             entry("labels", t(($) => $.page.tabs.labels), Tags, <LabelsTab />, {
               wide: true,
             }),

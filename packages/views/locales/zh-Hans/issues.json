@@ -402,7 +402,13 @@
     "empty_grouping": "没有匹配的任务",
     "no_value": "未设置",
     "ordered_by": "按{{field}}排序",
-    "manual_reorder_hint": "切换到“手动”排序后，才能调整同一列内的顺序。"
+    "manual_reorder_hint": "切换到“手动”排序后，才能调整同一列内的顺序。",
+    "parent_group": {
+      "all": "全部",
+      "tabs_label": "按父任务筛选",
+      "unknown_parent": "父任务",
+      "count_other": "· {{count}} 张"
+    }
   },
   "peek": {
     "panel_label": "任务预览",

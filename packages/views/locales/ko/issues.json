@@ -402,7 +402,13 @@
     "empty_grouping": "일치하는 태스크가 없습니다",
     "no_value": "값 없음",
     "ordered_by": "{{field}} 기준으로 정렬된 보드",
-    "manual_reorder_hint": "열 안의 순서를 바꾸려면 정렬을 '수동'으로 전환하세요."
+    "manual_reorder_hint": "열 안의 순서를 바꾸려면 정렬을 '수동'으로 전환하세요.",
+    "parent_group": {
+      "all": "전체",
+      "tabs_label": "상위 태스크로 필터",
+      "unknown_parent": "상위 태스크",
+      "count_other": "· {{count}}개"
+    }
   },
   "peek": {
     "panel_label": "태스크 미리보기",

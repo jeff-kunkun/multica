@@ -290,6 +290,18 @@ export interface IssueViewState {
    */
   boardExpandedParents: string[];
   /**
+   * Board parent groups the user collapsed, as `<column id>|<parent id>`: one
+   * parent's group folds in one column, the same parent elsewhere stays open.
+   * Display only. (DENE-2760, `office_parent_groups`)
+   */
+  boardCollapsedParentGroups: string[];
+  /**
+   * The board's parent tab: when set, every column shows only that parent's
+   * sub-issues. Not persisted, like `agentRunningFilter`: a stored tab would
+   * bring the user back to a board missing most of its cards. (DENE-2760)
+   */
+  boardParentFilter: string | null;
+  /**
    * Flips how `tableCollapsedParents` reads. `false` (workspace default) keeps
    * the historical meaning — every parent starts expanded and the list names
    * the collapsed ones. `true` (project surfaces) starts every parent
@@ -372,6 +384,8 @@ export interface IssueViewState {
   toggleCardPropertyId: (propertyId: string) => void;
   toggleShowSubIssues: () => void;
   toggleBoardParentExpanded: (issueId: string) => void;
+  toggleBoardParentGroupCollapsed: (key: string) => void;
+  setBoardParentFilter: (parentId: string | null) => void;
   toggleHideCompletedParents: () => void;
   toggleListCollapsed: (status: IssueStatus) => void;
   setSwimlaneGrouping: (grouping: SwimlaneGrouping) => void;
@@ -411,6 +425,8 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
   cardPropertyIds: [],
   showSubIssues: true,
   boardExpandedParents: [],
+  boardCollapsedParentGroups: [],
+  boardParentFilter: null,
   tableParentsCollapsedByDefault: false,
   hideCompletedParents: false,
   listCollapsedStatuses: [],
@@ -622,6 +638,13 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
         ? state.boardExpandedParents.filter((id) => id !== issueId)
         : [...state.boardExpandedParents, issueId],
     })),
+  toggleBoardParentGroupCollapsed: (key) =>
+    set((state) => ({
+      boardCollapsedParentGroups: state.boardCollapsedParentGroups.includes(key)
+        ? state.boardCollapsedParentGroups.filter((k) => k !== key)
+        : [...state.boardCollapsedParentGroups, key],
+    })),
+  setBoardParentFilter: (parentId) => set({ boardParentFilter: parentId }),
   toggleHideCompletedParents: () =>
     set((state) => ({ hideCompletedParents: !state.hideCompletedParents })),
   toggleListCollapsed: (status) =>
@@ -723,6 +746,8 @@ export const viewStorePersistOptions = (name: string) => ({
     cardPropertyIds: state.cardPropertyIds,
     showSubIssues: state.showSubIssues,
     boardExpandedParents: state.boardExpandedParents,
+    // `boardParentFilter` is not persisted; see its field comment.
+    boardCollapsedParentGroups: state.boardCollapsedParentGroups,
     tableParentsCollapsedByDefault: state.tableParentsCollapsedByDefault,
     hideCompletedParents: state.hideCompletedParents,
     listCollapsedStatuses: state.listCollapsedStatuses,
@@ -833,6 +858,11 @@ export function mergeViewStatePersisted<T extends IssueViewState>(
     boardExpandedParents: Array.isArray(p.boardExpandedParents)
       ? p.boardExpandedParents
       : current.boardExpandedParents,
+    boardCollapsedParentGroups: Array.isArray(p.boardCollapsedParentGroups)
+      ? p.boardCollapsedParentGroups.filter((key): key is string => typeof key === "string")
+      : current.boardCollapsedParentGroups,
+    // Never restored, even from a hand-edited snapshot: see the field comment.
+    boardParentFilter: current.boardParentFilter,
     // A surface-level default, not a user preference: never let a snapshot
     // taken before the surface had it (or one copied from a saved view
     // definition) flip a project surface back to expand-everything.

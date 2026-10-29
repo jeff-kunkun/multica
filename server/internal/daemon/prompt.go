@@ -83,16 +83,13 @@ func perTurnContextBlocks(task Task, opts promptOpts) string {
 }
 
 // buildSessionHandoffBlock tells a run that the server set its last session on
-// this issue aside (DENE-2756) and hands over what that session last reported.
-// It stands in for the continuity notice: the comments stay the record.
+// this issue aside (it went cold with a large context, DENE-1331) and hands
+// over what that session last reported. It stands in for the continuity
+// notice: the comments stay the record.
 func buildSessionHandoffBlock(h SessionHandoff) string {
-	why := "had gone cold with a large context"
-	if h.Reason == "context_limit" {
-		why = fmt.Sprintf("was still about %dk tokens of context after the CLI's own compaction, past this workspace's limit", (h.ContextTokens+500)/1000)
-	}
 	var b strings.Builder
 	b.WriteString("## Session Handoff\n\n")
-	fmt.Fprintf(&b, "This run starts a new session in the same working directory: your previous session on this issue %s, and resuming it would only slow the start. Its memory is not here; the issue comments are the record, so catch up on them as the workflow says before acting.\n", why)
+	b.WriteString("This run starts a new session in the same working directory: your previous session on this issue had gone cold with a large context, and resuming it would only slow the start. Its memory is not here; the issue comments are the record, so catch up on them as the workflow says before acting.\n")
 	if out := strings.TrimSpace(h.LastOutput); out != "" {
 		b.WriteString("What that session last reported:\n\n")
 		for _, line := range strings.Split(out, "\n") {

@@ -24,6 +24,8 @@ import { useViewStoreApi } from "@multica/core/issues/stores/view-store-context"
 import { useViewBaseline } from "../surface/view-baseline-context";
 import { StatusHeading } from "./status-heading";
 import { DraggableBoardCard } from "./board-card";
+import { BoardParentGroupHeader, useBoardParentGroups } from "./board-parent-groups";
+import { parentGroupRows, type ParentGroupRow } from "../utils/parent-groups";
 import type { ChildProgress } from "./list-row";
 import { useT } from "../../i18n";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -150,6 +152,29 @@ export const BoardColumn = memo(function BoardColumn({
     [issueIds, issueMap],
   );
 
+  // With parent groups on (DENE-2760), a header row leads each parent's
+  // sub-issues and a folded group drops its cards. The sortable list follows
+  // the rows, so dnd-kit measures the cards in the order they are drawn.
+  const parentGroups = useBoardParentGroups();
+  const rows = useMemo<ParentGroupRow<Issue>[]>(
+    () =>
+      parentGroups
+        ? parentGroupRows(
+            resolvedIssues,
+            (issue) => issue.parent_issue_id,
+            (parentId) => parentGroups.isCollapsed(group.id, parentId),
+          )
+        : resolvedIssues.map((issue) => ({ kind: "card" as const, item: issue, parentId: null })),
+    [group.id, parentGroups, resolvedIssues],
+  );
+  const sortableIds = useMemo(
+    () =>
+      parentGroups
+        ? rows.flatMap((row) => (row.kind === "card" ? [row.item.id] : []))
+        : issueIds,
+    [issueIds, parentGroups, rows],
+  );
+
   // The column's scroll container is both dnd-kit's droppable and Virtuoso's
   // customScrollParent, so a merged callback ref feeds the element to both.
   // useDroppable's setNodeRef is stable across renders. Keeping the droppable
@@ -180,20 +205,31 @@ export const BoardColumn = memo(function BoardColumn({
     [footer],
   );
 
-  const computeItemKey = (_index: number, issue: Issue) => issue.id;
-  const itemContent = (index: number, issue: Issue) => (
+  const computeItemKey = (_index: number, row: ParentGroupRow<Issue>) =>
+    row.kind === "card" ? row.item.id : `parent-group:${row.parentId}`;
+  const itemContent = (index: number, row: ParentGroupRow<Issue>) => (
     // pt-2 on every card but the first reproduces the previous `space-y-2`
     // gap; padding (not margin) is inside Virtuoso's measured item box so its
     // height math stays correct.
     <div className={index === 0 ? undefined : "pt-2"}>
-      <DraggableBoardCard
-        issue={issue}
-        childProgress={childProgressMap?.get(issue.id)}
-        project={
-          issue.project_id ? projectMap?.get(issue.project_id) : undefined
-        }
-        disableSorting={!!sortLabel}
-      />
+      {row.kind === "group" ? (
+        <BoardParentGroupHeader
+          columnId={group.id}
+          parentId={row.parentId}
+          count={row.count}
+          collapsed={row.collapsed}
+        />
+      ) : (
+        <DraggableBoardCard
+          issue={row.item}
+          childProgress={childProgressMap?.get(row.item.id)}
+          project={
+            row.item.project_id ? projectMap?.get(row.item.project_id) : undefined
+          }
+          disableSorting={!!sortLabel}
+          groupColor={row.parentId ? parentGroups?.colorOf(row.parentId) : undefined}
+        />
+      )}
     </div>
   );
 
@@ -332,8 +368,8 @@ export const BoardColumn = memo(function BoardColumn({
           }`}
         >
           {resolvedIssues.length > 0 ? (
-            <SortableContext items={issueIds} strategy={verticalListSortingStrategy}>
-              {resolvedIssues.length <= BOARD_VIRTUALIZE_THRESHOLD ? (
+            <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
+              {rows.length <= BOARD_VIRTUALIZE_THRESHOLD ? (
                 /* Small column: plain full render (reusing the same
                    itemContent, so it is byte-identical to the virtualized
                    rows). No handoff, no estimates — see
@@ -343,20 +379,20 @@ export const BoardColumn = memo(function BoardColumn({
                    Footer slot. */
                 <>
                   <VirtuosoSeed
-                    data={resolvedIssues}
+                    data={rows}
                     itemContent={itemContent}
                     computeItemKey={computeItemKey}
-                    count={resolvedIssues.length}
+                    count={rows.length}
                   />
                   {footer}
                 </>
               ) : scrollEl ? (
                 <Virtuoso
                   customScrollParent={scrollEl}
-                  data={resolvedIssues}
+                  data={rows}
                   computeItemKey={computeItemKey}
                   initialScrollTop={restoredScrollTop ?? 0}
-                  initialItemCount={Math.min(resolvedIssues.length, BOARD_SEED_COUNT)}
+                  initialItemCount={Math.min(rows.length, BOARD_SEED_COUNT)}
                   defaultItemHeight={BOARD_CARD_ESTIMATED_HEIGHT}
                   increaseViewportBy={{ top: 300, bottom: 300 }}
                   components={footerComponents}
@@ -369,7 +405,7 @@ export const BoardColumn = memo(function BoardColumn({
                    with a matching `initialItemCount` to survive the
                    measurement frame (MUL-4750). */
                 <VirtuosoSeed
-                  data={resolvedIssues}
+                  data={rows}
                   itemContent={itemContent}
                   computeItemKey={computeItemKey}
                   count={BOARD_SEED_COUNT}

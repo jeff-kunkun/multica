@@ -109,13 +109,7 @@
     "customized_one": "{{count}} tâche ouverte a son propre réglage et ignore cette valeur par défaut.",
     "customized_other": "{{count}} tâches ouvertes ont leur propre réglage et ignorent cette valeur par défaut.",
     "admin_only": "Seuls les propriétaires et administrateurs peuvent modifier ces valeurs.",
-    "load_error": "Impossible de charger les valeurs par défaut des réveils.",
-    "session_title": "Contexte des sessions",
-    "session_description": "Une relance reprend la session précédente. Au-delà de la limite après la compaction de la CLI, une nouvelle session démarre avec un court relais.",
-    "session_max_context": "Limite de contexte (jetons)",
-    "session_max_context_hint": "0 la désactive (par défaut). Claude et Codex indiquent leur taille.",
-    "session_invalid": "Saisissez un nombre entier de 0 à 2000000.",
-    "session_save_error": "Impossible d’enregistrer la limite."
+    "load_error": "Impossible de charger les valeurs par défaut des réveils."
   },
   "quick_actions": {
     "title": "Actions rapides",
@@ -1408,12 +1402,8 @@
       "title": "Mises à jour",
       "current_version": "Version actuelle",
       "version_alignment": {
-        "title": "Alignement des versions",
-        "description": "L'application, le daemon local et le serveur doivent exécuter le même commit. Tout côté différent ou sans commit est affiché en rouge.",
-        "aligned": "Alignées",
-        "misaligned": "Non alignées",
-        "mismatch": "différent",
-        "no_commit": "aucun commit",
+        "title": "Versions",
+        "description": "Ce que l'application, le daemon local et le serveur exécutent chacun.",
         "not_reported": "non signalé",
         "daemon_not_running": "arrêté",
         "server_loading": "vérification…",

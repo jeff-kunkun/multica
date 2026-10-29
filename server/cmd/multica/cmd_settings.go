@@ -31,8 +31,6 @@ decide permissions; the server does.
   multica settings get repo.shares --value-json '{"url":"https://github.com/acme/app.git"}'
   multica settings set repo.shares --value-json '{"url":"https://github.com/acme/app.git","member_id":"..."}'
   multica settings set repo.shares --value-json '{"url":"https://github.com/acme/app.git","member_id":"...","revoke":true}'
-  multica settings get session.max-context-tokens
-  multica settings set session.max-context-tokens --value-json 150000   # new session past this context; 0 = off (default)
 
 Keys, methods, and which page each one belongs to: docs/kun/settings-cli-coverage.md`,
 }
@@ -78,7 +76,7 @@ type settingsCall struct {
 type settingsKind struct {
 	handlers []string
 	read     func(id string, query map[string]any, workspaceID string) (settingsCall, error)
-	write    func(id string, value any, workspaceID string) (settingsCall, error)
+	write    func(id string, value any) (settingsCall, error)
 }
 
 // settingsKinds is the only method table. Adding a server route under the
@@ -96,7 +94,7 @@ var settingsKinds = map[string]settingsKind{
 		read: func(id string, _ map[string]any, _ string) (settingsCall, error) {
 			return settingsCall{Method: http.MethodGet, Path: "/api/modules", Project: "module", Hint: id}, nil
 		},
-		write: func(id string, value any, _ string) (settingsCall, error) {
+		write: func(id string, value any) (settingsCall, error) {
 			return settingsCall{Method: http.MethodPut, Path: "/api/modules/" + url.PathEscape(id) + "/visibility", Body: value}, nil
 		},
 	},
@@ -113,7 +111,7 @@ var settingsKinds = map[string]settingsKind{
 				Hint:    queryString(query, "url"),
 			}, nil
 		},
-		write: func(_ string, value any, _ string) (settingsCall, error) {
+		write: func(_ string, value any) (settingsCall, error) {
 			return settingsCall{Method: http.MethodPut, Path: "/api/repos/visibility", Body: value}, nil
 		},
 	},
@@ -136,21 +134,8 @@ var settingsKinds = map[string]settingsKind{
 		read: func(id string, _ map[string]any, _ string) (settingsCall, error) {
 			return settingsCall{Method: http.MethodGet, Path: "/api/runtimes", Project: "runtime-visibility", Hint: id}, nil
 		},
-		write: func(id string, value any, _ string) (settingsCall, error) {
+		write: func(id string, value any) (settingsCall, error) {
 			return settingsCall{Method: http.MethodPatch, Path: "/api/runtimes/" + url.PathEscape(id), Body: value}, nil
-		},
-	},
-	"session.max-context-tokens": {
-		handlers: []string{"GetWorkspaceSessionResume", "UpdateWorkspaceSessionResume"},
-		read: func(_ string, _ map[string]any, workspaceID string) (settingsCall, error) {
-			return sessionResumeCall(http.MethodGet, nil, workspaceID)
-		},
-		write: func(_ string, value any, workspaceID string) (settingsCall, error) {
-			// A bare number is the limit itself.
-			if n, ok := value.(float64); ok {
-				value = map[string]any{"max_context_tokens": n}
-			}
-			return sessionResumeCall(http.MethodPut, value, workspaceID)
 		},
 	},
 	"agent.access-passes": {
@@ -165,7 +150,7 @@ var settingsKinds = map[string]settingsKind{
 		read: func(id string, _ map[string]any, _ string) (settingsCall, error) {
 			return settingsCall{Method: http.MethodGet, Path: "/api/agents/" + url.PathEscape(id), Project: "runtime-skill", Hint: id}, nil
 		},
-		write: func(id string, value any, _ string) (settingsCall, error) {
+		write: func(id string, value any) (settingsCall, error) {
 			return settingsCall{
 				Method: http.MethodPut,
 				Path:   "/api/agents/" + url.PathEscape(id) + "/runtime-skills/enabled",
@@ -176,14 +161,7 @@ var settingsKinds = map[string]settingsKind{
 	},
 }
 
-func sessionResumeCall(method string, body any, workspaceID string) (settingsCall, error) {
-	if workspaceID == "" {
-		return settingsCall{}, fmt.Errorf("workspace id is required for session.max-context-tokens")
-	}
-	return settingsCall{Method: method, Path: "/api/workspaces/" + url.PathEscape(workspaceID) + "/session-resume", Body: body}, nil
-}
-
-func planRepoSharesWrite(_ string, value any, _ string) (settingsCall, error) {
+func planRepoSharesWrite(_ string, value any) (settingsCall, error) {
 	body, _ := value.(map[string]any)
 	if body != nil && boolField(body, "revoke") {
 		repoURL := queryString(body, "url")
@@ -203,7 +181,7 @@ func planRepoSharesWrite(_ string, value any, _ string) (settingsCall, error) {
 	return settingsCall{Method: http.MethodPost, Path: "/api/repos/shares", Body: value}, nil
 }
 
-func planAccessPassWrite(id string, value any, _ string) (settingsCall, error) {
+func planAccessPassWrite(id string, value any) (settingsCall, error) {
 	path := "/api/agents/" + url.PathEscape(id) + "/access-passes"
 	if body, ok := value.(map[string]any); ok && body["revoke_id"] != nil {
 		revokeID := strings.TrimSpace(fmt.Sprint(body["revoke_id"]))
@@ -227,7 +205,7 @@ func settingsHandlerClaims() map[string]struct{} {
 
 func parseSettingsKey(key string) (kind, id string, err error) {
 	switch key {
-	case "modules.visibility", "repo.visibility", "repo.shares", "session.max-context-tokens":
+	case "modules.visibility", "repo.visibility", "repo.shares":
 		return key, "", nil
 	}
 	parts := strings.Split(key, ".")
@@ -265,7 +243,7 @@ func planSettings(key string, write bool, value any, query map[string]any, works
 		if kind.write == nil {
 			return settingsCall{}, fmt.Errorf("setting %s is read-only; set a more specific key", key)
 		}
-		return kind.write(id, value, workspaceID)
+		return kind.write(id, value)
 	}
 	if kind.read == nil {
 		return settingsCall{}, fmt.Errorf("setting %s cannot be read", key)

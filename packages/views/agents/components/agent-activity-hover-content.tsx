@@ -6,6 +6,8 @@ import { useQuery } from "@tanstack/react-query";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useFeatureEnabled } from "@multica/core/config";
+import { OFFICE_HIDE_WAKEUPS_FLAG } from "@multica/core/feature-flags";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { agentListOptions } from "@multica/core/workspace/queries";
 import { deriveAgentPresenceDetail } from "@multica/core/agents/derive-presence";
@@ -71,6 +73,8 @@ function AgentActivityTaskRow({
 } & ActivityLookups) {
   const { t } = useT("issues");
   const { getActorName, getActorInitials, getActorAvatarUrl } = useActorName();
+  // DENE-2761: office builds do not mark wakeup-started runs.
+  const wakeupsShown = !useFeatureEnabled(OFFICE_HIDE_WAKEUPS_FLAG, false);
 
   const agent = agentById.get(task.agent_id);
   const runtime = runtimeFrom(agent?.runtime_id, runtimeById);
@@ -112,7 +116,7 @@ function AgentActivityTaskRow({
       <span className="flex-1 truncate font-medium">
         {getActorName("agent", task.agent_id)}
       </span>
-      {task.wakeup_id && <Bell className="size-3 shrink-0 text-muted-foreground" aria-label={t(($) => $.wakeups.triggered_by_wakeup)} />}
+      {task.wakeup_id && wakeupsShown && <Bell className="size-3 shrink-0 text-muted-foreground" aria-label={t(($) => $.wakeups.triggered_by_wakeup)} />}
       <span className="flex shrink-0 items-center gap-1.5">
         <span className={`h-1.5 w-1.5 rounded-full ${dotClass}`} />
         <span className={labelClass}>

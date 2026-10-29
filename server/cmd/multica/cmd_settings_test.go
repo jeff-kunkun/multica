@@ -204,31 +204,6 @@ func TestPlanSettingsPinsAccessPassMethods(t *testing.T) {
 	}
 }
 
-// DENE-2756: the session context limit reads and writes its own workspace
-// endpoint; a bare number is the limit itself.
-func TestPlanSettingsSessionMaxContextTokens(t *testing.T) {
-	read, err := planSettings("session.max-context-tokens", false, nil, nil, "ws-123")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if read.Method != http.MethodGet || read.Path != "/api/workspaces/ws-123/session-resume" {
-		t.Fatalf("read = %s %s", read.Method, read.Path)
-	}
-	for _, value := range []any{float64(150000), map[string]any{"max_context_tokens": float64(150000)}} {
-		write, err := planSettings("session.max-context-tokens", true, value, nil, "ws-123")
-		if err != nil {
-			t.Fatal(err)
-		}
-		body, _ := write.Body.(map[string]any)
-		if write.Method != http.MethodPut || write.Path != "/api/workspaces/ws-123/session-resume" || body["max_context_tokens"] != float64(150000) {
-			t.Fatalf("write(%v) = %s %s %#v", value, write.Method, write.Path, write.Body)
-		}
-	}
-	if _, err := planSettings("session.max-context-tokens", false, nil, nil, ""); err == nil {
-		t.Fatal("read without a workspace was accepted")
-	}
-}
-
 func clearSettingsFlags(t *testing.T) {
 	t.Helper()
 	_ = settingsGetCmd.Flags().Set("output", "json")

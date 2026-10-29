@@ -33,3 +33,13 @@ export const OFFICE_DEFAULT_DIR_FLAG = "office_default_dir";
 // two runs share a folder; project creation stops offering repositories and
 // git init. Only on in office test builds.
 export const OFFICE_PROJECT_FOLDER_FLAG = "office_project_folder";
+
+// DENE-2760: on the board, sub-issues of one parent sit together under a
+// colored, collapsible header, and a tab row filters to one parent. Only on in
+// office test builds.
+export const OFFICE_PARENT_GROUPS_FLAG = "office_parent_groups";
+
+// DENE-2761: the office calls people through the manager doorbell, not
+// wakeups. Settings → Wakeups leaves the list (still opens from a link) and
+// issue cards and rows drop their wakeup bell. Only on in office test builds.
+export const OFFICE_HIDE_WAKEUPS_FLAG = "office_hide_wakeups";

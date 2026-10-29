@@ -107,13 +107,7 @@
     "save_error": "既定値を保存できませんでした。",
     "customized_other": "進行中の {{count}} 件のタスクが個別の設定を使っており、この既定値に従いません。",
     "admin_only": "既定値を変更できるのはオーナーと管理者だけです。",
-    "load_error": "ウェイクアップの既定値を読み込めませんでした。",
-    "session_title": "セッションのコンテキスト",
-    "session_description": "フォローアップは前のセッションを再開します。CLI の圧縮後も上限を超える場合は、短い引き継ぎ付きの新しいセッションで始まります。",
-    "session_max_context": "コンテキストの上限（トークン）",
-    "session_max_context_hint": "0 でオフ（既定）。Claude と Codex がサイズを報告します。",
-    "session_invalid": "0〜2000000 の整数を入力してください。",
-    "session_save_error": "上限を保存できませんでした。"
+    "load_error": "ウェイクアップの既定値を読み込めませんでした。"
   },
   "quick_actions": {
     "title": "クイックアクション",
@@ -1434,12 +1428,8 @@
       "title": "アップデート",
       "current_version": "現在のバージョン",
       "version_alignment": {
-        "title": "バージョンの一致",
-        "description": "アプリ、ローカルデーモン、サーバーは同じコミットで動作している必要があります。異なる、またはコミットのない項目は赤で表示されます。",
-        "aligned": "一致",
-        "misaligned": "不一致",
-        "mismatch": "不一致",
-        "no_commit": "コミットなし",
+        "title": "バージョン",
+        "description": "アプリ、ローカルデーモン、サーバーがそれぞれ実行しているバージョンです。",
         "not_reported": "未報告",
         "daemon_not_running": "停止中",
         "server_loading": "確認中…",

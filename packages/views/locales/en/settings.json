@@ -109,13 +109,7 @@
     "customized_one": "{{count}} open issue has its own setting and ignores this default.",
     "customized_other": "{{count}} open issues have their own setting and ignore this default.",
     "admin_only": "Only owners and admins can change these defaults.",
-    "load_error": "Could not load wakeup defaults.",
-    "session_title": "Session context",
-    "session_description": "Follow-ups resume the last session. Past this size after the CLI's own compaction, a new one starts with a short handoff.",
-    "session_max_context": "Context limit (tokens)",
-    "session_max_context_hint": "0 means off, the default. Claude and Codex report their size.",
-    "session_invalid": "Enter a whole number from 0 to 2000000.",
-    "session_save_error": "Could not save the context limit."
+    "load_error": "Could not load wakeup defaults."
   },
   "quick_actions": {
     "title": "Quick Actions",
@@ -1440,12 +1434,8 @@
       "title": "Updates",
       "current_version": "Current version",
       "version_alignment": {
-        "title": "Version alignment",
-        "description": "The app, the local daemon and the server should run the same commit. Any side that differs or reports no commit is shown in red.",
-        "aligned": "Aligned",
-        "misaligned": "Not aligned",
-        "mismatch": "differs",
-        "no_commit": "no commit",
+        "title": "Versions",
+        "description": "What the app, the local daemon and the server are each running.",
         "not_reported": "not reported",
         "daemon_not_running": "not running",
         "server_loading": "checking…",

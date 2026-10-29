@@ -23,12 +23,8 @@ const translations = {
       description: "Update preferences",
       current_version: "Current version",
       version_alignment: {
-        title: "Version alignment",
-        description: "All three should run the same commit.",
-        aligned: "Aligned",
-        misaligned: "Not aligned",
-        mismatch: "differs",
-        no_commit: "no commit",
+        title: "Versions",
+        description: "What each side runs.",
         not_reported: "not reported",
         daemon_not_running: "not running",
         server_loading: "checking…",
@@ -140,10 +136,17 @@ function setClientVersion(version: string) {
   window.desktopAPI.appInfo.version = version;
 }
 
-function sideStates() {
+function sideLines() {
   return Array.from(
     screen.getByTestId("version-alignment").querySelectorAll("li"),
-  ).map((li) => li.getAttribute("data-state"));
+  ).map((li) => li.textContent);
+}
+
+// Kun 2026-10-29: the three versions are listed, never judged or shown red.
+function expectNothingRed() {
+  const list = screen.getByTestId("version-alignment");
+  expect(list.closest("[class*='destructive']")).toBeNull();
+  expect(list.querySelector("[class*='destructive'], [class*='success'], svg")).toBeNull();
 }
 
 describe("UpdatesSettingsTab", () => {
@@ -159,8 +162,8 @@ describe("UpdatesSettingsTab", () => {
     mocks.getConfig.mockResolvedValue({ server_version: "" });
   });
 
-  describe("version alignment", () => {
-    it("is all green when app, daemon and server run the same commit", async () => {
+  describe("versions", () => {
+    it("lists app, daemon and server side by side", async () => {
       setClientVersion("0.6.7-kun.690eaa5471");
       installDaemonBridge({
         state: "running",
@@ -170,12 +173,16 @@ describe("UpdatesSettingsTab", () => {
       mocks.getConfig.mockResolvedValue({ server_version: FULL });
       render(<UpdatesSettingsTab />);
 
-      await waitFor(() => expect(screen.getByText("Aligned")).toBeInTheDocument());
-      expect(sideStates()).toEqual(["match", "match", "match"]);
-      expect(screen.getByText("Daemon: 690eaa5471")).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByText("Server: 690eaa5471")).toBeInTheDocument());
+      expect(sideLines()).toEqual([
+        "App: 690eaa5471",
+        "Daemon: 690eaa5471",
+        "Server: 690eaa5471",
+      ]);
+      expectNothingRed();
     });
 
-    it("marks the side that differs red", async () => {
+    it("shows a side that differs like any other", async () => {
       setClientVersion("0.6.7-kun.690eaa5471");
       installDaemonBridge({
         state: "running",
@@ -184,23 +191,24 @@ describe("UpdatesSettingsTab", () => {
       mocks.getConfig.mockResolvedValue({ server_version: FULL });
       render(<UpdatesSettingsTab />);
 
-      await waitFor(() =>
-        expect(screen.getByText("Daemon: 5565a1f7f5 · differs")).toBeInTheDocument(),
-      );
-      expect(screen.getByText("Not aligned")).toBeInTheDocument();
-      expect(sideStates()).toEqual(["match", "mismatch", "match"]);
+      await waitFor(() => expect(screen.getByText("Server: 690eaa5471")).toBeInTheDocument());
+      expect(sideLines()).toEqual([
+        "App: 690eaa5471",
+        "Daemon: 5565a1f7f5",
+        "Server: 690eaa5471",
+      ]);
+      expectNothingRed();
     });
 
-    it("never passes a daemon that only reports dev", async () => {
-      setClientVersion("0.6.7-kun.690eaa5471");
+    it("shows versions without a commit as they are", async () => {
+      setClientVersion("0.6.7-office.7");
       installDaemonBridge({ state: "running", cliVersion: "dev" });
       mocks.getConfig.mockResolvedValue({ server_version: FULL });
       render(<UpdatesSettingsTab />);
 
-      await waitFor(() =>
-        expect(screen.getByText("Daemon: dev · no commit")).toBeInTheDocument(),
-      );
-      expect(screen.getByText("Not aligned")).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByText("Server: 690eaa5471")).toBeInTheDocument());
+      expect(sideLines()).toEqual(["App: 0.6.7-office.7", "Daemon: dev", "Server: 690eaa5471"]);
+      expectNothingRed();
     });
 
     it("says why a side is missing and follows daemon status changes", async () => {
@@ -209,15 +217,15 @@ describe("UpdatesSettingsTab", () => {
       render(<UpdatesSettingsTab />);
 
       expect(await screen.findByText("Daemon: not running")).toBeInTheDocument();
-      expect(screen.getByText("App: 0.6.7-dene2667.4 · no commit")).toBeInTheDocument();
+      expect(screen.getByText("App: 0.6.7-dene2667.4")).toBeInTheDocument();
       expect(await screen.findByText("Server: not reported")).toBeInTheDocument();
-      expect(sideStates()).toEqual(["no_commit", "no_commit", "no_commit"]);
+      expectNothingRed();
 
       act(() => daemon.emit({ state: "running", cliCommit: FULL }));
       expect(screen.getByText("Daemon: 690eaa5471")).toBeInTheDocument();
     });
 
-    it("compares against the live server, not the version cached at launch", async () => {
+    it("reads the live server, not the version cached at launch", async () => {
       setClientVersion("0.6.7-kun.690eaa5471");
       installDaemonBridge({ state: "running", cliCommit: FULL });
       // Launch cached A; the server has since been switched to B.
@@ -228,37 +236,36 @@ describe("UpdatesSettingsTab", () => {
       render(<UpdatesSettingsTab />);
 
       await waitFor(() =>
-        expect(screen.getByText("Server: 5565a1f7f5 · differs")).toBeInTheDocument(),
+        expect(screen.getByText("Server: 5565a1f7f5")).toBeInTheDocument(),
       );
-      expect(screen.getByText("Not aligned")).toBeInTheDocument();
       expect(mocks.getConfig).toHaveBeenCalledWith({ fresh: true });
       expect(configStore.getState().serverVersion).toBe(
         "5565a1f7f556a92427bd60f2340efd89023459e8",
       );
     });
 
-    it("turns red when the server changes while the tab is open", async () => {
+    it("shows the new server version when it changes while the tab is open", async () => {
       setClientVersion("0.6.7-kun.690eaa5471");
       installDaemonBridge({ state: "running", cliCommit: FULL });
       mocks.getConfig.mockResolvedValue({ server_version: FULL });
       render(<UpdatesSettingsTab />);
-      await waitFor(() => expect(screen.getByText("Aligned")).toBeInTheDocument());
+      await waitFor(() => expect(screen.getByText("Server: 690eaa5471")).toBeInTheDocument());
 
       mocks.getConfig.mockResolvedValue({ server_version: "5565a1f7f5" });
       act(() => {
         window.dispatchEvent(new Event("focus"));
       });
 
-      await waitFor(() => expect(screen.getByText("Not aligned")).toBeInTheDocument());
-      expect(sideStates()).toEqual(["match", "match", "mismatch"]);
+      await waitFor(() => expect(screen.getByText("Server: 5565a1f7f5")).toBeInTheDocument());
+      expectNothingRed();
     });
 
-    it("does not keep an old green when the server can't be read", async () => {
+    it("says the server can't be read instead of keeping the old value", async () => {
       setClientVersion("0.6.7-kun.690eaa5471");
       installDaemonBridge({ state: "running", cliCommit: FULL });
       mocks.getConfig.mockResolvedValue({ server_version: FULL });
       render(<UpdatesSettingsTab />);
-      await waitFor(() => expect(screen.getByText("Aligned")).toBeInTheDocument());
+      await waitFor(() => expect(screen.getByText("Server: 690eaa5471")).toBeInTheDocument());
 
       mocks.getConfig.mockRejectedValue(new Error("offline"));
       act(() => {
@@ -268,15 +275,15 @@ describe("UpdatesSettingsTab", () => {
       await waitFor(() =>
         expect(screen.getByText("Server: couldn't read")).toBeInTheDocument(),
       );
-      expect(screen.getByText("Not aligned")).toBeInTheDocument();
+      expect(screen.queryByText("Server: 690eaa5471")).not.toBeInTheDocument();
     });
 
-    it("drops the old green while a refresh is still in flight", async () => {
+    it("says checking while a refresh is still in flight", async () => {
       setClientVersion("0.6.7-kun.690eaa5471");
       installDaemonBridge({ state: "running", cliCommit: FULL });
       mocks.getConfig.mockResolvedValue({ server_version: FULL });
       render(<UpdatesSettingsTab />);
-      await waitFor(() => expect(screen.getByText("Aligned")).toBeInTheDocument());
+      await waitFor(() => expect(screen.getByText("Server: 690eaa5471")).toBeInTheDocument());
 
       const reads = holdConfigReads();
       act(() => {
@@ -284,12 +291,9 @@ describe("UpdatesSettingsTab", () => {
       });
 
       expect(screen.getByText("Server: checking…")).toBeInTheDocument();
-      expect(screen.getByText("checking…")).toBeInTheDocument();
-      expect(screen.queryByText("Aligned")).not.toBeInTheDocument();
-      expect(sideStates()).toEqual(["match", "match", "no_commit"]);
 
       await act(async () => reads[0]?.resolve({ server_version: FULL }));
-      expect(screen.getByText("Aligned")).toBeInTheDocument();
+      expect(screen.getByText("Server: 690eaa5471")).toBeInTheDocument();
     });
 
     it("ignores an older read that answers after a newer one", async () => {
@@ -298,7 +302,7 @@ describe("UpdatesSettingsTab", () => {
       installDaemonBridge({ state: "running", cliCommit: FULL });
       mocks.getConfig.mockResolvedValue({ server_version: FULL });
       render(<UpdatesSettingsTab />);
-      await waitFor(() => expect(screen.getByText("Aligned")).toBeInTheDocument());
+      await waitFor(() => expect(screen.getByText("Server: 690eaa5471")).toBeInTheDocument());
 
       const reads = holdConfigReads();
       for (let i = 0; i < 3; i++) {
@@ -310,12 +314,11 @@ describe("UpdatesSettingsTab", () => {
       const [oldest, older, newest] = reads;
 
       await act(async () => newest?.resolve({ server_version: FULL }));
-      expect(screen.getByText("Aligned")).toBeInTheDocument();
+      expect(screen.getByText("Server: 690eaa5471")).toBeInTheDocument();
 
       await act(async () => older?.resolve({ server_version: other }));
       await act(async () => oldest?.reject(new Error("timeout")));
-      expect(screen.getByText("Aligned")).toBeInTheDocument();
-      expect(sideStates()).toEqual(["match", "match", "match"]);
+      expect(screen.getByText("Server: 690eaa5471")).toBeInTheDocument();
       expect(configStore.getState().serverVersion).toBe(FULL);
     });
   });

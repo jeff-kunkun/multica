@@ -3743,13 +3743,12 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				AgentID: task.AgentID,
 				IssueID: task.IssueID,
 			}); err == nil && prior.SessionID.Valid {
-				// A session still past the workspace's context limit after its
-				// last run (DENE-2756), or cold while thick (DENE-1331), is set
-				// aside: the run starts a new session in the same working
-				// directory, handed what the old one last reported. Issue
-				// retries never reach here.
+				// A session gone cold while thick (DENE-1331) is set aside: the
+				// run starts a new session in the same working directory,
+				// handed what the old one last reported. Issue retries never
+				// reach here.
 				if prior.RuntimeID == task.RuntimeID {
-					resp.SessionHandoff = h.sessionSetAside(r.Context(), *task, issue.WorkspaceID, prior.SessionID.String)
+					resp.SessionHandoff = h.sessionSetAside(r.Context(), *task, prior.SessionID.String)
 				}
 				if prior.RuntimeID == task.RuntimeID && resp.SessionHandoff == nil {
 					resp.PriorSessionID = prior.SessionID.String
