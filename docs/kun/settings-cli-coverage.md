@@ -41,6 +41,7 @@
 | 标签 | `/api/labels` | 界面有、接口是上游的 | 有：`label` |
 | 属性 | `/api/properties` | 界面有、接口是上游的 | 有：`property` |
 | 快捷操作 | `/api/quick-actions` | 界面有、接口是上游的 | 没有 |
+| 唤醒 · 会话上下文 | `GET` / `PUT /api/workspaces/{id}/session-resume`，`session_resume_max_context_tokens` | 魔改、界面在用 | `settings get/set session.max-context-tokens`；默认 0（关闭），整数 0–2000000 token，任务令牌不得修改。见 `office-session-cap.md` |
 | 路由席位 | 工作区 settings 里的 routing-projects（项目没设领域时的兜底） | 魔改、界面在用 | 有：`workspace routing-projects` |
 | 分工规则（路由页） | `/api/workspaces/{id}/routing/dispatch`（预览 `…/preview`） | 魔改、界面在用 | 有：`workspace routing policy show` / `preview` / `apply` |
 | 领域（派票页） | `/api/domains` | 魔改、界面在用 | 有：`domain list` / `add` / `rename` / `delete` |

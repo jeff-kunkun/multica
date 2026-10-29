@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { configStore } from "@multica/core/config";
+import type { DaemonStatus } from "../../../shared/daemon-types";
 import {
   installUpdaterBridge,
   MAC_UNSIGNED_CAPABILITIES,
@@ -10,6 +12,7 @@ import {
 const mocks = vi.hoisted(() => ({
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
+  getConfig: vi.fn(),
 }));
 
 const translations = {
@@ -19,6 +22,19 @@ const translations = {
       title: "Updates",
       description: "Update preferences",
       current_version: "Current version",
+      version_alignment: {
+        title: "Version alignment",
+        description: "All three should run the same commit.",
+        aligned: "Aligned",
+        misaligned: "Not aligned",
+        mismatch: "differs",
+        no_commit: "no commit",
+        not_reported: "not reported",
+        daemon_not_running: "not running",
+        server_loading: "checking…",
+        server_failed: "couldn't read",
+        side: { client: "App", daemon: "Daemon", server: "Server" },
+      },
       automatic_updates_title: "Automatic background updates",
       automatic_updates_description: "Download updates in the background",
       automatic_updates_save_failed: "Failed to save update settings",
@@ -83,7 +99,52 @@ vi.mock("sonner", () => ({
   },
 }));
 
+vi.mock("@multica/core/api", () => ({
+  api: { getConfig: mocks.getConfig },
+}));
+
 import { UpdatesSettingsTab } from "./updates-settings-tab";
+
+const FULL = "690eaa5471139ba8e5f60beca65e71865221272d";
+
+function installDaemonBridge(status: DaemonStatus) {
+  let listener: ((s: DaemonStatus) => void) | undefined;
+  Object.defineProperty(window, "daemonAPI", {
+    configurable: true,
+    value: {
+      getStatus: vi.fn().mockResolvedValue(status),
+      onStatusChange: vi.fn((cb: (s: DaemonStatus) => void) => {
+        listener = cb;
+        return () => {
+          listener = undefined;
+        };
+      }),
+    },
+  });
+  return { emit: (s: DaemonStatus) => listener?.(s) };
+}
+
+// Each getConfig call parks until the test answers it, in any order.
+function holdConfigReads() {
+  const reads: Array<{
+    resolve: (cfg: { server_version: string }) => void;
+    reject: (err: Error) => void;
+  }> = [];
+  mocks.getConfig.mockImplementation(
+    () => new Promise((resolve, reject) => reads.push({ resolve, reject })),
+  );
+  return reads;
+}
+
+function setClientVersion(version: string) {
+  window.desktopAPI.appInfo.version = version;
+}
+
+function sideStates() {
+  return Array.from(
+    screen.getByTestId("version-alignment").querySelectorAll("li"),
+  ).map((li) => li.getAttribute("data-state"));
+}
 
 describe("UpdatesSettingsTab", () => {
   let bridge: UpdaterBridgeFake;
@@ -92,6 +153,171 @@ describe("UpdatesSettingsTab", () => {
     mocks.toastSuccess.mockReset();
     mocks.toastError.mockReset();
     bridge = installUpdaterBridge();
+    installDaemonBridge({ state: "stopped" });
+    configStore.getState().setServerVersion("");
+    mocks.getConfig.mockReset();
+    mocks.getConfig.mockResolvedValue({ server_version: "" });
+  });
+
+  describe("version alignment", () => {
+    it("is all green when app, daemon and server run the same commit", async () => {
+      setClientVersion("0.6.7-kun.690eaa5471");
+      installDaemonBridge({
+        state: "running",
+        cliVersion: "0.6.7-kun.690eaa5471",
+        cliCommit: FULL,
+      });
+      mocks.getConfig.mockResolvedValue({ server_version: FULL });
+      render(<UpdatesSettingsTab />);
+
+      await waitFor(() => expect(screen.getByText("Aligned")).toBeInTheDocument());
+      expect(sideStates()).toEqual(["match", "match", "match"]);
+      expect(screen.getByText("Daemon: 690eaa5471")).toBeInTheDocument();
+    });
+
+    it("marks the side that differs red", async () => {
+      setClientVersion("0.6.7-kun.690eaa5471");
+      installDaemonBridge({
+        state: "running",
+        cliCommit: "5565a1f7f556a92427bd60f2340efd89023459e8",
+      });
+      mocks.getConfig.mockResolvedValue({ server_version: FULL });
+      render(<UpdatesSettingsTab />);
+
+      await waitFor(() =>
+        expect(screen.getByText("Daemon: 5565a1f7f5 · differs")).toBeInTheDocument(),
+      );
+      expect(screen.getByText("Not aligned")).toBeInTheDocument();
+      expect(sideStates()).toEqual(["match", "mismatch", "match"]);
+    });
+
+    it("never passes a daemon that only reports dev", async () => {
+      setClientVersion("0.6.7-kun.690eaa5471");
+      installDaemonBridge({ state: "running", cliVersion: "dev" });
+      mocks.getConfig.mockResolvedValue({ server_version: FULL });
+      render(<UpdatesSettingsTab />);
+
+      await waitFor(() =>
+        expect(screen.getByText("Daemon: dev · no commit")).toBeInTheDocument(),
+      );
+      expect(screen.getByText("Not aligned")).toBeInTheDocument();
+    });
+
+    it("says why a side is missing and follows daemon status changes", async () => {
+      setClientVersion("0.6.7-dene2667.4");
+      const daemon = installDaemonBridge({ state: "stopped" });
+      render(<UpdatesSettingsTab />);
+
+      expect(await screen.findByText("Daemon: not running")).toBeInTheDocument();
+      expect(screen.getByText("App: 0.6.7-dene2667.4 · no commit")).toBeInTheDocument();
+      expect(await screen.findByText("Server: not reported")).toBeInTheDocument();
+      expect(sideStates()).toEqual(["no_commit", "no_commit", "no_commit"]);
+
+      act(() => daemon.emit({ state: "running", cliCommit: FULL }));
+      expect(screen.getByText("Daemon: 690eaa5471")).toBeInTheDocument();
+    });
+
+    it("compares against the live server, not the version cached at launch", async () => {
+      setClientVersion("0.6.7-kun.690eaa5471");
+      installDaemonBridge({ state: "running", cliCommit: FULL });
+      // Launch cached A; the server has since been switched to B.
+      configStore.getState().setServerVersion(FULL);
+      mocks.getConfig.mockResolvedValue({
+        server_version: "5565a1f7f556a92427bd60f2340efd89023459e8",
+      });
+      render(<UpdatesSettingsTab />);
+
+      await waitFor(() =>
+        expect(screen.getByText("Server: 5565a1f7f5 · differs")).toBeInTheDocument(),
+      );
+      expect(screen.getByText("Not aligned")).toBeInTheDocument();
+      expect(mocks.getConfig).toHaveBeenCalledWith({ fresh: true });
+      expect(configStore.getState().serverVersion).toBe(
+        "5565a1f7f556a92427bd60f2340efd89023459e8",
+      );
+    });
+
+    it("turns red when the server changes while the tab is open", async () => {
+      setClientVersion("0.6.7-kun.690eaa5471");
+      installDaemonBridge({ state: "running", cliCommit: FULL });
+      mocks.getConfig.mockResolvedValue({ server_version: FULL });
+      render(<UpdatesSettingsTab />);
+      await waitFor(() => expect(screen.getByText("Aligned")).toBeInTheDocument());
+
+      mocks.getConfig.mockResolvedValue({ server_version: "5565a1f7f5" });
+      act(() => {
+        window.dispatchEvent(new Event("focus"));
+      });
+
+      await waitFor(() => expect(screen.getByText("Not aligned")).toBeInTheDocument());
+      expect(sideStates()).toEqual(["match", "match", "mismatch"]);
+    });
+
+    it("does not keep an old green when the server can't be read", async () => {
+      setClientVersion("0.6.7-kun.690eaa5471");
+      installDaemonBridge({ state: "running", cliCommit: FULL });
+      mocks.getConfig.mockResolvedValue({ server_version: FULL });
+      render(<UpdatesSettingsTab />);
+      await waitFor(() => expect(screen.getByText("Aligned")).toBeInTheDocument());
+
+      mocks.getConfig.mockRejectedValue(new Error("offline"));
+      act(() => {
+        window.dispatchEvent(new Event("focus"));
+      });
+
+      await waitFor(() =>
+        expect(screen.getByText("Server: couldn't read")).toBeInTheDocument(),
+      );
+      expect(screen.getByText("Not aligned")).toBeInTheDocument();
+    });
+
+    it("drops the old green while a refresh is still in flight", async () => {
+      setClientVersion("0.6.7-kun.690eaa5471");
+      installDaemonBridge({ state: "running", cliCommit: FULL });
+      mocks.getConfig.mockResolvedValue({ server_version: FULL });
+      render(<UpdatesSettingsTab />);
+      await waitFor(() => expect(screen.getByText("Aligned")).toBeInTheDocument());
+
+      const reads = holdConfigReads();
+      act(() => {
+        window.dispatchEvent(new Event("focus"));
+      });
+
+      expect(screen.getByText("Server: checking…")).toBeInTheDocument();
+      expect(screen.getByText("checking…")).toBeInTheDocument();
+      expect(screen.queryByText("Aligned")).not.toBeInTheDocument();
+      expect(sideStates()).toEqual(["match", "match", "no_commit"]);
+
+      await act(async () => reads[0]?.resolve({ server_version: FULL }));
+      expect(screen.getByText("Aligned")).toBeInTheDocument();
+    });
+
+    it("ignores an older read that answers after a newer one", async () => {
+      const other = "5565a1f7f556a92427bd60f2340efd89023459e8";
+      setClientVersion("0.6.7-kun.690eaa5471");
+      installDaemonBridge({ state: "running", cliCommit: FULL });
+      mocks.getConfig.mockResolvedValue({ server_version: FULL });
+      render(<UpdatesSettingsTab />);
+      await waitFor(() => expect(screen.getByText("Aligned")).toBeInTheDocument());
+
+      const reads = holdConfigReads();
+      for (let i = 0; i < 3; i++) {
+        act(() => {
+          window.dispatchEvent(new Event("focus"));
+        });
+      }
+      expect(reads).toHaveLength(3);
+      const [oldest, older, newest] = reads;
+
+      await act(async () => newest?.resolve({ server_version: FULL }));
+      expect(screen.getByText("Aligned")).toBeInTheDocument();
+
+      await act(async () => older?.resolve({ server_version: other }));
+      await act(async () => oldest?.reject(new Error("timeout")));
+      expect(screen.getByText("Aligned")).toBeInTheDocument();
+      expect(sideStates()).toEqual(["match", "match", "match"]);
+      expect(configStore.getState().serverVersion).toBe(FULL);
+    });
   });
 
   it("loads the persisted preference and saves changes from the switch", async () => {

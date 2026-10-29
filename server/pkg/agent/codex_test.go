@@ -4000,6 +4000,33 @@ func TestCodexThreadTokenUsageUpdatedAccumulatesCurrentTurnResponses(t *testing.
 	}
 }
 
+// DENE-2756: the run's context size is the input of its latest model call in
+// the current turn; a replayed snapshot of an earlier turn never sets it.
+func TestCodexThreadTokenUsageUpdatedRecordsLastContextTokens(t *testing.T) {
+	c := &codexClient{}
+	c.setActiveTurnID("turn-current")
+	c.updateThreadTokenUsage(codexThreadTokenUsageParams(
+		"thread-1", "turn-previous",
+		map[string]any{"inputTokens": float64(900_000)},
+		map[string]any{"inputTokens": float64(300_000)},
+	))
+	if c.lastContextTokens != nil {
+		t.Fatalf("replayed turn set the context size to %d", *c.lastContextTokens)
+	}
+	var total float64
+	for _, input := range []float64{180_000, 62_000} { // the second call follows a compaction
+		total += input
+		c.updateThreadTokenUsage(codexThreadTokenUsageParams(
+			"thread-1", "turn-current",
+			map[string]any{"inputTokens": total},
+			map[string]any{"inputTokens": input, "cachedInputTokens": input / 2, "outputTokens": float64(10)},
+		))
+	}
+	if c.lastContextTokens == nil || *c.lastContextTokens != 62_000 {
+		t.Fatalf("lastContextTokens = %v, want the latest call's input 62000", c.lastContextTokens)
+	}
+}
+
 func codexThreadTokenUsageParams(threadID, turnID string, total, last map[string]any) map[string]any {
 	return map[string]any{
 		"threadId": threadID,

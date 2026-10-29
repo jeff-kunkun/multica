@@ -935,6 +935,10 @@ func buildDaemonStartArgs(cmd *cobra.Command) []string {
 func runDaemonForeground(cmd *cobra.Command) error {
 	util.EnsureHiddenConsole()
 
+	// First, before anything reads the environment: every task, every runtime
+	// lookup, and every re-exec below inherits what this process holds.
+	droppedSessionEnv := dropOpenCodeSessionEnv()
+
 	profile := resolveProfile(cmd)
 
 	// Keep an entry this process may itself have been launched from fresh:
@@ -977,6 +981,9 @@ func runDaemonForeground(cmd *cobra.Command) error {
 		// slog default through the rotator, so every log line — including
 		// LoadConfig's slog.Warn below — is captured and rotated.
 		logger = logger_pkg.NewWriterLoggerDefault("daemon", logRotator)
+	}
+	if len(droppedSessionEnv) > 0 {
+		logger.Warn("daemon started inside an OpenCode session; dropped its environment so tasks use this machine's config dirs", "keys", droppedSessionEnv)
 	}
 
 	serverURL := resolveDaemonServerURL(cmd, profile)

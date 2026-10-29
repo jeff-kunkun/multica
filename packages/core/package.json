@@ -28,6 +28,7 @@
     "./workspace": "./workspace/index.ts",
     "./workspace/queries": "./workspace/queries.ts",
     "./workspace/magpie": "./workspace/magpie.ts",
+    "./workspace/session-resume": "./workspace/session-resume.ts",
     "./workspace/mutations": "./workspace/mutations.ts",
     "./workspace/pending-delete": "./workspace/pending-delete.ts",
     "./workspace/hooks": "./workspace/hooks.ts",

@@ -829,6 +829,11 @@ type AgentTaskResponse struct {
 	// session (MUL-7034). omitempty keeps it off the wire for the common
 	// (no-gap) case and for old daemons.
 	PriorSessionResumeUnavailable bool `json:"prior_session_resume_unavailable,omitempty"`
+	// SessionHandoff is set when the server set the agent's last session on
+	// the issue aside (DENE-2756, DENE-1331): the run starts a new session in
+	// PriorWorkDir and is told what the old one last reported. Old daemons
+	// ignore it and simply start fresh.
+	SessionHandoff *SessionHandoff `json:"session_handoff,omitempty"`
 	// ContinueInterruptedSession is set on an automatic retry that inherited
 	// a resume-safe parent session (DENE-727). The daemon resumes that session
 	// and sends a short continue prompt instead of re-injecting the original

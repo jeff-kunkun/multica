@@ -2007,6 +2007,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		var usageMap map[string]TokenUsage
 		c.usageMu.Lock()
 		u := c.usage
+		lastContextTokens := c.lastContextTokens
 		c.usageMu.Unlock()
 
 		// Read the rollout once for plan limits and as a fallback for what the
@@ -2027,6 +2028,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			SessionID:                    threadID,
 			DurationMs:                   duration.Milliseconds(),
 			Usage:                        usageMap,
+			LastContextTokens:            lastContextTokens,
 			PlanLimits:                   planLimitsFromCodexSession(scanned),
 			codexStartupRefreshRetrySafe: startupRefreshRetrySafe,
 			SessionRestartReason:         c.sessionRestartReason,
@@ -2573,6 +2575,10 @@ type codexClient struct {
 	// duplicate delivery idempotent while retaining multi-response turns.
 	usageTotal    codexRawTokenUsage
 	usageTotalSet bool
+	// lastContextTokens is the input of this run's latest model call: the
+	// context the thread carried at that point, after any compaction Codex did
+	// on its own (DENE-2756). Nil until a current-turn snapshot arrives.
+	lastContextTokens *int64
 
 	turnErrorMu sync.Mutex
 	turnError   string // captured from turn/completed status=failed or terminal error notifications
@@ -4026,6 +4032,9 @@ func (c *codexClient) updateThreadTokenUsage(params map[string]any) {
 	}
 	c.usageTotal = total
 	c.usageTotalSet = true
+	if input := codexRawTokenUsageFromV2(last).InputTokens; input > 0 {
+		c.lastContextTokens = &input
+	}
 	u := codexTokenUsage(delta)
 	c.usage.InputTokens += u.InputTokens
 	c.usage.OutputTokens += u.OutputTokens

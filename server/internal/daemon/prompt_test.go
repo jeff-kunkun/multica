@@ -1876,6 +1876,38 @@ func TestPerTurnContextBlocksCarryMovedBriefSections(t *testing.T) {
 	}
 }
 
+// DENE-2756: a run whose old session the server set aside is told why and
+// handed the old session's last report, in place of the continuity notice.
+func TestPerTurnContextBlocksCarrySessionHandoff(t *testing.T) {
+	t.Parallel()
+
+	task := Task{
+		IssueID:                       "issue-1",
+		TriggerCommentID:              "comment-1",
+		TriggerCommentContent:         "one more pass",
+		PriorSessionResumeUnavailable: true,
+		SessionHandoff:                &SessionHandoff{Reason: "context_limit", ContextTokens: 184_600, LastOutput: "Opened PR #7.\nTests pass."},
+	}
+	prompt := BuildPrompt(task, "codex")
+	for _, want := range []string{
+		"## Session Handoff",
+		"was still about 185k tokens of context after the CLI's own compaction",
+		"> Opened PR #7.\n> Tests pass.\n",
+	} {
+		if !strings.Contains(prompt, want) {
+			t.Errorf("prompt lacks %q\n---\n%s", want, prompt)
+		}
+	}
+	if strings.Contains(prompt, "## Session Continuity Notice") {
+		t.Errorf("handoff run also got the continuity notice\n---\n%s", prompt)
+	}
+
+	cold := BuildPrompt(Task{IssueID: "issue-1", SessionHandoff: &SessionHandoff{Reason: "cold", ContextTokens: 120_000}}, "claude")
+	if !strings.Contains(cold, "had gone cold with a large context") || strings.Contains(cold, "last reported") {
+		t.Errorf("cold handoff without a report rendered wrong\n---\n%s", cold)
+	}
+}
+
 // The blocks are per-run, so they must be absent when their preconditions are.
 func TestPerTurnContextBlocksOmittedWhenEmpty(t *testing.T) {
 	t.Parallel()

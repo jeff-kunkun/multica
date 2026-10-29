@@ -187,6 +187,7 @@ interface HealthPayload {
   device_name?: string;
   server_url?: string;
   cli_version?: string;
+  cli_commit?: string;
   active_task_count?: number;
   agents?: string[];
   workspaces?: unknown[];
@@ -477,6 +478,8 @@ async function fetchHealth(): Promise<DaemonStatus> {
       : 0,
     profile: active.name,
     serverUrl: data.server_url,
+    cliVersion: data.cli_version,
+    cliCommit: data.cli_commit,
     externallyManaged,
   };
 }

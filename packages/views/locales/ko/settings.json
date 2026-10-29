@@ -107,7 +107,13 @@
     "save_error": "기본값을 저장하지 못했습니다.",
     "customized_other": "진행 중인 태스크 {{count}}개가 자체 설정을 사용해 이 기본값을 따르지 않습니다.",
     "admin_only": "소유자와 관리자만 기본값을 바꿀 수 있습니다.",
-    "load_error": "깨우기 기본값을 불러오지 못했습니다."
+    "load_error": "깨우기 기본값을 불러오지 못했습니다.",
+    "session_title": "세션 컨텍스트",
+    "session_description": "후속 실행은 이전 세션을 이어갑니다. CLI가 압축한 뒤에도 상한을 넘으면 짧은 인수인계와 함께 새 세션으로 시작합니다.",
+    "session_max_context": "컨텍스트 상한(토큰)",
+    "session_max_context_hint": "0이면 끔(기본값). Claude와 Codex가 크기를 보고합니다.",
+    "session_invalid": "0~2000000 사이의 정수를 입력하세요.",
+    "session_save_error": "상한을 저장하지 못했습니다."
   },
   "quick_actions": {
     "title": "퀵 액션",
@@ -1164,6 +1170,23 @@
     "updates": {
       "title": "업데이트",
       "current_version": "현재 버전",
+      "version_alignment": {
+        "title": "버전 일치",
+        "description": "앱, 로컬 데몬, 서버는 같은 커밋으로 실행되어야 합니다. 다르거나 커밋이 없는 항목은 빨간색으로 표시됩니다.",
+        "aligned": "일치",
+        "misaligned": "불일치",
+        "mismatch": "불일치",
+        "no_commit": "커밋 없음",
+        "not_reported": "보고 안 됨",
+        "daemon_not_running": "실행 중 아님",
+        "server_loading": "확인 중…",
+        "server_failed": "읽을 수 없음",
+        "side": {
+          "client": "앱",
+          "daemon": "데몬",
+          "server": "서버"
+        }
+      },
       "automatic_updates_title": "자동 백그라운드 업데이트",
       "automatic_updates_description": "사용하면 앱 실행 직후와 한 시간마다 업데이트를 확인하고 사용 가능한 버전을 백그라운드에서 다운로드합니다.",
       "automatic_updates_save_failed": "자동 업데이트 설정을 저장하지 못했습니다",

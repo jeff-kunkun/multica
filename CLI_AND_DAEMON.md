@@ -161,6 +161,12 @@ To run in the foreground (useful for debugging):
 multica daemon start --foreground
 ```
 
+A daemon started from inside an OpenCode session (an agent ran `daemon start`
+or `daemon restart` from its shell) drops `OPENCODE`, `OPENCODE_PID` and the four
+`XDG_*_HOME` dirs before anything else, and logs which keys it dropped. Those
+belong to that OpenCode install, not to the machine; kept, every task would
+read its config instead of the user's (`gh` reporting "not logged in", for one).
+
 #### Following a replaced binary
 
 A CLI-launched daemon periodically compares its own compile-time version against

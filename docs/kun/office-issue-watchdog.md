@@ -37,7 +37,11 @@ manager option needs no code change. A missing property value falls back to
 Every COO webhook event includes the project name, issue number, title, current
 status, employee, responsible manager, wake target, and reason. The receiver
 can use `project_name` to route the notification to the corresponding project
-group; that external routing must be verified before production enablement. The
+group, except a `kun_decision` event, which names its group in `group` and is
+posted there as given (see 「等 Kun 拍板」 label below). The receiver is
+COO·Grok; how it handles `kun_decision` is in its card,
+`system-prompt/managers/coo-grok.md` in kun-agent-mono. That external routing
+must be verified before production enablement. The
 watchdog makes at most one HTTP attempt for each event; it does not retry a
 failed webhook.
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertCircle,
   ArrowDownToLine,
@@ -12,12 +12,25 @@ import {
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
+import { api } from "@multica/core/api";
+import { configStore } from "@multica/core/config";
 import { useT } from "@multica/views/i18n";
 import { SettingsCard, SettingsRow, SettingsTab } from "@multica/views/settings";
 import { toast } from "sonner";
 import { useUpdater } from "../hooks/use-updater";
 import { DownloadProgressBar } from "./update-notification";
+import { alignVersions, type SideVersion } from "./version-alignment";
+import type { DaemonStatus } from "../../../shared/daemon-types";
 import type { UpdateCheckRecord } from "../../../shared/updater-types";
+
+// The startup config read is cached for the whole session, so this tab asks
+// the server itself; a server switched since launch must not stay green.
+const SERVER_VERSION_REFRESH_MS = 60_000;
+
+type ServerVersionRead =
+  | { status: "loading" }
+  | { status: "ok"; version: string }
+  | { status: "failed" };
 
 function formatCheckedAt(iso: string): string {
   const date = new Date(iso);
@@ -47,6 +60,78 @@ export function UpdatesSettingsTab() {
   const [preferencesReady, setPreferencesReady] = useState(false);
   const [savingPreference, setSavingPreference] = useState(false);
   const currentVersion = window.desktopAPI.appInfo.version;
+  const [daemon, setDaemon] = useState<DaemonStatus>({ state: "stopped" });
+  const [server, setServer] = useState<ServerVersionRead>({ status: "loading" });
+
+  useEffect(() => {
+    void window.daemonAPI.getStatus().then(setDaemon);
+    return window.daemonAPI.onStatusChange(setDaemon);
+  }, []);
+
+  // Each read voids the one before it: the row says checking until this read
+  // answers, and an older read that answers late is dropped.
+  const serverReadSeq = useRef(0);
+  const refreshServerVersion = useCallback(async () => {
+    const seq = ++serverReadSeq.current;
+    setServer({ status: "loading" });
+    try {
+      const cfg = await api.getConfig({ fresh: true });
+      if (seq !== serverReadSeq.current) return;
+      setServer({ status: "ok", version: cfg.server_version ?? "" });
+      configStore.getState().setServerVersion(cfg.server_version);
+    } catch {
+      if (seq !== serverReadSeq.current) return;
+      // Never fall back to the last value: an unreadable server is not aligned.
+      setServer({ status: "failed" });
+    }
+  }, []);
+
+  // Re-read on open, every minute, when the window regains focus and when the
+  // daemon (re)connects, so a server swapped meanwhile turns the row red.
+  const daemonKey = daemon.state === "running" ? `running:${daemon.cliCommit ?? ""}` : daemon.state;
+  useEffect(() => {
+    void refreshServerVersion();
+  }, [refreshServerVersion, daemonKey]);
+
+  useEffect(() => {
+    const refresh = () => void refreshServerVersion();
+    const timer = window.setInterval(refresh, SERVER_VERSION_REFRESH_MS);
+    window.addEventListener("focus", refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [refreshServerVersion]);
+
+  const alignment = alignVersions({
+    client: currentVersion,
+    daemonVersion: daemon.cliVersion,
+    daemonCommit: daemon.cliCommit,
+    server: server.status === "ok" ? server.version : "",
+  });
+
+  const describeSide = (side: SideVersion): string => {
+    const name = t(($) => $.desktop.updates.version_alignment.side[side.side]);
+    if (side.commit) {
+      const commit = side.commit.slice(0, 10);
+      return side.state === "match"
+        ? `${name}: ${commit}`
+        : `${name}: ${commit} · ${t(($) => $.desktop.updates.version_alignment.mismatch)}`;
+    }
+    if (side.side === "server" && server.status === "loading") {
+      return `${name}: ${t(($) => $.desktop.updates.version_alignment.server_loading)}`;
+    }
+    if (side.side === "server" && server.status === "failed") {
+      return `${name}: ${t(($) => $.desktop.updates.version_alignment.server_failed)}`;
+    }
+    if (side.side === "daemon" && daemon.state !== "running" && !side.reported) {
+      return `${name}: ${t(($) => $.desktop.updates.version_alignment.daemon_not_running)}`;
+    }
+    if (!side.reported) {
+      return `${name}: ${t(($) => $.desktop.updates.version_alignment.not_reported)}`;
+    }
+    return `${name}: ${side.reported} · ${t(($) => $.desktop.updates.version_alignment.no_commit)}`;
+  };
 
   useEffect(() => {
     let mounted = true;
@@ -138,6 +223,51 @@ export function UpdatesSettingsTab() {
         <SettingsRow label={t(($) => $.desktop.updates.current_version)}>
           <span className="font-mono text-caption text-muted-foreground">
             v{currentVersion}
+          </span>
+        </SettingsRow>
+
+        <SettingsRow
+          label={t(($) => $.desktop.updates.version_alignment.title)}
+          align="start"
+          description={
+            <>
+              <p>{t(($) => $.desktop.updates.version_alignment.description)}</p>
+              <ul className="mt-2 flex flex-col gap-1" data-testid="version-alignment">
+                {alignment.sides.map((side) => (
+                  <li
+                    key={side.side}
+                    data-state={side.state}
+                    className={`inline-flex items-start gap-1.5 font-mono break-all ${
+                      side.state === "match" ? "text-muted-foreground" : "text-destructive"
+                    }`}
+                  >
+                    {side.state === "match" ? (
+                      <Check className="size-3.5 mt-0.5 shrink-0 text-success" />
+                    ) : (
+                      <AlertCircle className="size-3.5 mt-0.5 shrink-0" />
+                    )}
+                    {describeSide(side)}
+                  </li>
+                ))}
+              </ul>
+            </>
+          }
+        >
+          {/* Neither green nor red mid-read: the minute refresh must not flash. */}
+          <span
+            className={`text-caption ${
+              server.status === "loading"
+                ? "text-muted-foreground"
+                : alignment.aligned
+                  ? "text-success"
+                  : "text-destructive"
+            }`}
+          >
+            {server.status === "loading"
+              ? t(($) => $.desktop.updates.version_alignment.server_loading)
+              : alignment.aligned
+                ? t(($) => $.desktop.updates.version_alignment.aligned)
+                : t(($) => $.desktop.updates.version_alignment.misaligned)}
           </span>
         </SettingsRow>
 
@@ -283,7 +413,10 @@ export function UpdatesSettingsTab() {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => void check()}
+              onClick={() => {
+                void check();
+                void refreshServerVersion();
+              }}
               disabled={checking}
             >
               {checking ? (

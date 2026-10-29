@@ -3743,12 +3743,15 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				AgentID: task.AgentID,
 				IssueID: task.IssueID,
 			}); err == nil && prior.SessionID.Valid {
-				// Cold and thick (DENE-1331): the cache is gone and the
-				// context is large, so the run starts a new session in the
-				// same working directory. Issue retries are handled separately
-				// and always start a fresh session.
-				coldAndThick := prior.RuntimeID == task.RuntimeID && !task.RetryOfTaskID.Valid && h.sessionTooColdAndThick(r.Context(), *task, prior.SessionID.String)
-				if prior.RuntimeID == task.RuntimeID && !coldAndThick {
+				// A session still past the workspace's context limit after its
+				// last run (DENE-2756), or cold while thick (DENE-1331), is set
+				// aside: the run starts a new session in the same working
+				// directory, handed what the old one last reported. Issue
+				// retries never reach here.
+				if prior.RuntimeID == task.RuntimeID {
+					resp.SessionHandoff = h.sessionSetAside(r.Context(), *task, issue.WorkspaceID, prior.SessionID.String)
+				}
+				if prior.RuntimeID == task.RuntimeID && resp.SessionHandoff == nil {
 					resp.PriorSessionID = prior.SessionID.String
 					// Same rule as the rerun path: date the deltas from the run
 					// this session belongs to. GetLastTaskSession skips poisoned
