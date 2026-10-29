@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -132,6 +133,57 @@ func (h *Handler) CreateWatchdogNoteComment(ctx context.Context, issueID, conten
 	}
 	_, err = h.postWatchdogComment(ctx, issue, strings.TrimSpace(content+"\n\n"+issueWatchdogCommentMarker))
 	return err
+}
+
+// CreateWatchdogLabel attaches the workspace's issue label named name (any
+// case) to an open issue as the system, and publishes the change. The stop
+// routing uses it for the Kun-decision label.
+func (h *Handler) CreateWatchdogLabel(ctx context.Context, issueID, name string) error {
+	id, err := util.ParseUUID(issueID)
+	if err != nil {
+		return errors.New("invalid issue id")
+	}
+	issue, err := h.Queries.GetIssue(ctx, id)
+	if err != nil {
+		return errors.New("issue is no longer available")
+	}
+	switch issue.Status {
+	case "done", "cancelled":
+		return nil
+	}
+	var labelID pgtype.UUID
+	err = h.DB.QueryRow(ctx, `
+SELECT id FROM issue_label
+WHERE workspace_id = $1 AND resource_type = 'issue' AND lower(name) = lower($2)
+ORDER BY id LIMIT 1`, issue.WorkspaceID, strings.TrimSpace(name)).Scan(&labelID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return errors.New("watchdog label does not exist in the workspace")
+	}
+	if err != nil {
+		return errors.New("failed to find watchdog label")
+	}
+	attached, err := h.Queries.AttachLabelToIssue(ctx, db.AttachLabelToIssueParams{
+		IssueID:        issue.ID,
+		LabelID:        labelID,
+		WorkspaceID:    issue.WorkspaceID,
+		AttachedByType: pgtype.Text{String: "system", Valid: true},
+	})
+	if err != nil {
+		return errors.New("failed to attach watchdog label")
+	}
+	if !attached.Changed {
+		return nil
+	}
+	labels, err := h.Queries.ListLabelsByIssue(ctx, db.ListLabelsByIssueParams{IssueID: issue.ID, WorkspaceID: issue.WorkspaceID})
+	if err != nil {
+		return nil // attached; subscribers refetch on their next read
+	}
+	h.publishWithSource(ctx, protocol.EventIssueLabelsChanged, uuidToString(issue.WorkspaceID), "system", "", map[string]any{
+		"issue_id":       uuidToString(issue.ID),
+		"labels":         labelsToResponse(labels),
+		"issue_revision": attached.IssueRevision,
+	})
+	return nil
 }
 
 // postWatchdogMention leaves the marked system comment and, for an agent,

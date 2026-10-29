@@ -1,6 +1,7 @@
 package issuewatchdog
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -231,6 +232,86 @@ WHERE issue_id = $1::uuid AND event_type = $2`, issueID, KunDecisionEventType).S
 		t.Fatalf("label put on again: pushes = %d, want 2", len(got))
 	}
 	t.Log("label on again, seen only by the scan: a second push")
+}
+
+// The Kun-decision push goes to the issue's 「回哪个群」 (DENE-2743): the
+// issue's reply_group, a 随上级单 sub-issue's nearest ancestor with one (past
+// a parent with none), else the project table; an issue with no project goes to 杂项, and one whose group is
+// 不发群 (or whose project has none) to the office group.
+func TestKunDecisionPushFollowsReplyGroup(t *testing.T) {
+	b := newReviewBench(t)
+	const key = "kun-reply-group-key"
+	receiver, received, _ := newFakeReceiver(t, key, http.StatusAccepted)
+	defer receiver.Close()
+	w := b.watchdog(Config{KunLabel: "等 Kun 拍板", KunGroup: "Multica 办公室",
+		WebhookURL: receiver.URL, WebhookKey: key})
+	labelID := b.label("等 Kun 拍板")
+	project := func(title string) string {
+		return b.fx.Project(t, title, testutil.Cols{"workspace_id": b.workspaceID})
+	}
+	tarot, relay := project("tarot"), project("game-relay")
+	replyGroup := func(group string) json.RawMessage {
+		raw, err := json.Marshal(map[string]string{"reply_group": group})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return raw
+	}
+
+	own := b.issue("own reply group wins over the project", "in_progress", b.dev,
+		testutil.Cols{"project_id": tarot, "metadata": replyGroup(" 游戏 ")})
+	byProject := b.issue("no reply group, project table", "in_progress", b.dev,
+		testutil.Cols{"project_id": tarot})
+	unprojected := b.issue("no reply group, no project", "in_progress", b.dev,
+		testutil.Cols{"project_id": nil})
+	none := b.issue("不发群 still reaches Kun", "in_progress", b.dev,
+		testutil.Cols{"project_id": tarot, "metadata": replyGroup("不发群")})
+	unlisted := b.issue("project with no group", "in_progress", b.dev, nil)
+	grandparent := b.issue("grandparent names the group", "in_progress", b.dev,
+		testutil.Cols{"project_id": tarot, "metadata": replyGroup("Agent mono")})
+	parent := b.issue("parent follows its parent", "in_progress", b.dev,
+		testutil.Cols{"project_id": tarot, "parent_issue_id": grandparent, "metadata": replyGroup("随上级单")})
+	child := b.issue("child follows the chain", "in_progress", b.dev,
+		testutil.Cols{"parent_issue_id": parent, "metadata": replyGroup("随上级单")})
+	blankParent := b.issue("parent with no reply group", "in_progress", b.dev,
+		testutil.Cols{"project_id": relay})
+	orphanChild := b.issue("child of a parent with none", "in_progress", b.dev,
+		testutil.Cols{"project_id": tarot, "parent_issue_id": blankParent, "metadata": replyGroup("随上级单")})
+	topFollower := b.issue("随上级单 with no parent", "in_progress", b.dev,
+		testutil.Cols{"project_id": relay, "metadata": replyGroup("随上级单")})
+	namedGrandparent := b.issue("grandparent names the group over a blank parent", "in_progress", b.dev,
+		testutil.Cols{"project_id": tarot, "metadata": replyGroup("自媒体")})
+	blankMiddle := b.issue("parent with no reply group under a named grandparent", "in_progress", b.dev,
+		testutil.Cols{"project_id": relay, "parent_issue_id": namedGrandparent})
+	skipChild := b.issue("child skips the blank parent", "in_progress", b.dev,
+		testutil.Cols{"project_id": tarot, "parent_issue_id": blankMiddle, "metadata": replyGroup("随上级单")})
+
+	want := map[string]struct{ group, route string }{
+		own:         {"游戏", "按单上的「回哪个群」"},
+		byProject:   {"塔罗站", "按项目对照表"},
+		unprojected: {"杂项", "按项目对照表"},
+		none:        {"Multica 办公室", "单上的「回哪个群」是「不发群」"},
+		unlisted:    {"Multica 办公室", "项目对照表是「不发群」"},
+		child:       {"Agent mono", "按上级单的「回哪个群」"},
+		orphanChild: {"game relay", "按项目对照表"},
+		topFollower: {"game relay", "按项目对照表"},
+		skipChild:   {"自媒体", "按上级单的「回哪个群」"},
+	}
+	for id := range want {
+		b.setLabel(w, id, labelID, true)
+	}
+	for id, wantPush := range want {
+		pushes := eventsOf(received(), id, KunDecisionEventType)
+		if len(pushes) != 1 {
+			t.Fatalf("issue %s: pushes = %+v, want one", id, pushes)
+		}
+		p := pushes[0]
+		if p.Group != wantPush.group || p.WakeTarget != "office_group" ||
+			!strings.Contains(p.Reason, wantPush.route) || !strings.Contains(p.Reason, "「"+wantPush.group+"」群") {
+			t.Fatalf("issue %s: push group / reason = %q / %q, want %q / %q", id, p.Group, p.Reason, wantPush.group, wantPush.route)
+		}
+	}
+	t.Log("reply_group, 随上级单 up two levels and past a blank parent, project table, 杂项, and 不发群 → office group")
 }
 
 // A sub-issue stalled under a parent waiting on Kun does not wake the parent's

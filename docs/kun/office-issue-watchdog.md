@@ -23,7 +23,8 @@ detail response (see "Project-group reminders" below).
   issue within the manager wait, the watchdog sends one escalation to the COO.
   A status change also resolves the wait. A bare "收到" does not.
 - The watchdog never changes an issue's status; only the responsible manager
-  does.
+  does. The one write besides comments is stop routing putting the
+  「等 Kun 拍板」 label on an issue blocked on a decision (see below).
 
 Manager replies start with the signature for the issue's "负责经理" property:
 `【负责经理·X】`, where X is the part of the option after its last `·`, so
@@ -70,9 +71,16 @@ label add|remove` and the web UI); the workspace label must exist first
 (`multica label create`).
 
 - **Push.** When the label goes on, the watchdog sends one `kun_decision`
-  webhook event with `wake_target=office_group` and `group` set to
-  `KUN_GROUP` (「Multica 办公室」), for the receiver to post into that group.
-  It reacts to the `issue_labels:changed` event at once; the scan catches a
+  webhook event with `wake_target=office_group` and `group` set to the
+  issue's 「回哪个群」, for the receiver to post into that group (DENE-2743).
+  The group is the issue's `reply_group` metadata; `随上级单` takes the
+  nearest ancestor that names a group (a parent with none is skipped),
+  walking up at most 10 levels; with none it is the
+  project's group (for `随上级单`, the direct parent's project) from the office rules' project table (`projectGroups` in
+  `watchdog.go`, from 第二大脑.md 「规矩」, DENE-2587), and 「杂项」 for an issue
+  with no project. A group of `不发群`, or a project the table does not list,
+  still has to reach Kun, so it goes to `KUN_GROUP` (「Multica 办公室」). The
+  reason line says which source decided. It reacts to the `issue_labels:changed` event at once; the scan catches a
   label put on at issue creation, which publishes no event. Each time the
   label goes on is one push; done and cancelled issues are not pushed. The
   push starts no manager wait, so it does not escalate to the COO.
@@ -180,6 +188,45 @@ Each further failed round after a stop stops again. Wakes outside the
 watchdog, such as a hold that @mentions the developer, still start runs as
 usual.
 
+## Stop routing (DENE-2740)
+
+With `MULTICA_ISSUE_WATCHDOG_STOP_ROUTING=true` (off by default), every time a
+run of an issue's agent assignee ends (`task:completed`, `task:failed`,
+`task:cancelled`), where the run left the issue decides who moves it next.
+The routing runs on the task event, and every scan catches up runs that
+ended in the last hour (the `run.*` rows in `office_event`) and were not
+routed, for example across a restart. Turning the switch on therefore routes
+the last hour's runs once.
+
+A run is left alone when it is not the assignee's (a reviewer's run), when
+the issue is done or cancelled or carries 「等 Kun 拍板」, or when another run
+on the issue is live or was queued at or after this one ended (a retry, a
+follow-up for comments that arrived during the run, a mention).
+
+| Where the run left the issue | What the watchdog does |
+| --- | --- |
+| Moved to `in_review` (C1) | Wakes the reviewer field's reviewer once. With no reviewer, the `status_in_review` manager alert already asks the manager to accept: 「单子没填审查员，请负责经理验收」 |
+| Moved to `blocked` with `close.block_kind` `decision` or `permission` (C2, B2) | Puts 「等 Kun 拍板」 (`KUN_LABEL`) on the issue, which sends the `kun_decision` group push. `external` and `capacity` keep the ordinary `status_blocked` alert |
+| Failed or cancelled, no retry queued (C3) | One `run_failed` manager event naming the failure reason, on top of the platform's own interrupt comment |
+| Still `in_progress`, nothing delivered (C4) | Waits 30 seconds for a follow-up run, then wakes whoever the review stage waits on: the reviewer while a request is open, the manager (`awaiting_signoff`) after a pass, otherwise the developer, who is rerun up to the run's `max_attempts − 1` times (once by default; none when the agent's auto-retry is off) per status. The next empty stop sends one `no_delivery` manager event. The status is not changed |
+| Moved to `todo` or `backlog` (C5) | A note on the issue (no mention, no run) saying what is missing, from `backlog.waiting_for` or the run's last comment, and one `needs_instruction` manager event |
+| Still `in_progress` with open sub-issues (C6, parent) | One `parent_waiting` manager event asking to put the parent back in `todo` until the sub-issues finish |
+
+**Dependencies (C6).** An issue `blocked` with `close.block_kind=dependency`
+whose `close.block_action` names issues by number (`DENE-12`) or by issue
+mention is woken once, its assignee @mentioned, when every issue it names is
+done or cancelled. This runs when an issue is closed and on every scan. An
+action that names no issue (「等上一张单」) is left alone.
+
+**Offline machine (D1).** A run on a runtime that has been offline for
+`OFFLINE_WAIT` (default 10 minutes) sends the manager one `runtime_offline`
+event naming the machine. The run keeps its 3-hour reconnect grace.
+
+Each ended run is claimed once as `run-end:<task>` in
+`office_issue_watchdog_attempt`, with the route as the target, and each
+action has its own key, so a repeated event and the scan act once. No
+migration is needed.
+
 ## Configuration
 
 Set these in the backend process environment. The watchdog secret values must
@@ -201,7 +248,7 @@ deployment entry point must be checked read-only before enabling the feature.
 | `MULTICA_ISSUE_WATCHDOG_IDLE_INTERVAL` | `2h` | Idle interval between employee wake attempts |
 | `MULTICA_ISSUE_WATCHDOG_IN_REVIEW_WAIT` | `2h` | Time an `in_review` issue can sit quiet before the manager alert |
 | `MULTICA_ISSUE_WATCHDOG_KUN_LABEL` | `等 Kun 拍板` | Label that pushes an issue to Kun's group and quiets its wakes; unset uses the default, set to empty turns both off |
-| `MULTICA_ISSUE_WATCHDOG_KUN_GROUP` | `Multica 办公室` | Group named in the `kun_decision` event |
+| `MULTICA_ISSUE_WATCHDOG_KUN_GROUP` | `Multica 办公室` | Group for a `kun_decision` event whose issue has no group (`不发群` or a project not in the table) |
 | `MULTICA_ISSUE_WATCHDOG_MANAGER_WAIT` | `15m` | Time to wait for the responsible manager before COO escalation |
 | `MULTICA_ISSUE_WATCHDOG_EMPLOYEE_ROUNDS` | `2` | Employee wake attempts before manager escalation |
 | `MULTICA_ISSUE_WATCHDOG_RUN_AWARE` | `false` | Replaces comment wakes for live runs with project-group reminders |
@@ -216,6 +263,8 @@ deployment entry point must be checked read-only before enabling the feature.
 | `MULTICA_ISSUE_WATCHDOG_CHILD_WAIT` | `30m` | Time a sub-issue can stall before the parent's owner is woken |
 | `MULTICA_ISSUE_WATCHDOG_ROUND_STOP` | `false` | Stops the loop and lays out options for Kun after `ROUND_LIMIT` failed review rounds in a row |
 | `MULTICA_ISSUE_WATCHDOG_ROUND_LIMIT` | `2` | Failed review rounds in a row before the stop |
+| `MULTICA_ISSUE_WATCHDOG_STOP_ROUTING` | `false` | Routes every ended assignee run by where it left the issue, wakes dependency waits, and alerts on runs stranded on an offline machine |
+| `MULTICA_ISSUE_WATCHDOG_OFFLINE_WAIT` | `10m` | Time a runtime can be offline with a run before the manager alert |
 | `MULTICA_ISSUE_WATCHDOG_HEARTBEAT_FILE` | `/var/lib/multica/issue-watchdog/last-run` | File atomically replaced with the last run start time in UTC |
 
 Webhook URL and key are never included in request logs or error messages. Do not
@@ -233,6 +282,8 @@ UUID.
 - To stop the Kun-decision push and quieting, set
   `MULTICA_ISSUE_WATCHDOG_KUN_LABEL=` (empty) and restart the backend; the
   label itself stays on the issues.
+- To stop stop routing, set `MULTICA_ISSUE_WATCHDOG_STOP_ROUTING=false` and
+  restart the backend. Labels it put on stay on the issues.
 - To return to comment wakes for live runs, set
   `MULTICA_ISSUE_WATCHDOG_RUN_AWARE=false` and restart the backend. Recorded
   reminders stay in the attempt log and remain visible on the issue.
@@ -304,8 +355,37 @@ label on the same database:
   hours idle and a hold wake nobody; taking it off waits a fresh idle
   interval before the ordinary wake; putting it on again with no event is
   pushed by the scan;
+- the push goes to the issue's own `reply_group` over its project's, to the
+  grandparent's through two `随上级单` levels, to the grandparent's past a
+  parent with none, to the parent's project when no ancestor names one, to the project table's group, to 「杂项」 with no
+  project, and to 「Multica 办公室」 for `不发群` or an unlisted project;
 - a stalled sub-issue under a labelled parent wakes nobody on the parent and
   sends the manager one `child_unattended` event.
+
+`run_end_integration_test.go` covers stop routing on the same database, ending
+runs the way the platform does so the `run.*` office events are written:
+
+- with the switch off an ended run gets nothing; turned on, the scan routes it
+  once;
+- a run that moves the issue to `in_review` wakes the reviewer once and
+  queues a review run; with no reviewer nobody is woken and the in_review
+  alert asks for acceptance;
+- `blocked` on a decision attaches 「等 Kun 拍板」 and pushes once to
+  「Multica 办公室」;
+- a failure with no retry sends one `run_failed` event naming the reason; one
+  with a retry queued sends nothing;
+- back to `todo` with `backlog.waiting_for` leaves one note naming it and one
+  `needs_instruction` event;
+- a reviewer's run on the issue is not routed; a run whose event was missed is
+  routed by the scan; repeated events and scans send nothing twice;
+- an empty stop in `in_progress` waits for the scan, reruns the developer
+  once, then sends one `no_delivery` event, and the status stays
+  `in_progress`; a parent with an open sub-issue sends one `parent_waiting`
+  event; a follow-up run queued after the end leaves the run alone;
+- an issue blocked on two named issues is woken once, only after both are
+  done; one naming no issue is not;
+- a runtime offline 5 minutes sends nothing, at 11 minutes one
+  `runtime_offline` event, and the run is left running.
 
 `review_test.go` checks verdict recognition against the review wording used on
 2026-10-27, which had no `verdict:` lines, and the round counting: same-round
