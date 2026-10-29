@@ -736,9 +736,13 @@ func main() {
 	watchdog := issuewatchdog.New(pool, watchdogConfig, h.CreateWatchdogNudgeComment)
 	watchdog.SetWake(h.CreateWatchdogWakeComment)
 	watchdog.SetNote(h.CreateWatchdogNoteComment)
+	watchdog.SetLabel(h.CreateWatchdogLabel)
 	bus.Subscribe(protocol.EventIssueUpdated, watchdog.HandleEvent)
 	bus.Subscribe(protocol.EventCommentCreated, watchdog.HandleEvent)
 	bus.Subscribe(protocol.EventIssueLabelsChanged, watchdog.HandleEvent)
+	bus.Subscribe(protocol.EventTaskCompleted, watchdog.HandleEvent)
+	bus.Subscribe(protocol.EventTaskFailed, watchdog.HandleEvent)
+	bus.Subscribe(protocol.EventTaskCancelled, watchdog.HandleEvent)
 
 	// Construct a LivenessStore that mirrors the one wired into the HTTP
 	// handler. Both the heartbeat write path (handler) and the sweeper read

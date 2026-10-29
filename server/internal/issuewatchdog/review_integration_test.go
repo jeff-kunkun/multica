@@ -73,6 +73,7 @@ func (b *reviewBench) watchdog(cfg Config) *Watchdog {
 	base.HoldWake, base.ReviewWake, base.StuckWake, base.ChildWake = cfg.HoldWake, cfg.ReviewWake, cfg.StuckWake, cfg.ChildWake
 	base.RoundStop, base.RoundLimit = cfg.RoundStop, cfg.RoundLimit
 	base.InReviewWait, base.KunLabel, base.KunGroup = cfg.InReviewWait, cfg.KunLabel, cfg.KunGroup
+	base.StopRouting, base.OfflineWait = cfg.StopRouting, cfg.OfflineWait
 	if cfg.TodoStartDelay > 0 {
 		base.TodoStartDelay = cfg.TodoStartDelay
 	}
@@ -82,6 +83,7 @@ func (b *reviewBench) watchdog(cfg Config) *Watchdog {
 	w := New(b.pool, base, b.h.CreateWatchdogNudgeComment)
 	w.SetWake(b.h.CreateWatchdogWakeComment)
 	w.SetNote(b.h.CreateWatchdogNoteComment)
+	w.SetLabel(b.h.CreateWatchdogLabel)
 	w.now = func() time.Time { return b.now }
 	return w
 }

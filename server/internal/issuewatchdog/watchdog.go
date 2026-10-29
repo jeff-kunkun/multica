@@ -34,12 +34,22 @@ const (
 	RunningSilentEventType = "employee_running_silent"
 	projectGroupTarget     = "project_group"
 
-	// KunDecisionEventType asks the office group for Kun's decision when an
-	// issue takes the Kun-decision label (Config.KunLabel).
+	// KunDecisionEventType asks the issue's chat group (kunGroup) for Kun's
+	// decision when an issue takes the Kun-decision label (Config.KunLabel).
 	KunDecisionEventType = "kun_decision"
 	officeGroupTarget    = "office_group"
 	defaultKunLabel      = "等 Kun 拍板"
 	defaultKunGroup      = "Multica 办公室"
+
+	// An issue's 「回哪个群」 is its reply_group metadata, a chat group name or
+	// one of the two values below (DENE-2587). A sub-issue may defer to its
+	// parent; an issue with none falls back to its project's group.
+	replyGroupKey          = "reply_group"
+	replyGroupFollowParent = "随上级单"
+	replyGroupNone         = "不发群"
+	unprojectedGroup       = "杂项"
+	// maxReplyGroupHops bounds the walk up 随上级单 parents.
+	maxReplyGroupHops = 10
 
 	// liveCommandFreshness is how recent the run's live report must be for a
 	// reminder to name its command (DENE-2667 PR 4). The daemon reports every
@@ -97,6 +107,12 @@ type Config struct {
 	// pass lands.
 	RoundStop  bool
 	RoundLimit int
+	// StopRouting, off by default, routes each ended run of an issue's
+	// assignee by where it left the issue (run_end.go), and calls the
+	// responsible manager about a run whose runtime has been offline for
+	// OfflineWait.
+	StopRouting bool
+	OfflineWait time.Duration
 }
 
 func ConfigFromEnv() (Config, error) {
@@ -156,13 +172,14 @@ func ConfigFromEnv() (Config, error) {
 		}
 		return value, nil
 	}
-	var holdWake, reviewWake, stuckWake, childWake, roundStop bool
+	var holdWake, reviewWake, stuckWake, childWake, roundStop, stopRouting bool
 	for name, dst := range map[string]*bool{
-		"MULTICA_ISSUE_WATCHDOG_HOLD_WAKE":   &holdWake,
-		"MULTICA_ISSUE_WATCHDOG_REVIEW_WAKE": &reviewWake,
-		"MULTICA_ISSUE_WATCHDOG_STUCK_WAKE":  &stuckWake,
-		"MULTICA_ISSUE_WATCHDOG_CHILD_WAKE":  &childWake,
-		"MULTICA_ISSUE_WATCHDOG_ROUND_STOP":  &roundStop,
+		"MULTICA_ISSUE_WATCHDOG_HOLD_WAKE":    &holdWake,
+		"MULTICA_ISSUE_WATCHDOG_REVIEW_WAKE":  &reviewWake,
+		"MULTICA_ISSUE_WATCHDOG_STUCK_WAKE":   &stuckWake,
+		"MULTICA_ISSUE_WATCHDOG_CHILD_WAKE":   &childWake,
+		"MULTICA_ISSUE_WATCHDOG_ROUND_STOP":   &roundStop,
+		"MULTICA_ISSUE_WATCHDOG_STOP_ROUTING": &stopRouting,
 	} {
 		if *dst, err = parseBool(name); err != nil {
 			return Config{}, err
@@ -181,6 +198,10 @@ func ConfigFromEnv() (Config, error) {
 		return Config{}, err
 	}
 	childWait, err := parseDuration("MULTICA_ISSUE_WATCHDOG_CHILD_WAIT", 30*time.Minute)
+	if err != nil {
+		return Config{}, err
+	}
+	offlineWait, err := parseDuration("MULTICA_ISSUE_WATCHDOG_OFFLINE_WAIT", 10*time.Minute)
 	if err != nil {
 		return Config{}, err
 	}
@@ -231,6 +252,8 @@ func ConfigFromEnv() (Config, error) {
 		ChildWait:        childWait,
 		RoundStop:        roundStop,
 		RoundLimit:       roundLimit,
+		StopRouting:      stopRouting,
+		OfflineWait:      offlineWait,
 	}
 	if cfg.HeartbeatFile == "" {
 		cfg.HeartbeatFile = defaultHeartbeatFile
@@ -252,6 +275,25 @@ func ConfigFromEnv() (Config, error) {
 		}
 	}
 	return cfg, nil
+}
+
+// projectGroups is the project table of the office rules (第二大脑.md
+// 「规矩」, 2026-10-24, DENE-2587), keyed by project title. A project not
+// listed has no group (replyGroupNone).
+var projectGroups = map[string]string{
+	"Multica 魔改":     "Multica 办公室",
+	"game-multica":   "Multica 办公室",
+	"Agent mono仓库管理": "Agent mono",
+	"出海独立站":          "出海独立站/新词站",
+	"新词雷达":           "新词雷达",
+	"tarot":          "塔罗站",
+	"自媒体":            "自媒体",
+	"消息汇总":           "消息汇总",
+	"game":           "游戏",
+	"game-relay":     "game relay",
+	"RelayVPS":       "game relay",
+	"硕士论文":           "硕士论文",
+	"AI Rap Video":   "AI Rap Video",
 }
 
 // lookupEnvOr is the trimmed value of name, or fallback only when it is
@@ -283,6 +325,7 @@ type Watchdog struct {
 	nudge  NudgeFunc
 	wake   WakeFunc
 	note   NoteFunc
+	label  LabelFunc
 	client *http.Client
 	now    func() time.Time
 }
@@ -323,6 +366,8 @@ type Issue struct {
 	IssueRevision   int64
 	// KunLabel: the issue carries Config.KunLabel and waits on Kun.
 	KunLabel bool
+	// ReplyGroup is the issue's own reply_group metadata, trimmed.
+	ReplyGroup string
 }
 
 type webhookEvent struct {
@@ -344,7 +389,8 @@ type webhookEvent struct {
 	// CurrentCommand is the command the run has in flight, from its live
 	// report; omitted when it runs none or reports no live status.
 	CurrentCommand string `json:"current_command,omitempty"`
-	// Group is the chat group to post to; set only on kun_decision events.
+	// Group is the chat group to post to (kunGroup); set only on
+	// kun_decision events.
 	Group string `json:"group,omitempty"`
 }
 
@@ -391,7 +437,10 @@ func (w *Watchdog) HandleEvent(e events.Event) {
 				}
 				_ = w.notifyManager(ctx, issue, "status_"+issue.Status,
 					fmt.Sprintf("status:%s:%d:%s", issue.ID, rev, issue.Status),
-					"负责人状态变更为 "+issue.Status, "manager", w.now())
+					statusChangeReason(issue), "manager", w.now())
+			}
+			if w.cfg.StopRouting && (issue.Status == "done" || issue.Status == "cancelled") {
+				_ = w.checkDependencyWaits(ctx, w.now())
 			}
 		}
 		if changed, _ := payload["assignee_changed"].(bool); changed {
@@ -399,6 +448,22 @@ func (w *Watchdog) HandleEvent(e events.Event) {
 			if ok {
 				w.rebaselineAssignment(ctx, issue, w.now())
 			}
+		}
+	case protocol.EventTaskCompleted, protocol.EventTaskFailed, protocol.EventTaskCancelled:
+		if !w.cfg.StopRouting {
+			return
+		}
+		payload, ok := payloadMap(e.Payload)
+		if !ok {
+			return
+		}
+		taskID, _ := payload["task_id"].(string)
+		issueID, _ := payload["issue_id"].(string)
+		if taskID == "" || issueID == "" {
+			return // a chat run
+		}
+		if err := w.routeRunEnd(ctx, issueID, taskID, false, w.now()); err != nil {
+			slog.WarnContext(ctx, "issue watchdog run-end routing failed", "issue_id", issueID, "task_id", taskID)
 		}
 	case protocol.EventIssueLabelsChanged:
 		payload, ok := payloadMap(e.Payload)
@@ -452,6 +517,15 @@ func (w *Watchdog) HandleEvent(e events.Event) {
 			"employee-comment:"+commentID,
 			"负责员工在单子里发了新评论，等待负责经理回应", "manager", w.now())
 	}
+}
+
+// statusChangeReason is the manager alert for a status change. An issue that
+// enters review with no reviewer waits on the manager to accept it.
+func statusChangeReason(issue Issue) string {
+	if issue.Status == "in_review" && issue.Reviewer.ID == "" {
+		return "负责人状态变更为 in_review，单子没填审查员，请负责经理验收，通过就关单"
+	}
+	return "负责人状态变更为 " + issue.Status
 }
 
 func payloadMap(v any) (map[string]any, bool) {
@@ -511,7 +585,8 @@ SELECT i.id::text, i.workspace_id::text, i.number, w.issue_prefix || '-' || i.nu
          JOIN issue_label l ON l.id = il.label_id
          WHERE il.issue_id = i.id AND l.workspace_id = i.workspace_id
            AND l.resource_type = 'issue' AND lower(l.name) = lower($4)
-       ) AS kun_label
+       ) AS kun_label,
+       COALESCE(btrim(i.metadata->>$5::text), '')
 FROM issue i
 JOIN workspace w ON w.id = i.workspace_id
 LEFT JOIN project p ON p.id = i.project_id AND p.workspace_id = i.workspace_id
@@ -527,11 +602,11 @@ LEFT JOIN LATERAL (
     LIMIT 1
 ) manager_option ON true
 WHERE i.workspace_id = $1::uuid AND i.id = $2::uuid`,
-		workspaceID, issueID, watchdogCommentMarker, w.cfg.KunLabel,
+		workspaceID, issueID, watchdogCommentMarker, w.cfg.KunLabel, replyGroupKey,
 	).Scan(&out.ID, &out.WorkspaceID, &out.Number, &out.Identifier, &out.Title, &out.Status,
 		&out.AssigneeType, &out.AssigneeID, &out.EmployeeName, &out.ManagerName, &out.ProjectName,
 		&out.CreatedAt, &out.UpdatedAt, &firstExecutedAt, &out.ProgressAt, &out.IssueRevision,
-		&out.ParentID, &out.Reviewer.Type, &out.Reviewer.ID, &out.KunLabel)
+		&out.ParentID, &out.Reviewer.Type, &out.Reviewer.ID, &out.KunLabel, &out.ReplyGroup)
 	if err != nil {
 		return Issue{}, err
 	}
@@ -589,6 +664,17 @@ LIMIT 5000`, w.cfg.WorkspaceID)
 		}
 		if err := w.checkIssue(ctx, issue, now); err != nil {
 			slog.WarnContext(ctx, "issue watchdog scan item failed", "issue_id", issue.ID)
+		}
+	}
+	if w.cfg.StopRouting {
+		if err := w.catchUpRunEnds(ctx, now); err != nil {
+			slog.WarnContext(ctx, "issue watchdog run-end catch-up failed")
+		}
+		if err := w.checkOfflineRuns(ctx, now); err != nil {
+			slog.WarnContext(ctx, "issue watchdog offline-run scan failed")
+		}
+		if err := w.checkDependencyWaits(ctx, now); err != nil {
+			slog.WarnContext(ctx, "issue watchdog dependency scan failed")
 		}
 	}
 	if err := w.escalateExpiredManagerWaits(ctx, now); err != nil {
@@ -780,10 +866,11 @@ func (w *Watchdog) managerIdleReason(kind string, idle time.Duration) string {
 	return reason
 }
 
-// checkKunDecision pushes an issue to the Kun group once each time it takes
-// the Kun-decision label. A push stays open, and blocks the next one, until a
-// scan or a label event sees the label gone; the push's manager_resolved_at
-// records that, and the idle clock restarts so Kun's answer gets fresh time.
+// checkKunDecision pushes an issue to its chat group (kunGroup) once each time
+// it takes the Kun-decision label. A push stays open, and blocks the next one,
+// until a scan or a label event sees the label gone; the push's
+// manager_resolved_at records that, and the idle clock restarts so Kun's
+// answer gets fresh time.
 func (w *Watchdog) checkKunDecision(ctx context.Context, issue Issue, now time.Time) error {
 	if w.cfg.KunLabel == "" {
 		return nil
@@ -819,12 +906,13 @@ WHERE id = $1 AND manager_resolved_at IS NULL`, open, now); err != nil {
 	if err != nil || !claimed {
 		return err
 	}
+	group, route := w.kunGroup(ctx, issue)
 	err = w.post(ctx, webhookEvent{
 		EventID: key, EventType: KunDecisionEventType, IssueID: issue.ID,
 		IssueNumber: issue.Identifier, Title: issue.Title, Status: issue.Status,
 		Employee: issue.EmployeeName, Manager: issue.ManagerName, ProjectName: issue.ProjectName,
-		WakeTarget: officeGroupTarget, Group: w.cfg.KunGroup,
-		Reason:     fmt.Sprintf("单子打上了「%s」标签，请推到「%s」群请 Kun 拍板", w.cfg.KunLabel, w.cfg.KunGroup),
+		WakeTarget: officeGroupTarget, Group: group,
+		Reason:     fmt.Sprintf("单子打上了「%s」标签，%s，请推到「%s」群请 Kun 拍板", w.cfg.KunLabel, route, group),
 		OccurredAt: now.UTC(),
 	})
 	w.finishAttempt(ctx, id, err == nil)
@@ -832,6 +920,57 @@ WHERE id = $1 AND manager_resolved_at IS NULL`, open, now); err != nil {
 		return errors.New("issue watchdog Kun-decision push failed")
 	}
 	return nil
+}
+
+// kunGroup is the chat group an issue waiting on Kun is pushed to, and how it
+// was found: the issue's 「回哪个群」; for 随上级单, the nearest ancestor that
+// names a group, skipping parents with none or 随上级单; with none, the project
+// table (no project is 杂项), for 随上级单 by the direct parent's project. Kun
+// still has to see an issue whose group is 不发群, so it goes to
+// Config.KunGroup. A failed parent read ends the walk with no group found.
+func (w *Watchdog) kunGroup(ctx context.Context, issue Issue) (string, string) {
+	group, project, parentID := issue.ReplyGroup, issue.ProjectName, issue.ParentID
+	source := "单上的「回哪个群」"
+	if group == replyGroupFollowParent {
+		group = ""
+		for hops := 0; group == "" && parentID != "" && hops < maxReplyGroupHops; hops++ {
+			var nextGroup, nextParent, nextProject string
+			if err := w.pool.QueryRow(ctx, `
+SELECT COALESCE(btrim(i.metadata->>$3::text), ''), COALESCE(i.parent_issue_id::text, ''), COALESCE(p.title, '')
+FROM issue i
+LEFT JOIN project p ON p.id = i.project_id AND p.workspace_id = i.workspace_id
+WHERE i.workspace_id = $1::uuid AND i.id = $2::uuid`,
+				issue.WorkspaceID, parentID, replyGroupKey).Scan(&nextGroup, &nextParent, &nextProject); err != nil {
+				slog.WarnContext(ctx, "issue watchdog: read parent reply group failed", "issue_id", issue.ID, "parent_id", parentID)
+				break
+			}
+			if hops == 0 {
+				project = nextProject
+			}
+			if nextGroup != replyGroupFollowParent {
+				group = nextGroup
+			}
+			parentID = nextParent
+		}
+		if group != "" {
+			source = "上级单的「回哪个群」"
+		}
+	}
+	if group == "" {
+		source = "项目对照表"
+		switch {
+		case project == "":
+			group = unprojectedGroup
+		case projectGroups[project] != "":
+			group = projectGroups[project]
+		default:
+			group = replyGroupNone
+		}
+	}
+	if group == replyGroupNone {
+		return w.cfg.KunGroup, source + "是「" + replyGroupNone + "」"
+	}
+	return group, "按" + source
 }
 
 // loadActiveRun finds the assignee agent's running task on the issue. A
