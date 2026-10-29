@@ -25,6 +25,10 @@ export interface DaemonStatus {
   profile?: string;
   /** Backend URL the daemon connects to. */
   serverUrl?: string;
+  /** Build version of the running daemon process, e.g. "0.6.7-kun.690eaa5471". */
+  cliVersion?: string;
+  /** Commit the running daemon process was built from; empty on unstamped dev builds. */
+  cliCommit?: string;
   /**
    * True when a daemon is running but in an environment the app can't control
    * — its reported OS differs from the desktop host's (e.g. a Linux daemon

@@ -992,6 +992,19 @@ describe("ApiClient schema fallback", () => {
       expect(config.daemon_app_url).toBeUndefined();
       expect(config.feature_flags?.composio_mcp_apps).toBe(true);
     });
+
+    it("bypasses the HTTP cache only when asked for a fresh read", async () => {
+      stubFetchJson({ server_version: "abc1234" });
+      const client = new ApiClient("https://api.example.test");
+      await client.getConfig();
+      const fetchMock = vi.mocked(fetch);
+      expect(fetchMock.mock.calls[0]?.[1]?.cache).toBeUndefined();
+
+      stubFetchJson({ server_version: "abc1234" });
+      const fresh = await client.getConfig({ fresh: true });
+      expect(vi.mocked(fetch).mock.calls[0]?.[1]?.cache).toBe("no-store");
+      expect(fresh.server_version).toBe("abc1234");
+    });
   });
 
   describe("listGroupedIssues", () => {

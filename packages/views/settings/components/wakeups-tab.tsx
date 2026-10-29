@@ -7,14 +7,17 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useAuthStore } from "@multica/core/auth";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { useUpdateWorkspaceSystemWakeup, workspaceSystemWakeupsOptions } from "@multica/core/issues";
+import { useUpdateWorkspaceSessionResume, workspaceSessionResumeOptions } from "@multica/core/workspace/session-resume";
 import type { WorkspaceSystemWakeup } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
+import { Input } from "@multica/ui/components/ui/input";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { useT } from "../../i18n";
 import { SettingsCard, SettingsRow, SettingsSection, SettingsTab } from "./settings-layout";
 
 const MAX_INSTRUCTION_BYTES = 4000;
+const MAX_SESSION_CONTEXT_TOKENS = 2_000_000;
 
 /**
  * Workspace defaults of the platform's wakeup rules. Each issue can change
@@ -40,7 +43,8 @@ export function WakeupsTab() {
         </p>
       )}
       {childDone && <ChildDoneDefault rule={childDone} canManage={canManage} />}
-      {childDone && !canManage && <p className="text-caption text-muted-foreground">{t(($) => $.wakeups.admin_only)}</p>}
+      <SessionContextLimit canManage={canManage} />
+      {!canManage && <p className="text-caption text-muted-foreground">{t(($) => $.wakeups.admin_only)}</p>}
     </SettingsTab>
   );
 }
@@ -137,6 +141,78 @@ function ChildDoneDefault({ rule, canManage }: { rule: WorkspaceSystemWakeup; ca
                 {update.isPending ? t(($) => $.wakeups.saving) : t(($) => $.wakeups.save)}
               </Button>
             </div>
+          )}
+        </form>
+      </SettingsCard>
+    </SettingsSection>
+  );
+}
+
+/** The context limit of DENE-2756: a session past it is set aside at the next follow-up. */
+function SessionContextLimit({ canManage }: { canManage: boolean }) {
+  const { t } = useT("settings");
+  const wsId = useWorkspaceId();
+  const { data } = useQuery(workspaceSessionResumeOptions(wsId));
+  const update = useUpdateWorkspaceSessionResume(wsId);
+  const id = useId();
+  const [draft, setDraft] = useState("");
+  const [error, setError] = useState("");
+  const stored = data ? String(data.max_context_tokens) : "";
+  // A save elsewhere replaces an untouched draft.
+  useEffect(() => setDraft(stored), [stored]);
+  if (!data) return null;
+  const dirty = draft.trim() !== stored;
+  return (
+    <SettingsSection
+      anchor="session-context"
+      title={t(($) => $.wakeups.session_title)}
+      description={t(($) => $.wakeups.session_description)}
+    >
+      <SettingsCard>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            const next = Number(draft.trim());
+            if (draft.trim() === "" || !Number.isInteger(next) || next < 0 || next > MAX_SESSION_CONTEXT_TOKENS) {
+              setError(t(($) => $.wakeups.session_invalid));
+              return;
+            }
+            update.mutate(next, { onError: () => toast.error(t(($) => $.wakeups.session_save_error)) });
+          }}
+        >
+          <SettingsRow
+            label={<label htmlFor={`${id}-tokens`}>{t(($) => $.wakeups.session_max_context)}</label>}
+            description={t(($) => $.wakeups.session_max_context_hint)}
+          >
+            <div className="flex items-center gap-2">
+              <Input
+                id={`${id}-tokens`}
+                type="number"
+                inputMode="numeric"
+                min={0}
+                max={MAX_SESSION_CONTEXT_TOKENS}
+                step={1000}
+                value={draft}
+                disabled={!canManage || update.isPending}
+                aria-invalid={!!error}
+                aria-describedby={error ? `${id}-error` : undefined}
+                className="w-28 text-base md:text-body"
+                onChange={(event) => {
+                  setDraft(event.target.value);
+                  setError("");
+                }}
+              />
+              {canManage && (
+                <Button type="submit" size="sm" disabled={!dirty || update.isPending}>
+                  {update.isPending ? t(($) => $.wakeups.saving) : t(($) => $.wakeups.save)}
+                </Button>
+              )}
+            </div>
+          </SettingsRow>
+          {error && (
+            <p id={`${id}-error`} role="alert" className="px-4 pb-3 text-caption text-destructive">
+              {error}
+            </p>
           )}
         </form>
       </SettingsCard>

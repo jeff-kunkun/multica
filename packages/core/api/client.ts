@@ -480,6 +480,9 @@ import {
   WorkspaceMagpieSchema,
   EMPTY_WORKSPACE_MAGPIE,
   type WorkspaceMagpie,
+  WorkspaceSessionResumeSchema,
+  EMPTY_WORKSPACE_SESSION_RESUME,
+  type WorkspaceSessionResume,
   DeleteAgentResponseSchema,
   EMPTY_DELETE_AGENT_RESPONSE,
   type DeleteAgentResponse,
@@ -3488,8 +3491,12 @@ export class ApiClient {
   }
 
   // App Config
-  async getConfig(): Promise<AppConfigResponse> {
-    const raw = await this.fetch<unknown>("/api/config");
+  /** `fresh` skips the HTTP cache, for callers that compare the live server version. */
+  async getConfig(options?: { fresh?: boolean }): Promise<AppConfigResponse> {
+    const raw = await this.fetch<unknown>(
+      "/api/config",
+      options?.fresh ? { cache: "no-store" } : undefined,
+    );
     return parseWithFallback<AppConfigResponse>(raw, AppConfigSchema, EMPTY_APP_CONFIG, {
       endpoint: "GET /api/config",
     });
@@ -3574,6 +3581,23 @@ export class ApiClient {
     // The switch is only offered where magpie is available.
     return parseWithFallback(raw, WorkspaceMagpieSchema, { enabled, available: true }, {
       endpoint: "PUT /api/workspaces/{id}/magpie",
+    });
+  }
+
+  async getWorkspaceSessionResume(workspaceId: string): Promise<WorkspaceSessionResume> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/session-resume`);
+    return parseWithFallback(raw, WorkspaceSessionResumeSchema, EMPTY_WORKSPACE_SESSION_RESUME, {
+      endpoint: "GET /api/workspaces/{id}/session-resume",
+    });
+  }
+
+  async updateWorkspaceSessionResume(workspaceId: string, maxContextTokens: number): Promise<WorkspaceSessionResume> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/session-resume`, {
+      method: "PUT",
+      body: JSON.stringify({ max_context_tokens: maxContextTokens }),
+    });
+    return parseWithFallback(raw, WorkspaceSessionResumeSchema, { ...EMPTY_WORKSPACE_SESSION_RESUME, max_context_tokens: maxContextTokens }, {
+      endpoint: "PUT /api/workspaces/{id}/session-resume",
     });
   }
 

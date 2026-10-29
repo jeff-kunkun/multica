@@ -146,6 +146,12 @@ export function useSettingsSearchIndex(
         description: t(($) => $.wakeups.child_done_description),
       },
       {
+        tab: "wakeups",
+        anchor: "session-context",
+        title: t(($) => $.wakeups.session_title),
+        description: t(($) => $.wakeups.session_description),
+      },
+      {
         tab: "labels",
         title: t(($) => $.page.tabs.labels),
         description: t(($) => $.labels.description),

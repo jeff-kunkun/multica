@@ -1329,6 +1329,18 @@ export type WorkspaceMagpie = z.infer<typeof WorkspaceMagpieSchema>;
 
 export const EMPTY_WORKSPACE_MAGPIE: WorkspaceMagpie = { enabled: false, available: false };
 
+// `GET/PUT /api/workspaces/{id}/session-resume` (DENE-2756): the context size
+// (tokens, after the CLI's own compaction) past which an agent's next follow-up
+// on an issue starts a new session with a short handoff instead of resuming.
+// 0, the default, means off.
+export const WorkspaceSessionResumeSchema = z.object({
+  max_context_tokens: z.number().int().catch(0).default(0),
+}).loose();
+
+export type WorkspaceSessionResume = z.infer<typeof WorkspaceSessionResumeSchema>;
+
+export const EMPTY_WORKSPACE_SESSION_RESUME: WorkspaceSessionResume = { max_context_tokens: 0 };
+
 // `DELETE /api/agents/{id}` (magpie mode only): the server backs the agent's
 // full configuration up before deleting it, and only returns once both
 // happened.

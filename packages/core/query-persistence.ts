@@ -60,6 +60,12 @@ function isPersistableQuery(query: Query): boolean {
  */
 export const QUERY_CACHE_MAX_CHARS = 2_000_000;
 
+/** Shortest gap between two snapshot writes. */
+export const QUERY_CACHE_WRITE_INTERVAL_MS = 3_000;
+
+/** Marks a query the snapshot does not hold (not yet a success, or failed). */
+const NOT_KEPT = Symbol("not kept");
+
 /**
  * Only data JSON round-trips unchanged may be persisted. A `Map`, `Set`, `Blob`
  * or `Date` comes back as `{}` or a string, and the page that restores it
@@ -135,31 +141,81 @@ export function createPersistedQueryCache(
     storage.removeItem(key);
   }
 
+  // Each write dehydrates, checks and stringifies the whole cache and then
+  // stores it synchronously, so it runs at most once per interval, and only
+  // when what the snapshot keeps has changed: a query's data while it is a
+  // success, nothing otherwise. New data, a success turning into an error or
+  // a reset, and the removal of a kept query all count. A poll or refetch
+  // that returns the same data keeps the same reference (structural sharing)
+  // and writes nothing (DENE-2756).
+  const kept = new WeakMap<Query, unknown>();
+  const keptNow = (query: Query) => (query.state.status === "success" ? query.state.data : NOT_KEPT);
+  const keptBefore = (query: Query) => (kept.has(query) ? kept.get(query) : NOT_KEPT);
+  // Queries restored above are already in the snapshot.
+  for (const query of queryClient.getQueryCache().getAll()) {
+    if (isPersistableQuery(query)) kept.set(query, keptNow(query));
+  }
   let writeTimer: ReturnType<typeof setTimeout> | undefined;
-  const unsubscribe = queryClient.getQueryCache().subscribe(() => {
-    if (writeTimer) clearTimeout(writeTimer);
-    writeTimer = setTimeout(() => {
+  const write = () => {
+    writeTimer = undefined;
+    try {
+      const state = dehydrate(queryClient, {
+        shouldDehydrateQuery: (query) =>
+          query.state.status === "success" && isPersistableQuery(query) && isJsonSafe(query.state.data),
+      });
+      storage.setItem(key, serializeWithinBudget(userId, state));
+    } catch {
+      // Storage is best effort (private mode/quota must never break the app).
+      // Drop the stale snapshot so it does not keep holding the quota.
       try {
-        const state = dehydrate(queryClient, {
-          shouldDehydrateQuery: (query) =>
-            query.state.status === "success" && isPersistableQuery(query) && isJsonSafe(query.state.data),
-        });
-        storage.setItem(key, serializeWithinBudget(userId, state));
+        storage.removeItem(key);
       } catch {
-        // Storage is best effort (private mode/quota must never break the app).
-        // Drop the stale snapshot so it does not keep holding the quota.
-        try {
-          storage.removeItem(key);
-        } catch {
-          // Nothing more to free.
-        }
+        // Nothing more to free.
       }
-    }, 50);
+    }
+  };
+  const schedule = () => {
+    writeTimer ??= setTimeout(write, QUERY_CACHE_WRITE_INTERVAL_MS);
+  };
+  const unsubscribe = queryClient.getQueryCache().subscribe((event) => {
+    const query = event.query;
+    if (!isPersistableQuery(query)) return;
+    if (event.type === "removed") {
+      if (keptBefore(query) !== NOT_KEPT) schedule();
+      kept.delete(query);
+      return;
+    }
+    if (event.type !== "added" && event.type !== "updated") return;
+    const now = keptNow(query);
+    if (now === keptBefore(query)) return;
+    kept.set(query, now);
+    schedule();
   });
+
+  // A pending write lands before the window hides or the page goes away, so
+  // the throttle never costs the next start its snapshot.
+  const flush = () => {
+    if (!writeTimer) return;
+    clearTimeout(writeTimer);
+    write();
+  };
+  const onVisibilityChange = () => {
+    if (document.visibilityState === "hidden") flush();
+  };
+  const hasPage = typeof window !== "undefined" && typeof document !== "undefined";
+  if (hasPage) {
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+  }
 
   return () => {
     unsubscribe();
     if (writeTimer) clearTimeout(writeTimer);
+    writeTimer = undefined;
+    if (hasPage) {
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    }
   };
 }
 
