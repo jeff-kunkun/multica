@@ -19,12 +19,12 @@ import { SettingsCard, SettingsRow, SettingsTab } from "@multica/views/settings"
 import { toast } from "sonner";
 import { useUpdater } from "../hooks/use-updater";
 import { DownloadProgressBar } from "./update-notification";
-import { alignVersions, type SideVersion } from "./version-alignment";
+import { sideVersions, type SideVersion } from "./version-alignment";
 import type { DaemonStatus } from "../../../shared/daemon-types";
 import type { UpdateCheckRecord } from "../../../shared/updater-types";
 
 // The startup config read is cached for the whole session, so this tab asks
-// the server itself; a server switched since launch must not stay green.
+// the server itself; a server switched since launch must not show the old one.
 const SERVER_VERSION_REFRESH_MS = 60_000;
 
 type ServerVersionRead =
@@ -81,13 +81,13 @@ export function UpdatesSettingsTab() {
       configStore.getState().setServerVersion(cfg.server_version);
     } catch {
       if (seq !== serverReadSeq.current) return;
-      // Never fall back to the last value: an unreadable server is not aligned.
+      // Never fall back to the last value: say the read failed instead.
       setServer({ status: "failed" });
     }
   }, []);
 
   // Re-read on open, every minute, when the window regains focus and when the
-  // daemon (re)connects, so a server swapped meanwhile turns the row red.
+  // daemon (re)connects, so a server swapped meanwhile shows its new version.
   const daemonKey = daemon.state === "running" ? `running:${daemon.cliCommit ?? ""}` : daemon.state;
   useEffect(() => {
     void refreshServerVersion();
@@ -103,7 +103,7 @@ export function UpdatesSettingsTab() {
     };
   }, [refreshServerVersion]);
 
-  const alignment = alignVersions({
+  const sides = sideVersions({
     client: currentVersion,
     daemonVersion: daemon.cliVersion,
     daemonCommit: daemon.cliCommit,
@@ -112,12 +112,7 @@ export function UpdatesSettingsTab() {
 
   const describeSide = (side: SideVersion): string => {
     const name = t(($) => $.desktop.updates.version_alignment.side[side.side]);
-    if (side.commit) {
-      const commit = side.commit.slice(0, 10);
-      return side.state === "match"
-        ? `${name}: ${commit}`
-        : `${name}: ${commit} · ${t(($) => $.desktop.updates.version_alignment.mismatch)}`;
-    }
+    if (side.commit) return `${name}: ${side.commit.slice(0, 10)}`;
     if (side.side === "server" && server.status === "loading") {
       return `${name}: ${t(($) => $.desktop.updates.version_alignment.server_loading)}`;
     }
@@ -130,7 +125,7 @@ export function UpdatesSettingsTab() {
     if (!side.reported) {
       return `${name}: ${t(($) => $.desktop.updates.version_alignment.not_reported)}`;
     }
-    return `${name}: ${side.reported} · ${t(($) => $.desktop.updates.version_alignment.no_commit)}`;
+    return `${name}: ${side.reported}`;
   };
 
   useEffect(() => {
@@ -232,43 +227,18 @@ export function UpdatesSettingsTab() {
           description={
             <>
               <p>{t(($) => $.desktop.updates.version_alignment.description)}</p>
-              <ul className="mt-2 flex flex-col gap-1" data-testid="version-alignment">
-                {alignment.sides.map((side) => (
-                  <li
-                    key={side.side}
-                    data-state={side.state}
-                    className={`inline-flex items-start gap-1.5 font-mono break-all ${
-                      side.state === "match" ? "text-muted-foreground" : "text-destructive"
-                    }`}
-                  >
-                    {side.state === "match" ? (
-                      <Check className="size-3.5 mt-0.5 shrink-0 text-success" />
-                    ) : (
-                      <AlertCircle className="size-3.5 mt-0.5 shrink-0" />
-                    )}
-                    {describeSide(side)}
-                  </li>
+              <ul
+                className="mt-2 flex flex-col gap-1 font-mono break-all text-muted-foreground"
+                data-testid="version-alignment"
+              >
+                {sides.map((side) => (
+                  <li key={side.side}>{describeSide(side)}</li>
                 ))}
               </ul>
             </>
           }
         >
-          {/* Neither green nor red mid-read: the minute refresh must not flash. */}
-          <span
-            className={`text-caption ${
-              server.status === "loading"
-                ? "text-muted-foreground"
-                : alignment.aligned
-                  ? "text-success"
-                  : "text-destructive"
-            }`}
-          >
-            {server.status === "loading"
-              ? t(($) => $.desktop.updates.version_alignment.server_loading)
-              : alignment.aligned
-                ? t(($) => $.desktop.updates.version_alignment.aligned)
-                : t(($) => $.desktop.updates.version_alignment.misaligned)}
-          </span>
+          {null}
         </SettingsRow>
 
         <SettingsRow

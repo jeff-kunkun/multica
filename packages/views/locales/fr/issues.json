@@ -392,7 +392,14 @@
     "empty_grouping": "Aucune tâche correspondante",
     "no_value": "Aucune valeur",
     "ordered_by": "Tableau trié par {{field}}",
-    "manual_reorder_hint": "Passez au tri Manuel pour réorganiser les tâches dans une colonne."
+    "manual_reorder_hint": "Passez au tri Manuel pour réorganiser les tâches dans une colonne.",
+    "parent_group": {
+      "all": "Toutes",
+      "tabs_label": "Filtrer par tâche parente",
+      "unknown_parent": "Tâche parente",
+      "count_one": "· {{count}} tâche",
+      "count_other": "· {{count}} tâches"
+    }
   },
   "peek": {
     "panel_label": "Aperçu de la tâche",

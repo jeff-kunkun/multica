@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { alignVersions, commitOf, sameCommit } from "./version-alignment";
+import { commitOf, sideVersions } from "./version-alignment";
 
 const FULL = "690eaa5471139ba8e5f60beca65e71865221272d";
 
@@ -19,90 +19,32 @@ describe("commitOf", () => {
   });
 });
 
-describe("sameCommit", () => {
-  it("treats a short hash as its full commit", () => {
-    expect(sameCommit("690eaa5471", FULL)).toBe(true);
-    expect(sameCommit(FULL, "690eaa5")).toBe(true);
-    expect(sameCommit("690eaa5471", "5565a1f7f5")).toBe(false);
-    expect(sameCommit("", "")).toBe(false);
-  });
-});
-
-describe("alignVersions", () => {
-  it("is aligned only when all three sides carry the same commit", () => {
-    const got = alignVersions({
+describe("sideVersions", () => {
+  it("lists client, daemon and server in that order with their commits", () => {
+    const got = sideVersions({
       client: "0.6.7-kun.690eaa5471",
       daemonVersion: "0.6.7-kun.690eaa5471",
       daemonCommit: FULL,
       server: FULL,
     });
-    expect(got.aligned).toBe(true);
-    expect(got.sides.map((s) => s.state)).toEqual(["match", "match", "match"]);
-    expect(got.sides[1]?.reported).toBe(FULL);
+    expect(got).toEqual([
+      { side: "client", reported: "0.6.7-kun.690eaa5471", commit: "690eaa5471" },
+      { side: "daemon", reported: FULL, commit: FULL },
+      { side: "server", reported: FULL, commit: FULL },
+    ]);
   });
 
-  it("marks a client without a commit in its version red", () => {
-    const got = alignVersions({
-      client: "0.6.7-dene2667.4",
-      daemonCommit: FULL,
-      server: FULL,
-    });
-    expect(got.aligned).toBe(false);
-    expect(got.sides.map((s) => s.state)).toEqual(["no_commit", "match", "match"]);
-  });
-
-  it("marks only the odd side red when two agree", () => {
-    const got = alignVersions({
-      client: "0.6.7-kun.690eaa5471",
-      daemonCommit: "5565a1f7f556a92427bd60f2340efd89023459e8",
-      server: FULL,
-    });
-    expect(got.sides.map((s) => s.state)).toEqual(["match", "mismatch", "match"]);
-  });
-
-  it("marks every side red when none agree", () => {
-    const got = alignVersions({
-      client: "0.6.7-kun.aaaaaaa111",
-      daemonCommit: "bbbbbbb222",
-      server: "ccccccc333",
-    });
-    expect(got.sides.map((s) => s.state)).toEqual(["mismatch", "mismatch", "mismatch"]);
-  });
-
-  it("never passes a daemon that reports only dev", () => {
-    const got = alignVersions({
-      client: "0.6.7-kun.690eaa5471",
-      daemonVersion: "dev",
-      daemonCommit: "unknown",
-      server: FULL,
-    });
-    expect(got.aligned).toBe(false);
-    expect(got.sides[1]).toMatchObject({ state: "no_commit", reported: "unknown" });
+  it("keeps a version without a commit as reported", () => {
+    const got = sideVersions({ client: "0.6.7-office.7", daemonVersion: "dev", server: "" });
+    expect(got.map((s) => [s.reported, s.commit])).toEqual([
+      ["0.6.7-office.7", ""],
+      ["dev", ""],
+      ["", ""],
+    ]);
   });
 
   it("falls back to the commit in the daemon's version", () => {
-    const got = alignVersions({
-      client: "0.6.7-kun.690eaa5471",
-      daemonVersion: "0.6.7-kun.690eaa5471",
-      server: FULL,
-    });
-    expect(got.aligned).toBe(true);
-    expect(got.sides[1]?.reported).toBe("0.6.7-kun.690eaa5471");
-  });
-
-  it("keeps a lone commit green but the whole row red", () => {
-    const got = alignVersions({ client: "0.6.7-dene2667.4", daemonCommit: FULL });
-    expect(got.aligned).toBe(false);
-    expect(got.sides.map((s) => s.state)).toEqual(["no_commit", "match", "no_commit"]);
-  });
-
-  it("does not pass when the server reports no version", () => {
-    const got = alignVersions({
-      client: "0.6.7-kun.690eaa5471",
-      daemonCommit: FULL,
-      server: "",
-    });
-    expect(got.aligned).toBe(false);
-    expect(got.sides[2]).toMatchObject({ state: "no_commit", reported: "" });
+    const got = sideVersions({ daemonVersion: "0.6.7-kun.690eaa5471", daemonCommit: "unknown" });
+    expect(got[1]).toEqual({ side: "daemon", reported: "unknown", commit: "690eaa5471" });
   });
 });

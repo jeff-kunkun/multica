@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { createStore, type StoreApi } from "zustand/vanilla";
 import {
   mergeViewStatePersisted,
+  viewStorePersistOptions,
   viewStoreSlice,
   type IssueViewState,
 } from "./view-store";
@@ -23,6 +24,38 @@ describe("board sub-issue accordion state", () => {
     store.getState().toggleBoardParentExpanded("a");
 
     expect(store.getState().boardExpandedParents).toEqual(["b"]);
+  });
+});
+
+describe("board parent groups state", () => {
+  let store: StoreApi<IssueViewState>;
+  beforeEach(() => {
+    store = createStore<IssueViewState>()((set) => viewStoreSlice(set));
+  });
+
+  it("folds one group without touching the others", () => {
+    store.getState().toggleBoardParentGroupCollapsed("status:todo|p1");
+    store.getState().toggleBoardParentGroupCollapsed("status:done|p1");
+    store.getState().toggleBoardParentGroupCollapsed("status:todo|p1");
+
+    expect(store.getState().boardCollapsedParentGroups).toEqual(["status:done|p1"]);
+  });
+
+  it("starts on every parent and remembers the selected tab", () => {
+    expect(store.getState().boardParentFilter).toBeNull();
+
+    store.getState().setBoardParentFilter("p1");
+    expect(store.getState().boardParentFilter).toBe("p1");
+    store.getState().setBoardParentFilter(null);
+    expect(store.getState().boardParentFilter).toBeNull();
+  });
+
+  it("persists folded groups but never the selected tab", () => {
+    const state = { ...store.getState(), boardCollapsedParentGroups: ["k"], boardParentFilter: "p1" };
+    const persisted = viewStorePersistOptions("test").partialize(state);
+
+    expect(persisted).toMatchObject({ boardCollapsedParentGroups: ["k"] });
+    expect(persisted).not.toHaveProperty("boardParentFilter");
   });
 });
 
@@ -64,5 +97,21 @@ describe("persisted merge", () => {
       mergeViewStatePersisted({ boardExpandedParents: "nope" }, current)
         .boardExpandedParents,
     ).toEqual(["keep-me"]);
+  });
+
+  it("restores folded parent groups, drops a malformed list, and never a tab", () => {
+    const current = { ...defaults(), boardCollapsedParentGroups: ["keep-me"] };
+
+    expect(
+      mergeViewStatePersisted({ boardCollapsedParentGroups: ["a|p", 3] }, current)
+        .boardCollapsedParentGroups,
+    ).toEqual(["a|p"]);
+    expect(
+      mergeViewStatePersisted({ boardCollapsedParentGroups: "nope" }, current)
+        .boardCollapsedParentGroups,
+    ).toEqual(["keep-me"]);
+    expect(
+      mergeViewStatePersisted({ boardParentFilter: "p1" }, current).boardParentFilter,
+    ).toBeNull();
   });
 });

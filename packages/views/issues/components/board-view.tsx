@@ -31,8 +31,20 @@ import { propertyListOptions, useSetIssueProperty, useUnsetIssueProperty } from 
 import { useWorkspaceId } from "@multica/core/hooks";
 import type { IssueGrouping } from "@multica/core/issues/stores/view-store";
 import { useActorName } from "@multica/core/workspace/hooks";
+import { useFeatureEnabled } from "@multica/core/config";
+import { OFFICE_PARENT_GROUPS_FLAG } from "@multica/core/feature-flags";
 import { BoardColumn, BOARD_CARD_WIDTH, type BoardColumnGroup } from "./board-column";
 import { BoardWorkflowContext, type BoardWorkflowContextValue } from "./board-workflow-context";
+import {
+  BoardParentGroupsContext,
+  BoardParentTabs,
+  type BoardParentGroupsValue,
+} from "./board-parent-groups";
+import {
+  assignParentGroupColors,
+  groupColumnsByParent,
+  parentGroupKey,
+} from "../utils/parent-groups";
 import {
   resolveProjectWorkflow,
   stepHandsOff,
@@ -531,6 +543,17 @@ function BoardViewImpl({
     }),
     [activeHandlerLabel, activeIssue?.status, activeProject, activeWorkflow, scopeProject, t, workflows],
   );
+  // Parent groups (DENE-2760) reorder the drag mirror itself, not just the
+  // drawing: a drop computes its position from the neighbours in this order,
+  // so it has to be the order the user sees.
+  const parentGroupsOn = useFeatureEnabled(OFFICE_PARENT_GROUPS_FLAG);
+  const layoutColumns = useCallback(() => {
+    const built = buildColumns(groupedIssues, groups, grouping, groupingOptionIds);
+    if (!parentGroupsOn) return built;
+    const parentOf = new Map(groupedIssues.map((issue) => [issue.id, issue.parent_issue_id]));
+    return groupColumnsByParent(built, (id) => parentOf.get(id));
+  }, [groupedIssues, groups, grouping, groupingOptionIds, parentGroupsOn]);
+
   // Shared drag/settle primitive: owns the local column mirror, the
   // dragging/settling locks, the post-move animation-frame throttle, and the
   // settle callback. Shared with list-view (and swimlane) so the surfaces
@@ -545,13 +568,13 @@ function BoardViewImpl({
     recentlyMovedRef,
     settleVersion,
     beginSettle,
-  } = useDragSettle(() => buildColumns(groupedIssues, groups, grouping, groupingOptionIds));
+  } = useDragSettle(layoutColumns);
 
   useEffect(() => {
     if (!isDraggingRef.current && !isSettlingRef.current) {
-      setColumns(buildColumns(groupedIssues, groups, grouping, groupingOptionIds));
+      setColumns(layoutColumns());
     }
-  }, [groupedIssues, groups, grouping, groupingOptionIds, settleVersion, setColumns, isDraggingRef, isSettlingRef]);
+  }, [layoutColumns, settleVersion, setColumns, isDraggingRef, isSettlingRef]);
 
   // --- Issue map ---
   // Frozen during drag so BoardColumn/DraggableBoardCard props stay
@@ -567,6 +590,82 @@ function BoardViewImpl({
     issueMapRef.current = issueMap;
   }
 
+  // --- Parent groups (DENE-2760) ---
+  // Parents are read off the unfiltered mirror, so a tab never repaints the
+  // other parents and every column agrees on each parent's color.
+  const collapsedParentGroups = useViewStore((s) => s.boardCollapsedParentGroups);
+  const toggleParentGroupCollapsed = useViewStore((s) => s.toggleBoardParentGroupCollapsed);
+  const storedParentFilter = useViewStore((s) => s.boardParentFilter);
+  const setParentFilter = useViewStore((s) => s.setBoardParentFilter);
+  const boardParents = useMemo(() => {
+    if (!parentGroupsOn) return [];
+    const counts = new Map<string, number>();
+    for (const group of groups) {
+      for (const id of columns[group.id] ?? EMPTY_IDS) {
+        const parentId = issueMap.get(id)?.parent_issue_id;
+        if (parentId) counts.set(parentId, (counts.get(parentId) ?? 0) + 1);
+      }
+    }
+    // Newest parent first: UUIDv7 ids sort by creation time.
+    return Array.from(counts, ([id, count]) => ({ id, count })).toSorted((a, b) =>
+      b.id.localeCompare(a.id),
+    );
+  }, [columns, groups, issueMap, parentGroupsOn]);
+  const parentColors = useMemo(
+    () => assignParentGroupColors(boardParents.map((parent) => parent.id)),
+    [boardParents],
+  );
+  // Tabs count and filter only the cards the board holds, so they wait until
+  // every column has its last page: a parent on an unloaded page would be
+  // missing, and its counts would be short. Grouping and colors still apply
+  // to the loaded cards. A column still fetching also waits, but only until the
+  // board has settled once: after that a background refresh keeps the row and
+  // the picked tab in place instead of blinking them off (DENE-2762).
+  const boardLoadState = useMemo(() => {
+    if (groupBranches?.hasMoreGroups) return { complete: false, fetching: false };
+    let complete = true;
+    let fetching = false;
+    for (const group of groups) {
+      const page = isStatusGroup(group)
+        ? statusPagination?.[group.status]
+        : groupPagination?.[group.id];
+      if (!page) continue;
+      if (page.hasMore || page.isLoading || page.isError) complete = false;
+      if (page.isFetching) fetching = true;
+    }
+    return { complete, fetching };
+  }, [groupBranches?.hasMoreGroups, groupPagination, groups, statusPagination]);
+  const boardSettled = boardLoadState.complete && !boardLoadState.fetching;
+  const [boardSettledOnce, setBoardSettledOnce] = useState(false);
+  if (boardSettled && !boardSettledOnce) setBoardSettledOnce(true);
+  const boardFullyLoaded = boardSettled || (boardLoadState.complete && boardSettledOnce);
+  // A tab whose parent has left the board reads as 「全部」.
+  const parentFilter =
+    boardFullyLoaded &&
+    storedParentFilter &&
+    boardParents.some((parent) => parent.id === storedParentFilter)
+      ? storedParentFilter
+      : null;
+  const parentGroupsValue = useMemo<BoardParentGroupsValue | null>(() => {
+    if (!parentGroupsOn) return null;
+    const collapsed = new Set(collapsedParentGroups);
+    return {
+      colorOf: (parentId) => parentColors.get(parentId),
+      isCollapsed: (columnId, parentId) => collapsed.has(parentGroupKey(columnId, parentId)),
+      toggle: (columnId, parentId) => toggleParentGroupCollapsed(parentGroupKey(columnId, parentId)),
+    };
+  }, [collapsedParentGroups, parentColors, parentGroupsOn, toggleParentGroupCollapsed]);
+  // What each column draws: the mirror, narrowed to the selected parent.
+  const displayColumns = useMemo(() => {
+    if (!parentFilter) return columns;
+    return Object.fromEntries(
+      Object.entries(columns).map(([columnId, ids]) => [
+        columnId,
+        ids.filter((id) => issueMap.get(id)?.parent_issue_id === parentFilter),
+      ]),
+    );
+  }, [columns, issueMap, parentFilter]);
+
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 5 },
@@ -576,8 +675,18 @@ function BoardViewImpl({
   // Side peek steps through a column with J / K, in the order shown here.
   const peek = useIssuePeekActions();
   useEffect(() => {
-    peek?.publishColumns(groups.map((group) => columns[group.id] ?? EMPTY_IDS));
-  }, [peek, groups, columns]);
+    peek?.publishColumns(
+      groups.map((group) => {
+        const ids = displayColumns[group.id] ?? EMPTY_IDS;
+        if (!parentGroupsValue) return ids;
+        // A folded group's cards are not on screen, so J / K skips them.
+        return ids.filter((id) => {
+          const parentId = issueMap.get(id)?.parent_issue_id;
+          return !parentId || !parentGroupsValue.isCollapsed(group.id, parentId);
+        });
+      }),
+    );
+  }, [peek, groups, displayColumns, issueMap, parentGroupsValue]);
   useEffect(() => () => peek?.publishColumns(null), [peek]);
 
   // #6700: drag empty board background with the left button to pan horizontally
@@ -642,8 +751,7 @@ function BoardViewImpl({
       isDraggingRef.current = false;
       setActiveIssue(null);
 
-      const resetColumns = () =>
-        setColumns(buildColumns(groupedIssues, groups, grouping, groupingOptionIds));
+      const resetColumns = () => setColumns(layoutColumns());
 
       if (!over) {
         resetColumns();
@@ -812,7 +920,7 @@ function BoardViewImpl({
       );
       applyPropertyGroupValue(finalGroup, activeId);
     },
-    [applyPropertyGroupValue, beginSettle, catalog, columnsRef, groupIds, groupMap, groupedIssues, grouping, groupingOptionIds, groups, isDraggingRef, labelOf, onMoveIssue, pinnedIssueIds, setColumns, sortBy, t, workflowOfIssue],
+    [applyPropertyGroupValue, beginSettle, catalog, columnsRef, groupIds, groupMap, isDraggingRef, labelOf, layoutColumns, onMoveIssue, pinnedIssueIds, setColumns, sortBy, t, workflowOfIssue],
   );
 
   // An aborted drag (pointercancel, window resize, tab hide, Escape) fires
@@ -822,11 +930,24 @@ function BoardViewImpl({
   const handleDragCancel = useCallback(() => {
     isDraggingRef.current = false;
     setActiveIssue(null);
-    setColumns(buildColumns(groupedIssues, groups, grouping, groupingOptionIds));
-  }, [groupedIssues, groups, grouping, groupingOptionIds, setColumns, isDraggingRef]);
+    setColumns(layoutColumns());
+  }, [layoutColumns, setColumns, isDraggingRef]);
+
+  // A narrowed column counts what it shows, not the whole status.
+  const filteredCount = (groupId: string) =>
+    parentFilter ? (displayColumns[groupId] ?? EMPTY_IDS).length : undefined;
 
   return (
     <BoardWorkflowContext.Provider value={boardWorkflow}>
+    <BoardParentGroupsContext.Provider value={parentGroupsValue}>
+    {parentGroupsValue && boardFullyLoaded && (
+      <BoardParentTabs
+        parents={boardParents}
+        selected={parentFilter}
+        colorOf={parentGroupsValue.colorOf}
+        onSelect={setParentFilter}
+      />
+    )}
     <DndContext
       sensors={sensors}
       collisionDetection={collisionDetection}
@@ -871,7 +992,7 @@ function BoardViewImpl({
               <ServerPaginatedBoardColumn
                 key={group.id}
                 group={group}
-                issueIds={columns[group.id] ?? EMPTY_IDS}
+                issueIds={displayColumns[group.id] ?? EMPTY_IDS}
                 issueMap={issueMapRef.current}
                 childProgressMap={childProgressMap}
                 projectMap={projectMap}
@@ -879,13 +1000,14 @@ function BoardViewImpl({
                 projectId={projectId}
                 onCreateIssue={onCreateIssue}
                 sortLabel={sortLabel}
+                countOverride={filteredCount(group.id)}
               />
             ) : (
               groupPagination?.[group.id] ? (
                 <ServerPaginatedBoardColumn
                   key={group.id}
                   group={group}
-                  issueIds={columns[group.id] ?? EMPTY_IDS}
+                  issueIds={displayColumns[group.id] ?? EMPTY_IDS}
                   issueMap={issueMapRef.current}
                   childProgressMap={childProgressMap}
                   projectMap={projectMap}
@@ -893,18 +1015,19 @@ function BoardViewImpl({
                   projectId={projectId}
                   onCreateIssue={onCreateIssue}
                   sortLabel={sortLabel}
+                  countOverride={filteredCount(group.id)}
                 />
               ) : (
                 <BoardColumn
                   key={group.id}
                   group={group}
-                  issueIds={columns[group.id] ?? EMPTY_IDS}
+                  issueIds={displayColumns[group.id] ?? EMPTY_IDS}
                   issueMap={issueMapRef.current}
                   childProgressMap={childProgressMap}
                   projectMap={projectMap}
                   projectId={projectId}
                   onCreateIssue={onCreateIssue}
-                  totalCount={group.totalCount}
+                  totalCount={filteredCount(group.id) ?? group.totalCount}
                   sortLabel={sortLabel}
                 />
               )
@@ -932,11 +1055,17 @@ function BoardViewImpl({
                   ? projectMap?.get(activeIssue.project_id)
                   : undefined
               }
+              groupColor={
+                activeIssue.parent_issue_id
+                  ? parentGroupsValue?.colorOf(activeIssue.parent_issue_id)
+                  : undefined
+              }
             />
           </div>
         ) : null}
       </DragOverlay>
     </DndContext>
+    </BoardParentGroupsContext.Provider>
     <WorkflowHandoffConfirmDialog
       issue={pendingHandoff?.issue ?? null}
       toStatus={pendingHandoff?.status ?? ""}
@@ -971,6 +1100,7 @@ const ServerPaginatedBoardColumn = memo(function ServerPaginatedBoardColumn({
   projectId,
   onCreateIssue,
   sortLabel,
+  countOverride,
 }: {
   group: BoardColumnGroup;
   issueIds: string[];
@@ -981,6 +1111,8 @@ const ServerPaginatedBoardColumn = memo(function ServerPaginatedBoardColumn({
   projectId?: string;
   onCreateIssue?: (defaults: IssueCreateDefaults) => void;
   sortLabel?: string | null;
+  /** The header count while a parent tab narrows the column. */
+  countOverride?: number;
 }) {
   const footer = page ? (
     <ListLoadMoreFooter
@@ -999,7 +1131,7 @@ const ServerPaginatedBoardColumn = memo(function ServerPaginatedBoardColumn({
       issueMap={issueMap}
       childProgressMap={childProgressMap}
       projectMap={projectMap}
-      totalCount={page?.total ?? group.totalCount}
+      totalCount={countOverride ?? page?.total ?? group.totalCount}
       projectId={projectId}
       onCreateIssue={onCreateIssue}
       sortLabel={sortLabel}

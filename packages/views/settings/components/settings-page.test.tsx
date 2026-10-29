@@ -5,6 +5,7 @@ import { SidebarProvider, useSidebar } from "@multica/ui/components/ui/sidebar";
 import { configStore } from "@multica/core/config";
 import {
   BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG,
+  OFFICE_HIDE_WAKEUPS_FLAG,
   PLUGINS_V1_FLAG,
   PROJECT_WORKFLOWS_V1_FLAG,
 } from "@multica/core/feature-flags";
@@ -33,6 +34,7 @@ vi.mock("./keyboard-shortcuts-tab", stub("KeyboardShortcutsTab"));
 vi.mock("./plugins-tab", stub("PluginsTab"));
 vi.mock("./billing-tab", stub("BillingTab"));
 vi.mock("./config-transfer-tab", stub("ConfigTransferTab"));
+vi.mock("./wakeups-tab", stub("WakeupsTab"));
 
 const shell = vi.hoisted(() => ({
   appsAvailable: false,
@@ -109,6 +111,7 @@ beforeEach(() => {
   shell.appsAvailable = false;
   shell.role = "owner";
   configStore.getState().setFeatureFlags({});
+  configStore.getState().setLocalFeatureFlags({});
   replace.mockClear();
   push.mockClear();
 });
@@ -427,5 +430,17 @@ describe("SettingsPage search", () => {
       { target: { value: "plugins" } },
     );
     expect(screen.getByText("No matching settings")).toBeInTheDocument();
+  });
+});
+
+describe("SettingsPage office wakeups flag", () => {
+  it("drops Wakeups from the list but still opens it from a link", () => {
+    configStore.getState().setLocalFeatureFlags({ [OFFICE_HIDE_WAKEUPS_FLAG]: true });
+    navigationState.search = "tab=wakeups";
+
+    renderWithI18n(<SettingsPage />);
+
+    expect(screen.queryByRole("link", { name: "Wakeups" })).not.toBeInTheDocument();
+    expect(screen.getByText("WakeupsTab")).toBeInTheDocument();
   });
 });

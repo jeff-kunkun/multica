@@ -107,13 +107,7 @@
     "save_error": "无法保存默认值。",
     "customized_other": "{{count}} 个进行中的任务使用了自己的设置，不跟随此默认值。",
     "admin_only": "只有所有者和管理员可以修改默认值。",
-    "load_error": "无法加载唤醒默认值。",
-    "session_title": "会话上下文",
-    "session_description": "跟进默认续接上次会话；CLI 自己压缩后仍超过上限，就开新会话并附简短交接。",
-    "session_max_context": "上下文上限（token）",
-    "session_max_context_hint": "0 表示关闭（默认）。目前 Claude 和 Codex 会上报大小。",
-    "session_invalid": "请输入 0 到 2000000 的整数。",
-    "session_save_error": "无法保存上下文上限。"
+    "load_error": "无法加载唤醒默认值。"
   },
   "quick_actions": {
     "title": "快捷操作",
@@ -1434,12 +1428,8 @@
       "title": "更新",
       "current_version": "当前版本",
       "version_alignment": {
-        "title": "版本对齐",
-        "description": "客户端、后台程序、服务端应是同一个提交；任一对不上或没有提交号就标红。",
-        "aligned": "一致",
-        "misaligned": "对不上",
-        "mismatch": "对不上",
-        "no_commit": "没有提交号",
+        "title": "三边版本",
+        "description": "客户端、后台程序、服务端各自在跑的版本。",
         "not_reported": "没有上报",
         "daemon_not_running": "没在运行",
         "server_loading": "正在查询…",

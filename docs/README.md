@@ -21,6 +21,7 @@
 - [Local MCP adapter and client configuration](kun/fast-access-mcp.md)
 - [Office issue watchdog: configuration, heartbeat, stop, and rollback](kun/office-issue-watchdog.md)
 - [Project folder: one folder per project, shared-folder warning, rollback](kun/office-project-folder.md)
+- [Board parent groups: sub-issues together under a colored header, parent tabs, rollback](kun/office-parent-groups.md)
 
 - [CLI project names, temp files, key status and compact reads](kun/cli-convenience.md)
 

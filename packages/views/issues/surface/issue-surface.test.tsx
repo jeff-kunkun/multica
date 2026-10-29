@@ -13,6 +13,8 @@ import {
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
+import { configStore } from "@multica/core/config";
+import { OFFICE_HIDE_WAKEUPS_FLAG } from "@multica/core/feature-flags";
 import {
   getIssueSurfaceViewStore,
   pruneIssueSurfaceViewStates,
@@ -160,8 +162,10 @@ function projectSurface(projectId: string) {
 
 describe("IssueSurface — scope switch loading semantics", () => {
   let qc: QueryClient;
+  let listIssueWakeupSummaries: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
+    listIssueWakeupSummaries = vi.fn(async () => []);
     mockWsId.current = "ws-1";
     qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     // p1 answers immediately with one issue; p2 stays in flight forever so
@@ -183,6 +187,7 @@ describe("IssueSurface — scope switch loading semantics", () => {
       listProjects: vi.fn(() => never()),
       getAgentTaskSnapshot: vi.fn(() => never<AgentTask[]>()),
       getChildIssueProgress: vi.fn(() => never()),
+      listIssueWakeupSummaries,
     } as unknown as ApiClient);
     pruneIssueSurfaceViewStates([]);
   });
@@ -192,6 +197,24 @@ describe("IssueSurface — scope switch loading semantics", () => {
     qc.clear();
     pruneIssueSurfaceViewStates([]);
     vi.restoreAllMocks();
+  });
+
+  it("polls the cards' wakeup summaries, except in an office build that hides wakeups", async () => {
+    render(<QueryClientProvider client={qc}>{projectSurface("p1")}</QueryClientProvider>);
+    await screen.findByText("P1 issue");
+    expect(listIssueWakeupSummaries).toHaveBeenCalled();
+
+    cleanup();
+    qc.clear();
+    listIssueWakeupSummaries.mockClear();
+    configStore.getState().setLocalFeatureFlags({ [OFFICE_HIDE_WAKEUPS_FLAG]: true });
+    try {
+      render(<QueryClientProvider client={qc}>{projectSurface("p1")}</QueryClientProvider>);
+      await screen.findByText("P1 issue");
+      expect(listIssueWakeupSummaries).not.toHaveBeenCalled();
+    } finally {
+      configStore.getState().setLocalFeatureFlags({});
+    }
   });
 
   it("renders an exact-status transient list without reading or changing the active saved view", async () => {

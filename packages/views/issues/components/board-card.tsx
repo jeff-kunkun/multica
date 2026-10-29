@@ -67,6 +67,7 @@ export const BoardCardContent = memo(function BoardCardContent({
   project,
   expanded = false,
   onToggleExpanded,
+  groupColor,
 }: {
   issue: Issue;
   editable?: boolean;
@@ -76,6 +77,10 @@ export const BoardCardContent = memo(function BoardCardContent({
    *  the drag overlay and the hover card render a static copy. (DENE-444) */
   expanded?: boolean;
   onToggleExpanded?: () => void;
+  /** Set when the card sits in its parent's board group: the card wears the
+   *  parent's color on its left edge, and the group header names the parent
+   *  in place of the card's own parent chip. (DENE-2760) */
+  groupColor?: string;
 }) {
   const { t } = useT("issues");
   const locale = useLocale();
@@ -210,7 +215,15 @@ export const BoardCardContent = memo(function BoardCardContent({
   const showRightMeta = !!showStartDate || !!showDueDate || !!showChildProgress || showUpdatedHint;
 
   return (
-    <div className="rounded-lg border-[0.5px] border-surface-border bg-surface py-3 px-2.5 shadow-[var(--surface-shadow)] transition-colors group-hover/card:border-foreground/15 group-hover/card:bg-surface-hover group-data-[popup-open]/card:border-foreground/15 group-data-[popup-open]/card:bg-surface-hover group-data-[peeked]/card:ring-2 group-data-[peeked]/card:ring-brand/50">
+    <div className={`${groupColor ? "relative " : ""}rounded-lg border-[0.5px] border-surface-border bg-surface py-3 px-2.5 shadow-[var(--surface-shadow)] transition-colors group-hover/card:border-foreground/15 group-hover/card:bg-surface-hover group-data-[popup-open]/card:border-foreground/15 group-data-[popup-open]/card:bg-surface-hover group-data-[peeked]/card:ring-2 group-data-[peeked]/card:ring-brand/50`}>
+      {groupColor && (
+        <span
+          aria-hidden
+          data-testid="board-card-group-bar"
+          className="pointer-events-none absolute inset-y-0 left-0 w-[3px] rounded-l-lg"
+          style={{ backgroundColor: groupColor }}
+        />
+      )}
       {/* Row 1: priority + identifier (left), agent activity + assignee (right) */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 min-w-0">
@@ -224,8 +237,10 @@ export const BoardCardContent = memo(function BoardCardContent({
       {/* Row 1b: parent ownership. Sub-issues and top-level issues share a
           column whenever "Show sub-issues" is on, so a child says what it
           belongs to before it says what it is. Renders nothing on a parent
-          card. (DENE-480) */}
-      <ParentIssueBadge parentIssueId={issue.parent_issue_id} className="mt-1" />
+          card, or inside a parent group, whose header names it. (DENE-480) */}
+      {!groupColor && (
+        <ParentIssueBadge parentIssueId={issue.parent_issue_id} className="mt-1" />
+      )}
 
       {/* Row 2: Title */}
       <p className="mt-1 text-body font-medium leading-snug line-clamp-2">
@@ -388,11 +403,13 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({
   childProgress,
   project,
   disableSorting,
+  groupColor,
 }: {
   issue: Issue;
   childProgress?: ChildProgress;
   project?: Project;
   disableSorting?: boolean;
+  groupColor?: string;
 }) {
   const p = useWorkspacePaths();
   const expanded = useViewStore((s) => s.boardExpandedParents.includes(issue.id));
@@ -463,6 +480,7 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({
             project={project}
             expanded={expanded}
             onToggleExpanded={onToggleExpanded}
+            groupColor={groupColor}
           />
         </AppLink>
       </div>

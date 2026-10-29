@@ -402,7 +402,13 @@
     "empty_grouping": "一致するタスクがありません",
     "no_value": "値なし",
     "ordered_by": "{{field}} 順に並べたボード",
-    "manual_reorder_hint": "列内の順序を変更するには、並び順を「手動」に切り替えてください。"
+    "manual_reorder_hint": "列内の順序を変更するには、並び順を「手動」に切り替えてください。",
+    "parent_group": {
+      "all": "すべて",
+      "tabs_label": "親タスクで絞り込む",
+      "unknown_parent": "親タスク",
+      "count_other": "· {{count}} 件"
+    }
   },
   "peek": {
     "panel_label": "タスクのプレビュー",

@@ -1876,8 +1876,8 @@ func TestPerTurnContextBlocksCarryMovedBriefSections(t *testing.T) {
 	}
 }
 
-// DENE-2756: a run whose old session the server set aside is told why and
-// handed the old session's last report, in place of the continuity notice.
+// DENE-1331: a run whose cold, thick session the server set aside is told why
+// and handed the old session's last report, in place of the continuity notice.
 func TestPerTurnContextBlocksCarrySessionHandoff(t *testing.T) {
 	t.Parallel()
 
@@ -1886,12 +1886,12 @@ func TestPerTurnContextBlocksCarrySessionHandoff(t *testing.T) {
 		TriggerCommentID:              "comment-1",
 		TriggerCommentContent:         "one more pass",
 		PriorSessionResumeUnavailable: true,
-		SessionHandoff:                &SessionHandoff{Reason: "context_limit", ContextTokens: 184_600, LastOutput: "Opened PR #7.\nTests pass."},
+		SessionHandoff:                &SessionHandoff{Reason: "cold", LastOutput: "Opened PR #7.\nTests pass."},
 	}
-	prompt := BuildPrompt(task, "codex")
+	prompt := BuildPrompt(task, "claude")
 	for _, want := range []string{
 		"## Session Handoff",
-		"was still about 185k tokens of context after the CLI's own compaction",
+		"had gone cold with a large context",
 		"> Opened PR #7.\n> Tests pass.\n",
 	} {
 		if !strings.Contains(prompt, want) {
@@ -1902,9 +1902,9 @@ func TestPerTurnContextBlocksCarrySessionHandoff(t *testing.T) {
 		t.Errorf("handoff run also got the continuity notice\n---\n%s", prompt)
 	}
 
-	cold := BuildPrompt(Task{IssueID: "issue-1", SessionHandoff: &SessionHandoff{Reason: "cold", ContextTokens: 120_000}}, "claude")
-	if !strings.Contains(cold, "had gone cold with a large context") || strings.Contains(cold, "last reported") {
-		t.Errorf("cold handoff without a report rendered wrong\n---\n%s", cold)
+	bare := BuildPrompt(Task{IssueID: "issue-1", SessionHandoff: &SessionHandoff{Reason: "cold"}}, "claude")
+	if !strings.Contains(bare, "had gone cold with a large context") || strings.Contains(bare, "last reported") {
+		t.Errorf("cold handoff without a report rendered wrong\n---\n%s", bare)
 	}
 }
 

@@ -10,6 +10,8 @@ import {
   HoverCardContent,
 } from "@multica/ui/components/ui/hover-card";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useFeatureEnabled } from "@multica/core/config";
+import { OFFICE_HIDE_WAKEUPS_FLAG } from "@multica/core/feature-flags";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import type { AgentTask, IssueWakeupSummaryRow, PausedWakeup } from "@multica/core/types";
 import { pausedWakeupsOptions, workspaceWakeupSummariesOptions } from "@multica/core/issues/wakeups";
@@ -22,6 +24,7 @@ import { useT } from "../../i18n";
 import { useWakeupText } from "./wakeup-presentation";
 
 const EMPTY_GROUPS: IssueTaskGroups = { running: [], queued: [] };
+const EMPTY_WAKEUPS: IssueWakeupSummaryRow[] = [];
 
 // Dwell threshold before the activity card opens (MUL-5189).
 //
@@ -100,23 +103,32 @@ export const IssueAgentActivityIndicator = memo(
     const wsId = useWorkspaceId();
     const text = useWakeupText();
     const [open, setOpen] = useState(false);
+    // DENE-2761: office builds call people through the manager doorbell, so
+    // the card shows no wakeup bell and does not fetch the rules. A disabled
+    // query still returns whatever another view cached, so the rows are also
+    // dropped here, not only left unfetched.
+    const wakeupsShown = !useFeatureEnabled(OFFICE_HIDE_WAKEUPS_FLAG, false);
     const selectWakeups = useCallback(
       (rows: IssueWakeupSummaryRow[]) =>
         rows.filter((row) => row.issue_id === issueId),
       [issueId],
     );
-    const { data: wakeups = [] } = useQuery({
+    const { data: cachedWakeups = EMPTY_WAKEUPS } = useQuery({
       ...workspaceWakeupSummariesOptions(wsId),
+      enabled: !!wsId && wakeupsShown,
       select: selectWakeups,
     });
+    const wakeups = wakeupsShown ? cachedWakeups : EMPTY_WAKEUPS;
     const selectPaused = useCallback(
       (rows: PausedWakeup[]) => rows.some((row) => row.issue_id === issueId),
       [issueId],
     );
-    const { data: paused = false } = useQuery({
+    const { data: cachedPaused = false } = useQuery({
       ...pausedWakeupsOptions(wsId),
+      enabled: !!wsId && wakeupsShown,
       select: selectPaused,
     });
+    const paused = wakeupsShown && cachedPaused;
     const select = useCallback(
       (snapshot: AgentTask[]) => selectIssueTasks(snapshot, issueId),
       [issueId],
@@ -144,7 +156,7 @@ export const IssueAgentActivityIndicator = memo(
     const wakeupCount = wakeups[0]?.active_count ?? 0;
     const hasTasks = agentIds.length > 0;
     const hoverTasks = [...groups.running, ...groups.queued];
-    const wakeupTriggered = hoverTasks.some((task) => !!task.wakeup_id);
+    const wakeupTriggered = wakeupsShown && hoverTasks.some((task) => !!task.wakeup_id);
     if (!hasTasks && !wakeupCount && !paused) return null;
     const isRunning = opacity === "full";
     // One sentence of what the issue waits for; a paused rule speaks up only

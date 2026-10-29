@@ -198,7 +198,7 @@ type Task struct {
 	PriorSessionID                string               `json:"prior_session_id,omitempty"`                 // Claude session ID from a previous task on this issue
 	PriorWorkDir                  string               `json:"prior_work_dir,omitempty"`                   // work_dir from a previous task on this issue
 	PriorSessionResumeUnavailable bool                 `json:"prior_session_resume_unavailable,omitempty"` // MUL-5305: server signals a more recent Codex session was withheld (rollout missing) and PriorSessionID (if any) is an older fallback; the run must disclose the continuity gap even if that older session resumes cleanly. Absent/false on old servers.
-	SessionHandoff                *SessionHandoff      `json:"session_handoff,omitempty"`                  // DENE-2756: the server set the agent's last session on this issue aside; this run starts a new session in PriorWorkDir. Mirror type: internal/handler/session_gate.go. Absent on old servers.
+	SessionHandoff                *SessionHandoff      `json:"session_handoff,omitempty"`                  // DENE-1331: the server set the agent's last session on this issue aside (cold and thick); this run starts a new session in PriorWorkDir. Mirror type: internal/handler/session_gate.go. Absent on old servers.
 	ContinueInterruptedSession    bool                 `json:"continue_interrupted_session,omitempty"`     // DENE-727: auto-retry inherited a resume-safe parent session; daemon sends a continue prompt instead of re-injecting the original task. omitempty so old daemons ignore it and keep today's full prompt while still resuming.
 	// SessionRestartReason is filled by the daemon when a continue-retry
 	// cannot actually resume and has to open a new CLI session. It is not
@@ -326,9 +326,8 @@ type SubIssueRef struct {
 
 // SessionHandoff mirrors handler.SessionHandoff.
 type SessionHandoff struct {
-	Reason        string `json:"reason"` // "context_limit" or "cold"
-	ContextTokens int64  `json:"context_tokens,omitempty"`
-	LastOutput    string `json:"last_output,omitempty"`
+	Reason     string `json:"reason"` // "cold"
+	LastOutput string `json:"last_output,omitempty"`
 }
 
 type IssueContextComment struct {

@@ -6,6 +6,7 @@ import type { Issue } from "@multica/core/types";
 /** The slice of a parent issue a sub-issue card needs to name its owner. */
 export interface ParentIssueRef {
   id: string;
+  number: number;
   identifier: string;
   title: string;
 }
@@ -32,6 +33,7 @@ export function ParentIssueLookupProvider({
     for (const issue of issues) {
       map.set(issue.id, {
         id: issue.id,
+        number: issue.number,
         identifier: issue.identifier,
         title: issue.title,
       });

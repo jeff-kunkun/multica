@@ -319,7 +319,7 @@ func NewAPIClient(baseURL, workspaceID, token string) *APIClient {
 		BaseURL:     strings.TrimRight(baseURL, "/"),
 		WorkspaceID: workspaceID,
 		Token:       token,
-		HTTPClient:  &http.Client{Timeout: httpTimeout()},
+		HTTPClient:  &http.Client{Timeout: httpTimeout(), Transport: newDialRetryTransport(http.DefaultTransport)},
 	}
 }
 

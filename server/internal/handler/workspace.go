@@ -524,7 +524,6 @@ func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {
 		merged = keepStoredBotWakeChainLimit(merged, stored)
 		// The magpie mode switch is written only through its own endpoint.
 		merged = keepStoredMagpie(merged, stored)
-		merged = keepStoredSessionResume(merged, stored)
 		s, _ := json.Marshal(merged)
 		params.Settings = s
 	}

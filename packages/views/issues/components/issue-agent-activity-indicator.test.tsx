@@ -1,5 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { configStore } from "@multica/core/config";
+import { OFFICE_HIDE_WAKEUPS_FLAG } from "@multica/core/feature-flags";
 import en from "../../locales/en/issues.json";
 import type { AgentTask } from "@multica/core/types";
 
@@ -85,8 +87,10 @@ vi.mock("@tanstack/react-query", async () => {
     ...actual,
     useQuery: (opts: {
       queryKey?: readonly unknown[];
+      enabled?: boolean;
       select?: (data: unknown) => unknown;
     }) => {
+      if (opts.enabled === false) return { data: undefined };
       if (opts.queryKey?.[1] === "task-snapshot") {
         return {
           data: opts.select
@@ -135,6 +139,7 @@ beforeEach(() => {
   mockState.snapshot = [makeTask()];
   mockState.summaries = [];
 });
+afterEach(() => configStore.getState().setLocalFeatureFlags({}));
 
 describe("IssueAgentActivityIndicator", () => {
   it("wraps the badge in a hover card by default", () => {
@@ -231,4 +236,20 @@ it("shows deferred wakeup retries as queued", () => {
   mockState.snapshot = [makeTask({ status: "deferred", wakeup_id: "wake-1" })];
   render(<IssueAgentActivityIndicator issueId="issue-1" hoverCard={false} />);
   expect(screen.getByText("Queued")).toBeInTheDocument();
+});
+it("drops every wakeup cue in an office build that hides wakeups", () => {
+  configStore.getState().setLocalFeatureFlags({ [OFFICE_HIDE_WAKEUPS_FLAG]: true });
+  mockState.snapshot = [makeTask({ wakeup_id: "wake-2" })];
+  mockState.summaries = [eventSummary];
+  mockState.paused = [{ issue_id: "issue-1", id: "wake-9", agent_id: "agent-1", paused_reason: "loop" }];
+  render(<IssueAgentActivityIndicator issueId="issue-1" hoverCard={false} />);
+  expect(screen.getByText("Working", { ignore: '[aria-hidden="true"] *' })).toBeInTheDocument();
+  expect(screen.queryByLabelText("Triggered by wakeup")).toBeNull();
+  expect(screen.queryByText("+2")).toBeNull();
+
+  cleanup();
+  mockState.snapshot = [];
+  const { container } = render(<IssueAgentActivityIndicator issueId="issue-1" hoverCard={false} />);
+  // Waiting rules and paused alerts no longer give an idle issue a badge.
+  expect(container.firstChild).toBeNull();
 });
