@@ -15,7 +15,9 @@ With `office_hide_wakeups` in `VITE_MULTICA_FEATURE_FLAGS` (desktop) or
 - Issue cards and list rows drop every wakeup cue: the bell on a run a wakeup
   started, the `+N` upcoming count, the "waiting for …" label and the "wakeup
   paused" alert. The card no longer fetches the wakeup summaries or paused
-  rules. Running and queued runs still show as before.
+  rules, and ignores them when another view already cached them; the issue
+  list and board stop their 10-second summary poll. Running and queued runs
+  still show as before.
 - The run rows in the activity hover card drop the wakeup bell.
 
 The issue page's own Wakeups section and `multica issue wakeup …` stay.

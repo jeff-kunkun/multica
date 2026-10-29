@@ -11,6 +11,8 @@ import { cn } from "@multica/ui/lib/utils";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useQuery } from "@tanstack/react-query";
 import { workspaceWakeupSummariesOptions } from "@multica/core/issues/wakeups";
+import { useFeatureEnabled } from "@multica/core/config";
+import { OFFICE_HIDE_WAKEUPS_FLAG } from "@multica/core/feature-flags";
 import {
   useViewStore,
   ViewStoreProvider,
@@ -203,7 +205,13 @@ function IssueSurfaceContent({
 }: Omit<IssueSurfaceComponentProps, "surfaceKey">) {
   const workspaceId = useWorkspaceId();
   // One polling owner for the whole surface; individual cards only select cache data.
-  useQuery({ ...workspaceWakeupSummariesOptions(workspaceId), refetchInterval: 10_000 });
+  // Office builds hide the cards' wakeup cues (DENE-2761), so nothing polls there.
+  const wakeupsHidden = useFeatureEnabled(OFFICE_HIDE_WAKEUPS_FLAG, false);
+  useQuery({
+    ...workspaceWakeupSummariesOptions(workspaceId),
+    enabled: !!workspaceId && !wakeupsHidden,
+    refetchInterval: 10_000,
+  });
   const { t } = useT("projects");
   const { isGuest } = useGuestReadOnly();
   const controller = useIssueSurfaceController({
