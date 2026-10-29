@@ -76,6 +76,9 @@ func TestClassifyRules(t *testing.T) {
 		{"usage limit", "Account exceeded the daily usage limit", ReasonAgentProviderQuotaLimit},
 		{"hit your limit ascii", "you've hit your limit; upgrade to continue", ReasonAgentProviderQuotaLimit},
 		{"hit your limit curly", "you\u2019ve hit your limit", ReasonAgentProviderQuotaLimit},
+		{"session limit ascii", "You've hit your session limit \u00b7 resets 2pm (UTC)", ReasonAgentProviderQuotaLimit},
+		{"session limit curly", "You\u2019ve hit your session limit \u00b7 resets 2pm (UTC)", ReasonAgentProviderQuotaLimit},
+		{"weekly limit", "You've hit your weekly limit \u00b7 resets Nov 3, 9am (UTC)", ReasonAgentProviderQuotaLimit},
 		{"credits", "Your account has 0 credits remaining", ReasonAgentProviderQuotaLimit},
 		// Claude Code names the spent window; these used to land in unknown
 		// and the seat was never relayed (DENE-1159).
