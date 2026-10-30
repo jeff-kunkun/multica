@@ -299,6 +299,7 @@ func TestFastDurableSSEReplayAndScopeReset(t *testing.T) {
 }
 
 func TestFastDurableNewGrantInvalidatesAndPrivateEventsStayHidden(t *testing.T) {
+	readAsAdmin(t, testWorkspaceID)
 	stranger := dbfx.User(t, "journal stranger", "journal-"+randomID()+"@example.test")
 	dbfx.Member(t, testWorkspaceID, stranger, "member")
 	hidden := dbfx.Issue(t, "hidden journal", testutil.Cols{"visibility": "private", "creator_id": stranger})
@@ -428,6 +429,7 @@ func TestFastDurableSlowConsumerCanReplay(t *testing.T) {
 }
 
 func TestFastDurableEmptyFilteredPagesAdvanceFixedUpper(t *testing.T) {
+	readAsAdmin(t, testWorkspaceID)
 	stranger := dbfx.User(t, "filtered stranger", "filtered-"+randomID()+"@example.test")
 	hidden := dbfx.Issue(t, "hidden pages", testutil.Cols{"visibility": "private", "creator_id": stranger})
 	visible := dbfx.Issue(t, "visible after hidden")

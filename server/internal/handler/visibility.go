@@ -183,6 +183,14 @@ func (v visibilityViewer) isOwnedAgent(actorType string, actorID pgtype.UUID) bo
 	return ok
 }
 
+// ownerWidening: the workspace owner sees every issue and project in their
+// own workspace, at any scope. "仅我可见" means "only me" where me is the
+// workspace owner; a private resource the owner cannot see is a lockout, not
+// privacy. This never widens to admins or to human friends (member/guest).
+func (v visibilityViewer) ownerWidening() bool {
+	return !v.bypasses() && v.userID.Valid && v.role == permission.RoleOwner
+}
+
 func (v visibilityViewer) canSee(vis string, rel permission.Relation) bool {
 	if v.bypasses() {
 		return true
@@ -194,10 +202,18 @@ func (v visibilityViewer) canSee(vis string, rel permission.Relation) bool {
 // the decision needs rather than a row type. sqlc gives each list query its
 // own row struct, and every one of them has to answer this question the same
 // way. The issue id is what a direct share (resource_share) names.
+//
+// The workspace owner sees every issue in their workspace, private ones
+// included — the same widening canSeeProject gives projects (DENE-2772). A
+// member's private issue the owner cannot see is work that drops off the
+// owner's board and reminders. Admins and members stay on the matrix.
 func (v visibilityViewer) canSeeIssueFields(
 	issueID pgtype.UUID, visibility, creatorType string, creatorID, projectID pgtype.UUID,
 	assigneeType string, assigneeID pgtype.UUID,
 ) bool {
+	if v.ownerWidening() {
+		return true
+	}
 	rel := v.relation(creatorType, creatorID, projectID)
 	rel.IsCreator = rel.IsCreator || v.isOwnedAgent(creatorType, creatorID)
 	rel.IsAssignee = v.isMe(assigneeType, assigneeID) || v.isOwnedAgent(assigneeType, assigneeID)
@@ -217,19 +233,15 @@ func (v visibilityViewer) canSeeIssue(issue db.Issue) bool {
 // canSeeProject: a project is its own project, so "in project" means the
 // viewer can reach this project.
 //
-// Two project-only widenings on top of the generic matrix (DENE-698 follow-up):
+// Two widenings on top of the generic matrix (DENE-698 follow-up):
 //
-//   - The workspace owner sees every project in their own workspace, at any
-//     scope. "仅我可见" means "only me" where me is the workspace owner; a
-//     private project the owner cannot see is a lockout, not privacy — the very
-//     bug this branch fixes. This never widens to admins or to human friends
-//     (member/guest); they stay bound by the scope tiers below.
+//   - ownerWidening, shared with issues.
 //   - A project created or led by an agent this viewer owns counts as the
 //     viewer's own, exactly as an owned agent's issues do (canSeeIssueFields).
 //     An agent is its human's extension, so putting one in the lead seat must
 //     not hide a private project from the person that agent belongs to.
 func (v visibilityViewer) canSeeProject(p db.Project) bool {
-	if !v.bypasses() && v.role == permission.RoleOwner {
+	if v.ownerWidening() {
 		return true
 	}
 	isCreator := (p.CreatedBy.Valid && v.userID.Valid && p.CreatedBy.Bytes == v.userID.Bytes) ||
@@ -241,21 +253,23 @@ func (v visibilityViewer) canSeeProject(p db.Project) bool {
 	})
 }
 
-// canChangeProjectVisibility applies canSeeProject's two widenings to the
-// write side: a viewer let in by them must also be able to reshare. Without
-// this the owner could see a private project nobody created (or one an owned
-// agent leads) yet every PUT /visibility answered 403.
 // canChangeIssueVisibility is the tier rule SetIssueVisibility enforces; the
-// access read (GET /api/issues/{id}/access) answers with the same call so
-// the share button never promises a save the server would refuse.
+// access read (GET /api/issues/{id}/access) and the share list answer with the
+// same call so the share button never promises a save the server would
+// refuse. The owner widening carries over: an owner let in to a private issue
+// can also reshare it, as with projects.
 func (v visibilityViewer) canChangeIssueVisibility(issue db.Issue) bool {
-	if v.bypasses() {
+	if v.bypasses() || v.ownerWidening() {
 		return true
 	}
 	rel := v.relation(issue.CreatorType, issue.CreatorID, issue.ProjectID)
 	return permission.Allowed(v.role, permission.ActionChangeVisibility, permission.Visibility(issue.Visibility), rel)
 }
 
+// canChangeProjectVisibility applies canSeeProject's two widenings to the
+// write side: a viewer let in by them must also be able to reshare. Without
+// this the owner could see a private project nobody created (or one an owned
+// agent leads) yet every PUT /visibility answered 403.
 func (v visibilityViewer) canChangeProjectVisibility(p db.Project) bool {
 	if v.bypasses() || v.role == permission.RoleOwner {
 		return true
@@ -319,9 +333,10 @@ func (v visibilityViewer) filterProjects(projects []db.Project) []db.Project {
 //	creator OR assignee OR (workspace scope, unless guest)
 //	OR (project scope AND reachable)
 //
-// An unknown tier yields FALSE — fail closed, same as the matrix.
+// An unknown tier yields FALSE — fail closed, same as the matrix. The owner
+// sees everything, as in canSeeIssueFields.
 func (v visibilityViewer) issueVisibilitySQL(alias string, addArg func(any) string) string {
-	if v.bypasses() {
+	if v.bypasses() || v.ownerWidening() {
 		return "TRUE"
 	}
 	if !v.role.Valid() || !v.userID.Valid {
@@ -361,7 +376,7 @@ func (v visibilityViewer) projectVisibilitySQL(alias string, addArg func(any) st
 		return "FALSE"
 	}
 	// Owner sees every project in the workspace — the Go twin's owner branch.
-	if v.role == permission.RoleOwner {
+	if v.ownerWidening() {
 		return "TRUE"
 	}
 	parts := []string{

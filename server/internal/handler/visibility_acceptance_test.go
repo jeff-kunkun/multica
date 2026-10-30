@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/testutil"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // The sharing model's acceptance criteria (DENE-698), exercised through the
@@ -21,6 +22,19 @@ func visibilityTestMember(t *testing.T, name, email string) string {
 	userID := dbfx.User(t, name, email)
 	dbfx.Member(t, testWorkspaceID, userID, "member")
 	return userID
+}
+
+// readAsAdmin demotes the fixture owner (testUserID) to admin in one workspace
+// for the rest of the test. The owner sees every issue in their workspace
+// (DENE-2772), so a test about an issue hidden from its reader needs a reader
+// the sharing scope still binds; admin is the nearest such tier.
+func readAsAdmin(t *testing.T, workspaceID string) {
+	t.Helper()
+	dbfx.Exec(t, `UPDATE member SET role = 'admin' WHERE workspace_id = $1 AND user_id = $2`, workspaceID, testUserID)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`UPDATE member SET role = 'owner' WHERE workspace_id = $1 AND user_id = $2`, workspaceID, testUserID)
+	})
 }
 
 func issueIDsInList(t *testing.T, userID, path string) map[string]string {
@@ -294,6 +308,96 @@ func TestAssigneeSeesAPrivateIssueTheyWereGiven(t *testing.T) {
 	dbfx.QueryRow(t, `SELECT visibility FROM issue WHERE id = $1`, issueID).Scan(&visibility)
 	if visibility != "private" {
 		t.Fatalf("assignment changed the scope to %q; it must stay private", visibility)
+	}
+}
+
+// The workspace owner sees every issue in their workspace, a member's private
+// one included (DENE-2772): detail, list, comments and runs all let them in,
+// and they may reshare it, as with projects. Nobody else is widened — an
+// admin or another member still gets the plain 404, and the creator and
+// assignee keep their own access.
+func TestOwnerSeesAMembersPrivateIssue(t *testing.T) {
+	requireDB(t)
+
+	author := visibilityTestMember(t, "Vis Private Author", "{{EMAIL_6f5vbfbq}}")
+	worker := visibilityTestMember(t, "Vis Private Worker", "{{EMAIL_zfhaqsrh}}")
+	stranger := visibilityTestMember(t, "Vis Private Stranger", "{{EMAIL_pnm0nmo1}}")
+	admin := dbfx.User(t, "Vis Private Admin", "{{EMAIL_bmgg9ruk}}")
+	dbfx.Member(t, testWorkspaceID, admin, "admin")
+
+	issueID := dbfx.Issue(t, "a member's own work", testutil.Cols{
+		"creator_type":  "member",
+		"creator_id":    author,
+		"visibility":    "private",
+		"assignee_type": "member",
+		"assignee_id":   worker,
+	})
+
+	reads := map[string]func(userID string) *testutil.Response{
+		"detail": func(userID string) *testutil.Response {
+			return testutil.Call(t, testHandler.GetIssue,
+				withURLParam(newRequestAs(userID, "GET", "/api/issues/"+issueID, nil), "id", issueID))
+		},
+		"comments": func(userID string) *testutil.Response {
+			return testutil.Call(t, testHandler.ListComments,
+				withURLParam(newRequestAs(userID, "GET", "/api/issues/"+issueID+"/comments", nil), "id", issueID))
+		},
+		"runs": func(userID string) *testutil.Response {
+			return testutil.Call(t, testHandler.ListTasksByIssue,
+				withURLParam(newRequestAs(userID, "GET", "/api/issues/"+issueID+"/task-runs", nil), "id", issueID))
+		},
+	}
+	for _, read := range reads {
+		for _, userID := range []string{testUserID, author, worker} {
+			read(userID).Want(200)
+		}
+		for _, userID := range []string{stranger, admin} {
+			read(userID).Want(404)
+		}
+	}
+
+	listPath := "/api/issues?workspace_id=" + testWorkspaceID
+	for _, userID := range []string{testUserID, author, worker} {
+		if _, ok := issueIDsInList(t, userID, listPath)[issueID]; !ok {
+			t.Fatalf("user %s cannot find the private issue in the list", userID)
+		}
+	}
+	for _, userID := range []string{stranger, admin} {
+		if _, ok := issueIDsInList(t, userID, listPath)[issueID]; ok {
+			t.Fatalf("non-owner %s found a member's private issue in the list", userID)
+		}
+	}
+
+	// The unread count repeats the rule in SQL (inbox.sql); a notice about
+	// the issue counts for the owner and still not for the stranger.
+	unread := func(userID string) int64 {
+		n, err := testHandler.Queries.CountUnreadInbox(context.Background(), db.CountUnreadInboxParams{
+			WorkspaceID: parseUUID(testWorkspaceID), RecipientType: "member", RecipientID: parseUUID(userID),
+		})
+		if err != nil {
+			t.Fatalf("count unread: %v", err)
+		}
+		return n
+	}
+	ownerBefore, strangerBefore := unread(testUserID), unread(stranger)
+	insertInboxRowFor(t, testUserID, issueID)
+	insertInboxRowFor(t, stranger, issueID)
+	dbfx.Cleanup(t, `DELETE FROM inbox_item WHERE issue_id = $1`, issueID)
+	if got := unread(testUserID); got != ownerBefore+1 {
+		t.Fatalf("owner unread count = %d, want %d", got, ownerBefore+1)
+	}
+	if got := unread(stranger); got != strangerBefore {
+		t.Fatalf("stranger unread count moved to %d for an issue they cannot see", got)
+	}
+
+	var access struct {
+		CanChange bool `json:"can_change"`
+	}
+	testutil.Call(t, testHandler.GetIssueAccess,
+		withURLParam(newRequest("GET", "/api/issues/"+issueID+"/access", nil), "id", issueID)).
+		Want(200).JSON(&access)
+	if !access.CanChange {
+		t.Fatal("the owner sees the private issue but is told they cannot reshare it")
 	}
 }
 

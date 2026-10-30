@@ -59,6 +59,11 @@ func TestIssueVisibilitySQLAgreesWithCanSeeIssue(t *testing.T) {
 			projectIDs: []pgtype.UUID{myProject, otherProject},
 			projectSet: map[[16]byte]struct{}{myProject.Bytes: {}, otherProject.Bytes: {}},
 		},
+		"owner": {
+			userID: me, role: permission.RoleOwner,
+			projectIDs: []pgtype.UUID{myProject, otherProject},
+			projectSet: map[[16]byte]struct{}{myProject.Bytes: {}, otherProject.Bytes: {}},
+		},
 		"unidentified caller": {},
 	}
 

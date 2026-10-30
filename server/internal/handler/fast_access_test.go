@@ -72,6 +72,7 @@ func TestFastAccessSnapshot(t *testing.T) {
 		}
 		fx.Task(t, a, cols)
 	}
+	readAsAdmin(t, ws1)
 	stranger := dbfx.User(t, "other", "fast-private-"+randomID()+"@example.test")
 	dbfx.Member(t, ws1, stranger, "member")
 	hidden := fx.Issue(t, "HIDDEN-ISSUE", testutil.Cols{"creator_id": stranger, "visibility": "private"})
@@ -259,6 +260,7 @@ func TestFastAccessAutopilotAndRunEndpoint(t *testing.T) {
 	ap := dbfx.Insert(t, "autopilot", testutil.Cols{"workspace_id": testWorkspaceID, "title": "Compact autopilot", "assignee_id": agent, "assignee_type": "agent", "created_by_type": "member", "created_by_id": testUserID, "execution_mode": "run_only", "status": "active"})
 	ar := dbfx.Insert(t, "autopilot_run", testutil.Cols{"autopilot_id": ap, "source": "manual", "status": "running"})
 	task := dbfx.Task(t, agent, testutil.Cols{"runtime_id": rt, "status": "running", "autopilot_run_id": ar})
+	readAsAdmin(t, testWorkspaceID)
 	stranger := dbfx.User(t, "private-auto", "private-auto-"+randomID()+"@example.test")
 	hiddenIssue := dbfx.Issue(t, "PRIVATE-AUTO-SOURCE", testutil.Cols{"creator_id": stranger, "visibility": "private"})
 	hiddenExecution := dbfx.Insert(t, "autopilot_run", testutil.Cols{"autopilot_id": ap, "source": "manual", "status": "running", "issue_id": hiddenIssue})

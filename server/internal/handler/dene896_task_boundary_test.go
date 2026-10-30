@@ -75,6 +75,7 @@ func TestDownloadAttachment_TaskTokenBoundToOtherWorkspaceDenied(t *testing.T) {
 // sharee) cannot see the issue.
 func hiddenIssueTaskFixture(t *testing.T) (issueID, taskID string) {
 	t.Helper()
+	readAsAdmin(t, testWorkspaceID)
 	otherUserID := dbfx.User(t, "DENE-896 Owner", "dene896-owner@multica.ai")
 	dbfx.Member(t, testWorkspaceID, otherUserID, "member")
 	issueID = dbfx.Issue(t, "dene896 hidden issue", testutil.Cols{
