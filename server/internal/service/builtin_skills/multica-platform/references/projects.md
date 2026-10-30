@@ -127,9 +127,11 @@ The brief's `## Code Source` names the directory, its current git branch (read
 when the task starts), and the other tasks this machine is running in the same
 directory with their branches. Because other agents may be working there at
 the same time, do not switch branches, reset, or discard changes you did not
-make. Work that needs a different branch goes in a git worktree you create
-inside or beside the project folder (for example
-`<folder>.worktrees/<branch>`), never in a hidden Multica directory.
+make. Work that needs a different branch goes in a git worktree at
+`<root>/worktrees/<task>`, the path the brief spells out, never beside the
+folder or in a hidden Multica directory. `<root>` is the project folder: the
+parent of a bound `main/` or `dev/` (also for a repository nested inside `main/`),
+otherwise the bound directory itself.
 
 Multica keeps its own per-task files (task marker, `resources.json`, skills,
 runtime brief) out of the user's directory where the runtime allows it.

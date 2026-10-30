@@ -419,6 +419,25 @@ func writeRepositories(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("\n")
 }
 
+// worktreeRoot is the project folder whose worktrees/ holds task worktrees,
+// matching root_of in kun-agent-mono's repo-layout check.py, which blocks
+// commits in worktrees placed anywhere else (DENE-2786): a bound `<root>/main`
+// or `<root>/dev` gives `<root>`, a repo nested inside main/ (mono's
+// `main/memory`) shares the outer `<root>`, and any other folder is its own
+// root.
+func worktreeRoot(localPath string) string {
+	p := filepath.Clean(localPath)
+	if base := filepath.Base(p); base == "main" || base == "dev" {
+		return filepath.Dir(p)
+	}
+	for dir := filepath.Dir(p); dir != filepath.Dir(dir); dir = filepath.Dir(dir) {
+		if filepath.Base(dir) == "main" {
+			return filepath.Dir(dir)
+		}
+	}
+	return p
+}
+
 // writeCodeSource emits the Code Source section: where this task's code is, and
 // which repositories must NOT be checked out because the machine already holds
 // them.
@@ -450,7 +469,7 @@ func writeCodeSource(b *strings.Builder, ctx TaskContextForEnv) {
 		fmt.Fprintf(b, " (%s)", strings.Join(where, "; "))
 	}
 	b.WriteString(", the project's folder on this machine: its code is already here, so never clone a repository it holds. ")
-	b.WriteString("Others may work here too: don't switch branches, reset, or discard changes you didn't make; put a separate change in a git worktree beside the folder (e.g. `<folder>.worktrees/<branch>`).\n\n")
+	fmt.Fprintf(b, "Others may work here too: don't switch branches, reset, or discard changes you didn't make; put a separate change in a git worktree at `%s`.\n\n", filepath.Join(worktreeRoot(src.LocalPath), "worktrees", "<task>"))
 
 	if len(src.CoRunners) > 0 {
 		runs := make([]string, 0, len(src.CoRunners))

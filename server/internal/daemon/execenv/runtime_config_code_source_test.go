@@ -104,10 +104,33 @@ func TestBriefNamesTheBranchAndTheOtherTasksInTheFolder(t *testing.T) {
 	for _, want := range []string{
 		"You run in `/Users/kunkun/code/app` (branch `main`)",
 		"- Also running here now: DENE-7 (branch `fix-login`), Chat about the build\n",
-		"put a separate change in a git worktree beside the folder",
+		"put a separate change in a git worktree at `/Users/kunkun/code/app/worktrees/<task>`.",
 	} {
 		if !strings.Contains(brief, want) {
 			t.Errorf("brief missing %q", want)
+		}
+	}
+}
+
+// The worktree location follows the repo-layout standard, whose hook blocks
+// commits in worktrees anywhere but <root>/worktrees/ (DENE-2786, DENE-2808).
+func TestBriefPutsWorktreesUnderTheProjectRoot(t *testing.T) {
+	for _, tc := range []struct{ folder, want string }{
+		{"/Volumes/p/multica-office/main", "/Volumes/p/multica-office/worktrees/<task>"},
+		{"/Volumes/p/multica-office/main/", "/Volumes/p/multica-office/worktrees/<task>"},
+		{"/Volumes/p/site/dev", "/Volumes/p/site/worktrees/<task>"},
+		{"/Users/k/.agents/kun-agent-mono/main/memory", "/Users/k/.agents/kun-agent-mono/worktrees/<task>"},
+		{"/Users/k/code/app", "/Users/k/code/app/worktrees/<task>"},
+	} {
+		brief := briefWithCodeSource(t, TaskContextForEnv{
+			IssueID:    "i1",
+			CodeSource: CodeSourceForEnv{Kind: "local_directory", LocalPath: tc.folder},
+		})
+		if want := "put a separate change in a git worktree at `" + tc.want + "`."; !strings.Contains(brief, want) {
+			t.Errorf("folder %s: brief missing %q", tc.folder, want)
+		}
+		if strings.Contains(brief, ".worktrees") {
+			t.Errorf("folder %s: brief still points beside the folder", tc.folder)
 		}
 	}
 }
