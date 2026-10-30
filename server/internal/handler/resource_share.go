@@ -60,7 +60,7 @@ func (h *Handler) loadIssueShareTarget(w http.ResponseWriter, r *http.Request) (
 		workspaceID:  issue.WorkspaceID,
 		resourceType: "issue",
 		resourceID:   uuidToString(issue.ID),
-		canManage: viewer.bypasses() ||
+		canManage: viewer.bypasses() || viewer.ownerWidening() ||
 			permission.Allowed(viewer.role, permission.ActionChangeVisibility, permission.Visibility(issue.Visibility), rel),
 		issueID: uuidToString(issue.ID),
 	}, true

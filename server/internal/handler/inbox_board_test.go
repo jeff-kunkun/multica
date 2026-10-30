@@ -286,6 +286,7 @@ func TestInboxBoard_ProjectFilter(t *testing.T) {
 	// A project the viewer cannot see: its tickets are private to someone else,
 	// so filtering by it must not bring them onto this viewer's board. An
 	// unknown project gives the same empty board.
+	readAsAdmin(t, testWorkspaceID)
 	other := dbfx.User(t, "Board other", "board-project-filter-other@example.test")
 	dbfx.Member(t, testWorkspaceID, other, "member")
 	projHidden := dbfx.Project(t, "board filter hidden")

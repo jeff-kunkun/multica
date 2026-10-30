@@ -125,6 +125,7 @@ func TestCommentDirectoryMCPRealHandler(t *testing.T) {
 		t.Fatal("byte paging lost roots", len(seen))
 	}
 	// The same HTTP route rechecks visibility between directory pages.
+	readAsAdmin(t, testWorkspaceID)
 	stranger := dbfx.User(t, "private owner", "roots-"+randomID()+"@example.test")
 	fastMustExec(t, `UPDATE issue SET creator_id=$2,visibility='private' WHERE id=$1`, parseUUID(issue), parseUUID(stranger))
 	rec, _ := listComments(t, issue, "roots_only=true&summary=true&limit=1&offset=1")

@@ -201,6 +201,7 @@ WHERE i.workspace_id = $1 AND i.recipient_type = $2 AND i.recipient_id = $3
     -- recipient. Keep in step with inboxItemIsPersonalNotice in
     -- internal/handler/agent_access_pass.go.
     OR i.type IN ('agent_access_request', 'agent_access_approved', 'agent_access_declined')
+    OR COALESCE(m.role, '') = 'owner'
     OR (iss.creator_type = 'member' AND iss.creator_id = i.recipient_id)
     OR (iss.assignee_type = 'member' AND iss.assignee_id = i.recipient_id)
     OR (iss.creator_type = 'agent' AND EXISTS (
@@ -250,8 +251,9 @@ type CountUnreadInboxParams struct {
 // row rather than through the handler's visibilityViewer: creator or
 // assignee, or workspace scope unless guest, or project scope through a
 // project they can reach (explicit membership, a project they lead, the
-// owner fallback over all projects) or a direct share on the issue. Keep in step with
-// visibilityViewer.issueVisibilitySQL in internal/handler/visibility.go.
+// owner fallback over all projects) or a direct share on the issue. The
+// workspace owner sees every issue, private included (DENE-2772). Keep in
+// step with visibilityViewer.issueVisibilitySQL in internal/handler/visibility.go.
 func (q *Queries) CountUnreadInbox(ctx context.Context, arg CountUnreadInboxParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countUnreadInbox, arg.WorkspaceID, arg.RecipientType, arg.RecipientID)
 	var count int64
@@ -275,6 +277,7 @@ FROM (
       AND (
         iss.id IS NULL
         OR i.type IN ('agent_access_request', 'agent_access_approved', 'agent_access_declined')
+        OR m.role = 'owner'
         OR (iss.creator_type = 'member' AND iss.creator_id = i.recipient_id)
         OR (iss.assignee_type = 'member' AND iss.assignee_id = i.recipient_id)
         OR (iss.creator_type = 'agent' AND EXISTS (
