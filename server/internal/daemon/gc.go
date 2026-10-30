@@ -35,6 +35,7 @@ func (d *Daemon) gcLoop(ctx context.Context) {
 		"interval", d.cfg.GCInterval,
 		"ttl", d.cfg.GCTTL,
 		"completed_task_ttl", d.cfg.GCCompletedTaskTTL,
+		"local_directory_ttl", d.cfg.GCLocalDirectoryTTL,
 		"orphan_ttl", d.cfg.GCOrphanTTL,
 		"artifact_ttl", d.cfg.GCArtifactTTL,
 		"repo_ttl", d.cfg.GCRepoTTL,
@@ -337,8 +338,10 @@ func (d *Daemon) gcWorkspaceIssues(ctx context.Context, workspaceID string, cand
 		if !ok || result.Err != nil {
 			// No usable answer about the parent issue this cycle, so the task
 			// data stays. The regenerable Codex cache is still fair game —
-			// see applyManagedArtifactFallback.
-			action := d.applyManagedArtifactFallback(candidate.taskDir, candidate.meta, gcActionSkip)
+			// see applyManagedArtifactFallback — and so is an expired
+			// local_directory env root, whose expiry never asks the parent.
+			action := d.applyLocalDirectoryGCOverride(candidate.meta, gcActionSkip)
+			action = d.applyManagedArtifactFallback(candidate.taskDir, candidate.meta, action)
 			cleaned += d.applyGCAction(ctx, candidate.taskDir, action, stats)
 			continue
 		}
@@ -512,11 +515,27 @@ func (d *Daemon) applyLocalDirectoryGCOverride(meta *execenv.GCMeta, action gcAc
 	if !meta.LocalDirectory {
 		return action
 	}
-	// local_directory tasks keep their envRoot indefinitely so the user
-	// can inspect output/ and logs/ for forensic context. The WorkDir is
-	// the user's own path and lives outside taskDir. The envRoot contains
-	// the daemon's durable logbook plus regenerable tool caches, so keep the
-	// former while allowing narrowly scoped cleanup of the latter.
+	// Once the task has been over for GCLocalDirectoryTTL the whole envRoot
+	// goes, whatever the parent record says. Nothing reads it back: the
+	// WorkDir is the user's own path outside taskDir, and a later task never
+	// reuses a local_directory envRoot (shouldReusePriorWorkdir refuses), so
+	// all that remains is the run's logs and caches. Keeping them forever
+	// grew by thousands of directories and filled the disk (DENE-2806). A
+	// running task is protected by isActiveEnvRoot and the reservation in
+	// applyGCAction, as on every other cleanup path.
+	if d.localDirectoryEnvExpired(meta) {
+		d.logger.Info("gc: local_directory env expired",
+			"kind", string(meta.Kind),
+			"task", meta.TaskID,
+			"completed_at", meta.CompletedAt.Format(time.RFC3339),
+			"local_directory_ttl", d.cfg.GCLocalDirectoryTTL,
+		)
+		return gcActionClean
+	}
+	// Until then the envRoot stays so the user can inspect output/ and logs/
+	// for forensic context. The envRoot contains the daemon's durable logbook
+	// plus regenerable tool caches, so keep the former while allowing
+	// narrowly scoped cleanup of the latter.
 	//
 	//   gcActionClean   → demote to artifact-pattern cleanup so envRoot
 	//                     (and especially the logbook) survives.
@@ -539,6 +558,16 @@ func (d *Daemon) applyLocalDirectoryGCOverride(meta *execenv.GCMeta, action gcAc
 	default:
 		return action
 	}
+}
+
+// localDirectoryEnvExpired reports whether a local_directory task completed
+// longer than GCLocalDirectoryTTL ago. A zero CompletedAt never expires: it
+// means the task never reported completion, so there is no end to count from.
+func (d *Daemon) localDirectoryEnvExpired(meta *execenv.GCMeta) bool {
+	return meta.LocalDirectory &&
+		d.cfg.GCLocalDirectoryTTL > 0 &&
+		!meta.CompletedAt.IsZero() &&
+		time.Since(meta.CompletedAt) > d.cfg.GCLocalDirectoryTTL
 }
 
 // shouldCleanTaskDirForKind runs the per-Kind dispatch without applying the
@@ -634,9 +663,9 @@ func (d *Daemon) gcDecisionIssueResult(taskDir string, meta *execenv.GCMeta, res
 	// lookup with a recognized status is intentionally required: transient
 	// network/auth failures and response drift keep data rather than turning an
 	// unavailable or malformed status into a deletion signal.
-	// The active-root guard and reservation protect concurrent reuse. User-owned
-	// local_directory envs stay on the existing artifact-only policy so a shorter
-	// completed-task TTL cannot make artifact cleanup happen early.
+	// The active-root guard and reservation protect concurrent reuse.
+	// local_directory envs have their own clock (GCLocalDirectoryTTL, applied in
+	// applyLocalDirectoryGCOverride), so this TTL never touches them.
 	if d.cfg.GCCompletedTaskTTL > 0 &&
 		!meta.LocalDirectory &&
 		!meta.CompletedAt.IsZero() &&

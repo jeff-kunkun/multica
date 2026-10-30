@@ -76,6 +76,7 @@ const (
 	DefaultGCCompletedTaskTTLCloud        = 14 * 24 * time.Hour // 14 days — Multica Cloud bounds completed issue-task env retention by default; see defaultGCCompletedTaskTTL
 	DefaultGCCompletedTaskTTLSelfHost     = 0                   // disabled — self-host keeps every completed env until its issue goes terminal, unless an operator opts in
 	DefaultGCOrphanTTL                    = 72 * time.Hour      // 3 days — orphans with no meta (crashes, pre-GC leftovers)
+	DefaultGCLocalDirectoryTTL            = 72 * time.Hour      // 3 days — fully remove a local_directory task's env root this long after the task ended; the user's own folder lives outside it (DENE-2806)
 	DefaultGCArtifactTTL                  = 12 * time.Hour      // 12h — drop regenerable artifacts once a task has been completed this long
 	DefaultGCCodexSessionTTL              = 14 * 24 * time.Hour // 14 days — reclaim per-issue Codex session stores untouched this long
 	DefaultGCHermesMemoryTTL              = 90 * 24 * time.Hour // 90 days — reclaim per-agent Hermes memory stores untouched this long (long: reclaiming these is visible amnesia, and they are a few markdown files)
@@ -142,7 +143,8 @@ type Config struct {
 	GCEnabled                      bool                  // enable periodic workspace garbage collection (default: true)
 	GCInterval                     time.Duration         // how often the GC loop runs (default: 2h)
 	GCTTL                          time.Duration         // clean dirs whose issue is done/cancelled and updated_at < now()-TTL (default: 24h)
-	GCCompletedTaskTTL             time.Duration         // fully clean inactive issue-task envs completed at least this long ago, regardless of parent issue status (default: 14d on Multica Cloud, 0/disabled elsewhere; local_directory envs are never fully removed)
+	GCCompletedTaskTTL             time.Duration         // fully clean inactive issue-task envs completed at least this long ago, regardless of parent issue status (default: 14d on Multica Cloud, 0/disabled elsewhere; local_directory envs follow GCLocalDirectoryTTL instead)
+	GCLocalDirectoryTTL            time.Duration         // fully clean an inactive local_directory task env root (every kind) once its task completed at least this long ago, regardless of the parent record; the user's WorkDir is outside the env root and never touched (default: 72h, set 0 to keep them indefinitely)
 	GCOrphanTTL                    time.Duration         // clean orphan dirs with no meta, or dirs whose issue gc-check returns 404, once they exceed this age (default: 72h). The 404 path uses the same TTL — a scoped-down token can't instantly wipe live workspaces.
 	GCArtifactTTL                  time.Duration         // once a task has been completed for at least this long, drop regenerable artifacts: pattern-matched build outputs when the parent record keeps the directory (an open issue), and the exact daemon-managed Codex cache for every task kind (default: 12h, set 0 to disable both)
 	GCArtifactPatterns             []string              // basename patterns whose subtrees are removed during artifact cleanup (default: node_modules, .next, .turbo)
@@ -617,6 +619,10 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	gcLocalDirectoryTTL, err := durationFromEnv("MULTICA_GC_LOCAL_DIRECTORY_TTL", DefaultGCLocalDirectoryTTL)
+	if err != nil {
+		return Config{}, err
+	}
 	gcArtifactTTL, err := durationFromEnv("MULTICA_GC_ARTIFACT_TTL", DefaultGCArtifactTTL)
 	if err != nil {
 		return Config{}, err
@@ -713,6 +719,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		GCTTL:                           gcTTL,
 		GCCompletedTaskTTL:              gcCompletedTaskTTL,
 		GCOrphanTTL:                     gcOrphanTTL,
+		GCLocalDirectoryTTL:             gcLocalDirectoryTTL,
 		GCArtifactTTL:                   gcArtifactTTL,
 		GCArtifactPatterns:              gcArtifactPatterns,
 		GCRepoTTL:                       gcRepoTTL,

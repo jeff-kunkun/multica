@@ -1235,12 +1235,11 @@ type GCMeta struct {
 	WorkspaceID    string     `json:"workspace_id"`
 	CompletedAt    time.Time  `json:"completed_at"`
 	// LocalDirectory marks tasks whose WorkDir pointed at a user-owned
-	// path rather than the synthesised envRoot/workdir. The GC loop honours
-	// this by never falling into the gcActionClean branch (which would
-	// RemoveAll envRoot — safe by structure, but we still want to keep the
-	// envRoot's output/ and logs/ around longer so users can inspect what
-	// the agent did in their own tree). Pattern-based artifact cleanup is
-	// still allowed.
+	// path rather than the synthesised envRoot/workdir. The GC loop keeps
+	// such an envRoot (allowing only pattern-based artifact cleanup) until
+	// the task has been completed for GCLocalDirectoryTTL, so users can
+	// inspect output/ and logs/ for a while; after that it removes the
+	// whole envRoot, which never contains the user's WorkDir.
 	LocalDirectory bool `json:"local_directory,omitempty"`
 }
 

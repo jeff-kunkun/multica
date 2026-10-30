@@ -221,6 +221,31 @@ func TestLoadConfig_CompletedTaskTTLDefaultsBoundedOnOfficialCloud(t *testing.T)
 	}
 }
 
+func TestLoadConfig_LocalDirectoryTTLDefaultsToThreeDaysAndZeroDisables(t *testing.T) {
+	stageFakeAgent(t)
+	redirectTestHome(t, t.TempDir())
+	t.Setenv("SHELL", filepath.Join(t.TempDir(), "missing-shell"))
+	t.Setenv("MULTICA_GC_LOCAL_DIRECTORY_TTL", "")
+
+	overrides := Overrides{ServerURL: "https://multica.example.com", WorkspacesRoot: t.TempDir()}
+	cfg, err := LoadConfig(overrides)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.GCLocalDirectoryTTL != 72*time.Hour {
+		t.Fatalf("GCLocalDirectoryTTL = %s, want 72h by default", cfg.GCLocalDirectoryTTL)
+	}
+
+	t.Setenv("MULTICA_GC_LOCAL_DIRECTORY_TTL", "0")
+	cfg, err = LoadConfig(overrides)
+	if err != nil {
+		t.Fatalf("LoadConfig with opt-out: %v", err)
+	}
+	if cfg.GCLocalDirectoryTTL != 0 {
+		t.Fatalf("GCLocalDirectoryTTL = %s, want an explicit 0 to keep local_directory envs", cfg.GCLocalDirectoryTTL)
+	}
+}
+
 func TestDefaultGCCompletedTaskTTLOnlyBoundsOfficialCloudHost(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

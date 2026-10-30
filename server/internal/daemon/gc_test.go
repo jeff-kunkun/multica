@@ -2648,8 +2648,9 @@ func TestGCMetaForTask(t *testing.T) {
 
 // TestShouldCleanTaskDir_LocalDirectoryNeverClean confirms the GC loop
 // never removes the envRoot of a local_directory task even when the parent
-// issue is long-since done. Artifact-pattern cleanup is the most that
-// should ever happen, so output/ and logs/ stay around for the user.
+// issue is long-since done, as long as GCLocalDirectoryTTL is off (zero, as
+// in newGCTestDaemon). Artifact-pattern cleanup is the most that should ever
+// happen then, so output/ and logs/ stay around for the user.
 func TestShouldCleanTaskDir_LocalDirectoryNeverClean(t *testing.T) {
 	t.Parallel()
 	issueID := "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa1"
