@@ -9349,33 +9349,29 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		taskResult.SessionRestartReason = reason
 	}()
 
-	if shouldRetryWithFreshSession(result, task.PriorSessionID, tools, provider) {
-		firstResult := result
-		firstUsage := result.Usage
-		firstTools := tools
-		if !result.ResumeRejectedTransient {
-			retiredSessionID = task.PriorSessionID
-		}
-		taskLog.Warn("session resume failed, retrying with fresh session", "error", result.Error)
-
-		// Rebuild cold-session context before the single retry. The prior
-		// provider transcript is gone (missing, account-mismatched, or —
-		// GH #5975 — carrying history the provider now refuses), so the
-		// fresh process must NOT be told it is resuming a conversation:
-		//   - taskCtx.PriorSessionResumed=false + re-injecting the runtime
-		//     brief rewrites the on-disk AGENTS.md so it no longer claims
-		//     "You're resuming the prior session" (which file-based backends
-		//     like Kiro load themselves).
-		//   - clearing task.PriorSessionID rebuilds the prompt on the cold
-		//     comment-reading path instead of the warm resumed one.
-		//   - PriorSessionResumeUnavailable=true makes BuildPrompt append the
-		//     continuity notice for this surface, so the agent knows not to
-		//     assume continuity it no longer has. This is now the ONLY injector
-		//     on the retry path: the backend's own copy is suppressed below,
-		//     because before MUL-5722 both fired and the turn carried the same
-		//     paragraph twice.
-		// task and taskCtx are local (runTask takes task by value), so these
-		// mutations only affect the retry.
+	// coldSessionPrompt readies a fresh session that holds none of the earlier
+	// context and returns its prompt. The prior provider transcript is gone
+	// (missing, account-mismatched, or — GH #5975 — carrying history the
+	// provider now refuses), so the fresh process must NOT be told it is
+	// resuming a conversation:
+	//   - taskCtx.PriorSessionResumed=false + re-injecting the runtime
+	//     brief rewrites the on-disk AGENTS.md so it no longer claims
+	//     "You're resuming the prior session" (which file-based backends
+	//     like Kiro load themselves).
+	//   - clearing task.PriorSessionID rebuilds the prompt on the cold
+	//     comment-reading path instead of the warm resumed one, with the
+	//     issue description and snapshot in full.
+	//   - PriorSessionResumeUnavailable=true makes BuildPrompt append the
+	//     continuity notice for this surface, so the agent knows not to
+	//     assume continuity it no longer has. This is now the ONLY injector
+	//     on the retry path: the backend's own copy is suppressed below,
+	//     because before MUL-5722 both fired and the turn carried the same
+	//     paragraph twice.
+	// task and taskCtx are local (runTask takes task by value), so these
+	// mutations only affect the fresh session. The resume-failure retry below
+	// uses it, and so does the fresh continuation after an idle stop
+	// (DENE-2900), whose first prompt may have been the warm one.
+	coldSessionPrompt := func() string {
 		execOpts.ResumeSessionID = ""
 		task.PriorSessionID = ""
 		task.PriorSessionResumeUnavailable = true
@@ -9389,7 +9385,19 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				execOpts.SystemPrompt = runtimeBrief
 			}
 		}
-		freshPrompt := BuildPrompt(task, provider, promptOptions...)
+		return BuildPrompt(task, provider, promptOptions...)
+	}
+
+	if shouldRetryWithFreshSession(result, task.PriorSessionID, tools, provider) {
+		firstResult := result
+		firstUsage := result.Usage
+		firstTools := tools
+		if !result.ResumeRejectedTransient {
+			retiredSessionID = task.PriorSessionID
+		}
+		taskLog.Warn("session resume failed, retrying with fresh session", "error", result.Error)
+
+		freshPrompt := coldSessionPrompt()
 
 		retryResult, retryTools, retryErr := d.executeAndDrainDetectingSkills(ctx, backend, freshPrompt, execOpts, taskLog, task.ID, env.CodexHome, skillUsage, &msgSeq)
 		if retryErr != nil {
@@ -9437,10 +9445,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			}
 		}
 		if fresh {
+			// The task again, built for a session with no context (the
+			// first prompt may have been the warm one of a resumed
+			// session), and the stop note.
+			freshPrompt := idleFreshPromptFor(coldSessionPrompt(), stopNote)
 			freshOpts := execOpts
-			freshOpts.ResumeSessionID = ""
 			freshOpts.ResumeExpected = false
-			next, nextTools, nextErr = d.executeAndDrainDetectingSkills(ctx, backend, idleFreshPromptFor(prompt, stopNote), freshOpts, taskLog, task.ID, env.CodexHome, skillUsage, &msgSeq)
+			next, nextTools, nextErr = d.executeAndDrainDetectingSkills(ctx, backend, freshPrompt, freshOpts, taskLog, task.ID, env.CodexHome, skillUsage, &msgSeq)
 		}
 		switch {
 		case nextErr != nil && ctx.Err() != nil:
@@ -10097,7 +10108,10 @@ func (d *Daemon) executeAndDrainDetectingSkills(ctx context.Context, backend age
 	// background shells) has calls the tracker cannot see end, so it keeps
 	// the silence budget only.
 	var stoppedByCommandCap atomic.Bool
-	commands := commandCap{stopped: &stoppedByCommandCap}
+	// receivedMessages counts what the drain loop has taken, so the cap can
+	// tell the backlog it waits for from output queued after it.
+	var receivedMessages atomic.Int64
+	commands := commandCap{stopped: &stoppedByCommandCap, received: receivedMessages.Load}
 	if session.ToolActivity == nil {
 		commands.oldest = live.oldestCommand
 	}
@@ -10264,6 +10278,7 @@ func (d *Daemon) executeAndDrainDetectingSkills(ctx context.Context, backend age
 				observedAt := time.Now().UTC()
 				lastActivityAt.Store(int64(awakeclock.Now()))
 				live.observe(msg)
+				receivedMessages.Add(1)
 				switch msg.Type {
 				case agent.MessageStatus:
 					// Persist the session/work_dir as soon as the backend
@@ -10647,7 +10662,8 @@ func idleWatchdogTickInterval(window time.Duration) time.Duration {
 //
 // In both cases the watchdog also requires the session.Messages buffer to be
 // empty — a buffered-but-undrained message means the drain loop is behind, not
-// the backend.
+// the backend. Past the command cap it waits only for the messages queued
+// when the cap was reached (capBacklog), not for output queued later.
 //
 // With a tool in flight that commands.oldest measures, toolWindow is the
 // command cap instead (DENE-2900): the run is stopped once the oldest such
@@ -10673,10 +10689,39 @@ func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window, toolWindow ti
 // commandCap is the command cap's view of one run (DENE-2900). oldest reports
 // when the oldest running call the cap measures started, on the awake clock;
 // nil means the run has no per-call starts and keeps the silence budget only.
+// received counts the messages the drain loop has taken, each counted after
+// oldest has seen it; nil means the cap does not wait for queued messages.
 // stopped is set when the cap, not silence, stopped the run.
 type commandCap struct {
-	oldest  func() (time.Duration, bool)
-	stopped *atomic.Bool
+	oldest   func() (time.Duration, bool)
+	received func() int64
+	stopped  *atomic.Bool
+}
+
+// capBacklog is what the command cap waits for before it stops a call that
+// ran past it: the messages already queued when the cap was reached, one of
+// which may be the call's result (DENE-2900). Output queued after that does
+// not defer the stop again, or a command that prints faster than the drain
+// loop takes it would never be stopped.
+type capBacklog struct {
+	waiting bool
+	until   int64
+}
+
+// drained reports whether the backlog queued when the cap was reached has
+// been taken; queued is the queue's length now. The first call with a queue
+// records that backlog.
+func (b *capBacklog) drained(c commandCap, queued int) bool {
+	if c.received == nil {
+		return true
+	}
+	if !b.waiting {
+		if queued == 0 {
+			return true
+		}
+		b.waiting, b.until = true, c.received()+int64(queued)
+	}
+	return c.received() >= b.until
 }
 
 // check reports whether a call the cap measures is running, and whether the
@@ -10699,6 +10744,7 @@ func (d *Daemon) runIdleWatchdogWithClock(agentCtx context.Context, window, tool
 	}
 	ticker := time.NewTicker(idleWatchdogTickInterval(tickWindow))
 	defer ticker.Stop()
+	var backlog capBacklog
 	for {
 		select {
 		case <-agentCtx.Done():
@@ -10718,6 +10764,9 @@ func (d *Daemon) runIdleWatchdogWithClock(agentCtx context.Context, window, tool
 				threshold = toolWindow
 				measured, capped = commands.check(awakeNow(), toolWindow)
 			}
+			if !capped {
+				backlog = capBacklog{}
+			}
 			last := lastActivityAt.Load()
 			idleFor := awakeNow() - time.Duration(last)
 			// A measured command is bounded by the cap alone: its silence is
@@ -10727,8 +10776,10 @@ func (d *Daemon) runIdleWatchdogWithClock(agentCtx context.Context, window, tool
 			}
 			// A buffered-but-undrained message means the drain loop is
 			// behind, not the backend. Wait one more tick rather than
-			// killing a backend that is still producing output.
-			if len(messages) > 0 {
+			// killing a backend that is still producing output. Past the
+			// command cap, wait only for what was queued when the cap was
+			// reached: it may hold the call's result.
+			if capped && !backlog.drained(commands, len(messages)) || !capped && len(messages) > 0 {
 				continue
 			}
 			// Cursor can stop its owned background tools without aborting the
@@ -10753,9 +10804,10 @@ func (d *Daemon) runIdleWatchdogWithClock(agentCtx context.Context, window, tool
 			// callback may publish newer activity without changing the count.
 			currentToolInFlight := inFlightTools() > 0
 			if capped {
-				// The cap counts from the call's start, so activity does not
-				// matter; only that the call is still running past it.
-				if _, still := commands.check(awakeNow(), toolWindow); !still || !currentToolInFlight || len(messages) > 0 {
+				// The cap counts from the call's start, so activity and later
+				// output do not matter; only that the call is still running
+				// past it.
+				if _, still := commands.check(awakeNow(), toolWindow); !still || !currentToolInFlight {
 					continue
 				}
 			} else if currentActivity := lastActivityAt.Load(); currentActivity != last ||

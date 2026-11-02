@@ -26,8 +26,11 @@ import (
 // answers. In modes "nosession" and "nosession-never" the first run goes
 // silent before it reports a session, and the later fresh run answers or goes
 // silent again. In mode "vanish" the first run removes the CLI, so nothing
-// after it can start. Each run's argv goes to args.log and the resumed or
-// later fresh prompt to prompts.log.
+// after it can start. Mode "warm-unresumable" is "unresumable" for a task
+// that resumes sess-prior: the first run continues it, records its prompt in
+// first.log and goes silent, and resuming sess-prior again is refused. Each
+// run's argv goes to args.log and the resumed or later fresh prompt to
+// prompts.log.
 func fakeIdleClaude(t *testing.T, mode string) (bin, dir string) {
 	t.Helper()
 	dir = t.TempDir()
@@ -40,19 +43,26 @@ answer() {
   echo '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"'"$1"'"}]}}'
   echo '{"type":"result","subtype":"success","is_error":false,"session_id":"sess-idle","result":"'"$1"'"}'
 }
+resume=sess-idle
 case %[2]q in
 nosession*) [ "$runs" -eq 1 ] && exec sleep 30;;
 vanish) rm -f "$0";;
+warm-unresumable) resume=sess-prior
+  if [ "$runs" -eq 1 ]; then
+    echo '{"type":"system","subtype":"init","session_id":"sess-prior"}'
+    IFS= read -r line; printf '%%s\n' "$line" >> %[1]q/first.log
+    exec sleep 30
+  fi;;
 esac
 echo '{"type":"system","subtype":"init","session_id":"sess-idle"}'
 case " $* " in
-*" --resume sess-idle "*)
-  if [ %[2]q = unresumable ]; then echo "No conversation found with session ID: sess-idle" >&2; exit 1; fi
+*" --resume $resume "*)
+  case %[2]q in *unresumable) echo "No conversation found with session ID: $resume" >&2; exit 1;; esac
   IFS= read -r line; printf '%%s\n' "$line" >> %[1]q/prompts.log
   [ %[2]q = never ] && exec sleep 30
   answer resumed; exit 0;;
 esac
-case %[2]q in unresumable|nosession*) if [ "$runs" -gt 1 ]; then
+case %[2]q in *unresumable|nosession*) if [ "$runs" -gt 1 ]; then
   IFS= read -r line; printf '%%s\n' "$line" >> %[1]q/prompts.log
   [ %[2]q = nosession-never ] && exec sleep 30
   answer fresh; exit 0
@@ -128,7 +138,15 @@ func runIdleClaudeTaskOnServer(t *testing.T, bin, policy string) (TaskResult, *i
 
 func runIdleClaudeTaskWith(t *testing.T, bin, policy string, issues *idleIssueServer) TaskResult {
 	t.Helper()
-	redirectTestHome(t, t.TempDir())
+	return runIdleClaudeTaskPrepared(t, bin, policy, issues, nil)
+}
+
+// runIdleClaudeTaskPrepared runs the idle task; prepare, when set, adjusts
+// the task and the test home before the run.
+func runIdleClaudeTaskPrepared(t *testing.T, bin, policy string, issues *idleIssueServer, prepare func(home string, task *Task)) TaskResult {
+	t.Helper()
+	home := t.TempDir()
+	redirectTestHome(t, home)
 	srv := httptest.NewServer(http.HandlerFunc(issues.handler))
 	t.Cleanup(srv.Close)
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -158,6 +176,9 @@ func runIdleClaudeTaskWith(t *testing.T, bin, policy string, issues *idleIssueSe
 		AgentID:     "agent-idle",
 		AuthToken:   "mat_test",
 		Agent:       &AgentData{ID: "agent-idle", Name: "idle-agent"},
+	}
+	if prepare != nil {
+		prepare(home, &task)
 	}
 	result, err := d.runTask(context.Background(), task, "claude", 0, logger)
 	if err != nil {
@@ -244,6 +265,56 @@ func TestIdleStopUnresumableSessionStartsFreshWithSummary(t *testing.T) {
 	prompts := readRuns(t, filepath.Join(dir, "prompts.log"))
 	if !strings.Contains(prompts[0], "could not be resumed") || !strings.Contains(prompts[0], "空闲看门狗停了这一轮") {
 		t.Fatalf("fresh prompt = %q, want the task with the stop note", prompts[0])
+	}
+}
+
+// Codex's second DENE-2900 review: a run that resumed a session was sent the
+// warm prompt, which leaves out what that session already held. When the
+// stopped session then cannot be resumed, the fresh one must get the whole
+// task, and nothing telling it that it continues a conversation.
+func TestIdleStopWarmRunFreshFallbackGetsTheWholeTask(t *testing.T) {
+	bin, dir := fakeIdleClaude(t, "warm-unresumable")
+	const description = "Check the deploy logs of FG3 and report"
+	result := runIdleClaudeTaskPrepared(t, bin, "", &idleIssueServer{}, func(home string, task *Task) {
+		// The session to resume is in Claude's store, so the run resumes it.
+		projects := filepath.Join(home, ".claude", "projects", "p")
+		if err := os.MkdirAll(projects, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(projects, "sess-prior.jsonl"), []byte("{}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		task.PriorSessionID = "sess-prior"
+		task.IssueTitle = "FG3 deploy check"
+		task.IssueStatus = "in_progress"
+		task.IssueDescription = description
+		// The server found the description unchanged and no new comment.
+		task.IssueStateDeltaKnown = true
+		task.NewCommentsDeltaKnown = true
+	})
+	if result.Status != "completed" || result.Comment != "fresh" {
+		t.Fatalf("result = %+v, want the fresh session's answer", result)
+	}
+	runs := readRuns(t, filepath.Join(dir, "args.log"))
+	if len(runs) != 3 || !strings.Contains(runs[0], "--resume sess-prior") ||
+		!strings.Contains(runs[1], "--resume sess-prior") || strings.Contains(runs[2], "--resume") {
+		t.Fatalf("argv = %q, want the resumed run, the refused resume, then a fresh run", runs)
+	}
+	// The setup really produced the warm prompt the fallback must not reuse.
+	first := readRuns(t, filepath.Join(dir, "first.log"))[0]
+	if strings.Contains(first, description) || !strings.Contains(first, "unchanged since your previous run") {
+		t.Fatalf("first prompt = %q, want the warm one without the description", first)
+	}
+	fresh := readRuns(t, filepath.Join(dir, "prompts.log"))[0]
+	for _, want := range []string{description, "Session Continuity Notice", "could not be resumed", "空闲看门狗停了这一轮"} {
+		if !strings.Contains(fresh, want) {
+			t.Fatalf("fresh prompt lacks %q: %q", want, fresh)
+		}
+	}
+	for _, warm := range []string{"unchanged since your previous run", "since the previous run", "this resumed run"} {
+		if strings.Contains(fresh, warm) {
+			t.Fatalf("fresh prompt still reads as a resumed session (%q): %q", warm, fresh)
+		}
 	}
 }
 

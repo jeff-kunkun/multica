@@ -31,7 +31,6 @@ const (
 	liveTailBytes        = 4096
 	liveCommandMaxRunes  = 300
 	liveOutputMaxRunes   = 200
-	liveMaxTrackedCalls  = 64
 	liveReportTimeout    = 5 * time.Second
 	livePrivateKeyMarker = "PRIVATE KEY-----"
 )
@@ -58,7 +57,9 @@ type liveTracker struct {
 	// clock reads the idle watchdog's awake clock; nil means awakeclock.Now.
 	clock func() time.Duration
 
-	mu    sync.Mutex
+	mu sync.Mutex
+	// calls are the calls in flight by message, oldest first, every one of
+	// them (the live report shows only the newest).
 	calls []liveCall
 	// seen is when each call the backend reports as running started, on the
 	// awake clock, keyed by liveCallKey. It is refreshed on every reading of
@@ -100,10 +101,11 @@ func (t *liveTracker) observe(msg agent.Message) {
 	switch msg.Type {
 	case agent.MessageToolUse:
 		t.last = liveCall{callID: msg.CallID, tool: msg.Tool, command: liveCommand(msg.Tool, msg.Input), startedAt: now}
+		// Every call stays until its result: the command cap times the
+		// oldest one, so a list cut to the newest would forget it, and its
+		// result would then drop another call (DENE-2900). The list is as
+		// long as the drain loop's in-flight count.
 		t.calls = append(t.calls, t.last)
-		if len(t.calls) > liveMaxTrackedCalls {
-			t.calls = t.calls[len(t.calls)-liveMaxTrackedCalls:]
-		}
 		t.steps = append(t.steps, cutRunes(t.last.command, stopStepMaxRunes))
 		if len(t.steps) > stopMaxSteps {
 			t.steps = t.steps[len(t.steps)-stopMaxSteps:]

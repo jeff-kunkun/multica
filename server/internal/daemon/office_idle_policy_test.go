@@ -64,6 +64,10 @@ type officeWatchdog struct {
 	// hidden is what the backend reports as running while its stream shows
 	// nothing yet (OpenCode).
 	hidden atomic.Pointer[[]agent.RunningTool]
+	// queue is the backend's message buffer the watchdog looks at, and
+	// received counts what the test's drain took from it.
+	queue    chan agent.Message
+	received atomic.Int64
 }
 
 func (w *officeWatchdog) hiddenCalls() []agent.RunningTool {
@@ -75,7 +79,7 @@ func (w *officeWatchdog) hiddenCalls() []agent.RunningTool {
 
 func startOfficeWatchdog(t *testing.T, unlimited bool) *officeWatchdog {
 	t.Helper()
-	w := &officeWatchdog{start: time.Now()}
+	w := &officeWatchdog{start: time.Now(), queue: make(chan agent.Message, 8)}
 	now := func() time.Duration { return time.Since(w.start) }
 	w.live = &liveTracker{clock: now, running: w.hiddenCalls}
 	cfg := Config{AgentIdleWatchdog: 2 * time.Hour, AgentToolWatchdog: 2 * time.Hour, CommandWatchdog: DefaultCommandWatchdog}
@@ -91,9 +95,9 @@ func startOfficeWatchdog(t *testing.T, unlimited bool) *officeWatchdog {
 	var last atomic.Int64
 	last.Store(int64(now()))
 	countTools := countingOutputActivity(w.tools.Load, &last, func() time.Duration { return time.Duration(w.line.Load()) })
-	commands := commandCap{oldest: w.live.oldestCommand, stopped: &w.capped}
+	commands := commandCap{oldest: w.live.oldestCommand, received: w.received.Load, stopped: &w.capped}
 	go new(Daemon).runIdleWatchdogWithClock(ctx, idle, tool, &last, countTools, &w.fired, &w.thresh,
-		cancel, make(chan agent.Message), nil, nil, commands, slog.Default(), now)
+		cancel, w.queue, nil, nil, commands, slog.Default(), now)
 	synctest.Wait()
 	return w
 }
@@ -113,6 +117,21 @@ func (w *officeWatchdog) done(id string) {
 	w.live.observe(agent.Message{Type: agent.MessageToolResult, CallID: id})
 	w.tools.Add(-1)
 	w.output()
+}
+
+// flood keeps the message queue full until ctx ends: the backend prints
+// faster than the drain loop takes it, one message a second.
+func (w *officeWatchdog) flood(ctx context.Context) {
+	for len(w.queue) < cap(w.queue) {
+		w.queue <- agent.Message{Type: agent.MessageText, Content: "line"}
+	}
+	for ctx.Err() == nil {
+		time.Sleep(time.Second)
+		<-w.queue
+		w.output()
+		w.received.Add(1)
+		w.queue <- agent.Message{Type: agent.MessageText, Content: "line"}
+	}
 }
 
 // mustNotStopBy and mustStopBy sleep the fake clock to at, measured from the
@@ -226,6 +245,75 @@ func TestOfficeIdlePolicyStopsOnlyRealSilence(t *testing.T) {
 			w.done("first")
 			w.mustNotStopBy(t, 105*time.Minute, "the second command 55 minutes in")
 			w.mustStopBy(t, 112*time.Minute, true)
+		})
+	})
+	// Codex's second DENE-2900 review: output the drain loop is behind on
+	// must not hold the cap off for ever, nor may the cap stop a command whose
+	// result was already queued, and the 64 calls the live report shows must
+	// not be the only ones the cap measures.
+	t.Run("a queue kept full by output cannot hold off the cap", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			w := startOfficeWatchdog(t, false)
+			ctx, stop := context.WithCancel(context.Background())
+			flooding := make(chan struct{})
+			w.run("c1", "bash", "yes")
+			go func() {
+				defer close(flooding)
+				w.flood(ctx)
+			}()
+			// The bubble may end only once the flood has (a failed check
+			// included).
+			defer func() {
+				stop()
+				<-flooding
+			}()
+			w.mustNotStopBy(t, 59*time.Minute, "a flooding command before 60 minutes")
+			w.mustStopBy(t, 66*time.Minute, true)
+			if len(w.queue) == 0 {
+				t.Fatal("the queue drained; the case did not hold it full")
+			}
+		})
+	})
+	t.Run("a result queued when the cap is reached ends the command, not the run", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			w := startOfficeWatchdog(t, false)
+			w.run("c1", "bash", "go test ./...")
+			// The result lands in the queue just before the cap; the drain
+			// loop takes it only after the watchdog has seen the cap.
+			time.Sleep(59*time.Minute + 50*time.Second)
+			w.queue <- agent.Message{Type: agent.MessageText, Content: "ok"}
+			w.queue <- agent.Message{Type: agent.MessageToolResult, CallID: "c1"}
+			time.Sleep(time.Minute)
+			<-w.queue
+			w.received.Add(1)
+			<-w.queue
+			w.done("c1")
+			w.received.Add(1)
+			w.mustNotStopBy(t, 69*time.Minute, "a command whose result was queued at the cap")
+			w.mustStopBy(t, 77*time.Minute, false)
+		})
+	})
+	t.Run("the oldest of 80 calls at once still ends at its own cap", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			w := startOfficeWatchdog(t, false)
+			w.run("long", "bash", "make release")
+			for i := 0; i < 80; i++ {
+				time.Sleep(10 * time.Second)
+				w.run(fmt.Sprintf("p%d", i), "bash", "lint")
+			}
+			// They finish out of order: the odd ones newest first, then the
+			// even ones oldest first. long keeps running.
+			for i := 79; i >= 0; i -= 2 {
+				w.done(fmt.Sprintf("p%d", i))
+			}
+			for i := 0; i < 80; i += 2 {
+				w.done(fmt.Sprintf("p%d", i))
+			}
+			if start, ok := w.live.oldestCommand(); !ok || start != 0 {
+				t.Fatalf("oldest = %s, %v; want long's start", start, ok)
+			}
+			w.mustNotStopBy(t, 59*time.Minute, "the long command before 60 minutes")
+			w.mustStopBy(t, 62*time.Minute, true)
 		})
 	})
 	t.Run("a command the stream does not show yet is not charged the silence before it", func(t *testing.T) {

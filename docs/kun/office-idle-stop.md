@@ -12,7 +12,9 @@ but since DENE-2900 a stopped run also resumes its session once (see below).
   it stopped on, or the last step, the steps before it and the last output.
 - The run continues once with that note: the same session, or, when the run
   had no session yet or the resume is refused or cannot start, a fresh session
-  with the task and the note.
+  with the task and the note. The fresh session gets the task as a cold start
+  does: the whole issue snapshot, the continuity notice, and a brief that does
+  not say it resumes, even when the stopped run had resumed a session.
 - Stopped again, the run ends `blocked` (`idle_watchdog`) with a note that it
   will not be rerun automatically. If the continuation cannot start at all,
   the run ends `blocked` at once with the stop note. The server never retries
@@ -31,9 +33,12 @@ but since DENE-2900 a stopped run also resumes its session once (see below).
   a running command is activity, so neither its output nor other work beside
   it extends the cap, and a later command gets its own full cap. Codex's
   semantic timer uses the same rule with the oldest command the turn started.
-  A subagent hand-off (`task`, `agent`) and Cursor's background tools have no
-  start the daemon can see, so they keep the silence budget. The cap only
-  narrows the daemon-wide tool window.
+  Every running call is timed, however many run at once. Past the cap the
+  daemon waits only for the messages already queued, which may hold the
+  command's result, so output arriving faster than it is read cannot hold the
+  stop off. A subagent hand-off (`task`, `agent`) and Cursor's background
+  tools have no start the daemon can see, so they keep the silence budget. The
+  cap only narrows the daemon-wide tool window.
 
 ## How to turn it on
 
