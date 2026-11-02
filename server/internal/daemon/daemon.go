@@ -10114,10 +10114,10 @@ func (d *Daemon) executeAndDrainDetectingSkills(ctx context.Context, backend age
 	// background shells) has calls the tracker cannot see end, so it keeps
 	// the silence budget only.
 	var stoppedByCommandCap atomic.Bool
-	// receivedMessages counts what the drain loop has taken, so the cap can
-	// tell the backlog it waits for from output queued after it.
-	var receivedMessages atomic.Int64
-	commands := commandCap{stopped: &stoppedByCommandCap, received: receivedMessages.Load}
+	// progress counts what the drain loop has taken, so the cap can tell the
+	// backlog it waits for from output queued after it.
+	progress := &drainProgress{queued: func() int { return len(session.Messages) }}
+	commands := commandCap{stopped: &stoppedByCommandCap, drain: progress}
 	if session.ToolActivity == nil {
 		commands.oldest = live.oldestCommand
 	}
@@ -10283,8 +10283,7 @@ func (d *Daemon) executeAndDrainDetectingSkills(ctx context.Context, backend age
 				// can't be misattributed to backend silence.
 				observedAt := time.Now().UTC()
 				lastActivityAt.Store(int64(awakeclock.Now()))
-				live.observe(msg)
-				receivedMessages.Add(1)
+				progress.take(func() { live.observe(msg) })
 				switch msg.Type {
 				case agent.MessageStatus:
 					// Persist the session/work_dir as soon as the backend
@@ -10695,13 +10694,56 @@ func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window, toolWindow ti
 // commandCap is the command cap's view of one run (DENE-2900). oldest reports
 // when the oldest running call the cap measures started, on the awake clock;
 // nil means the run has no per-call starts and keeps the silence budget only.
-// received counts the messages the drain loop has taken, each counted after
-// oldest has seen it; nil means the cap does not wait for queued messages.
-// stopped is set when the cap, not silence, stopped the run.
+// drain is how far the drain loop has taken the run's messages; nil means the
+// cap does not wait for queued messages. stopped is set when the cap, not
+// silence, stopped the run.
 type commandCap struct {
-	oldest   func() (time.Duration, bool)
-	received func() int64
-	stopped  *atomic.Bool
+	oldest  func() (time.Duration, bool)
+	drain   *drainProgress
+	stopped *atomic.Bool
+}
+
+// drainProgress counts the messages the drain loop has taken from the queue,
+// each once the tracker has seen it (DENE-2900). queued reads the queue's
+// length.
+type drainProgress struct {
+	queued func() int
+
+	mu    sync.Mutex
+	taken int64
+}
+
+// take records one message the drain loop took: see is the tracker seeing
+// it, and the count goes up with it, in one step under the lock backlogEnd
+// reads by.
+func (p *drainProgress) take(see func()) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	see()
+	p.taken++
+}
+
+func (p *drainProgress) count() int64 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.taken
+}
+
+// backlogEnd returns the count the drain loop reaches once it has taken every
+// message queued now. The queue's length and the count are read under the
+// lock take holds, so the drain loop cannot count a message between the two
+// readings (Codex's third DENE-2900 review). Counted after the queue was
+// read, that message would be in both, and the cap would wait for a message
+// that never comes; counted before, it would be in neither, and the cap could
+// stop before the queued result. Only a message the drain loop has just
+// taken off the queue and waits on the lock to count is in neither: the stop
+// can then come while the drain loop takes the backlog's last message, the
+// race any deadline has with a result that lands at it.
+func (p *drainProgress) backlogEnd() int64 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	queued := p.queued()
+	return p.taken + int64(queued)
 }
 
 // capBacklog is what the command cap waits for before it stops a call that
@@ -10715,19 +10757,15 @@ type capBacklog struct {
 }
 
 // drained reports whether the backlog queued when the cap was reached has
-// been taken; queued is the queue's length now. The first call with a queue
-// records that backlog.
-func (b *capBacklog) drained(c commandCap, queued int) bool {
-	if c.received == nil {
+// been taken. The first call records that backlog.
+func (b *capBacklog) drained(c commandCap) bool {
+	if c.drain == nil {
 		return true
 	}
 	if !b.waiting {
-		if queued == 0 {
-			return true
-		}
-		b.waiting, b.until = true, c.received()+int64(queued)
+		b.waiting, b.until = true, c.drain.backlogEnd()
 	}
-	return c.received() >= b.until
+	return c.drain.count() >= b.until
 }
 
 // check reports whether a call the cap measures is running, and whether the
@@ -10785,7 +10823,7 @@ func (d *Daemon) runIdleWatchdogWithClock(agentCtx context.Context, window, tool
 			// killing a backend that is still producing output. Past the
 			// command cap, wait only for what was queued when the cap was
 			// reached: it may hold the call's result.
-			if capped && !backlog.drained(commands, len(messages)) || !capped && len(messages) > 0 {
+			if capped && !backlog.drained(commands) || !capped && len(messages) > 0 {
 				continue
 			}
 			// Cursor can stop its owned background tools without aborting the

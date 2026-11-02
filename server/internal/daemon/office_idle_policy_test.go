@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -64,10 +65,12 @@ type officeWatchdog struct {
 	// hidden is what the backend reports as running while its stream shows
 	// nothing yet (OpenCode).
 	hidden atomic.Pointer[[]agent.RunningTool]
-	// queue is the backend's message buffer the watchdog looks at, and
-	// received counts what the test's drain took from it.
-	queue    chan agent.Message
-	received atomic.Int64
+	// queue is the backend's message buffer the watchdog looks at, and drain
+	// counts what the test's drain loop took from it. queueRead, when set,
+	// replaces the cap's reading of the queue's length.
+	queue     chan agent.Message
+	drain     *drainProgress
+	queueRead atomic.Pointer[func() int]
 }
 
 func (w *officeWatchdog) hiddenCalls() []agent.RunningTool {
@@ -80,6 +83,12 @@ func (w *officeWatchdog) hiddenCalls() []agent.RunningTool {
 func startOfficeWatchdog(t *testing.T, unlimited bool) *officeWatchdog {
 	t.Helper()
 	w := &officeWatchdog{start: time.Now(), queue: make(chan agent.Message, 8)}
+	w.drain = &drainProgress{queued: func() int {
+		if read := w.queueRead.Load(); read != nil {
+			return (*read)()
+		}
+		return len(w.queue)
+	}}
 	now := func() time.Duration { return time.Since(w.start) }
 	w.live = &liveTracker{clock: now, running: w.hiddenCalls}
 	cfg := Config{AgentIdleWatchdog: 2 * time.Hour, AgentToolWatchdog: 2 * time.Hour, CommandWatchdog: DefaultCommandWatchdog}
@@ -95,7 +104,7 @@ func startOfficeWatchdog(t *testing.T, unlimited bool) *officeWatchdog {
 	var last atomic.Int64
 	last.Store(int64(now()))
 	countTools := countingOutputActivity(w.tools.Load, &last, func() time.Duration { return time.Duration(w.line.Load()) })
-	commands := commandCap{oldest: w.live.oldestCommand, received: w.received.Load, stopped: &w.capped}
+	commands := commandCap{oldest: w.live.oldestCommand, drain: w.drain, stopped: &w.capped}
 	go new(Daemon).runIdleWatchdogWithClock(ctx, idle, tool, &last, countTools, &w.fired, &w.thresh,
 		cancel, w.queue, nil, nil, commands, slog.Default(), now)
 	synctest.Wait()
@@ -128,8 +137,7 @@ func (w *officeWatchdog) flood(ctx context.Context) {
 	for ctx.Err() == nil {
 		time.Sleep(time.Second)
 		<-w.queue
-		w.output()
-		w.received.Add(1)
+		w.drain.take(w.output)
 		w.queue <- agent.Message{Type: agent.MessageText, Content: "line"}
 	}
 }
@@ -285,12 +293,46 @@ func TestOfficeIdlePolicyStopsOnlyRealSilence(t *testing.T) {
 			w.queue <- agent.Message{Type: agent.MessageToolResult, CallID: "c1"}
 			time.Sleep(time.Minute)
 			<-w.queue
-			w.received.Add(1)
+			w.drain.take(func() {})
 			<-w.queue
-			w.done("c1")
-			w.received.Add(1)
+			w.drain.take(func() { w.done("c1") })
 			w.mustNotStopBy(t, 69*time.Minute, "a command whose result was queued at the cap")
 			w.mustStopBy(t, 77*time.Minute, false)
+		})
+	})
+	// Codex's third DENE-2900 review: the drain loop takes the last output just
+	// as the cap reads the queue's length, and nothing follows. Counted
+	// between the cap's two readings, that line would be waited for twice,
+	// and the cap would never stop the command.
+	t.Run("output taken as the cap reads the queue does not hold the cap off", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			w := startOfficeWatchdog(t, false)
+			w.run("c1", "bash", "go test ./...")
+			time.Sleep(59*time.Minute + 50*time.Second)
+			w.queue <- agent.Message{Type: agent.MessageText, Content: "still running"}
+			var once sync.Once
+			read := func() int {
+				queued := len(w.queue)
+				once.Do(func() {
+					// Right after that reading, the drain loop takes the line.
+					// It counts it at once unless the count is locked, as
+					// the cap keeps it while it reads the queue.
+					msg := <-w.queue
+					take := func() { w.drain.take(func() { w.live.observe(msg); w.output() }) }
+					if w.drain.mu.TryLock() {
+						w.drain.mu.Unlock()
+						take()
+					} else {
+						go take()
+					}
+				})
+				return queued
+			}
+			w.queueRead.Store(&read)
+			w.mustStopBy(t, 66*time.Minute, true)
+			if len(w.queue) != 0 || w.drain.count() != 1 {
+				t.Fatalf("queue %d, taken %d: the drain loop did not take the line as the cap read the queue", len(w.queue), w.drain.count())
+			}
 		})
 	})
 	t.Run("the oldest of 80 calls at once still ends at its own cap", func(t *testing.T) {
