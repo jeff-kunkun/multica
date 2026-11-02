@@ -3883,8 +3883,10 @@ func TestExecuteAndDrain_CodexInactivityReportsMCPToolResultTranscript(t *testin
 	if err != nil {
 		t.Fatalf("executeAndDrain: %v", err)
 	}
-	if result.Status != "timeout" {
-		t.Fatalf("expected timeout, got status=%q error=%q", result.Status, result.Error)
+	// A Codex semantic timeout is a stop for silence (DENE-2900): it carries
+	// the stop note and Codex's own diagnostic.
+	if result.Status != "idle_watchdog" || !strings.Contains(result.Error, agent.CodexSemanticInactivityMarker) {
+		t.Fatalf("expected the idle_watchdog stop, got status=%q error=%q", result.Status, result.Error)
 	}
 	if tools != 1 {
 		t.Fatalf("expected one tool use, got %d", tools)
@@ -4079,8 +4081,9 @@ func TestExecuteAndDrain_IdleWatchdog_FiresOnInactivity(t *testing.T) {
 	if result.Status != "idle_watchdog" {
 		t.Fatalf("expected status=idle_watchdog, got %q (err=%q)", result.Status, result.Error)
 	}
-	if !strings.Contains(result.Error, "idle watchdog") {
-		t.Fatalf("expected error to mention idle watchdog, got %q", result.Error)
+	// The stop note (DENE-2900) names the budget and the run's last output.
+	if !strings.HasPrefix(result.Error, "空闲看门狗停了这一轮") || !strings.Contains(result.Error, "最后输出：hello") {
+		t.Fatalf("expected the idle stop note, got %q", result.Error)
 	}
 	// The watchdog should fire within a few ticks (interval = window/2 with
 	// no floor for sub-minute windows). 5× window is generous and keeps the
@@ -4224,8 +4227,10 @@ func TestExecuteAndDrain_PiWithoutTurnErrorKeepsIdleWatchdogResult(t *testing.T)
 	if result.Status != "idle_watchdog" {
 		t.Fatalf("result = %+v, want the existing idle_watchdog disposition", result)
 	}
-	if result.Error != "execution cancelled" {
-		t.Fatalf("error = %q, want the existing no-provider-error cancellation text", result.Error)
+	// No provider error outranks the stop: the error is the watchdog's own
+	// stop note (DENE-2900), not a backend text.
+	if !strings.HasPrefix(result.Error, "空闲看门狗停了这一轮：200ms 没有新消息") {
+		t.Fatalf("error = %q, want the idle stop note", result.Error)
 	}
 }
 

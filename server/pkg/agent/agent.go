@@ -59,6 +59,12 @@ type ExecOptions struct {
 	ClaudeAutoCompactTokens   int
 	Timeout                   time.Duration
 	SemanticInactivityTimeout time.Duration
+	// SemanticCommandTimeout is how long the Codex semantic timer waits while
+	// a command the turn started is still running (DENE-2900). A silent
+	// command emits no events, so without it a long build would read as a
+	// stalled model. Zero, or a value not above SemanticInactivityTimeout,
+	// keeps SemanticInactivityTimeout for that case too.
+	SemanticCommandTimeout time.Duration
 	// FirstTurnNoProgressTimeout optionally overrides the Codex first-turn
 	// no-progress ceiling — the window a turn may stay completely silent after
 	// the app-server reports turn/started before the watchdog fails it. Zero
@@ -216,6 +222,12 @@ type Session struct {
 	// progress notice. Zero means no line yet. Only the office idle policy
 	// counts it as activity (ExecOptions.OfficeIdleStop).
 	OutputActivity func() time.Duration
+	// RunningTools optionally lists the tool calls the provider is executing
+	// right now, for a CLI whose stream reports a tool only once it finished
+	// (OpenCode). The daemon adds the calls its own messages do not already
+	// hold in flight, so such a command counts as running, not as silence
+	// (DENE-2900). Nil means the stream already shows every running call.
+	RunningTools func() []RunningTool
 	// InterruptBackgroundTools stops owned background tools at the daemon's
 	// tool watchdog boundary without cancelling the agent. True means at least
 	// one tool completed/was stopped and released from accounting; the watchdog
@@ -258,6 +270,17 @@ const (
 	MessageError      MessageType = "error"
 	MessageLog        MessageType = "log"
 )
+
+// RunningTool is one tool call a provider reports as still executing.
+type RunningTool struct {
+	CallID string
+	Tool   string
+	Input  map[string]any
+	// StartedAt is the wall-clock start the provider recorded, zero when it
+	// did not record one. It is shown to people only, never measured against
+	// the idle watchdog's clock.
+	StartedAt time.Time
+}
 
 // Message is a unified event emitted by an agent during execution.
 type Message struct {

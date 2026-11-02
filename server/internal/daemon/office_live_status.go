@@ -46,19 +46,29 @@ func liveStatusFromEnv() (bool, error) {
 	}
 }
 
-// liveTracker follows one execution's messages for its live report: the
-// tool calls still in flight and the tail of the latest output.
+// liveTracker follows one execution's messages: the tool calls still in
+// flight, the latest call, and the tail of the latest output. The live report
+// reads it, and so does the idle watchdog's stop note (DENE-2900).
 type liveTracker struct {
-	mu       sync.Mutex
-	calls    []liveCall
+	// running lists the calls the backend itself reports as running (nil when
+	// its stream already shows every running call).
+	running func() []agent.RunningTool
+
+	mu    sync.Mutex
+	calls []liveCall
+	last  liveCall
+	// steps are the run's latest tool calls, oldest first, for the stop
+	// summary a resumed or fresh session gets (DENE-2900).
+	steps    []string
 	tailKind agent.MessageType
 	tail     string
 }
 
 type liveCall struct {
-	callID  string
-	tool    string
-	command string
+	callID    string
+	tool      string
+	command   string
+	startedAt time.Time
 }
 
 // observe records one backend message. A nil tracker ignores it, so the
@@ -71,9 +81,14 @@ func (t *liveTracker) observe(msg agent.Message) {
 	defer t.mu.Unlock()
 	switch msg.Type {
 	case agent.MessageToolUse:
-		t.calls = append(t.calls, liveCall{callID: msg.CallID, tool: msg.Tool, command: liveCommand(msg.Tool, msg.Input)})
+		t.last = liveCall{callID: msg.CallID, tool: msg.Tool, command: liveCommand(msg.Tool, msg.Input), startedAt: time.Now()}
+		t.calls = append(t.calls, t.last)
 		if len(t.calls) > liveMaxTrackedCalls {
 			t.calls = t.calls[len(t.calls)-liveMaxTrackedCalls:]
+		}
+		t.steps = append(t.steps, cutRunes(t.last.command, stopStepMaxRunes))
+		if len(t.steps) > stopMaxSteps {
+			t.steps = t.steps[len(t.steps)-stopMaxSteps:]
 		}
 	case agent.MessageToolResult:
 		t.finish(msg.CallID)
@@ -150,12 +165,86 @@ func liveToolOutput(output string) string {
 // redacted. With no tool in flight by the watchdog's own count the call is
 // left out, so a finished command is never shown as running.
 func (t *liveTracker) snapshot(toolsInFlight int32) (tool, command, lastOutput string) {
+	var backend []agent.RunningTool
+	if toolsInFlight > 0 && t.running != nil {
+		backend = t.running()
+	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if n := len(t.calls); n > 0 && toolsInFlight > 0 {
-		tool, command = t.calls[n-1].tool, t.calls[n-1].command
+	if toolsInFlight > 0 {
+		if n := len(t.calls); n > 0 {
+			tool, command = t.calls[n-1].tool, t.calls[n-1].command
+		} else if calls := t.backendCallsLocked(backend); len(calls) > 0 {
+			tool, command = calls[len(calls)-1].tool, calls[len(calls)-1].command
+		}
 	}
 	return tool, command, liveLastLine(t.tail)
+}
+
+// untrackedRunning counts the backend's running calls that no tool_use
+// message has put in flight yet, so the watchdog adds each call once.
+func (t *liveTracker) untrackedRunning() int32 {
+	if t.running == nil {
+		return 0
+	}
+	backend := t.running()
+	if len(backend) == 0 {
+		return 0
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return int32(len(t.backendCallsLocked(backend)))
+}
+
+// backendCallsLocked converts the backend's running calls that are not
+// already in flight by message into calls, in the backend's order.
+func (t *liveTracker) backendCallsLocked(backend []agent.RunningTool) []liveCall {
+	var calls []liveCall
+	for _, running := range backend {
+		if running.CallID != "" && t.hasCallLocked(running.CallID) {
+			continue
+		}
+		calls = append(calls, liveCall{callID: running.CallID, tool: running.Tool, command: liveCommand(running.Tool, running.Input), startedAt: running.StartedAt})
+	}
+	return calls
+}
+
+func (t *liveTracker) hasCallLocked(callID string) bool {
+	for _, call := range t.calls {
+		if call.callID == callID {
+			return true
+		}
+	}
+	return false
+}
+
+// stopFacts collects what the stop note says when the watchdog fires after
+// budget: the call the budget ran out on while a command was running (the
+// oldest still in flight), the run's latest call, and its last output line.
+func (t *liveTracker) stopFacts(budget time.Duration, commandRunning bool) idleStopFacts {
+	var backend []agent.RunningTool
+	if commandRunning && t.running != nil {
+		backend = t.running()
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	facts := idleStopFacts{
+		budget:         budget,
+		commandRunning: commandRunning,
+		lastStep:       t.last.command,
+		recentSteps:    append([]string(nil), t.steps...),
+		lastOutput:     liveLastLine(t.tail),
+		now:            time.Now(),
+	}
+	if commandRunning {
+		candidates := append(append([]liveCall(nil), t.calls...), t.backendCallsLocked(backend)...)
+		for i, call := range candidates {
+			if i == 0 || (!call.startedAt.IsZero() && (facts.commandStarted.IsZero() || call.startedAt.Before(facts.commandStarted))) {
+				facts.command, facts.commandStarted = call.command, call.startedAt
+			}
+		}
+	}
+	return facts
 }
 
 // liveCommand renders a tool call as one redacted line: the shell command when

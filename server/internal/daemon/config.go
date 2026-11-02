@@ -45,6 +45,12 @@ const (
 	// missing first model token and a stalled response stream. The generic
 	// AgentIdleWatchdog remains the global enable/disable switch.
 	DefaultOpenCodeIdleWatchdog = 10 * time.Minute
+	// DefaultCommandWatchdog is the command cap: how long one running command
+	// may stay silent before the run is stopped (DENE-2900). It applies where
+	// the no-command window is short — OpenCode's 10 minutes and Codex's own
+	// semantic timer — so a long build or log check is not mistaken for a
+	// hang there, and a stuck command still ends within the hour.
+	DefaultCommandWatchdog = 60 * time.Minute
 	// DefaultAgentIdleWatchdog is the per-task safety net that force-stops a
 	// run when the backend has emitted no message for this long AND its
 	// message queue is empty. Backends like Claude Code can hang indefinitely
@@ -182,6 +188,7 @@ type Config struct {
 	CodexTurnInterruptTimeout   time.Duration
 	CodexThreadHandshakeTimeout time.Duration
 	OpenCodeIdleWatchdog        time.Duration // OpenCode-specific no-message window; 0 falls back to AgentIdleWatchdog and values above it cannot extend the global bound
+	CommandWatchdog             time.Duration // command cap for OpenCode and Codex's semantic timer; for OpenCode it cannot extend AgentToolWatchdog; 0 = no separate cap
 	AgentIdleWatchdog           time.Duration // force-stop a run when the backend goes silent this long with an empty queue (0 = disabled)
 	// IdleStopPolicy picks how a quiet run is stopped: "" is the legacy
 	// watchdog above, "office" the office policy (MULTICA_IDLE_STOP_POLICY,
@@ -387,6 +394,15 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// cannot extend the global bound, and the global zero still disables the
 	// whole mechanism.
 	openCodeIdleWatchdog, err := durationFromEnv("MULTICA_OPENCODE_IDLE_WATCHDOG", DefaultOpenCodeIdleWatchdog)
+	if err != nil {
+		return Config{}, err
+	}
+	// MULTICA_COMMAND_WATCHDOG is the command cap (DENE-2900). For OpenCode it
+	// narrows the in-flight-tool budget: zero falls back to
+	// MULTICA_AGENT_TOOL_WATCHDOG, and a value above it cannot extend it. For
+	// Codex it is how long the semantic timer waits while a command runs;
+	// zero keeps the semantic timeout for that too.
+	commandWatchdog, err := durationFromEnv("MULTICA_COMMAND_WATCHDOG", DefaultCommandWatchdog)
 	if err != nil {
 		return Config{}, err
 	}
@@ -749,6 +765,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		CodexTurnInterruptTimeout:       codexTurnInterruptTimeout,
 		CodexThreadHandshakeTimeout:     codexThreadHandshakeTimeout,
 		OpenCodeIdleWatchdog:            openCodeIdleWatchdog,
+		CommandWatchdog:                 commandWatchdog,
 		AgentIdleWatchdog:               agentIdleWatchdog,
 		AgentToolWatchdog:               agentToolWatchdog,
 		IdleStopPolicy:                  idleStopPolicy,

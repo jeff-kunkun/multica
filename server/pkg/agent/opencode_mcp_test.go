@@ -554,9 +554,22 @@ func TestOpencodeBackendOmitsMCPEnvWhenEmpty(t *testing.T) {
 		t.Fatalf("status = %q, error = %q; want completed", r.Status, r.Error)
 	}
 
+	// The user's config survives as is; only the running-tool plugin joins it
+	// (DENE-2900), and no MCP block is added.
 	captured := readCapturedEnv(t, captureFile)
-	if got := captured["OPENCODE_CONFIG_CONTENT"]; got != userContent {
-		t.Fatalf("user OPENCODE_CONFIG_CONTENT was not preserved:\n  want %q\n  got  %q", userContent, got)
+	var doc map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(captured["OPENCODE_CONFIG_CONTENT"]), &doc); err != nil {
+		t.Fatalf("OPENCODE_CONFIG_CONTENT = %q: %v", captured["OPENCODE_CONFIG_CONTENT"], err)
+	}
+	if got, want := string(doc["mcp"]), `{"user_only":{"type":"remote","url":"https://user.example/mcp"}}`; got != want {
+		t.Fatalf("user mcp block was not preserved:\n  want %s\n  got  %s", want, got)
+	}
+	var plugins []string
+	if err := json.Unmarshal(doc["plugin"], &plugins); err != nil || len(plugins) != 1 || !strings.HasSuffix(plugins[0], "/multica-tool-activity.js") {
+		t.Fatalf("plugins = %s, want only the running-tool plugin", doc["plugin"])
+	}
+	if len(doc) != 2 {
+		t.Fatalf("OPENCODE_CONFIG_CONTENT gained keys: %s", captured["OPENCODE_CONFIG_CONTENT"])
 	}
 }
 

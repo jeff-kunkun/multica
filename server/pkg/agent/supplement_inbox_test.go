@@ -268,10 +268,20 @@ func TestOpenCodeExecuteDeliversSupplementThroughPlugin(t *testing.T) {
 	var doc struct {
 		Plugin []string `json:"plugin"`
 	}
-	if err := json.Unmarshal(config, &doc); err != nil || len(doc.Plugin) != 1 || !strings.HasPrefix(doc.Plugin[0], "file://") {
+	if err := json.Unmarshal(config, &doc); err != nil {
 		t.Fatalf("OPENCODE_CONFIG_CONTENT = %s", config)
 	}
-	if _, err := os.Stat(strings.TrimPrefix(doc.Plugin[0], "file://")); !os.IsNotExist(err) {
+	// The supplement plugin rides next to the running-tool one (DENE-2900).
+	supplement := ""
+	for _, plugin := range doc.Plugin {
+		if strings.HasSuffix(plugin, "/multica-supplement.js") {
+			supplement = plugin
+		}
+	}
+	if len(doc.Plugin) != 2 || !strings.HasPrefix(supplement, "file://") {
+		t.Fatalf("OPENCODE_CONFIG_CONTENT = %s", config)
+	}
+	if _, err := os.Stat(strings.TrimPrefix(supplement, "file://")); !os.IsNotExist(err) {
 		t.Fatalf("plugin inbox survived the run: %v", err)
 	}
 }
@@ -309,7 +319,7 @@ func TestSupplementExtensionsOnlyWhenNegotiated(t *testing.T) {
 	for _, provider := range []string{"opencode", "pi"} {
 		captureDir := t.TempDir()
 		fakePath := filepath.Join(t.TempDir(), provider)
-		writeTestExecutable(t, fakePath, []byte("#!/bin/sh\ncat > /dev/null\nprintf '%s\\n' \"$*\" > \"$CAPTURE_DIR/args\"\nprintf '%s' \"${OPENCODE_CONFIG_CONTENT-}${MULTICA_SUPPLEMENT_DIR-}\" > \"$CAPTURE_DIR/env\"\n"))
+		writeTestExecutable(t, fakePath, []byte("#!/bin/sh\ncat > /dev/null\nprintf '%s\\n' \"$*\" > \"$CAPTURE_DIR/args\"\nprintf '%s' \"${MULTICA_SUPPLEMENT_DIR-}\" > \"$CAPTURE_DIR/env\"\nprintf '%s' \"${OPENCODE_CONFIG_CONTENT-}\" > \"$CAPTURE_DIR/config\"\n"))
 		backend, err := New(provider, Config{ExecutablePath: fakePath, Logger: slog.Default(), Env: map[string]string{"CAPTURE_DIR": captureDir}})
 		if err != nil {
 			t.Fatal(err)
@@ -328,8 +338,11 @@ func TestSupplementExtensionsOnlyWhenNegotiated(t *testing.T) {
 		<-session.Result
 		args, _ := os.ReadFile(filepath.Join(captureDir, "args"))
 		env, _ := os.ReadFile(filepath.Join(captureDir, "env"))
-		if strings.Contains(string(args), "--extension") || len(env) != 0 {
-			t.Fatalf("%s: args=%q env=%q", provider, args, env)
+		// OpenCode always carries the running-tool plugin (DENE-2900), never
+		// the supplement one without negotiation.
+		config, _ := os.ReadFile(filepath.Join(captureDir, "config"))
+		if strings.Contains(string(args), "--extension") || len(env) != 0 || strings.Contains(string(config), "multica-supplement") {
+			t.Fatalf("%s: args=%q env=%q config=%q", provider, args, env, config)
 		}
 	}
 }

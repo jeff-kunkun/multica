@@ -3,8 +3,25 @@
 Under the office idle policy the daemon stops a run only after the CLI has been
 truly silent. That means no output line and no command in flight. The daemon
 then resumes the same session once and tells the agent not to rerun a hung
-command unchanged. Without the policy, the legacy watchdog behaves exactly as
-before.
+command unchanged. Without the policy, the legacy watchdog keeps its windows,
+but since DENE-2900 a stopped run also resumes its session once (see below).
+
+## Every policy since DENE-2900
+
+- A stop leaves a note as the run's error, so the issue shows it: the command
+  it stopped on, or the last step, the steps before it and the last output.
+- The run resumes the same session once with that note. If the session cannot
+  be resumed, a fresh session gets the task again with the note.
+- Stopped again, the run ends `blocked` (`idle_watchdog`) with a note that it
+  will not be rerun automatically. The server never retries `idle_watchdog`.
+  The issue moves to `blocked` too (`block_kind` external, written as the
+  run's agent with its task token), but only while it is still `in_progress`
+  with that agent assigned, at the revision the daemon read.
+- A Codex semantic-inactivity timeout counts as such a stop. Before, it was
+  `codex_semantic_inactivity`, which the server retried in a fresh session and
+  so lost every earlier step.
+- `MULTICA_COMMAND_WATCHDOG` (60m) is the cap for one silent running command,
+  for OpenCode and Codex, whose no-command windows are short.
 
 ## How to turn it on
 
@@ -35,7 +52,10 @@ mid-run applies from the next run. The claim records the policy in the run's
 always matches what the running daemon was given. A run not yet claimed shows
 the current label, which is what its claim will read.
 
-After a stop, the daemon resumes the same session once with a short prompt. If
+After a stop, the daemon resumes the same session once with a short prompt,
+followed by the stop note (DENE-2900): the command it stopped on, or the run's
+last step and output. Under either policy the same note becomes the run's
+error, which the issue shows as a comment. If
 the resumed turn also goes quiet, the run ends `blocked` with
 `idle_watchdog`, as before.
 
@@ -53,7 +73,8 @@ the resumed turn also goes quiet, the run ends `blocked` with
 - One new optional response field, `idle_unlimited`, is added to the daemon
   claim and to the issue's task list. It is omitted when false, so older
   daemons and clients read the same payload as before.
-- The resume and the partial-message flag happen only under the office policy.
+- The partial-message flag is added only under the office policy. The one
+  resume happens under every policy since DENE-2900.
 
 ## Rollback
 

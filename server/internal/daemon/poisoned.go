@@ -22,10 +22,11 @@ import (
 //     invalid_request_error (oversized payload, malformed image, etc.).
 //     The bad message is already baked into the conversation history, so
 //     every resume hits the same 400. Detected via classifyPoisonedError.
-//   - Timeout-side: Codex reported semantic inactivity after the session got
-//     stuck without agent progress. Resuming that Codex session can replay the
-//     same stuck state, while a fresh manual rerun may succeed. Detected via
-//     classifyResumeUnsafeTimeout.
+//   - Timeout-side: Codex never got its first turn going (first-turn no
+//     progress). Detected via classifyResumeUnsafeTimeout. A semantic
+//     inactivity timeout later in the turn no longer lands here: since
+//     DENE-2900 executeAndDrain reports it as an idle_watchdog stop, resumed
+//     once in the same session, because a fresh retry lost every earlier step.
 //   - Transport-side: a Codex thread/resume response too large to read back.
 //     The thread only grows, so every later resume overflows identically.
 //     Detected via classifyResumeUnsafeTransport.

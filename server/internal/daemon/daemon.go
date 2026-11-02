@@ -2190,6 +2190,7 @@ func (d *Daemon) run(ctx context.Context, healthLn net.Listener) error {
 		// without it an operator cannot read the tool budget actually in effect.
 		"tool_watchdog", d.cfg.AgentToolWatchdog,
 		"opencode_idle_watchdog", d.cfg.OpenCodeIdleWatchdog,
+		"command_watchdog", d.cfg.CommandWatchdog,
 		"idle_stop_policy", d.cfg.IdleStopPolicy,
 		// Derived from the watchdog budget too (Codex's own timer is not
 		// tool-aware), so it needs the same treatment as tool_watchdog: without
@@ -9176,9 +9177,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 	model, thinkingLevel, serviceTier = selection.Model, selection.ThinkingLevel, selection.ServiceTier
 
-	var idleWatchdogTimeout time.Duration
+	var idleWatchdogTimeout, toolWatchdogTimeout time.Duration
 	if provider == "opencode" || provider == "codearts" {
 		idleWatchdogTimeout = d.cfg.OpenCodeIdleWatchdog
+		toolWatchdogTimeout = narrowedToolWatchdog(d.cfg.AgentToolWatchdog, d.cfg.CommandWatchdog)
 	}
 	execOpts := agent.ExecOptions{
 		EnableTaskSupplement:       taskSupplementNegotiated,
@@ -9188,8 +9190,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ThreadName:                 deriveTaskThreadName(task),
 		Timeout:                    d.cfg.AgentTimeout,
 		SemanticInactivityTimeout:  d.cfg.CodexSemanticInactivityTimeout,
+		SemanticCommandTimeout:     d.cfg.CommandWatchdog,
 		FirstTurnNoProgressTimeout: d.cfg.CodexFirstTurnNoProgressTimeout,
 		IdleWatchdogTimeout:        idleWatchdogTimeout,
+		ToolWatchdogTimeout:        toolWatchdogTimeout,
 		HandshakeTimeout:           d.cfg.CodexHandshakeTimeout,
 		TurnInterruptTimeout:       d.cfg.CodexTurnInterruptTimeout,
 		ThreadHandshakeTimeout:     d.cfg.CodexThreadHandshakeTimeout,
@@ -9311,6 +9315,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"resume_session", execOpts.ResumeSessionID != "",
 		"timeout", execOpts.Timeout,
 		"idle_watchdog", execOpts.IdleWatchdogTimeout,
+		"tool_watchdog", execOpts.ToolWatchdogTimeout,
 		"office_idle_stop", execOpts.OfficeIdleStop,
 		"idle_unlimited", execOpts.IdleUnlimited,
 	)
@@ -9403,22 +9408,39 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// than being relabeled resumable by a benign-looking second error.
 		result, tools = reconcileFreshRetryResult(firstResult, firstUsage, firstTools, retryResult, retryTools, retryErr)
 	}
-	if shouldResumeAfterIdleStop(result, execOpts) {
-		// One resume of the same session after the office policy stopped it
-		// for silence (DENE-2667). A second stop ends the run as blocked.
+	if shouldResumeAfterIdleStop(result) {
+		// One resume of the same session after a watchdog stopped it for
+		// silence (DENE-2667, every run since DENE-2900). A second stop ends
+		// the run as blocked; the server does not retry idle_watchdog.
 		taskLog.Warn("idle stop: resuming the same session once", "session_id", result.SessionID, "error", result.Error)
-		execOpts.ResumeSessionID = result.SessionID
-		execOpts.ResumeExpected = true
-		if briefInline && resumedSessionHoldsBrief(provider, execOpts.ResumeSessionID) {
-			execOpts.SystemPrompt = ""
+		resumeOpts := execOpts
+		resumeOpts.ResumeSessionID = result.SessionID
+		resumeOpts.ResumeExpected = true
+		if briefInline && resumedSessionHoldsBrief(provider, resumeOpts.ResumeSessionID) {
+			resumeOpts.SystemPrompt = ""
 		}
-		resumeResult, resumeTools, resumeErr := d.executeAndDrainDetectingSkills(ctx, backend, officeIdleResumePrompt, execOpts, taskLog, task.ID, env.CodexHome, skillUsage, &msgSeq)
+		resumeResult, resumeTools, resumeErr := d.executeAndDrainDetectingSkills(ctx, backend, officeIdleResumePromptFor(result.Error), resumeOpts, taskLog, task.ID, env.CodexHome, skillUsage, &msgSeq)
+		if resumeErr == nil && shouldRetryWithFreshSession(resumeResult, resumeOpts.ResumeSessionID, resumeTools, provider) {
+			// The session could not be continued. Start fresh with the
+			// task and the stop summary rather than from nothing.
+			taskLog.Warn("idle stop: the session could not be resumed; starting fresh with the stop summary", "error", resumeResult.Error)
+			freshOpts := execOpts
+			freshOpts.ResumeSessionID = ""
+			freshOpts.ResumeExpected = false
+			resumeResult, resumeTools, resumeErr = d.executeAndDrainDetectingSkills(ctx, backend, idleFreshPromptFor(prompt, result.Error), freshOpts, taskLog, task.ID, env.CodexHome, skillUsage, &msgSeq)
+		}
 		if resumeErr != nil {
 			taskLog.Error("idle stop: resume failed to start; keeping the stopped result", "error", resumeErr)
 		} else {
 			resumeResult.Usage = mergeUsage(result.Usage, resumeResult.Usage)
 			if resumeResult.SessionID == "" {
 				resumeResult.SessionID = result.SessionID
+			}
+			if resumeResult.Status == "idle_watchdog" {
+				// Stopped twice: the issue goes to blocked so a person
+				// picks it up, and the run's error says why (DENE-2900).
+				resumeResult.Error = idleStoppedTwiceNote + "\n\n" + resumeResult.Error
+				d.blockIssueAfterIdleStops(ctx, task, agentToken, taskLog)
 			}
 			result, tools = resumeResult, tools+resumeTools
 		}
@@ -10041,17 +10063,34 @@ func (d *Daemon) executeAndDrainDetectingSkills(ctx context.Context, backend age
 	if terminalObserved == nil {
 		terminalObserved = func() bool { return false }
 	}
+	// The tracker follows every run: the live report reads it, and the stop
+	// note names the running command or the last step from it (DENE-2900).
+	live := &liveTracker{running: session.RunningTools}
+	if session.RunningTools != nil {
+		// A call the backend reports as running is in flight even though the
+		// stream has not shown it yet (OpenCode prints a tool once finished).
+		counted := watchdogToolCount
+		watchdogToolCount = func() int32 { return counted() + live.untrackedRunning() }
+	}
+	// idleStopNoteText holds the stop note, written the moment the watchdog
+	// fires: the messages a killed backend still flushes afterwards would
+	// otherwise move "the last step" past the one it stopped on.
+	var idleStopNoteText atomic.Value
+	fireIdleStop := func() {
+		note := idleStopNote(live.stopFacts(time.Duration(idleWatchdogThreshold.Load()), watchdogToolCount() > 0))
+		idleStopNoteText.Store(note)
+		taskLog.Warn("idle watchdog stop note", "note", note)
+		agentCancel()
+	}
 	watchdogCtx, stopWatchdog := context.WithCancel(agentCtx)
 	defer stopWatchdog()
 	if idleWindow > 0 {
-		go d.runIdleWatchdog(watchdogCtx, idleWindow, toolWindow, &lastActivityAt, watchdogToolCount, &idleWatchdogFired, &idleWatchdogThreshold, agentCancel, session.Messages, session.InterruptBackgroundTools, terminalObserved, taskLog)
+		go d.runIdleWatchdog(watchdogCtx, idleWindow, toolWindow, &lastActivityAt, watchdogToolCount, &idleWatchdogFired, &idleWatchdogThreshold, fireIdleStop, session.Messages, session.InterruptBackgroundTools, terminalObserved, taskLog)
 	}
 	// The live report (DENE-2667 PR 4) reads the silence on the watchdog's
 	// clock: watchdogToolCount merges the backend's tool and output activity
 	// into lastActivityAt before every reading, exactly as the watchdog does.
-	var live *liveTracker
 	if d.cfg.LiveStatus && taskID != "" {
-		live = &liveTracker{}
 		liveActivity := func() (time.Duration, int32) {
 			inFlight := watchdogToolCount()
 			return awakeclock.Now() - time.Duration(lastActivityAt.Load()), inFlight
@@ -10381,13 +10420,16 @@ func (d *Daemon) executeAndDrainDetectingSkills(ctx context.Context, backend age
 	// delivered non-authoritative result is still returned to the idle-watchdog
 	// caller for re-tagging; ordinary upstream cancellation deliberately ignores
 	// it and keeps the existing generic cancelled disposition.
-	// idleStopped tags a result the idle watchdog stopped.
+	// idleStopped tags a result the idle watchdog stopped. The stop note
+	// replaces the error the backend reports for the kill itself.
 	idleStopped := func(result agent.Result) agent.Result {
 		result.Status = "idle_watchdog"
-		if result.Error == "" {
+		if note, _ := idleStopNoteText.Load().(string); note != "" {
+			result.Error = note
+		} else if result.Error == "" {
 			result.Error = idleWatchdogReason(time.Duration(idleWatchdogThreshold.Load()))
 		}
-		if sid, _ := observedSessionID.Load().(string); opts.OfficeIdleStop && result.SessionID == "" {
+		if sid, _ := observedSessionID.Load().(string); result.SessionID == "" {
 			result.SessionID = sid
 		}
 		return result
@@ -10441,6 +10483,15 @@ func (d *Daemon) executeAndDrainDetectingSkills(ctx context.Context, backend age
 			// disposition through a dedicated failure_reason, not the
 			// generic "agent_error" bucket the aborted path falls into.
 			result = idleStopped(result)
+		} else if note := codexSemanticStopNote(result, opts, live, watchdogToolCount() > 0); note != "" {
+			// Codex's own timer stopped the turn: leave the same note, so
+			// the issue says what it stopped on (DENE-2900).
+			// It is a stop for silence like the watchdog's, so it is handled
+			// as one: resumed once in the same session, never retried by
+			// the server in a fresh one (DENE-2900).
+			taskLog.Warn("codex semantic stop note", "note", note)
+			result.Status = "idle_watchdog"
+			result.Error = note + "\n\n" + result.Error
 		}
 		return result, toolCount.Load(), nil
 	case <-drainCtx.Done():
@@ -10665,6 +10716,17 @@ func (d *Daemon) runIdleWatchdogWithClock(agentCtx context.Context, window, tool
 			return
 		}
 	}
+}
+
+// narrowedToolWatchdog is a provider's in-flight-tool budget: provider only
+// narrows the daemon-wide tool budget, and zero means "use that budget"
+// (ExecOptions.ToolWatchdogTimeout). A daemon-wide 0 — never stop while a tool
+// runs — therefore stays in force.
+func narrowedToolWatchdog(daemonWide, provider time.Duration) time.Duration {
+	if daemonWide > 0 && provider > 0 && provider < daemonWide {
+		return provider
+	}
+	return 0
 }
 
 // idleWatchdogBudgets returns one execution's silence budgets: idle with no
