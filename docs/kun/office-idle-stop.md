@@ -21,7 +21,7 @@ but since DENE-2900 a stopped run also resumes its session once (see below).
   `codex_semantic_inactivity`, which the server retried in a fresh session and
   so lost every earlier step.
 - `MULTICA_COMMAND_WATCHDOG` (60m) is the cap for one silent running command,
-  for OpenCode and Codex, whose no-command windows are short.
+  under either policy. It only narrows the daemon-wide tool window.
 
 ## How to turn it on
 
@@ -38,9 +38,12 @@ but since DENE-2900 a stopped run also resumes its session once (see below).
 
 | Case | Idle without output | With a command running |
 |---|---|---|
-| Claude, Codex | 3 minutes | 30 minutes |
-| Any other CLI (not verified for streaming) | 5 minutes | 30 minutes |
+| Every CLI | 10 minutes | the command cap (60 minutes) |
 | Issue labelled 长任务 by a person | no limit | no limit |
+
+Kun set 10 and 60 minutes on 2026-11-02 (DENE-2900). Before, the policy
+stopped after 3 minutes (5 for a CLI not verified to stream) and allowed 30
+minutes with a command.
 
 Every raw output line counts as activity. Claude runs get
 `--include-partial-messages`, so a long reply arrives word by word. Codex

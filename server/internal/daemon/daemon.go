@@ -9222,7 +9222,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		QwenpawWorkspace:       env.QwenpawWorkspace,
 	}
 	if d.cfg.IdleStopPolicy == idleStopPolicyOffice {
-		applyOfficeIdlePolicy(&execOpts, provider, task.IdleUnlimited)
+		applyOfficeIdlePolicy(&execOpts, task.IdleUnlimited, narrowedToolWatchdog(d.cfg.AgentToolWatchdog, d.cfg.CommandWatchdog))
 	}
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:

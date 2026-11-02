@@ -16,32 +16,25 @@ import (
 //
 //   - every line the CLI writes is activity: Claude streams its reply word by
 //     word, and Codex reports its thinking;
-//   - with no command running, 3 minutes of silence stops the run;
-//   - with a command running, the run may stay silent up to 30 minutes;
+//   - with no command running, 10 minutes of silence stops the run;
+//   - with a command running, the run may stay silent up to the command cap
+//     (MULTICA_COMMAND_WATCHDOG, 60 minutes);
 //   - an issue a person labelled 长任务 has no limit;
 //   - a run stopped for silence resumes the same session once.
 //
-// A CLI whose output has not been verified to stream while it works gets 5
-// minutes instead of 3. The daemon-wide MULTICA_AGENT_IDLE_WATCHDOG=0 still
+// Kun set the 10 and 60 minutes on 2026-11-02 (DENE-2900); before, the policy
+// stopped after 3 minutes (5 for a CLI not verified to stream) and allowed 30
+// with a command. The daemon-wide MULTICA_AGENT_IDLE_WATCHDOG=0 still
 // switches every watchdog off.
 const (
 	idleStopPolicyOffice = "office"
 
-	officeIdleWindow           = 3 * time.Minute
-	officeUnverifiedIdleWindow = 5 * time.Minute
-	officeToolWindow           = 30 * time.Minute
+	officeIdleWindow = 10 * time.Minute
 	// officeUnlimitedSemanticInactivity lifts Codex's own no-progress timer
 	// for a 长任务 run. Zero would mean the backend default, so "no limit" is a
 	// span no run reaches.
 	officeUnlimitedSemanticInactivity = 10 * 365 * 24 * time.Hour
 )
-
-// officeIdleStreamVerified lists the CLIs whose output was verified to keep
-// streaming while they work, a long reply or a long think (DENE-2667 real runs).
-var officeIdleStreamVerified = map[string]bool{
-	"claude": true,
-	"codex":  true,
-}
 
 func idleStopPolicyFromEnv() (string, error) {
 	switch value := strings.TrimSpace(os.Getenv("MULTICA_IDLE_STOP_POLICY")); value {
@@ -54,19 +47,18 @@ func idleStopPolicyFromEnv() (string, error) {
 	}
 }
 
-// applyOfficeIdlePolicy sets one execution's office idle budgets.
-func applyOfficeIdlePolicy(opts *agent.ExecOptions, provider string, idleUnlimited bool) {
+// applyOfficeIdlePolicy sets one execution's office idle budgets. toolWindow
+// is the command cap already narrowed to the daemon-wide tool budget
+// (narrowedToolWatchdog); zero keeps that budget.
+func applyOfficeIdlePolicy(opts *agent.ExecOptions, idleUnlimited bool, toolWindow time.Duration) {
 	opts.OfficeIdleStop = true
 	if idleUnlimited {
 		opts.IdleUnlimited = true
 		opts.SemanticInactivityTimeout = officeUnlimitedSemanticInactivity
 		return
 	}
-	opts.IdleWatchdogTimeout = officeUnverifiedIdleWindow
-	if officeIdleStreamVerified[provider] {
-		opts.IdleWatchdogTimeout = officeIdleWindow
-	}
-	opts.ToolWatchdogTimeout = officeToolWindow
+	opts.IdleWatchdogTimeout = officeIdleWindow
+	opts.ToolWatchdogTimeout = toolWindow
 }
 
 // shouldResumeAfterIdleStop reports whether a run a watchdog stopped for
