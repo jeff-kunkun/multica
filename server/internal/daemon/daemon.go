@@ -10116,7 +10116,7 @@ func (d *Daemon) executeAndDrainDetectingSkills(ctx context.Context, backend age
 	var stoppedByCommandCap atomic.Bool
 	// progress counts what the drain loop has taken, so the cap can tell the
 	// backlog it waits for from output queued after it.
-	progress := &drainProgress{queued: func() int { return len(session.Messages) }}
+	progress := newDrainProgress(func() int { return len(session.Messages) })
 	commands := commandCap{stopped: &stoppedByCommandCap, drain: progress}
 	if session.ToolActivity == nil {
 		commands.oldest = live.oldestCommand
@@ -10283,7 +10283,8 @@ func (d *Daemon) executeAndDrainDetectingSkills(ctx context.Context, backend age
 				// can't be misattributed to backend silence.
 				observedAt := time.Now().UTC()
 				lastActivityAt.Store(int64(awakeclock.Now()))
-				progress.take(func() { live.observe(msg) })
+				live.observe(msg)
+				progress.took()
 				switch msg.Type {
 				case agent.MessageStatus:
 					// Persist the session/work_dir as soon as the backend
@@ -10426,11 +10427,15 @@ func (d *Daemon) executeAndDrainDetectingSkills(ctx context.Context, backend age
 					mu.Unlock()
 					flushFirstVisible()
 				}
+			case reply := <-progress.asks:
+				// Between two messages: everything taken is counted.
+				progress.answer(reply)
 			case <-drainCtx.Done():
 				goto drainDone
 			}
 		}
 	drainDone:
+		progress.stopped()
 		close(done)
 		// Let any tick-driven flush finish before the final one: a flush still
 		// in flight would otherwise keep posting batches after this goroutine
@@ -10668,7 +10673,8 @@ func idleWatchdogTickInterval(window time.Duration) time.Duration {
 // In both cases the watchdog also requires the session.Messages buffer to be
 // empty — a buffered-but-undrained message means the drain loop is behind, not
 // the backend. Past the command cap it waits only for the messages queued
-// when the cap was reached (capBacklog), not for output queued later.
+// when the cap was reached (capBacklog), not for output queued later; the
+// drain loop itself says, between two messages, where that backlog ends.
 //
 // With a tool in flight that commands.oldest measures, toolWindow is the
 // command cap instead (DENE-2900): the run is stopped once the oldest such
@@ -10703,47 +10709,63 @@ type commandCap struct {
 	stopped *atomic.Bool
 }
 
-// drainProgress counts the messages the drain loop has taken from the queue,
-// each once the tracker has seen it (DENE-2900). queued reads the queue's
-// length.
+// drainProgress is how far the drain loop has taken the run's messages
+// (DENE-2900). Only the drain loop changes it, and only the drain loop says
+// where the queued backlog ends, between two messages: a message it has taken
+// off the queue but not handled yet is in neither the queue nor the count, so
+// a reading from any other goroutine could leave that message out, and with
+// it the result of the call the cap is about to stop (Codex's fourth review).
 type drainProgress struct {
+	// queued reads the queue's length.
 	queued func() int
-
-	mu    sync.Mutex
-	taken int64
+	// asks carries the cap's question to the drain loop, which receives it
+	// only between two messages.
+	asks chan chan int64
+	// done closes when the drain loop takes no more messages.
+	done  chan struct{}
+	taken atomic.Int64
 }
 
-// take records one message the drain loop took: see is the tracker seeing
-// it, and the count goes up with it, in one step under the lock backlogEnd
-// reads by.
-func (p *drainProgress) take(see func()) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	see()
-	p.taken++
+// drainAnswerWait is how long the cap waits for the drain loop's answer. It
+// is longer than the drain loop's slowest step with a message, the 5-second
+// session pin, so a drain loop that does not answer within it is stuck.
+const drainAnswerWait = 10 * time.Second
+
+func newDrainProgress(queued func() int) *drainProgress {
+	return &drainProgress{queued: queued, asks: make(chan chan int64), done: make(chan struct{})}
 }
 
-func (p *drainProgress) count() int64 {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.taken
+// took counts a message the drain loop has handled, after the tracker saw it.
+func (p *drainProgress) took() { p.taken.Add(1) }
+
+func (p *drainProgress) count() int64 { return p.taken.Load() }
+
+// answer is the drain loop's reply to an ask, given between two messages:
+// every message it took is counted, so the count plus the queue's length is
+// where the backlog queued now ends.
+func (p *drainProgress) answer(reply chan<- int64) {
+	reply <- p.taken.Load() + int64(p.queued())
 }
 
-// backlogEnd returns the count the drain loop reaches once it has taken every
-// message queued now. The queue's length and the count are read under the
-// lock take holds, so the drain loop cannot count a message between the two
-// readings (Codex's third DENE-2900 review). Counted after the queue was
-// read, that message would be in both, and the cap would wait for a message
-// that never comes; counted before, it would be in neither, and the cap could
-// stop before the queued result. Only a message the drain loop has just
-// taken off the queue and waits on the lock to count is in neither: the stop
-// can then come while the drain loop takes the backlog's last message, the
-// race any deadline has with a result that lands at it.
-func (p *drainProgress) backlogEnd() int64 {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	queued := p.queued()
-	return p.taken + int64(queued)
+// stopped tells the cap that the drain loop takes no more messages.
+func (p *drainProgress) stopped() { close(p.done) }
+
+// backlogEnd asks the drain loop for the count it reaches once it has taken
+// every message queued now, waiting at most wait. False means it did not
+// answer: it is busy with a message.
+func (p *drainProgress) backlogEnd(ctx context.Context, wait time.Duration) (int64, bool) {
+	reply := make(chan int64, 1)
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case p.asks <- reply:
+		return <-reply, true
+	case <-p.done:
+		return p.taken.Load(), true
+	case <-timer.C:
+	case <-ctx.Done():
+	}
+	return 0, false
 }
 
 // capBacklog is what the command cap waits for before it stops a call that
@@ -10752,18 +10774,28 @@ func (p *drainProgress) backlogEnd() int64 {
 // not defer the stop again, or a command that prints faster than the drain
 // loop takes it would never be stopped.
 type capBacklog struct {
-	waiting bool
-	until   int64
+	waiting    bool
+	until      int64
+	unanswered bool
 }
 
 // drained reports whether the backlog queued when the cap was reached has
-// been taken. The first call records that backlog.
-func (b *capBacklog) drained(c commandCap) bool {
+// been handled. The first call asks the drain loop where that backlog ends. A
+// drain loop that does not answer is busy with a message, which may be the
+// call's result, so the cap waits a tick; one that does not answer at the next
+// tick either is stuck, a hang the cap ends, so the wait stays bounded.
+func (b *capBacklog) drained(ctx context.Context, c commandCap) bool {
 	if c.drain == nil {
 		return true
 	}
 	if !b.waiting {
-		b.waiting, b.until = true, c.drain.backlogEnd()
+		end, ok := c.drain.backlogEnd(ctx, drainAnswerWait)
+		if !ok {
+			stuck := b.unanswered
+			b.unanswered = true
+			return stuck
+		}
+		b.waiting, b.until = true, end
 	}
 	return c.drain.count() >= b.until
 }
@@ -10823,7 +10855,7 @@ func (d *Daemon) runIdleWatchdogWithClock(agentCtx context.Context, window, tool
 			// killing a backend that is still producing output. Past the
 			// command cap, wait only for what was queued when the cap was
 			// reached: it may hold the call's result.
-			if capped && !backlog.drained(commands) || !capped && len(messages) > 0 {
+			if capped && !backlog.drained(agentCtx, commands) || !capped && len(messages) > 0 {
 				continue
 			}
 			// Cursor can stop its owned background tools without aborting the

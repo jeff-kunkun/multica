@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -65,12 +64,12 @@ type officeWatchdog struct {
 	// hidden is what the backend reports as running while its stream shows
 	// nothing yet (OpenCode).
 	hidden atomic.Pointer[[]agent.RunningTool]
-	// queue is the backend's message buffer the watchdog looks at, and drain
-	// counts what the test's drain loop took from it. queueRead, when set,
-	// replaces the cap's reading of the queue's length.
-	queue     chan agent.Message
-	drain     *drainProgress
-	queueRead atomic.Pointer[func() int]
+	// queue is the backend's message buffer. The test's drain loop is its only
+	// reader: it takes a message when the test lets one through (let), and
+	// answers the cap between two messages, as the daemon's drain loop does.
+	queue chan agent.Message
+	drain *drainProgress
+	let   chan chan struct{}
 }
 
 func (w *officeWatchdog) hiddenCalls() []agent.RunningTool {
@@ -82,13 +81,8 @@ func (w *officeWatchdog) hiddenCalls() []agent.RunningTool {
 
 func startOfficeWatchdog(t *testing.T, unlimited bool) *officeWatchdog {
 	t.Helper()
-	w := &officeWatchdog{start: time.Now(), queue: make(chan agent.Message, 8)}
-	w.drain = &drainProgress{queued: func() int {
-		if read := w.queueRead.Load(); read != nil {
-			return (*read)()
-		}
-		return len(w.queue)
-	}}
+	w := &officeWatchdog{start: time.Now(), queue: make(chan agent.Message, 8), let: make(chan chan struct{})}
+	w.drain = newDrainProgress(func() int { return len(w.queue) })
 	now := func() time.Duration { return time.Since(w.start) }
 	w.live = &liveTracker{clock: now, running: w.hiddenCalls}
 	cfg := Config{AgentIdleWatchdog: 2 * time.Hour, AgentToolWatchdog: 2 * time.Hour, CommandWatchdog: DefaultCommandWatchdog}
@@ -105,6 +99,7 @@ func startOfficeWatchdog(t *testing.T, unlimited bool) *officeWatchdog {
 	last.Store(int64(now()))
 	countTools := countingOutputActivity(w.tools.Load, &last, func() time.Duration { return time.Duration(w.line.Load()) })
 	commands := commandCap{oldest: w.live.oldestCommand, drain: w.drain, stopped: &w.capped}
+	go w.drainLoop(ctx)
 	go new(Daemon).runIdleWatchdogWithClock(ctx, idle, tool, &last, countTools, &w.fired, &w.thresh,
 		cancel, w.queue, nil, nil, commands, slog.Default(), now)
 	synctest.Wait()
@@ -128,6 +123,44 @@ func (w *officeWatchdog) done(id string) {
 	w.output()
 }
 
+// drainLoop is the test's drain loop. It takes the next queued message when
+// the test lets one through; a hold channel sent with it keeps the message
+// between taking it and handling it until the test closes the channel.
+func (w *officeWatchdog) drainLoop(ctx context.Context) {
+	defer w.drain.stopped()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case reply := <-w.drain.asks:
+			w.drain.answer(reply)
+		case hold := <-w.let:
+			var msg agent.Message
+			select {
+			case msg = <-w.queue:
+			case <-ctx.Done():
+				return
+			}
+			if hold != nil {
+				select {
+				case <-hold:
+				case <-ctx.Done():
+					return
+				}
+			}
+			w.live.observe(msg)
+			if msg.Type == agent.MessageToolResult {
+				w.tools.Add(-1)
+			}
+			w.output()
+			w.drain.took()
+		}
+	}
+}
+
+// pass lets the drain loop take and handle the next queued message.
+func (w *officeWatchdog) pass() { w.let <- nil }
+
 // flood keeps the message queue full until ctx ends: the backend prints
 // faster than the drain loop takes it, one message a second.
 func (w *officeWatchdog) flood(ctx context.Context) {
@@ -136,9 +169,16 @@ func (w *officeWatchdog) flood(ctx context.Context) {
 	}
 	for ctx.Err() == nil {
 		time.Sleep(time.Second)
-		<-w.queue
-		w.drain.take(w.output)
-		w.queue <- agent.Message{Type: agent.MessageText, Content: "line"}
+		select {
+		case w.let <- nil:
+		case <-ctx.Done():
+			return
+		}
+		select {
+		case w.queue <- agent.Message{Type: agent.MessageText, Content: "line"}:
+		case <-ctx.Done():
+			return
+		}
 	}
 }
 
@@ -292,47 +332,59 @@ func TestOfficeIdlePolicyStopsOnlyRealSilence(t *testing.T) {
 			w.queue <- agent.Message{Type: agent.MessageText, Content: "ok"}
 			w.queue <- agent.Message{Type: agent.MessageToolResult, CallID: "c1"}
 			time.Sleep(time.Minute)
-			<-w.queue
-			w.drain.take(func() {})
-			<-w.queue
-			w.drain.take(func() { w.done("c1") })
+			w.pass()
+			w.pass()
 			w.mustNotStopBy(t, 69*time.Minute, "a command whose result was queued at the cap")
 			w.mustStopBy(t, 77*time.Minute, false)
 		})
 	})
-	// Codex's third DENE-2900 review: the drain loop takes the last output just
-	// as the cap reads the queue's length, and nothing follows. Counted
-	// between the cap's two readings, that line would be waited for twice,
-	// and the cap would never stop the command.
-	t.Run("output taken as the cap reads the queue does not hold the cap off", func(t *testing.T) {
+	// Codex's third DENE-2900 review: the last output is taken just after the
+	// cap asked where the backlog ends, and nothing follows. It must be
+	// waited for once, not twice, or the cap would never stop the command.
+	t.Run("output taken just after the cap asked does not hold the cap off", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			w := startOfficeWatchdog(t, false)
 			w.run("c1", "bash", "go test ./...")
 			time.Sleep(59*time.Minute + 50*time.Second)
 			w.queue <- agent.Message{Type: agent.MessageText, Content: "still running"}
-			var once sync.Once
-			read := func() int {
-				queued := len(w.queue)
-				once.Do(func() {
-					// Right after that reading, the drain loop takes the line.
-					// It counts it at once unless the count is locked, as
-					// the cap keeps it while it reads the queue.
-					msg := <-w.queue
-					take := func() { w.drain.take(func() { w.live.observe(msg); w.output() }) }
-					if w.drain.mu.TryLock() {
-						w.drain.mu.Unlock()
-						take()
-					} else {
-						go take()
-					}
-				})
-				return queued
-			}
-			w.queueRead.Store(&read)
+			time.Sleep(40 * time.Second)
+			w.pass()
 			w.mustStopBy(t, 66*time.Minute, true)
 			if len(w.queue) != 0 || w.drain.count() != 1 {
-				t.Fatalf("queue %d, taken %d: the drain loop did not take the line as the cap read the queue", len(w.queue), w.drain.count())
+				t.Fatalf("queue %d, taken %d: the line was not taken after the cap asked", len(w.queue), w.drain.count())
 			}
+		})
+	})
+	// Codex's fourth DENE-2900 review: the result was queued long before the
+	// cap, and the drain loop has taken it off the queue but not handled it
+	// when the cap is reached. Neither the queue nor the count holds it then,
+	// so only the drain loop can tell the cap it is busy with a message.
+	t.Run("a result taken but not handled at the cap ends the command, not the run", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			w := startOfficeWatchdog(t, false)
+			w.run("c1", "bash", "go test ./...")
+			time.Sleep(50 * time.Minute)
+			w.queue <- agent.Message{Type: agent.MessageToolResult, CallID: "c1"}
+			time.Sleep(9*time.Minute + 30*time.Second)
+			hold := make(chan struct{})
+			w.let <- hold
+			w.mustNotStopBy(t, 61*time.Minute, "a command whose result the drain loop held at the cap")
+			close(hold)
+			w.mustNotStopBy(t, 69*time.Minute, "a command whose result the drain loop held at the cap")
+			w.mustStopBy(t, 77*time.Minute, false)
+		})
+	})
+	// The wait for the drain loop stays bounded: one that does not answer at
+	// two ticks in a row is stuck, and the cap stops the run.
+	t.Run("a drain loop stuck at the cap does not hold the cap off", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			w := startOfficeWatchdog(t, false)
+			w.run("c1", "bash", "go test ./...")
+			time.Sleep(59 * time.Minute)
+			w.queue <- agent.Message{Type: agent.MessageText, Content: "still running"}
+			w.let <- make(chan struct{})
+			w.mustNotStopBy(t, 64*time.Minute, "the first tick the drain loop did not answer")
+			w.mustStopBy(t, 66*time.Minute, true)
 		})
 	})
 	t.Run("the oldest of 80 calls at once still ends at its own cap", func(t *testing.T) {

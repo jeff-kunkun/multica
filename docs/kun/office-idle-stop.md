@@ -38,9 +38,10 @@ but since DENE-2900 a stopped run also resumes its session once (see below).
   a result message: its stream prints the call only a moment later. Past the cap the
   daemon waits only for the messages already queued, which may hold the
   command's result, so output arriving faster than it is read cannot hold the
-  stop off. It reads how many messages are queued and how many it has taken
-  in one step, so a message taken between two readings is never waited for
-  twice. A subagent hand-off (`task`, `agent`) and Cursor's background
+  stop off. Only the loop that reads the messages says where that backlog
+  ends, and only between two messages, so a message it is still handling is
+  never left out. If that loop does not answer at two checks in a row, it is
+  stuck and the cap stops the run. A subagent hand-off (`task`, `agent`) and Cursor's background
   tools have no start the daemon can see, so they keep the silence budget. The
   cap only narrows the daemon-wide tool window.
 
