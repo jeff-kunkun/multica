@@ -10099,9 +10099,15 @@ func (d *Daemon) executeAndDrainDetectingSkills(ctx context.Context, backend age
 	live := &liveTracker{running: session.RunningTools}
 	if session.RunningTools != nil {
 		// A call the backend reports as running is in flight even though the
-		// stream has not shown it yet (OpenCode prints a tool once finished).
+		// stream has not shown it yet (OpenCode prints a tool once finished),
+		// and its end is activity, as a tool_result would be: the stream
+		// shows the call only a moment after the backend stops reporting it.
 		counted := watchdogToolCount
-		watchdogToolCount = func() int32 { return counted() + live.untrackedRunning() }
+		watchdogToolCount = func() int32 {
+			running := live.untrackedRunning()
+			advanceActivity(&lastActivityAt, live.lastEnded())
+			return counted() + running
+		}
 	}
 	// The command cap measures each call the tracker follows from its start
 	// (DENE-2900). A backend that keeps its own tool accounting (Cursor's

@@ -65,7 +65,10 @@ type liveTracker struct {
 	// awake clock, keyed by liveCallKey. It is refreshed on every reading of
 	// the backend's list, so a finished call is forgotten.
 	seen map[string]time.Duration
-	last liveCall
+	// endedAt is when a reading last found a call of seen gone, on the awake
+	// clock: the call finished, which is activity, as its tool_result is.
+	endedAt time.Duration
+	last    liveCall
 	// steps are the run's latest tool calls, oldest first, for the stop
 	// summary a resumed or fresh session gets (DENE-2900).
 	steps    []string
@@ -245,8 +248,25 @@ func (t *liveTracker) backendCalls() []liveCall {
 		}
 		calls = append(calls, liveCall{callID: running.CallID, tool: running.Tool, command: command, startedAt: start})
 	}
+	for key := range t.seen {
+		if _, still := seen[key]; !still {
+			t.endedAt = now
+			break
+		}
+	}
 	t.seen = seen
 	return calls
+}
+
+// lastEnded returns when a backend-reported call was last seen to finish, on
+// the awake clock (zero before any did). OpenCode drops a call from its list
+// a moment before its stream prints the call, so without this the watchdog
+// could read that moment as silence going back to before the call started
+// (DENE-2900).
+func (t *liveTracker) lastEnded() time.Duration {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.endedAt
 }
 
 // liveCallKey identifies a backend-reported call across readings: by its id,

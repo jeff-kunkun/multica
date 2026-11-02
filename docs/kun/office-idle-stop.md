@@ -33,7 +33,9 @@ but since DENE-2900 a stopped run also resumes its session once (see below).
   a running command is activity, so neither its output nor other work beside
   it extends the cap, and a later command gets its own full cap. Codex's
   semantic timer uses the same rule with the oldest command the turn started.
-  Every running call is timed, however many run at once. Past the cap the
+  Every running call is timed, however many run at once. A call that OpenCode
+  stops reporting as running has ended, which counts as activity, the same as
+  a result message: its stream prints the call only a moment later. Past the cap the
   daemon waits only for the messages already queued, which may hold the
   command's result, so output arriving faster than it is read cannot hold the
   stop off. A subagent hand-off (`task`, `agent`) and Cursor's background

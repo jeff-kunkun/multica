@@ -14,9 +14,11 @@ import (
 
 // hiddenToolBackend models OpenCode 1.x: the stream shows a tool only once it
 // finished, and RunningTools reports the command while it runs. It stays
-// silent for silence, then prints the call and completes.
+// silent for silence, stops reporting the command, and gap later prints the
+// call and completes.
 type hiddenToolBackend struct {
 	silence time.Duration
+	gap     time.Duration
 }
 
 func (b hiddenToolBackend) Execute(ctx context.Context, _ string, _ agent.ExecOptions) (*agent.Session, error) {
@@ -42,6 +44,7 @@ func (b hiddenToolBackend) Execute(ctx context.Context, _ string, _ agent.ExecOp
 		mu.Lock()
 		running = nil
 		mu.Unlock()
+		time.Sleep(b.gap)
 		msgCh <- agent.Message{Type: agent.MessageToolUse, Tool: "bash", CallID: "oc-1", Input: map[string]any{"command": "npm run build"}}
 		msgCh <- agent.Message{Type: agent.MessageToolResult, Tool: "bash", CallID: "oc-1", Output: "built"}
 		close(msgCh)
@@ -61,14 +64,18 @@ func (b hiddenToolBackend) Execute(ctx context.Context, _ string, _ agent.ExecOp
 
 // A command the stream does not show yet still counts as running: a short
 // no-command window does not stop it (DENE-2900, "long command not killed").
+// Nor does the moment between the backend dropping the finished command and
+// its stream printing it: the gap is longer than a watchdog tick (200ms), so
+// a tick always lands in it, and that tick must not read the silence from
+// before the command as idle.
 func TestExecuteAndDrain_HiddenRunningCommandIsNotIdle(t *testing.T) {
 	t.Parallel()
 	d := newTestDaemon(t)
 	d.cfg.AgentIdleWatchdog = 5 * time.Second
 	d.cfg.AgentToolWatchdog = 5 * time.Second
 
-	result, _, err := d.executeAndDrain(context.Background(), hiddenToolBackend{silence: 400 * time.Millisecond}, "p",
-		agent.ExecOptions{IdleWatchdogTimeout: 50 * time.Millisecond, ToolWatchdogTimeout: 3 * time.Second},
+	result, _, err := d.executeAndDrain(context.Background(), hiddenToolBackend{silence: time.Second, gap: 240 * time.Millisecond}, "p",
+		agent.ExecOptions{IdleWatchdogTimeout: 400 * time.Millisecond, ToolWatchdogTimeout: 3 * time.Second},
 		slog.Default(), "t-hidden-tool", "", new(atomic.Int32))
 	if err != nil {
 		t.Fatal(err)
