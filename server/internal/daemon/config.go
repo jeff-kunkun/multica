@@ -45,11 +45,12 @@ const (
 	// missing first model token and a stalled response stream. The generic
 	// AgentIdleWatchdog remains the global enable/disable switch.
 	DefaultOpenCodeIdleWatchdog = 10 * time.Minute
-	// DefaultCommandWatchdog is the command cap: how long one running command
-	// may stay silent before the run is stopped (DENE-2900). It applies where
-	// the no-command window is short — OpenCode's 10 minutes and Codex's own
-	// semantic timer — so a long build or log check is not mistaken for a
-	// hang there, and a stuck command still ends within the hour.
+	// DefaultCommandWatchdog is the command cap: how long one command may run,
+	// counted from its own start, before the run is stopped (DENE-2900). A
+	// command that is still running is activity, so the 10-minute no-message
+	// window does not stop it, whether it prints or not; a stuck one still
+	// ends within the hour. Calls whose start the daemon cannot see (a
+	// subagent hand-off, Cursor's background tools) keep the silence budget.
 	DefaultCommandWatchdog = 60 * time.Minute
 	// DefaultAgentIdleWatchdog is the per-task safety net that force-stops a
 	// run when the backend has emitted no message for this long AND its
@@ -397,8 +398,9 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	// MULTICA_COMMAND_WATCHDOG is the command cap (DENE-2900). For OpenCode it
-	// narrows the in-flight-tool budget: zero falls back to
+	// MULTICA_COMMAND_WATCHDOG is the command cap (DENE-2900), counted from
+	// each command's own start. For OpenCode, and for every CLI under the
+	// office idle policy, it narrows the in-flight-tool budget: zero falls back to
 	// MULTICA_AGENT_TOOL_WATCHDOG, and a value above it cannot extend it. For
 	// Codex it is how long the semantic timer waits while a command runs;
 	// zero keeps the semantic timeout for that too.

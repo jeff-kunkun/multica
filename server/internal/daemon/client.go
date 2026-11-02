@@ -1517,37 +1517,47 @@ func (c *Client) postJSONWithToken(ctx context.Context, path, token string, reqB
 	return c.sendJSONWithToken(ctx, http.MethodPost, path, token, reqBody, respBody)
 }
 
-// BlockIssueAfterIdleStops moves an issue to blocked as the agent whose run a
-// watchdog stopped twice (DENE-2900): nothing reruns it, so a person has to
-// pick it up. taskToken is that run's task token, so the change is the
-// agent's own. It acts only while the issue is still in_progress with agentID
-// assigned, and pins the revision it read, so a status someone else set in
-// the meantime is left alone. It reports whether it moved the issue.
+// blockAfterIdleStopsAttempts bounds the re-reads after a revision conflict.
+const blockAfterIdleStopsAttempts = 3
+
+// BlockIssueAfterIdleStops moves an issue to blocked as the agent whose run
+// nothing will continue after a watchdog stop (DENE-2900), so a person picks
+// it up. taskToken is that run's task token, so the change is the agent's own.
+// It acts only while the issue is still in_progress with agentID assigned,
+// and pins the revision it read, so a status someone else set in the meantime
+// is left alone. A revision conflict (any other edit) reads the issue again
+// and decides again, a bounded number of times. It reports whether it moved
+// the issue.
 func (c *Client) BlockIssueAfterIdleStops(ctx context.Context, taskToken, issueID, agentID, action string) (bool, error) {
 	path := "/api/issues/" + url.PathEscape(issueID)
-	var issue struct {
-		Status       string `json:"status"`
-		AssigneeType string `json:"assignee_type"`
-		AssigneeID   string `json:"assignee_id"`
-		Revision     int64  `json:"revision"`
+	var err error
+	for attempt := 0; attempt < blockAfterIdleStopsAttempts; attempt++ {
+		var issue struct {
+			Status       string `json:"status"`
+			AssigneeType string `json:"assignee_type"`
+			AssigneeID   string `json:"assignee_id"`
+			Revision     int64  `json:"revision"`
+		}
+		if err := c.getJSONWithToken(ctx, path, taskToken, &issue); err != nil {
+			return false, err
+		}
+		if issue.Status != "in_progress" || issue.AssigneeType != "agent" || issue.AssigneeID != agentID {
+			return false, nil
+		}
+		body := map[string]any{
+			"status":            "blocked",
+			"block_kind":        "external",
+			"block_action":      action,
+			"suppress_run":      true,
+			"expected_revision": issue.Revision,
+		}
+		err = c.sendJSONWithToken(ctx, http.MethodPut, path, taskToken, body, nil)
+		var reqErr *requestError
+		if !errors.As(err, &reqErr) || reqErr.StatusCode != http.StatusConflict {
+			return err == nil, err
+		}
 	}
-	if err := c.getJSONWithToken(ctx, path, taskToken, &issue); err != nil {
-		return false, err
-	}
-	if issue.Status != "in_progress" || issue.AssigneeType != "agent" || issue.AssigneeID != agentID {
-		return false, nil
-	}
-	body := map[string]any{
-		"status":            "blocked",
-		"block_kind":        "external",
-		"block_action":      action,
-		"suppress_run":      true,
-		"expected_revision": issue.Revision,
-	}
-	if err := c.sendJSONWithToken(ctx, http.MethodPut, path, taskToken, body, nil); err != nil {
-		return false, err
-	}
-	return true, nil
+	return false, err
 }
 
 // sendJSONWithToken sends one JSON request with an explicit credential.

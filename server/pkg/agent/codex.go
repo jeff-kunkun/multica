@@ -1746,14 +1746,18 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 
 		lastSemanticActivity := time.Now()
 		lastSemanticActivityDescription := "turn/start"
-		// A command that prints nothing emits no events, so while one runs the
-		// timer waits the command budget instead (DENE-2900).
-		semanticBudget := func() (time.Duration, bool) {
-			running := runningCalls.any()
-			if running && opts.SemanticCommandTimeout > semanticInactivityTimeout {
-				return opts.SemanticCommandTimeout, true
+		// semanticWait is how long the timer has left, and the budget it
+		// measures. A command that prints nothing emits no events, so while
+		// one runs and a command cap is set, the timer runs until the oldest
+		// running command reaches the cap, counted from its start however
+		// much else happens meanwhile (DENE-2900). Otherwise it is the
+		// semantic timeout from the latest activity.
+		semanticWait := func() (wait, budget time.Duration, commandRunning bool) {
+			started, running := runningCalls.oldest()
+			if running && opts.SemanticCommandTimeout > 0 {
+				return time.Until(started.Add(opts.SemanticCommandTimeout)), opts.SemanticCommandTimeout, true
 			}
-			return semanticInactivityTimeout, running
+			return semanticInactivityTimeout - time.Since(lastSemanticActivity), semanticInactivityTimeout, running
 		}
 		semanticTimer := time.NewTimer(semanticInactivityTimeout)
 		defer semanticTimer.Stop()
@@ -1842,8 +1846,8 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			case activity := <-semanticActivityCh:
 				lastSemanticActivity = time.Now()
 				lastSemanticActivityDescription = activity
-				budget, _ := semanticBudget()
-				resetTimer(semanticTimer, budget)
+				wait, _, _ := semanticWait()
+				resetTimer(semanticTimer, wait)
 				if activity == "status:running" && !firstTurnStarted {
 					firstTurnStarted = true
 					firstItemWait.start(time.Now(), c.activeTurnID())
@@ -1879,11 +1883,17 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 					"last_activity", lastSemanticActivityDescription,
 				)
 			case <-semanticTimer.C:
+				// The timer holds the state the latest activity it saw left
+				// behind; an activity the channel dropped can leave it short.
+				wait, budget, commandRunning := semanticWait()
+				if wait > 0 {
+					semanticTimer.Reset(wait)
+					continue
+				}
 				waitingForTurn = false
 				finishFirstItemWait("semantic_inactivity_timeout")
 				finalStatus = "timeout"
 				turnID := c.activeTurnID()
-				budget, commandRunning := semanticBudget()
 				timeoutDiagnostic = codexTimeoutDiagnostic{
 					Kind:           codexTimeoutSemanticInactivity,
 					Timeout:        budget,
@@ -2517,11 +2527,12 @@ func logCodexAgentMessage(logger *slog.Logger, msg Message) {
 }
 
 // codexRunningCalls holds the tool calls a Codex turn started and has not
-// finished, so the semantic timer can tell a silent command from a silent
-// model (DENE-2900). The reader goroutine writes it; the lifecycle loop reads.
+// finished, with their starts, so the semantic timer can tell a silent command
+// from a silent model and cap each command from its start (DENE-2900). The
+// reader goroutine writes it; the lifecycle loop reads.
 type codexRunningCalls struct {
-	mu  sync.Mutex
-	ids map[string]struct{}
+	mu     sync.Mutex
+	starts map[string]time.Time
 }
 
 func (r *codexRunningCalls) observe(msg Message) {
@@ -2532,26 +2543,35 @@ func (r *codexRunningCalls) observe(msg Message) {
 	defer r.mu.Unlock()
 	switch msg.Type {
 	case MessageToolUse:
-		if r.ids == nil {
-			r.ids = make(map[string]struct{})
+		if r.starts == nil {
+			r.starts = make(map[string]time.Time)
 		}
-		r.ids[msg.CallID] = struct{}{}
+		if _, running := r.starts[msg.CallID]; !running {
+			r.starts[msg.CallID] = time.Now()
+		}
 	case MessageToolResult:
-		delete(r.ids, msg.CallID)
+		delete(r.starts, msg.CallID)
 	}
 }
 
-func (r *codexRunningCalls) any() bool {
+// oldest returns the start of the oldest running call, false when none runs.
+func (r *codexRunningCalls) oldest() (time.Time, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return len(r.ids) > 0
+	var oldest time.Time
+	for _, start := range r.starts {
+		if oldest.IsZero() || start.Before(oldest) {
+			oldest = start
+		}
+	}
+	return oldest, !oldest.IsZero()
 }
 
 // reset forgets every call: an interrupted turn's commands were stopped.
 func (r *codexRunningCalls) reset() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.ids = nil
+	r.starts = nil
 }
 
 func describeCodexSemanticActivity(msg Message) string {

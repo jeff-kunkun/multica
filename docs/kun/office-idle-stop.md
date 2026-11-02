@@ -10,18 +10,30 @@ but since DENE-2900 a stopped run also resumes its session once (see below).
 
 - A stop leaves a note as the run's error, so the issue shows it: the command
   it stopped on, or the last step, the steps before it and the last output.
-- The run resumes the same session once with that note. If the session cannot
-  be resumed, a fresh session gets the task again with the note.
+- The run continues once with that note: the same session, or, when the run
+  had no session yet or the resume is refused or cannot start, a fresh session
+  with the task and the note.
 - Stopped again, the run ends `blocked` (`idle_watchdog`) with a note that it
-  will not be rerun automatically. The server never retries `idle_watchdog`.
-  The issue moves to `blocked` too (`block_kind` external, written as the
-  run's agent with its task token), but only while it is still `in_progress`
-  with that agent assigned, at the revision the daemon read.
+  will not be rerun automatically. If the continuation cannot start at all,
+  the run ends `blocked` at once with the stop note. The server never retries
+  `idle_watchdog`.
+- Either way the issue moves to `blocked` too (`block_kind` external, written
+  as the run's agent with its task token), but only while it is still
+  `in_progress` with that agent assigned, at the revision the daemon read. On
+  a revision conflict the daemon reads the issue again and decides again, up
+  to 3 times, so someone else's change wins. If the move fails, the run's
+  comment says so and asks the owner to move or reassign the issue.
 - A Codex semantic-inactivity timeout counts as such a stop. Before, it was
   `codex_semantic_inactivity`, which the server retried in a fresh session and
   so lost every earlier step.
-- `MULTICA_COMMAND_WATCHDOG` (60m) is the cap for one silent running command,
-  under either policy. It only narrows the daemon-wide tool window.
+- `MULTICA_COMMAND_WATCHDOG` (60m) is the cap for one command, under either
+  policy. It counts from that command's own start, not from the last message:
+  a running command is activity, so neither its output nor other work beside
+  it extends the cap, and a later command gets its own full cap. Codex's
+  semantic timer uses the same rule with the oldest command the turn started.
+  A subagent hand-off (`task`, `agent`) and Cursor's background tools have no
+  start the daemon can see, so they keep the silence budget. The cap only
+  narrows the daemon-wide tool window.
 
 ## How to turn it on
 
@@ -38,7 +50,7 @@ but since DENE-2900 a stopped run also resumes its session once (see below).
 
 | Case | Idle without output | With a command running |
 |---|---|---|
-| Every CLI | 10 minutes | the command cap (60 minutes) |
+| Every CLI | 10 minutes | the command cap (60 minutes from the command's start) |
 | Issue labelled 长任务 by a person | no limit | no limit |
 
 Kun set 10 and 60 minutes on 2026-11-02 (DENE-2900). Before, the policy
@@ -59,7 +71,7 @@ After a stop, the daemon resumes the same session once with a short prompt,
 followed by the stop note (DENE-2900): the command it stopped on, or the run's
 last step and output. Under either policy the same note becomes the run's
 error, which the issue shows as a comment. If
-the resumed turn also goes quiet, the run ends `blocked` with
+the continuation also goes quiet, the run ends `blocked` with
 `idle_watchdog`, as before.
 
 ## Verified end to end (2026-10-27, dev stack, windows shortened to 30 s)

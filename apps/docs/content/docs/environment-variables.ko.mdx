@@ -242,7 +242,7 @@ API key와 base URL이 모두 비어 있으면 이 레이어가 꺼지고 업스
 | `MULTICA_AGENT_IDLE_WATCHDOG` | `2h` | 출력과 도구 실행이 모두 없을 때의 무응답 상한. `0`이면 watchdog 전체가 비활성화됩니다 |
 | `MULTICA_AGENT_TOOL_WATCHDOG` | `MULTICA_AGENT_IDLE_WATCHDOG`와 동일 | 단일 도구 호출이 계속 무응답인 시간 상한. 모델보다 도구에 더 여유를 주고 싶을 때만 따로 설정하며, `0`이면 도구 실행 중에는 강제 종료하지 않습니다. Cursor의 백그라운드 셸은 실행한 프로세스가 종료될 때까지 실행 중으로 간주됩니다. 이 상한에 도달하면 데몬이 해당 프로세스를 정리하고, Cursor가 최종 결과를 내도록 새 watchdog 예산을 부여합니다. 프로세스 소유권이나 정리를 검증할 수 없으면 일반적인 실행 취소 정책이 적용됩니다 |
 | `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` | OpenCode 전용 무응답 기준값 |
-| `MULTICA_COMMAND_WATCHDOG` | `60m` | 명령 상한: 실행 중인 명령 하나가 출력 없이 있을 수 있는 시간. OpenCode 는 도구 예산으로 사용하고(`MULTICA_AGENT_TOOL_WATCHDOG` 를 넘을 수 없음), Codex 의미 타이머는 명령 실행 중 이 시간을 기다립니다. `0` 은 별도 상한 없음 |
+| `MULTICA_COMMAND_WATCHDOG` | `60m` | 명령 상한: 명령 하나가 자신의 시작부터 실행될 수 있는 시간(출력 여부와 무관). 도구 예산을 좁히며(`MULTICA_AGENT_TOOL_WATCHDOG` 를 넘을 수 없음), Codex 의미 타이머는 가장 오래된 실행 중 명령의 시작부터 셉니다. `0` 은 별도 상한 없음 |
 | `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | `MULTICA_AGENT_IDLE_WATCHDOG`와 동일 | Codex 의미 활동 없음 기준값. 기본값은 idle / tool 예산 중 큰 값. 턴이 시작한 명령이 실행 중인 동안에는 대신 `MULTICA_COMMAND_WATCHDOG` 를 기다립니다 |
 | `MULTICA_CODEX_FIRST_TURN_TIMEOUT` | `0` | Codex 첫 턴 무진행 상한의 명시적 재정의; `0` 은 기본값 유지. 실제 첫 턴 대기는 여전히 `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` 및 전체 실행 타임아웃으로 제한됨 — `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` 을 이 값보다 엄격히 크게(여유를 두고) 설정해야 하며, 그렇지 않으면 대기가 그 값으로 잘리고 모델 카탈로그 시작 재시도가 건너뛰어짐. 값이 같으면 충분하지 않음: 의미 타이머가 먼저 시작되므로 값이 같을 때도 재시도가 손실될 수 있음 |
 | `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s`, `thread/start`·`thread/resume`: `60s` | Codex app-server 시작 handshake 상한. 명시적으로 설정한 값은 두 예산을 모두 일괄 재정의합니다 |

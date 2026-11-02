@@ -9408,41 +9408,61 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// than being relabeled resumable by a benign-looking second error.
 		result, tools = reconcileFreshRetryResult(firstResult, firstUsage, firstTools, retryResult, retryTools, retryErr)
 	}
-	if shouldResumeAfterIdleStop(result) {
-		// One resume of the same session after a watchdog stopped it for
-		// silence (DENE-2667, every run since DENE-2900). A second stop ends
-		// the run as blocked; the server does not retry idle_watchdog.
-		taskLog.Warn("idle stop: resuming the same session once", "session_id", result.SessionID, "error", result.Error)
-		resumeOpts := execOpts
-		resumeOpts.ResumeSessionID = result.SessionID
-		resumeOpts.ResumeExpected = true
-		if briefInline && resumedSessionHoldsBrief(provider, resumeOpts.ResumeSessionID) {
-			resumeOpts.SystemPrompt = ""
+	if shouldResumeAfterIdleStop(result) && ctx.Err() == nil {
+		// One continuation after a watchdog stopped the run for silence
+		// (DENE-2667, every run since DENE-2900): the same session when it
+		// can be resumed, otherwise a fresh one given the task and the stop
+		// note, so the work does not restart from nothing. A second stop, or
+		// a continuation that cannot start, ends the run as blocked; the
+		// server does not retry idle_watchdog.
+		stopNote := result.Error
+		var next agent.Result
+		var nextTools int32
+		var nextErr error
+		fresh := result.SessionID == ""
+		if fresh {
+			taskLog.Warn("idle stop: no session to resume; starting fresh with the stop note", "error", stopNote)
+		} else {
+			taskLog.Warn("idle stop: resuming the same session once", "session_id", result.SessionID, "error", stopNote)
+			resumeOpts := execOpts
+			resumeOpts.ResumeSessionID = result.SessionID
+			resumeOpts.ResumeExpected = true
+			if briefInline && resumedSessionHoldsBrief(provider, resumeOpts.ResumeSessionID) {
+				resumeOpts.SystemPrompt = ""
+			}
+			next, nextTools, nextErr = d.executeAndDrainDetectingSkills(ctx, backend, officeIdleResumePromptFor(stopNote), resumeOpts, taskLog, task.ID, env.CodexHome, skillUsage, &msgSeq)
+			fresh = ctx.Err() == nil && (nextErr != nil || shouldRetryWithFreshSession(next, resumeOpts.ResumeSessionID, nextTools, provider))
+			if fresh {
+				taskLog.Warn("idle stop: the session could not be resumed; starting fresh with the stop note", "start_error", nextErr, "error", next.Error)
+			}
 		}
-		resumeResult, resumeTools, resumeErr := d.executeAndDrainDetectingSkills(ctx, backend, officeIdleResumePromptFor(result.Error), resumeOpts, taskLog, task.ID, env.CodexHome, skillUsage, &msgSeq)
-		if resumeErr == nil && shouldRetryWithFreshSession(resumeResult, resumeOpts.ResumeSessionID, resumeTools, provider) {
-			// The session could not be continued. Start fresh with the
-			// task and the stop summary rather than from nothing.
-			taskLog.Warn("idle stop: the session could not be resumed; starting fresh with the stop summary", "error", resumeResult.Error)
+		if fresh {
 			freshOpts := execOpts
 			freshOpts.ResumeSessionID = ""
 			freshOpts.ResumeExpected = false
-			resumeResult, resumeTools, resumeErr = d.executeAndDrainDetectingSkills(ctx, backend, idleFreshPromptFor(prompt, result.Error), freshOpts, taskLog, task.ID, env.CodexHome, skillUsage, &msgSeq)
+			next, nextTools, nextErr = d.executeAndDrainDetectingSkills(ctx, backend, idleFreshPromptFor(prompt, stopNote), freshOpts, taskLog, task.ID, env.CodexHome, skillUsage, &msgSeq)
 		}
-		if resumeErr != nil {
-			taskLog.Error("idle stop: resume failed to start; keeping the stopped result", "error", resumeErr)
-		} else {
-			resumeResult.Usage = mergeUsage(result.Usage, resumeResult.Usage)
-			if resumeResult.SessionID == "" {
-				resumeResult.SessionID = result.SessionID
+		switch {
+		case nextErr != nil && ctx.Err() != nil:
+			// The task was cancelled meanwhile; the cancellation decides.
+			taskLog.Info("idle stop: task cancelled before the continuation started", "error", nextErr)
+		case nextErr != nil:
+			// Nothing continues the work, so a person has to (DENE-2900).
+			taskLog.Error("idle stop: the continuation failed to start", "error", nextErr)
+			result.Error = idleNotContinuedNote + "\n\n" + stopNote +
+				d.blockIssueAfterIdleStops(ctx, task, agentToken, idleNotContinuedAction, taskLog)
+		default:
+			next.Usage = mergeUsage(result.Usage, next.Usage)
+			if next.SessionID == "" && !fresh {
+				next.SessionID = result.SessionID
 			}
-			if resumeResult.Status == "idle_watchdog" {
+			if next.Status == "idle_watchdog" {
 				// Stopped twice: the issue goes to blocked so a person
 				// picks it up, and the run's error says why (DENE-2900).
-				resumeResult.Error = idleStoppedTwiceNote + "\n\n" + resumeResult.Error
-				d.blockIssueAfterIdleStops(ctx, task, agentToken, taskLog)
+				next.Error = idleStoppedTwiceNote + "\n\n" + next.Error +
+					d.blockIssueAfterIdleStops(ctx, task, agentToken, idleBlockAction, taskLog)
 			}
-			result, tools = resumeResult, tools+resumeTools
+			result, tools = next, tools+nextTools
 		}
 	}
 	// Record the account-level quota hit on the SAME terminal result, and only
@@ -10072,12 +10092,21 @@ func (d *Daemon) executeAndDrainDetectingSkills(ctx context.Context, backend age
 		counted := watchdogToolCount
 		watchdogToolCount = func() int32 { return counted() + live.untrackedRunning() }
 	}
+	// The command cap measures each call the tracker follows from its start
+	// (DENE-2900). A backend that keeps its own tool accounting (Cursor's
+	// background shells) has calls the tracker cannot see end, so it keeps
+	// the silence budget only.
+	var stoppedByCommandCap atomic.Bool
+	commands := commandCap{stopped: &stoppedByCommandCap}
+	if session.ToolActivity == nil {
+		commands.oldest = live.oldestCommand
+	}
 	// idleStopNoteText holds the stop note, written the moment the watchdog
 	// fires: the messages a killed backend still flushes afterwards would
 	// otherwise move "the last step" past the one it stopped on.
 	var idleStopNoteText atomic.Value
 	fireIdleStop := func() {
-		note := idleStopNote(live.stopFacts(time.Duration(idleWatchdogThreshold.Load()), watchdogToolCount() > 0))
+		note := idleStopNote(live.stopFacts(time.Duration(idleWatchdogThreshold.Load()), watchdogToolCount() > 0, stoppedByCommandCap.Load()))
 		idleStopNoteText.Store(note)
 		taskLog.Warn("idle watchdog stop note", "note", note)
 		agentCancel()
@@ -10085,7 +10114,7 @@ func (d *Daemon) executeAndDrainDetectingSkills(ctx context.Context, backend age
 	watchdogCtx, stopWatchdog := context.WithCancel(agentCtx)
 	defer stopWatchdog()
 	if idleWindow > 0 {
-		go d.runIdleWatchdog(watchdogCtx, idleWindow, toolWindow, &lastActivityAt, watchdogToolCount, &idleWatchdogFired, &idleWatchdogThreshold, fireIdleStop, session.Messages, session.InterruptBackgroundTools, terminalObserved, taskLog)
+		go d.runIdleWatchdog(watchdogCtx, idleWindow, toolWindow, &lastActivityAt, watchdogToolCount, &idleWatchdogFired, &idleWatchdogThreshold, fireIdleStop, session.Messages, session.InterruptBackgroundTools, terminalObserved, commands, taskLog)
 	}
 	// The live report (DENE-2667 PR 4) reads the silence on the watchdog's
 	// clock: watchdogToolCount merges the backend's tool and output activity
@@ -10620,6 +10649,16 @@ func idleWatchdogTickInterval(window time.Duration) time.Duration {
 // empty — a buffered-but-undrained message means the drain loop is behind, not
 // the backend.
 //
+// With a tool in flight that commands.oldest measures, toolWindow is the
+// command cap instead (DENE-2900): the run is stopped once the oldest such
+// call has run that long since it started, however much else it printed
+// meanwhile, and never for silence before that. A command stuck in a loop of
+// output, or one running beside other work, would otherwise never reach the
+// silence budget, and one the stream does not show yet would be charged the
+// silence from before it started. The silence budget still applies while
+// only unmeasured calls are in flight (a subagent hand-off, or a backend that
+// keeps its own tool accounting).
+//
 // Polling rate comes from idleWatchdogTickInterval, so a run is force-stopped
 // somewhere between its budget and budget + tick, never earlier.
 //
@@ -10627,14 +10666,33 @@ func idleWatchdogTickInterval(window time.Duration) time.Duration {
 // awake. lastActivityAt and every native tool timestamp are awakeclock
 // readings. A laptop that sleeps through a run resumes with its silence
 // exactly where it was before the lid closed (GitHub #9024).
-func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window, toolWindow time.Duration, lastActivityAt *atomic.Int64, inFlightTools func() int32, fired *atomic.Bool, firedThreshold *atomic.Int64, cancel context.CancelFunc, messages <-chan agent.Message, interruptBackground func() bool, terminalObserved func() bool, taskLog *slog.Logger) {
-	d.runIdleWatchdogWithClock(agentCtx, window, toolWindow, lastActivityAt, inFlightTools, fired, firedThreshold, cancel, messages, interruptBackground, terminalObserved, taskLog, awakeclock.Now)
+func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window, toolWindow time.Duration, lastActivityAt *atomic.Int64, inFlightTools func() int32, fired *atomic.Bool, firedThreshold *atomic.Int64, cancel context.CancelFunc, messages <-chan agent.Message, interruptBackground func() bool, terminalObserved func() bool, commands commandCap, taskLog *slog.Logger) {
+	d.runIdleWatchdogWithClock(agentCtx, window, toolWindow, lastActivityAt, inFlightTools, fired, firedThreshold, cancel, messages, interruptBackground, terminalObserved, commands, taskLog, awakeclock.Now)
+}
+
+// commandCap is the command cap's view of one run (DENE-2900). oldest reports
+// when the oldest running call the cap measures started, on the awake clock;
+// nil means the run has no per-call starts and keeps the silence budget only.
+// stopped is set when the cap, not silence, stopped the run.
+type commandCap struct {
+	oldest  func() (time.Duration, bool)
+	stopped *atomic.Bool
+}
+
+// check reports whether a call the cap measures is running, and whether the
+// oldest one has run for budget by now.
+func (c commandCap) check(now, budget time.Duration) (running, over bool) {
+	if c.oldest == nil {
+		return false, false
+	}
+	start, ok := c.oldest()
+	return ok, ok && now-start >= budget
 }
 
 // runIdleWatchdogWithClock is runIdleWatchdog with the awake clock injected,
 // so tests can simulate a host suspend: wall time that passes while the
 // awake reading stands still.
-func (d *Daemon) runIdleWatchdogWithClock(agentCtx context.Context, window, toolWindow time.Duration, lastActivityAt *atomic.Int64, inFlightTools func() int32, fired *atomic.Bool, firedThreshold *atomic.Int64, cancel context.CancelFunc, messages <-chan agent.Message, interruptBackground func() bool, terminalObserved func() bool, taskLog *slog.Logger, awakeNow func() time.Duration) {
+func (d *Daemon) runIdleWatchdogWithClock(agentCtx context.Context, window, toolWindow time.Duration, lastActivityAt *atomic.Int64, inFlightTools func() int32, fired *atomic.Bool, firedThreshold *atomic.Int64, cancel context.CancelFunc, messages <-chan agent.Message, interruptBackground func() bool, terminalObserved func() bool, commands commandCap, taskLog *slog.Logger, awakeNow func() time.Duration) {
 	tickWindow := window
 	if toolWindow > 0 && toolWindow < tickWindow {
 		tickWindow = toolWindow
@@ -10652,15 +10710,19 @@ func (d *Daemon) runIdleWatchdogWithClock(agentCtx context.Context, window, tool
 			// toolWindow <= 0 disables the in-flight bound entirely.
 			threshold := window
 			toolInFlight := inFlightTools() > 0
+			measured, capped := false, false
 			if toolInFlight {
 				if toolWindow <= 0 {
 					continue
 				}
 				threshold = toolWindow
+				measured, capped = commands.check(awakeNow(), toolWindow)
 			}
 			last := lastActivityAt.Load()
 			idleFor := awakeNow() - time.Duration(last)
-			if idleFor < threshold {
+			// A measured command is bounded by the cap alone: its silence is
+			// expected, and the cap already ends one that never returns.
+			if measured && !capped || !measured && idleFor < threshold {
 				continue
 			}
 			// A buffered-but-undrained message means the drain loop is
@@ -10690,8 +10752,13 @@ func (d *Daemon) runIdleWatchdogWithClock(agentCtx context.Context, window, tool
 			// Refresh native tool activity BEFORE reading its timestamp. The
 			// callback may publish newer activity without changing the count.
 			currentToolInFlight := inFlightTools() > 0
-			currentActivity := lastActivityAt.Load()
-			if currentActivity != last ||
+			if capped {
+				// The cap counts from the call's start, so activity does not
+				// matter; only that the call is still running past it.
+				if _, still := commands.check(awakeNow(), toolWindow); !still || !currentToolInFlight || len(messages) > 0 {
+					continue
+				}
+			} else if currentActivity := lastActivityAt.Load(); currentActivity != last ||
 				currentToolInFlight != toolInFlight || len(messages) > 0 {
 				continue
 			}
@@ -10709,8 +10776,12 @@ func (d *Daemon) runIdleWatchdogWithClock(agentCtx context.Context, window, tool
 				"idle_for", idleFor.Round(time.Second).String(),
 				"threshold", threshold.String(),
 				"tool_in_flight", toolInFlight,
+				"command_cap", capped,
 			)
 			firedThreshold.Store(int64(threshold))
+			if capped && commands.stopped != nil {
+				commands.stopped.Store(true)
+			}
 			fired.Store(true)
 			cancel()
 			return

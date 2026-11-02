@@ -17,10 +17,12 @@ import (
 //   - every line the CLI writes is activity: Claude streams its reply word by
 //     word, and Codex reports its thinking;
 //   - with no command running, 10 minutes of silence stops the run;
-//   - with a command running, the run may stay silent up to the command cap
-//     (MULTICA_COMMAND_WATCHDOG, 60 minutes);
+//   - a running command is activity; one command may run up to the command
+//     cap (MULTICA_COMMAND_WATCHDOG, 60 minutes), counted from its own start,
+//     whether it prints or not;
 //   - an issue a person labelled 长任务 has no limit;
-//   - a run stopped for silence resumes the same session once.
+//   - a stopped run continues once: the same session, or a fresh one with the
+//     task and the stop note when there is no session or it cannot resume.
 //
 // Kun set the 10 and 60 minutes on 2026-11-02 (DENE-2900); before, the policy
 // stopped after 3 minutes (5 for a CLI not verified to stream) and allowed 30
@@ -62,11 +64,12 @@ func applyOfficeIdlePolicy(opts *agent.ExecOptions, idleUnlimited bool, toolWind
 }
 
 // shouldResumeAfterIdleStop reports whether a run a watchdog stopped for
-// silence gets its one resume of the same session. Since DENE-2900 that is
-// every such run, not only the office policy's: a fresh retry lost the
-// context of dozens of steps.
+// silence gets its one continuation: the same session when it can be resumed,
+// a fresh one with the stop note otherwise. Since DENE-2900 that is every such
+// run, not only the office policy's: a server retry started from nothing and
+// lost the context of dozens of steps.
 func shouldResumeAfterIdleStop(result agent.Result) bool {
-	return result.Status == "idle_watchdog" && result.SessionID != ""
+	return result.Status == "idle_watchdog"
 }
 
 // officeIdleResumePrompt is the next instruction of the resumed session.
@@ -97,27 +100,45 @@ func idleFreshPromptFor(taskPrompt, stopNote string) string {
 // stopped again: nothing retries it automatically, a person decides.
 const idleStoppedTwiceNote = "同一轮连续被停了 2 次（第一次停下后已在原会话接着跑过一次），不再自动重跑，这一轮记为阻塞。请人看一下卡在哪，再决定怎么继续。"
 
-// idleBlockAction is the blocked issue's next step (at most 80 characters).
-const idleBlockAction = "连停两次，不再自动重跑：看单里的停止说明，重派或补指示"
+// idleNotContinuedNote heads the run's error when the continuation after the
+// first stop could not even start: nothing reruns it, a person decides.
+const idleNotContinuedNote = "这一轮被停下后，接着跑（原会话和新会话）都没能启动，不再自动重跑，这一轮记为阻塞。请人看一下下面的停止说明，再决定怎么继续。"
 
-// blockIssueAfterIdleStops moves the run's issue to blocked once its resumed
-// session was stopped again (DENE-2900). It writes as the run's agent, with
-// the task's own token, and only while the issue is still in_progress with
-// that agent assigned, so a status someone already set is never overwritten.
-// A failure is logged, not fatal: the run's error still reaches the issue.
-func (d *Daemon) blockIssueAfterIdleStops(ctx context.Context, task Task, token string, taskLog *slog.Logger) {
+// The blocked issue's next step (at most 80 characters).
+const (
+	idleBlockAction        = "连停两次，不再自动重跑：看单里的停止说明，重派或补指示"
+	idleNotContinuedAction = "停下后没能接着跑：看单里的停止说明，重派或补指示"
+)
+
+// blockIssueAfterIdleStops moves the run's issue to blocked once nothing will
+// continue the run (DENE-2900): its continuation was stopped again or could
+// not start. It writes as the run's agent, with the task's own token, and only
+// while the issue is still in_progress with that agent assigned, so a status
+// someone already set is never overwritten. It returns what the run's error
+// adds: nothing once the issue is blocked or no longer this run's to move, and
+// the failure with what to do when the move failed, so the issue does not
+// read as in progress with no one running it.
+func (d *Daemon) blockIssueAfterIdleStops(ctx context.Context, task Task, token, action string, taskLog *slog.Logger) string {
 	if task.IssueID == "" || d.client == nil {
-		return
+		return ""
 	}
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	moved, err := d.client.BlockIssueAfterIdleStops(ctx, token, task.IssueID, task.AgentID, idleBlockAction)
+	moved, err := d.client.BlockIssueAfterIdleStops(ctx, token, task.IssueID, task.AgentID, action)
 	switch {
 	case err != nil:
 		taskLog.Warn("idle stop: could not move the issue to blocked", "issue_id", task.IssueID, "error", err)
+		return "\n\n" + idleBlockFailedNote(err)
 	case moved:
-		taskLog.Info("idle stop: stopped twice; issue moved to blocked", "issue_id", task.IssueID)
+		taskLog.Info("idle stop: issue moved to blocked", "issue_id", task.IssueID)
 	default:
-		taskLog.Info("idle stop: stopped twice; issue left as is (not in_progress with this agent)", "issue_id", task.IssueID)
+		taskLog.Info("idle stop: issue left as is (not in_progress with this agent)", "issue_id", task.IssueID)
 	}
+	return ""
+}
+
+// idleBlockFailedNote tells whoever reads the issue that the move to blocked
+// failed, why, and what to do instead.
+func idleBlockFailedNote(err error) string {
+	return "没能把单子挪到「已阻塞」（" + cutRunes(err.Error(), 200) + "）。单子可能还显示进行中，但已经没有员工在跑：请负责人手动挪到已阻塞，或重新派单。"
 }

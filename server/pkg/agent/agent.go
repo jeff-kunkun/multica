@@ -59,11 +59,13 @@ type ExecOptions struct {
 	ClaudeAutoCompactTokens   int
 	Timeout                   time.Duration
 	SemanticInactivityTimeout time.Duration
-	// SemanticCommandTimeout is how long the Codex semantic timer waits while
-	// a command the turn started is still running (DENE-2900). A silent
+	// SemanticCommandTimeout is the command cap of the Codex semantic timer
+	// (DENE-2900): while a command the turn started is still running, the
+	// timer ends the turn once the oldest such command has run this long,
+	// counted from its start, and not for silence before that. A silent
 	// command emits no events, so without it a long build would read as a
-	// stalled model. Zero, or a value not above SemanticInactivityTimeout,
-	// keeps SemanticInactivityTimeout for that case too.
+	// stalled model. Zero keeps SemanticInactivityTimeout since the latest
+	// activity for that case too.
 	SemanticCommandTimeout time.Duration
 	// FirstTurnNoProgressTimeout optionally overrides the Codex first-turn
 	// no-progress ceiling — the window a turn may stay completely silent after

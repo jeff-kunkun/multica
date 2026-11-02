@@ -14,12 +14,14 @@ type idleStopFacts struct {
 	// commandRunning reports that a tool call was still in flight, so the
 	// in-flight-tool budget ran out rather than the no-command one.
 	commandRunning bool
-	command        string    // the oldest call still running; "" when unknown
-	commandStarted time.Time // when it started; zero when unknown
-	lastStep       string    // the run's latest tool call; "" when it made none
-	lastOutput     string    // the run's last output line; "" when none
-	recentSteps    []string  // the run's latest tool calls, oldest first
-	now            time.Time
+	// capped reports that a command ran past the command cap, counted from
+	// its start; otherwise the run went silent past the budget.
+	capped      bool
+	command     string        // the call it stopped on; "" when unknown
+	commandAge  time.Duration // how long that call had run (awake time)
+	lastStep    string        // the run's latest tool call; "" when it made none
+	lastOutput  string        // the run's last output line; "" when none
+	recentSteps []string      // the run's latest tool calls, oldest first
 }
 
 // idleStopNote is the issue comment a watchdog stop leaves (DENE-2900): which
@@ -31,9 +33,11 @@ func idleStopNote(f idleStopFacts) string {
 	if f.commandRunning {
 		b.WriteString("命令看门狗停了这一轮：")
 		switch {
-		case f.command != "" && !f.commandStarted.IsZero():
-			fmt.Fprintf(&b, "命令 %s 已跑约 %s 还没结束，这期间没有任何新消息，超过单条命令上限 %s。",
-				noteCode(f.command), zhDuration(f.now.Sub(f.commandStarted)), zhDuration(f.budget))
+		case f.capped && f.command != "":
+			fmt.Fprintf(&b, "命令 %s 已跑约 %s 还没结束，超过单条命令上限 %s。",
+				noteCode(f.command), zhDuration(f.commandAge), zhDuration(f.budget))
+		case f.capped:
+			fmt.Fprintf(&b, "有命令跑了 %s 还没结束，超过单条命令上限。", zhDuration(f.budget))
 		case f.command != "":
 			fmt.Fprintf(&b, "命令 %s 还没结束，已经 %s 没有任何新消息，超过单条命令上限。",
 				noteCode(f.command), zhDuration(f.budget))
@@ -92,21 +96,21 @@ func cutRunes(s string, n int) string {
 }
 
 // codexSemanticStopNote is the stop note for a turn Codex's own semantic
-// timer ended, or "" when the result is anything else. The budget is the one
-// the backend waited: the command budget while a command ran, otherwise the
-// semantic timeout.
+// timer ended, or "" when the result is anything else. With a command running
+// and a command cap set, that timer stopped the command at the cap, counted
+// from its start; otherwise the model was silent past the semantic timeout.
 func codexSemanticStopNote(result agent.Result, opts agent.ExecOptions, live *liveTracker, commandRunning bool) string {
 	if result.Status != "timeout" || !strings.Contains(result.Error, agent.CodexSemanticInactivityMarker) {
 		return ""
+	}
+	if commandRunning && opts.SemanticCommandTimeout > 0 {
+		return idleStopNote(live.stopFacts(opts.SemanticCommandTimeout, true, true))
 	}
 	budget := opts.SemanticInactivityTimeout
 	if budget <= 0 {
 		budget = DefaultCodexSemanticInactivityTimeout
 	}
-	if commandRunning && opts.SemanticCommandTimeout > budget {
-		budget = opts.SemanticCommandTimeout
-	}
-	return idleStopNote(live.stopFacts(budget, commandRunning))
+	return idleStopNote(live.stopFacts(budget, commandRunning, false))
 }
 
 // noteCode renders a command as inline code. A backtick inside it would end
