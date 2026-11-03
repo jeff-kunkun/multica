@@ -71,6 +71,44 @@ require_config "$config" 'DATABASE_REPLICA_URL: postgres://reader:secret@replica
 require_config "$config" 'DATABASE_REPLICA_MAX_CONNS: "12"'
 require_config "$config" 'DATABASE_REPLICA_MIN_CONNS: "1"'
 
+# DENE-2927: the self-host backend logs at info unless .env asks otherwise
+# (the binary's own default is debug), and every app container, green ones
+# included, rotates its Docker log instead of growing without bound.
+require_config "$config" 'LOG_LEVEL: info'
+debug_config="$(LOG_LEVEL=debug docker compose --env-file "$tmp_env" -f docker-compose.selfhost.yml config)"
+require_config "$debug_config" 'LOG_LEVEL: debug'
+bluegreen_json="$(
+  docker compose --env-file "$tmp_env" \
+    -f docker-compose.selfhost.yml \
+    -f docker-compose.selfhost.build.yml \
+    -f docker-compose.selfhost.bluegreen.yml \
+    config --format json
+)"
+node -e '
+  const services = JSON.parse(require("fs").readFileSync(0, "utf8")).services;
+  const want = { driver: "json-file", "max-size": "100m", "max-file": "3" };
+  for (const name of ["backend", "frontend", "backend-green", "frontend-green"]) {
+    const logging = (services[name] || {}).logging || {};
+    const got = { driver: logging.driver, ...(logging.options || {}) };
+    for (const [key, value] of Object.entries(want)) {
+      if (got[key] !== value) {
+        console.error(`${name} logging ${key} is ${JSON.stringify(got[key])}, want ${value}`);
+        process.exit(1);
+      }
+    }
+  }
+  for (const name of ["backend", "backend-green"]) {
+    if (services[name].environment.LOG_LEVEL !== "info") {
+      console.error(`${name} LOG_LEVEL is ${services[name].environment.LOG_LEVEL}, want info`);
+      process.exit(1);
+    }
+  }
+  if (services.postgres.logging) {
+    console.error("postgres logging must stay unset so a plain up -d does not recreate the database");
+    process.exit(1);
+  }
+' <<<"$bluegreen_json"
+
 # The backend environment is an explicit allowlist, so a variable documented in
 # .env.example but missing here silently never reaches the container: the
 # operator configures it, the server never sees it, and nothing reports the gap.
