@@ -73,6 +73,9 @@
   "new": {
     "title": "新建任务",
     "title_placeholder": "任务标题",
+    "similar_title": "同项目已有相似工作单",
+    "similar_hint": "请回原单评论接力。确属不同工作，在描述单独写一行「查重放行：和候选单号不同在……」，列全候选编号，差异至少 8 字。近期完成单的后续工作，描述点名原单即可。",
+    "similar_done": "近期完成",
     "create": "创建任务",
     "creating": "创建中...",
     "description_placeholder": "描述...（输入 @ 提及）"

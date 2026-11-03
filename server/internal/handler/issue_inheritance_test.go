@@ -80,7 +80,20 @@ func TestCreateIssue_AgentOriginInheritsSourceProject(t *testing.T) {
 	parent := parentResponse.ID
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, parent) })
 	fx := newIssueCreateInheritanceFixture(t, parent, "")
-	child := createAgentIssueForInheritanceTest(t, fx, "inherits source issue project", nil)
+	req := newRequest(http.MethodPost, "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title": parentResponse.Title, "allow_duplicate": true,
+	})
+	req.Header.Set("X-Agent-ID", fx.agentID)
+	req.Header.Set("X-Task-ID", fx.taskID)
+	blocked := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusConflict)
+	var conflict struct {
+		Code string `json:"code"`
+	}
+	blocked.JSON(&conflict)
+	if conflict.Code != "active_duplicate_issue" {
+		t.Fatalf("inherited project bypassed similarity: %s", blocked.Body)
+	}
+	child := createAgentIssueForInheritanceTest(t, fx, "independent deployment verification", nil)
 	if child.ProjectID == nil || *child.ProjectID != projectID {
 		t.Fatalf("source issue project_id = %v, want %s", child.ProjectID, projectID)
 	}

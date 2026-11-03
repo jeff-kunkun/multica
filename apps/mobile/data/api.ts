@@ -80,10 +80,12 @@ import {
   PrioritizeQueuedChatTaskResponseSchema,
   TimelineEntriesSchema,
   WorkspaceSubscriptionSummarySchema,
+  SimilarIssuesResponseSchema,
 } from "@multica/core/api/schemas";
 import type {
   AppConfigResponse,
   RefreshSessionResponse,
+  SimilarIssuesResponse,
 } from "@multica/core/api/schemas";
 import {
   ActiveTasksResponseSchema,
@@ -740,6 +742,16 @@ class ApiClient {
       EMPTY_ISSUE_FALLBACK,
       { ...opts, endpoint: "getIssue" },
     );
+  }
+
+  async similarIssues(
+    params: { project_id: string; title: string; description?: string },
+    opts?: { signal?: AbortSignal },
+  ): Promise<SimilarIssuesResponse> {
+    const query = new URLSearchParams({ project_id: params.project_id, title: params.title });
+    if (params.description) query.set("description", params.description);
+    const raw = await this.fetch<unknown>(`/api/issues/similar?${query}`, { signal: opts?.signal });
+    return SimilarIssuesResponseSchema.parse(raw);
   }
 
   // Write endpoint — mirrors POST /api/issues

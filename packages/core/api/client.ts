@@ -2,7 +2,7 @@ import { parseFastAccess, type FastAccessRequest } from "./fast-access";
 import type { ZodType } from "zod";
 import type { IssueWakeup, IssueWakeupInput, IssueWakeupSummaryRow, PausedWakeup, SystemWakeup, WakeupRun, WorkspaceSystemWakeup } from "../types/issue-wakeup";
 import type { WorkspaceWakeupPage, WorkspaceWakeupFilters } from "../types/issue-wakeup";
-import { WorkspaceWakeupPageSchema, IssueWakeupSchema, IssueWakeupSummaryRowSchema, PausedWakeupSchema, SystemWakeupSchema, WakeupRunSchema, WorkspaceSystemWakeupSchema } from "./schemas";
+import { WorkspaceWakeupPageSchema, IssueWakeupSchema, IssueWakeupSummaryRowSchema, PausedWakeupSchema, SystemWakeupSchema, WakeupRunSchema, WorkspaceSystemWakeupSchema, SimilarIssuesResponseSchema, type SimilarIssuesResponse } from "./schemas";
 import type { ArchivedInboxFilters } from "../inbox/filter-store";
 import type { ArchivedInboxPage, ArchivedInboxFacets } from "../types/inbox";
 import type { InboxBoardResponse, UnreadInboxIssue } from "../types/home";
@@ -1493,6 +1493,23 @@ export class ApiClient {
     return parseWithFallback(raw, SearchIssuesResponseSchema, EMPTY_SEARCH_ISSUES_RESPONSE, {
       endpoint: "GET /api/issues/search",
     });
+  }
+
+  async similarIssues(params: {
+    project_id: string;
+    title: string;
+    description?: string;
+    parent_issue_id?: string;
+    signal?: AbortSignal;
+  }): Promise<SimilarIssuesResponse> {
+    const search = new URLSearchParams({ project_id: params.project_id, title: params.title });
+    if (params.description) search.set("description", params.description);
+    if (params.parent_issue_id) search.set("parent_issue_id", params.parent_issue_id);
+    const raw = await this.fetch<unknown>(
+      `/api/issues/similar?${search}`,
+      params.signal ? { signal: params.signal } : undefined,
+    );
+    return SimilarIssuesResponseSchema.parse(raw);
   }
 
   async searchProjects(params: { q: string; limit?: number; offset?: number; include_closed?: boolean; signal?: AbortSignal }): Promise<SearchProjectsResponse> {

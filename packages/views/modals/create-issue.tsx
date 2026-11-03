@@ -103,6 +103,7 @@ import { IssuePickerModal } from "./issue-picker-modal";
 import { useT } from "../i18n";
 import { SourceContextPreviewCard, useSourceContextFailureMessage } from "./source-context-preview";
 import { useIssueLimitUpgradePrompt } from "./use-issue-limit-upgrade-prompt";
+import { SimilarIssuesNotice } from "./similar-issues";
 
 // ManualCreatePanel — manual-mode body of the create-issue dialog. Renders
 // DialogContent + everything inside; the surrounding `<Dialog>` is owned by
@@ -815,12 +816,21 @@ export function ManualCreatePanel({
                 <div className="flex items-center gap-2 text-body text-muted-foreground ml-7">
                   <span className="truncate">{dup.issue.identifier} – {dup.issue.title}</span>
                 </div>
+                {dup.candidates && (
+                  <div className="mt-2 max-h-48 overflow-y-auto text-caption text-muted-foreground">
+                    {dup.candidates.map((candidate) => (
+                      <p key={candidate.id} className="break-words">{candidate.identifier} – {candidate.title}</p>
+                    ))}
+                    <p className="mt-2">{t(($) => $.create_issue.similar_hint)}</p>
+                  </div>
+                )}
                 {/* See the created-issue toast above: toast content lives
                     outside NavigationProvider, so this stays a button. */}
                 <button
                   type="button"
                   className="ml-7 mt-2 text-body text-primary hover:underline cursor-pointer"
                   onClick={() => {
+                    onClose();
                     router.push(p.issueDetail(dup.issue.id));
                     toast.dismiss(toastId);
                   }}
@@ -1065,6 +1075,14 @@ export function ManualCreatePanel({
               />
               {descDragOver && <FileDropOverlay />}
             </div>
+
+            <SimilarIssuesNotice
+              onNavigate={onClose}
+              title={title}
+              description={draft.manual.description}
+              projectId={projectSeeded || projectTouched ? projectId : (projectId ?? parentIssue?.project_id ?? undefined)}
+              parentId={parentIssueId}
+            />
 
             {anchorCommentId && (
               <SourceContextPreviewCard

@@ -279,6 +279,11 @@ var issueCreateCmd = &cobra.Command{
 // created, so they live where that action is looked up.
 func issueCreateLong() string {
 	return "Create a new issue.\n\n" +
+		"Before opening work in a project, use `multica issue similar --help`.\n" +
+		"The server blocks similar active/recent work and lists candidates; continue\n" +
+		"in the original issue's comments. Different work needs a standalone\n" +
+		"查重放行： reason naming the candidates in the description.\n" +
+		"--allow-duplicate does not bypass same-project similarity.\n\n" +
 		"Body: write a multi-line or rich description to a file inside the working\n" +
 		"directory and pass --description-file ./description.md; inline --description\n" +
 		"is for one short line (the shell rewrites quotes, backticks and $() first).\n" +
@@ -811,7 +816,7 @@ func init() {
 	issueCreateCmd.Flags().String("start-date", "", "Start date (calendar day, YYYY-MM-DD)")
 	issueCreateCmd.Flags().String("due-date", "", "Due date (calendar day, YYYY-MM-DD)")
 	issueCreateCmd.Flags().String("waiting-for", "", "What this backlog issue is waiting for, one line (80 chars max). Required when an agent puts an issue in backlog; nothing to wait for means use todo")
-	issueCreateCmd.Flags().Bool("allow-duplicate", false, "Allow creating an issue even when an active duplicate exists")
+	issueCreateCmd.Flags().Bool("allow-duplicate", false, "Allow a legacy exact-title duplicate; same-project similarity still requires a 查重放行 reason in the description (see issue similar --help)")
 	issueCreateCmd.Flags().Bool("plan-first", false, "Ask the agent for a plan first: no review, done or PR link until a person approves it (see multica issue plan)")
 	issueCreateCmd.Flags().String("output", "json", "Output format: table or json")
 	issueCreateCmd.Flags().StringSlice("attachment", nil, "File path(s) to attach (can be specified multiple times). Each file is uploaded and its markdown reference is appended to the description, which is what makes it render on the issue page")
@@ -1861,11 +1866,20 @@ func runIssueCreate(cmd *cobra.Command, _ []string) error {
 	var result map[string]any
 	if fromComment != "" {
 		result, err = createIssueFromComment(ctx, client, fromComment, body)
-		if err != nil {
-			return err
-		}
-	} else if err := client.PostJSON(ctx, "/api/issues", body, &result); err != nil {
+	} else {
+		err = client.PostJSON(ctx, "/api/issues", body, &result)
+	}
+	if err != nil {
 		if msg, ok := activeDuplicateIssueCreateMessage(err); ok {
+			if output, _ := cmd.Flags().GetString("output"); output == "json" {
+				var httpErr *cli.HTTPError
+				var payload map[string]any
+				if errors.As(err, &httpErr) && json.Unmarshal([]byte(httpErr.Body), &payload) == nil {
+					if printErr := cli.PrintJSON(cmd.OutOrStdout(), payload); printErr != nil {
+						return printErr
+					}
+				}
+			}
 			return errors.New(msg)
 		}
 		return fmt.Errorf("create issue: %w", err)

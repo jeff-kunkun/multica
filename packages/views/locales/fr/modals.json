@@ -165,7 +165,10 @@
     "toast_created": "Tâche créée",
     "view_issue": "Voir la tâche",
     "toast_failed": "Échec de la création de la tâche",
-    "toast_duplicate_title": "Tâche en double",
+    "toast_duplicate_title": "Des tâches similaires existent dans ce projet",
+    "similar_title": "Des tâches similaires existent dans ce projet",
+    "similar_hint": "Poursuivez dans une tâche existante. Pour un travail différent, ajoutez une ligne distincte : 查重放行：<toutes les références et une différence d’au moins 8 caractères>. Pour une tâche récemment terminée, citez sa référence dans la description.",
+    "similar_done": "Terminée récemment",
     "toast_duplicate_view": "Voir la tâche existante",
     "issue_limit": {
       "title": "Cet espace de travail a atteint sa limite de tâches",

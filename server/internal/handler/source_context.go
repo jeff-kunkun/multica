@@ -912,6 +912,14 @@ func (h *Handler) createAgentCommentSubIssue(w http.ResponseWriter, r *http.Requ
 }
 
 func (h *Handler) writeSourceContextError(w http.ResponseWriter, err error, limits service.SourceContextLimitUsage) {
+	var similar *service.SimilarIssuesError
+	if errors.As(err, &similar) && len(similar.Candidates) > 0 {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"code": "active_duplicate_issue", "error": similar.Error(),
+			"issue": similar.Candidates[0], "candidates": similar.Candidates,
+		})
+		return
+	}
 	if writeIssueLimitReached(w, err) {
 		return
 	}

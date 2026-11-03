@@ -1063,10 +1063,9 @@ func TestCreateIssueRejectsActiveDuplicate(t *testing.T) {
 
 	title := "SH-PM-SYNTH-01 Synthesize recommendation-to-shortlist planning outputs " + suffix
 	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-		"title":           title,
-		"status":          "in_progress",
-		"parent_issue_id": parentID,
-		"project_id":      projectID,
+		"title":      title,
+		"status":     "in_progress",
+		"project_id": projectID,
 	})
 	w = testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var original IssueResponse
@@ -1074,9 +1073,8 @@ func TestCreateIssueRejectsActiveDuplicate(t *testing.T) {
 	issueID = original.ID
 
 	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-		"title":           "  sh-pm-synth-01   synthesize recommendation-to-shortlist planning outputs " + suffix + "  ",
-		"parent_issue_id": parentID,
-		"project_id":      projectID,
+		"title":      "  sh-pm-synth-01   synthesize recommendation-to-shortlist planning outputs " + suffix + "  ",
+		"project_id": projectID,
 	})
 	w = testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusConflict)
 	var conflict struct {
@@ -1091,15 +1089,15 @@ func TestCreateIssueRejectsActiveDuplicate(t *testing.T) {
 	if conflict.Issue.ID != issueID || conflict.Issue.Status != "in_progress" {
 		t.Fatalf("conflict issue = %#v, want original %s in_progress", conflict.Issue, issueID)
 	}
-	if !strings.Contains(conflict.Error, original.Identifier+" "+title) || !strings.Contains(conflict.Error, "allow_duplicate=true") || !strings.Contains(conflict.Error, "--allow-duplicate") {
+	if !strings.Contains(conflict.Error, original.Identifier+" "+title) || !strings.Contains(conflict.Error, "查重放行") || !strings.Contains(conflict.Error, "评论接力") {
 		t.Fatalf("unexpected duplicate message: %q", conflict.Error)
 	}
 
 	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":           title,
-		"parent_issue_id": parentID,
 		"project_id":      projectID,
 		"allow_duplicate": true,
+		"description":     "查重放行：和 " + original.Identifier + " 不同在另一个部署环境中执行独立回归验证",
 	})
 	w = testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var duplicate IssueResponse
@@ -1110,9 +1108,8 @@ func TestCreateIssueRejectsActiveDuplicate(t *testing.T) {
 	}
 
 	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
-		"title":           title,
-		"parent_issue_id": parentID,
-		"project_id":      projectID,
+		"title":      title,
+		"project_id": projectID,
 	})
 	w = testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusConflict)
 	w.JSON(&conflict)

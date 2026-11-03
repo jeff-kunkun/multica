@@ -2915,8 +2915,8 @@ export const EMPTY_SQUAD_MEMBER_STATUS_LIST = { members: [] };
 
 // Structured error body — POST /api/workspaces/:wsId/issues 409 conflict.
 //
-// When the server detects an active issue with the same title in the same
-// workspace, it returns `{ code: "active_duplicate_issue", error, issue }`
+// When the server detects an exact duplicate or same-project similar work,
+// it returns `{ code: "active_duplicate_issue", error, issue, candidates? }`
 // instead of letting the create through. The UI uses the embedded issue ref
 // to offer "view existing" rather than dropping the user into a generic
 // "create failed" toast.
@@ -2933,6 +2933,25 @@ export const EMPTY_SQUAD_MEMBER_STATUS_LIST = { members: [] };
 //     out. `.loose()` lets the field pass through unchanged for any other
 //     consumer.
 
+export const SimilarIssueCandidateSchema = z.object({
+  id: z.string(),
+  identifier: z.string(),
+  title: z.string(),
+  status: z.string(),
+  score: z.number(),
+  why: z.string(),
+  recent_done: z.boolean(),
+}).loose();
+
+export const SimilarIssuesResponseSchema = z.object({
+  candidates: z.array(SimilarIssueCandidateSchema),
+  would_block: z.boolean(),
+  threshold: z.number(),
+});
+
+export type SimilarIssueCandidate = z.infer<typeof SimilarIssueCandidateSchema>;
+export type SimilarIssuesResponse = z.infer<typeof SimilarIssuesResponseSchema>;
+
 export const DuplicateIssueErrorBodySchema = z.object({
   code: z.literal("active_duplicate_issue"),
   error: z.string().optional(),
@@ -2941,6 +2960,7 @@ export const DuplicateIssueErrorBodySchema = z.object({
     identifier: z.string(),
     title: z.string(),
   }).loose(),
+  candidates: z.array(SimilarIssueCandidateSchema).optional(),
 }).loose();
 
 // A destructive confirmation must fail closed on an incomplete plan. Do not
@@ -2962,6 +2982,7 @@ export interface DuplicateIssueErrorBody {
     identifier: string;
     title: string;
   };
+  candidates?: SimilarIssueCandidate[];
 }
 
 // Webhook delivery schemas — backing the Autopilot Deliveries section. Enums
