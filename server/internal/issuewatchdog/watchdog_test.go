@@ -1,16 +1,10 @@
 package issuewatchdog
 
 import (
-	"context"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
-
-	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
 func TestManagerReplyRequiresAssignedSignatureAndSubstance(t *testing.T) {
@@ -64,103 +58,65 @@ func TestEveryManagerHasAnAssignedSignature(t *testing.T) {
 	}
 }
 
-func TestConfigIsDisabledByDefaultAndRejectsInvalidThresholds(t *testing.T) {
-	for _, name := range []string{
-		"MULTICA_ISSUE_WATCHDOG_ENABLED", "MULTICA_ISSUE_WATCHDOG_WORKSPACE_ID",
-		"MULTICA_ISSUE_WATCHDOG_WEBHOOK_URL", "MULTICA_ISSUE_WATCHDOG_WEBHOOK_KEY",
-		"MULTICA_ISSUE_WATCHDOG_TICK", "MULTICA_ISSUE_WATCHDOG_TODO_DELAY",
-		"MULTICA_ISSUE_WATCHDOG_IDLE_INTERVAL", "MULTICA_ISSUE_WATCHDOG_MANAGER_WAIT",
-		"MULTICA_ISSUE_WATCHDOG_EMPLOYEE_ROUNDS", "MULTICA_ISSUE_WATCHDOG_HEARTBEAT_FILE",
-		"MULTICA_ISSUE_WATCHDOG_RUN_AWARE", "MULTICA_ISSUE_WATCHDOG_SILENT_INTERVAL",
-		"MULTICA_ISSUE_WATCHDOG_IN_REVIEW_WAIT", "MULTICA_ISSUE_WATCHDOG_KUN_LABEL",
-		"MULTICA_ISSUE_WATCHDOG_KUN_GROUP",
-	} {
-		t.Setenv(name, "")
-	}
-	// An empty label turns it off; unset it so the default applies.
-	if err := os.Unsetenv("MULTICA_ISSUE_WATCHDOG_KUN_LABEL"); err != nil {
-		t.Fatal(err)
-	}
+func TestConfigHasOnlyOneDecisionEngine(t *testing.T) {
+	t.Setenv("MULTICA_ISSUE_WATCHDOG_ENABLED", "")
+	t.Setenv("MULTICA_ISSUE_WATCHDOG_TICK", "")
+	t.Setenv("MULTICA_ISSUE_WATCHDOG_STOP_ROUTING", "true")
+	t.Setenv("MULTICA_ISSUE_WATCHDOG_REVIEW_WAKE", "true")
+	t.Setenv("MULTICA_ISSUE_WATCHDOG_EMPLOYEE_ROUNDS", "2")
 	cfg, err := ConfigFromEnv()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Enabled {
-		t.Fatal("watchdog must default to disabled")
+	if cfg.Enabled || cfg.StopRouting || cfg.ReviewWake || cfg.NoRunWait != 30*time.Minute {
+		t.Fatalf("unexpected active config: %+v", cfg)
 	}
-	if cfg.RunAware {
-		t.Fatal("run-aware reminders must default to off so a deploy alone keeps the old behavior")
-	}
-	if cfg.SilentInterval != 20*time.Minute {
-		t.Fatalf("silent-run reminder interval = %s, want 20m", cfg.SilentInterval)
-	}
-	if cfg.TickInterval != time.Minute {
-		t.Fatalf("watchdog scan interval = %s, want 1m", cfg.TickInterval)
-	}
-	// The office timeouts: todo 6h, in_progress and in_review 2h.
-	if cfg.TodoStartDelay != 6*time.Hour {
-		t.Fatalf("todo start delay = %s, want 6h", cfg.TodoStartDelay)
-	}
-	if cfg.IdleInterval != 2*time.Hour {
-		t.Fatalf("idle reminder interval = %s, want 2h", cfg.IdleInterval)
-	}
-	if cfg.InReviewWait != 2*time.Hour {
-		t.Fatalf("in_review wait = %s, want 2h", cfg.InReviewWait)
-	}
-	if cfg.KunLabel != "等 Kun 拍板" || cfg.KunGroup != "Multica 办公室" {
-		t.Fatalf("Kun label / group = %q / %q, want 等 Kun 拍板 / Multica 办公室", cfg.KunLabel, cfg.KunGroup)
-	}
-	if cfg.ManagerWait != 15*time.Minute {
-		t.Fatalf("manager reply wait = %s, want 15m", cfg.ManagerWait)
-	}
-
 	t.Setenv("MULTICA_ISSUE_WATCHDOG_ENABLED", "true")
-	t.Setenv("MULTICA_ISSUE_WATCHDOG_WORKSPACE_ID", "8b82babe-01a5-41f5-b726-622bd77aa839")
-	t.Setenv("MULTICA_ISSUE_WATCHDOG_WEBHOOK_URL", "https://receiver.example.invalid/alerts")
-	t.Setenv("MULTICA_ISSUE_WATCHDOG_WEBHOOK_KEY", "test-only")
-	t.Setenv("MULTICA_ISSUE_WATCHDOG_IDLE_INTERVAL", "not-a-duration")
-	if _, err := ConfigFromEnv(); err == nil {
-		t.Fatal("invalid threshold was accepted")
+	t.Setenv("MULTICA_ISSUE_WATCHDOG_WORKSPACE_ID", "11111111-2222-3333-4444-555555555555")
+	t.Setenv("MULTICA_ISSUE_WATCHDOG_OWNERS_FILE", "")
+	if _, err = ConfigFromEnv(); err == nil {
+		t.Fatal("missing source accepted")
 	}
-	t.Setenv("MULTICA_ISSUE_WATCHDOG_IDLE_INTERVAL", "")
-	t.Setenv("MULTICA_ISSUE_WATCHDOG_IN_REVIEW_WAIT", "0s")
-	if _, err := ConfigFromEnv(); err == nil {
-		t.Fatal("zero in_review wait was accepted")
-	}
-	t.Setenv("MULTICA_ISSUE_WATCHDOG_IN_REVIEW_WAIT", "90m")
-	t.Setenv("MULTICA_ISSUE_WATCHDOG_TODO_DELAY", "3h")
-	t.Setenv("MULTICA_ISSUE_WATCHDOG_KUN_LABEL", " 待拍板 ")
-	t.Setenv("MULTICA_ISSUE_WATCHDOG_KUN_GROUP", "测试群")
-	cfg, err = ConfigFromEnv()
-	if err != nil {
+	path := filepath.Join(t.TempDir(), "owners.json")
+	if err = os.WriteFile(path, []byte(`{"project_managers":{"project":"负责人"}}`), 0600); err != nil {
 		t.Fatal(err)
 	}
-	if cfg.InReviewWait != 90*time.Minute || cfg.TodoStartDelay != 3*time.Hour ||
-		cfg.KunLabel != "待拍板" || cfg.KunGroup != "测试群" {
-		t.Fatalf("overrides = %s / %s / %q / %q", cfg.InReviewWait, cfg.TodoStartDelay, cfg.KunLabel, cfg.KunGroup)
+	t.Setenv("MULTICA_ISSUE_WATCHDOG_OWNERS_FILE", path)
+	cfg, err = ConfigFromEnv()
+	if err != nil || !cfg.Enabled {
+		t.Fatalf("outbox must need no webhook or key: %v", err)
 	}
-	t.Setenv("MULTICA_ISSUE_WATCHDOG_KUN_LABEL", "")
-	if cfg, err = ConfigFromEnv(); err != nil || cfg.KunLabel != "" {
-		t.Fatalf("explicitly empty Kun label = %q (err %v), want empty so the push and quieting are off", cfg.KunLabel, err)
+	t.Setenv("MULTICA_ISSUE_WATCHDOG_TICK", "0s")
+	if _, err = ConfigFromEnv(); err == nil {
+		t.Fatal("zero tick accepted")
 	}
+}
 
-	t.Setenv("MULTICA_ISSUE_WATCHDOG_RUN_AWARE", "true")
-	t.Setenv("MULTICA_ISSUE_WATCHDOG_SILENT_INTERVAL", "25m")
-	cfg, err = ConfigFromEnv()
-	if err != nil {
-		t.Fatal(err)
+func TestOwnersAndQuietStates(t *testing.T) {
+	table := OwnerTable{ProjectManagers: map[string]string{"p": "项目负责人", "legacy": "COO·Grok"}, Unowned: []string{"legacy"}, Managers: []string{"明确负责人"}}
+	for _, tc := range []struct {
+		explicit, project, want string
+		missing                 bool
+	}{
+		{"明确负责人", "p", "明确负责人", false}, {"", "p", "项目负责人", false},
+		{"COO·Grok", "legacy", registrationOwner, true}, {"", "", registrationOwner, true},
+		{"", "unknown", registrationOwner, true},
+		{"未知名字", "p", registrationOwner, true},
+	} {
+		got, missing := table.Resolve(tc.explicit, tc.project)
+		if got != tc.want || missing != tc.missing {
+			t.Fatalf("route %+v = %s,%v", tc, got, missing)
+		}
 	}
-	if !cfg.RunAware || cfg.SilentInterval != 25*time.Minute {
-		t.Fatalf("run-aware config = %v / %s, want on / 25m", cfg.RunAware, cfg.SilentInterval)
+	for _, issue := range []Issue{{Status: "todo"}, {Status: "backlog"}, {Status: "done"}, {Status: "cancelled"},
+		{Status: "blocked", KunLabel: true}, {Status: "in_progress", Title: "待 Kun｜确认"},
+		{Status: "in_review", WaitingKun: true}} {
+		if stallEligible(issue) {
+			t.Fatalf("quiet case eligible: %+v", issue)
+		}
 	}
-	t.Setenv("MULTICA_ISSUE_WATCHDOG_RUN_AWARE", "sometimes")
-	if _, err := ConfigFromEnv(); err == nil {
-		t.Fatal("non-boolean run-aware switch was accepted")
-	}
-	t.Setenv("MULTICA_ISSUE_WATCHDOG_RUN_AWARE", "true")
-	t.Setenv("MULTICA_ISSUE_WATCHDOG_SILENT_INTERVAL", "0s")
-	if _, err := ConfigFromEnv(); err == nil {
-		t.Fatal("zero silent-run interval was accepted")
+	if !stallEligible(Issue{Status: "in_review"}) {
+		t.Fatal("review without a run must be checked")
 	}
 }
 
@@ -187,86 +143,5 @@ func TestWriteHeartbeatReplacesFileWithUTCStamp(t *testing.T) {
 	}
 	if string(got) != now.Add(time.Minute).UTC().Format(time.RFC3339Nano)+"\n" {
 		t.Fatalf("heartbeat was not atomically refreshed: %q", got)
-	}
-}
-
-func TestFirstScanUsesExistingProgressTimestamp(t *testing.T) {
-	ctx := context.Background()
-	pool := testutil.OpenTestDatabase(ctx, t)
-	_, workspaceID, _, _, issueID := watchdogFixture(t, pool)
-	base := time.Now().UTC().Add(time.Second).Truncate(time.Second)
-	if _, err := pool.Exec(ctx, `
-UPDATE issue SET status = 'in_progress', created_at = $2
-WHERE id = $1::uuid`, issueID, base.Add(-45*time.Minute)); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := pool.Exec(ctx, `
-DELETE FROM office_event
-WHERE issue_id = $1::uuid AND event_type = 'issue.status_changed'`, issueID); err != nil {
-		t.Fatal(err)
-	}
-
-	var nudges int
-	w := New(pool, Config{
-		Enabled: true, WorkspaceID: workspaceID, TickInterval: time.Minute,
-		TodoStartDelay: 10 * time.Minute, IdleInterval: 30 * time.Minute,
-		ManagerWait: 15 * time.Minute, MaxEmployeeRound: 2,
-		HeartbeatFile: filepath.Join(t.TempDir(), "last-run"),
-	}, func(context.Context, string, string, string, string) error {
-		nudges++
-		return nil
-	})
-	w.now = func() time.Time { return base }
-	issue, err := w.loadIssue(ctx, workspaceID, issueID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !issue.ProgressAt.Before(base.Add(-30 * time.Minute)) {
-		t.Fatalf("fixture progress timestamp = %s, want older than %s", issue.ProgressAt, base.Add(-30*time.Minute))
-	}
-	if err := w.Run(ctx, base); err != nil {
-		t.Fatal(err)
-	}
-	if nudges != 1 {
-		t.Fatalf("first scan nudges = %d, want immediate reminder for 45-minute idle issue", nudges)
-	}
-}
-
-func TestWebhookPostsOnceWithBearerKeyAndProject(t *testing.T) {
-	const key = "fake-test-secret"
-	received := make(chan webhookEvent, 1)
-	requests := make(chan int, 1)
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requests <- 1
-		if got := r.Header.Get("Authorization"); got != "Bearer "+key {
-			t.Errorf("authorization = %q", got)
-		}
-		var event webhookEvent
-		if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
-			t.Errorf("decode payload: %v", err)
-		}
-		received <- event
-		w.WriteHeader(http.StatusAccepted)
-	}))
-	defer server.Close()
-
-	w := New(nil, Config{WebhookURL: server.URL, WebhookKey: key}, nil)
-	event := webhookEvent{
-		EventID: "test-event", EventType: "employee_unresponsive",
-		IssueID: "issue-1", IssueNumber: "TST-1", Title: "test title",
-		Status: "in_progress", Employee: "Codex", Manager: "CTO·扳手",
-		ProjectName: "Agent mono仓库管理", WakeTarget: "manager", Reason: "test",
-	}
-	if err := w.post(t.Context(), event); err != nil {
-		t.Fatal(err)
-	}
-	got := <-received
-	if got.ProjectName != event.ProjectName || got.Manager != event.Manager || got.WakeTarget != "manager" {
-		t.Fatalf("payload = %+v", got)
-	}
-	select {
-	case <-requests:
-	default:
-		t.Fatal("webhook receiver did not see a request")
 	}
 }

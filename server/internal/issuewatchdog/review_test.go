@@ -190,24 +190,13 @@ func TestReviewWakesAreOffByDefault(t *testing.T) {
 	if cfg.HoldWake || cfg.ReviewWake || cfg.StuckWake || cfg.ChildWake || cfg.RoundStop {
 		t.Fatalf("review wakes on by default: %+v", cfg)
 	}
-	if cfg.RoundLimit != 2 {
-		t.Fatalf("default round limit = %d, want 2", cfg.RoundLimit)
-	}
-	t.Setenv("MULTICA_ISSUE_WATCHDOG_ROUND_LIMIT", "3")
-	if cfg, err := ConfigFromEnv(); err != nil || cfg.RoundLimit != 3 {
-		t.Fatalf("round limit 3: %d, %v", cfg.RoundLimit, err)
-	}
-	t.Setenv("MULTICA_ISSUE_WATCHDOG_ROUND_LIMIT", "0")
-	if _, err := ConfigFromEnv(); err == nil {
-		t.Fatal("a round limit of 0 was accepted")
-	}
-	t.Setenv("MULTICA_ISSUE_WATCHDOG_ROUND_LIMIT", "")
-	if cfg.HoldWait != 2*time.Hour || cfg.ReviewWait != 20*time.Minute ||
-		cfg.NoRunWait != 15*time.Minute || cfg.ChildWait != 30*time.Minute {
-		t.Fatalf("default waits = %v %v %v %v", cfg.HoldWait, cfg.ReviewWait, cfg.NoRunWait, cfg.ChildWait)
+	if cfg.RoundLimit != 0 || cfg.HoldWait != 0 || cfg.ReviewWait != 0 ||
+		cfg.NoRunWait != 30*time.Minute || cfg.ChildWait != 0 {
+		t.Fatalf("retired routing must remain inert: %+v", cfg)
 	}
 	t.Setenv("MULTICA_ISSUE_WATCHDOG_STUCK_WAKE", "maybe")
-	if _, err := ConfigFromEnv(); err == nil {
-		t.Fatal("a non-boolean switch was accepted")
+	t.Setenv("MULTICA_ISSUE_WATCHDOG_ROUND_LIMIT", "3")
+	if cfg, err := ConfigFromEnv(); err != nil || cfg.StuckWake || cfg.RoundLimit != 0 {
+		t.Fatal("legacy environment reactivated routing")
 	}
 }

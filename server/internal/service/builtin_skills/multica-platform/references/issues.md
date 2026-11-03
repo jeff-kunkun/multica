@@ -451,3 +451,16 @@ No `next_offset` means the live directory is exhausted. Concurrent root changes
 can move offsets; use the activity checkpoint for durable synchronization.
 The directory stays a summary read; open a selected `thread_id` for replies/full
 text. CLI roots-only/since/summary and thread modes keep their existing contract.
+
+## Internal owner reminder worker
+
+`issue reminder claim|receipt --content-file <JSON> --output json` transports
+server-decided reminders; it never decides stalls or reruns issues. Human
+workspace owner/admin only: agent task tokens and Bot keys are refused.
+Persist a claim_token UUID before the claim; reuse it after a lost response.
+Receipt has claim_token and result sent / not_sent / uncertain. Only proven
+pre-send not_sent may retry once; uncertain delivery is terminal. Lost receipt
+retries do not resend the message. Operational details and current switches:
+`docs/kun/office-issue-watchdog.md` in the product source. Normal agents handle
+the original issue after an authorized owner request; they do not claim this
+workspace-wide queue.

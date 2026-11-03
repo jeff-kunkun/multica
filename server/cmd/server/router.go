@@ -2032,6 +2032,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/dingtalk/install/byo", h.RegisterDingTalkBYO)
 				})
 
+				// Delivery workers reuse the owner's saved CLI login. There is
+				// no task-token or Bot-key access to the workspace outbox.
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
+					r.Use(handler.RequireHumanActor)
+					r.Post("/issue-reminders/claim", h.ClaimIssueReminders)
+					r.Post("/issue-reminders/{reminderId}/receipt", h.ReceiptIssueReminder)
+				})
+
 				// Telegram integration. Same admin/member split as Slack:
 				// listing is member-visible; install + revoke are admin-only.
 				r.Group(func(r chi.Router) {
