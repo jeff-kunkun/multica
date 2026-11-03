@@ -70,6 +70,9 @@ type officeWatchdog struct {
 	queue chan agent.Message
 	drain *drainProgress
 	let   chan chan struct{}
+	// mute makes the drain loop take the cap's next question and stop there,
+	// never replying.
+	mute atomic.Bool
 }
 
 func (w *officeWatchdog) hiddenCalls() []agent.RunningTool {
@@ -133,6 +136,10 @@ func (w *officeWatchdog) drainLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case reply := <-w.drain.asks:
+			if w.mute.Load() {
+				<-ctx.Done()
+				return
+			}
 			w.drain.answer(reply)
 		case hold := <-w.let:
 			var msg agent.Message
@@ -374,8 +381,8 @@ func TestOfficeIdlePolicyStopsOnlyRealSilence(t *testing.T) {
 			w.mustStopBy(t, 77*time.Minute, false)
 		})
 	})
-	// The wait for the drain loop stays bounded: one that does not answer at
-	// two ticks in a row is stuck, and the cap stops the run.
+	// The wait for the drain loop stays bounded: past the cap the run is
+	// stopped one tick later at most, wherever the drain loop stopped.
 	t.Run("a drain loop stuck at the cap does not hold the cap off", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			w := startOfficeWatchdog(t, false)
@@ -384,6 +391,36 @@ func TestOfficeIdlePolicyStopsOnlyRealSilence(t *testing.T) {
 			w.queue <- agent.Message{Type: agent.MessageText, Content: "still running"}
 			w.let <- make(chan struct{})
 			w.mustNotStopBy(t, 64*time.Minute, "the first tick the drain loop did not answer")
+			w.mustStopBy(t, 66*time.Minute, true)
+		})
+	})
+	// Codex's fifth DENE-2900 review: the drain loop answers where the backlog
+	// ends, handles one of its two messages, then gets stuck on the other.
+	t.Run("a drain loop stuck in the backlog after answering does not hold the cap off", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			w := startOfficeWatchdog(t, false)
+			w.run("c1", "bash", "go test ./...")
+			time.Sleep(59 * time.Minute)
+			w.queue <- agent.Message{Type: agent.MessageText, Content: "line 1"}
+			w.queue <- agent.Message{Type: agent.MessageText, Content: "line 2"}
+			time.Sleep(90 * time.Second)
+			w.pass()
+			w.let <- make(chan struct{})
+			if w.drain.count() != 1 {
+				t.Fatalf("taken %d, want 1: the drain loop did not stop inside the backlog", w.drain.count())
+			}
+			w.mustNotStopBy(t, 64*time.Minute, "a backlog the drain loop was still taking")
+			w.mustStopBy(t, 66*time.Minute, true)
+		})
+	})
+	// Codex's fifth DENE-2900 review: the drain loop takes the cap's question
+	// and stops before it replies.
+	t.Run("a drain loop that takes the question and never replies does not hold the cap off", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			w := startOfficeWatchdog(t, false)
+			w.run("c1", "bash", "go test ./...")
+			w.mute.Store(true)
+			w.mustNotStopBy(t, 64*time.Minute, "the first tick the drain loop did not reply")
 			w.mustStopBy(t, 66*time.Minute, true)
 		})
 	})

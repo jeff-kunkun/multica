@@ -10673,8 +10673,9 @@ func idleWatchdogTickInterval(window time.Duration) time.Duration {
 // In both cases the watchdog also requires the session.Messages buffer to be
 // empty — a buffered-but-undrained message means the drain loop is behind, not
 // the backend. Past the command cap it waits only for the messages queued
-// when the cap was reached (capBacklog), not for output queued later; the
-// drain loop itself says, between two messages, where that backlog ends.
+// when the cap was reached (capBacklog), not for output queued later, and one
+// tick at most; the drain loop itself says, between two messages, where that
+// backlog ends.
 //
 // With a tool in flight that commands.oldest measures, toolWindow is the
 // command cap instead (DENE-2900): the run is stopped once the oldest such
@@ -10726,9 +10727,10 @@ type drainProgress struct {
 	taken atomic.Int64
 }
 
-// drainAnswerWait is how long the cap waits for the drain loop's answer. It
-// is longer than the drain loop's slowest step with a message, the 5-second
-// session pin, so a drain loop that does not answer within it is stuck.
+// drainAnswerWait is how long the cap waits for the drain loop's answer, from
+// asking to the reply. It is longer than the drain loop's slowest step with a
+// message, the 5-second session pin, so a drain loop that does not answer
+// within it is busy with a message or stuck.
 const drainAnswerWait = 10 * time.Second
 
 func newDrainProgress(queued func() int) *drainProgress {
@@ -10751,15 +10753,22 @@ func (p *drainProgress) answer(reply chan<- int64) {
 func (p *drainProgress) stopped() { close(p.done) }
 
 // backlogEnd asks the drain loop for the count it reaches once it has taken
-// every message queued now, waiting at most wait. False means it did not
-// answer: it is busy with a message.
+// every message queued now, waiting at most wait from asking to the reply, so
+// a drain loop that takes the question and then stops still lets the cap go
+// on (Codex's fifth review). False means it did not answer: it is busy with a
+// message, or stuck.
 func (p *drainProgress) backlogEnd(ctx context.Context, wait time.Duration) (int64, bool) {
 	reply := make(chan int64, 1)
 	timer := time.NewTimer(wait)
 	defer timer.Stop()
 	select {
 	case p.asks <- reply:
-		return <-reply, true
+		select {
+		case end := <-reply:
+			return end, true
+		case <-timer.C:
+		case <-ctx.Done():
+		}
 	case <-p.done:
 		return p.taken.Load(), true
 	case <-timer.C:
@@ -10770,34 +10779,29 @@ func (p *drainProgress) backlogEnd(ctx context.Context, wait time.Duration) (int
 
 // capBacklog is what the command cap waits for before it stops a call that
 // ran past it: the messages already queued when the cap was reached, one of
-// which may be the call's result (DENE-2900). Output queued after that does
-// not defer the stop again, or a command that prints faster than the drain
-// loop takes it would never be stopped.
+// which may be the call's result (DENE-2900). It waits for them one tick at
+// most, whatever the drain loop does meanwhile: a drain loop handles a message
+// in seconds, so one that has not reached the end of that backlog a tick later
+// is stuck or flooded, and the cap stops the run. Every earlier wait that
+// depended on the drain loop making progress could be held off for ever by a
+// drain loop that stopped at the wrong moment (Codex's third to fifth
+// reviews).
 type capBacklog struct {
-	waiting    bool
-	until      int64
-	unanswered bool
+	waited bool
 }
 
-// drained reports whether the backlog queued when the cap was reached has
-// been handled. The first call asks the drain loop where that backlog ends. A
-// drain loop that does not answer is busy with a message, which may be the
-// call's result, so the cap waits a tick; one that does not answer at the next
-// tick either is stuck, a hang the cap ends, so the wait stays bounded.
+// drained reports whether the cap may stop the call now. At the first tick
+// past the cap it asks the drain loop where the queued backlog ends and goes
+// ahead only if that backlog is already handled; otherwise, or if the drain
+// loop does not answer, the cap waits one tick. At the next tick it goes ahead
+// regardless.
 func (b *capBacklog) drained(ctx context.Context, c commandCap) bool {
-	if c.drain == nil {
+	if c.drain == nil || b.waited {
 		return true
 	}
-	if !b.waiting {
-		end, ok := c.drain.backlogEnd(ctx, drainAnswerWait)
-		if !ok {
-			stuck := b.unanswered
-			b.unanswered = true
-			return stuck
-		}
-		b.waiting, b.until = true, end
-	}
-	return c.drain.count() >= b.until
+	b.waited = true
+	end, ok := c.drain.backlogEnd(ctx, drainAnswerWait)
+	return ok && c.drain.count() >= end
 }
 
 // check reports whether a call the cap measures is running, and whether the
@@ -10854,7 +10858,7 @@ func (d *Daemon) runIdleWatchdogWithClock(agentCtx context.Context, window, tool
 			// behind, not the backend. Wait one more tick rather than
 			// killing a backend that is still producing output. Past the
 			// command cap, wait only for what was queued when the cap was
-			// reached: it may hold the call's result.
+			// reached, which may hold the call's result, and one tick at most.
 			if capped && !backlog.drained(agentCtx, commands) || !capped && len(messages) > 0 {
 				continue
 			}
