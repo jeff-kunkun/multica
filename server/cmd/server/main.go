@@ -35,7 +35,6 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/featureflag"
 	"github.com/multica-ai/multica/server/pkg/llm"
-	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -733,16 +732,7 @@ func main() {
 		slog.Error("invalid issue watchdog configuration", "error", watchdogConfigErr)
 		os.Exit(1)
 	}
-	watchdog := issuewatchdog.New(pool, watchdogConfig, h.CreateWatchdogNudgeComment)
-	watchdog.SetWake(h.CreateWatchdogWakeComment)
-	watchdog.SetNote(h.CreateWatchdogNoteComment)
-	watchdog.SetLabel(h.CreateWatchdogLabel)
-	bus.Subscribe(protocol.EventIssueUpdated, watchdog.HandleEvent)
-	bus.Subscribe(protocol.EventCommentCreated, watchdog.HandleEvent)
-	bus.Subscribe(protocol.EventIssueLabelsChanged, watchdog.HandleEvent)
-	bus.Subscribe(protocol.EventTaskCompleted, watchdog.HandleEvent)
-	bus.Subscribe(protocol.EventTaskFailed, watchdog.HandleEvent)
-	bus.Subscribe(protocol.EventTaskCancelled, watchdog.HandleEvent)
+	watchdog := issuewatchdog.New(pool, watchdogConfig, nil)
 
 	// Construct a LivenessStore that mirrors the one wired into the HTTP
 	// handler. Both the heartbeat write path (handler) and the sweeper read

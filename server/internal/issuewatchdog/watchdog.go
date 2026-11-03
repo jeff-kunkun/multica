@@ -9,7 +9,6 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -18,10 +17,9 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/events"
-	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 const (
@@ -62,6 +60,9 @@ const (
 )
 
 type Config struct {
+	Owners     OwnerTable
+	OwnersFile string
+
 	Enabled          bool
 	WorkspaceID      string
 	WebhookURL       string
@@ -116,164 +117,36 @@ type Config struct {
 }
 
 func ConfigFromEnv() (Config, error) {
-	enabled := false
-	if raw := strings.TrimSpace(os.Getenv("MULTICA_ISSUE_WATCHDOG_ENABLED")); raw != "" {
-		parsed, err := strconv.ParseBool(raw)
+	cfg := Config{TickInterval: time.Minute, NoRunWait: 30 * time.Minute, KunLabel: defaultKunLabel,
+		HeartbeatFile: envOr("MULTICA_ISSUE_WATCHDOG_HEARTBEAT_FILE", defaultHeartbeatFile),
+		WorkspaceID:   strings.TrimSpace(os.Getenv("MULTICA_ISSUE_WATCHDOG_WORKSPACE_ID")),
+		OwnersFile:    strings.TrimSpace(os.Getenv("MULTICA_ISSUE_WATCHDOG_OWNERS_FILE"))}
+	var err error
+	if value := strings.TrimSpace(os.Getenv("MULTICA_ISSUE_WATCHDOG_ENABLED")); value != "" {
+		cfg.Enabled, err = strconv.ParseBool(value)
 		if err != nil {
 			return Config{}, errors.New("MULTICA_ISSUE_WATCHDOG_ENABLED must be true or false")
 		}
-		enabled = parsed
 	}
-	parseDuration := func(name string, fallback time.Duration) (time.Duration, error) {
-		raw := strings.TrimSpace(os.Getenv(name))
-		if raw == "" {
-			return fallback, nil
+	if value := strings.TrimSpace(os.Getenv("MULTICA_ISSUE_WATCHDOG_TICK")); value != "" {
+		cfg.TickInterval, err = time.ParseDuration(value)
+		if err != nil || cfg.TickInterval <= 0 {
+			return Config{}, errors.New("MULTICA_ISSUE_WATCHDOG_TICK must be a positive duration")
 		}
-		value, err := time.ParseDuration(raw)
-		if err != nil || value <= 0 {
-			return 0, fmt.Errorf("%s must be a positive duration", name)
+	}
+	if cfg.Enabled {
+		if _, err = uuid.Parse(cfg.WorkspaceID); err != nil {
+			return Config{}, errors.New("MULTICA_ISSUE_WATCHDOG_WORKSPACE_ID must be a UUID when enabled")
 		}
-		return value, nil
-	}
-	tick, err := parseDuration("MULTICA_ISSUE_WATCHDOG_TICK", time.Minute)
-	if err != nil {
-		return Config{}, err
-	}
-	// The office timeouts (Kun, 2026-10-28): todo 6h, in_progress and
-	// in_review 2h, a hold nobody answers 2h.
-	todoDelay, err := parseDuration("MULTICA_ISSUE_WATCHDOG_TODO_DELAY", 6*time.Hour)
-	if err != nil {
-		return Config{}, err
-	}
-	idleInterval, err := parseDuration("MULTICA_ISSUE_WATCHDOG_IDLE_INTERVAL", 2*time.Hour)
-	if err != nil {
-		return Config{}, err
-	}
-	inReviewWait, err := parseDuration("MULTICA_ISSUE_WATCHDOG_IN_REVIEW_WAIT", 2*time.Hour)
-	if err != nil {
-		return Config{}, err
-	}
-	managerWait, err := parseDuration("MULTICA_ISSUE_WATCHDOG_MANAGER_WAIT", 15*time.Minute)
-	if err != nil {
-		return Config{}, err
-	}
-	silentInterval, err := parseDuration("MULTICA_ISSUE_WATCHDOG_SILENT_INTERVAL", 20*time.Minute)
-	if err != nil {
-		return Config{}, err
-	}
-	parseBool := func(name string) (bool, error) {
-		raw := strings.TrimSpace(os.Getenv(name))
-		if raw == "" {
-			return false, nil
+		if cfg.OwnersFile == "" {
+			return Config{}, errors.New("MULTICA_ISSUE_WATCHDOG_OWNERS_FILE must point to mono watch-lists.json")
 		}
-		value, err := strconv.ParseBool(raw)
-		if err != nil {
-			return false, fmt.Errorf("%s must be true or false", name)
-		}
-		return value, nil
-	}
-	var holdWake, reviewWake, stuckWake, childWake, roundStop, stopRouting bool
-	for name, dst := range map[string]*bool{
-		"MULTICA_ISSUE_WATCHDOG_HOLD_WAKE":    &holdWake,
-		"MULTICA_ISSUE_WATCHDOG_REVIEW_WAKE":  &reviewWake,
-		"MULTICA_ISSUE_WATCHDOG_STUCK_WAKE":   &stuckWake,
-		"MULTICA_ISSUE_WATCHDOG_CHILD_WAKE":   &childWake,
-		"MULTICA_ISSUE_WATCHDOG_ROUND_STOP":   &roundStop,
-		"MULTICA_ISSUE_WATCHDOG_STOP_ROUTING": &stopRouting,
-	} {
-		if *dst, err = parseBool(name); err != nil {
+		if cfg.Owners, err = ReadOwners(cfg.OwnersFile); err != nil {
 			return Config{}, err
 		}
 	}
-	holdWait, err := parseDuration("MULTICA_ISSUE_WATCHDOG_HOLD_WAIT", 2*time.Hour)
-	if err != nil {
-		return Config{}, err
-	}
-	reviewWait, err := parseDuration("MULTICA_ISSUE_WATCHDOG_REVIEW_WAIT", 20*time.Minute)
-	if err != nil {
-		return Config{}, err
-	}
-	noRunWait, err := parseDuration("MULTICA_ISSUE_WATCHDOG_NO_RUN_WAIT", 15*time.Minute)
-	if err != nil {
-		return Config{}, err
-	}
-	childWait, err := parseDuration("MULTICA_ISSUE_WATCHDOG_CHILD_WAIT", 30*time.Minute)
-	if err != nil {
-		return Config{}, err
-	}
-	offlineWait, err := parseDuration("MULTICA_ISSUE_WATCHDOG_OFFLINE_WAIT", 10*time.Minute)
-	if err != nil {
-		return Config{}, err
-	}
-	rounds := 2
-	if raw := strings.TrimSpace(os.Getenv("MULTICA_ISSUE_WATCHDOG_EMPLOYEE_ROUNDS")); raw != "" {
-		rounds, err = strconv.Atoi(raw)
-		if err != nil || rounds <= 0 {
-			return Config{}, errors.New("MULTICA_ISSUE_WATCHDOG_EMPLOYEE_ROUNDS must be a positive integer")
-		}
-	}
-	roundLimit := 2
-	if raw := strings.TrimSpace(os.Getenv("MULTICA_ISSUE_WATCHDOG_ROUND_LIMIT")); raw != "" {
-		roundLimit, err = strconv.Atoi(raw)
-		if err != nil || roundLimit <= 0 {
-			return Config{}, errors.New("MULTICA_ISSUE_WATCHDOG_ROUND_LIMIT must be a positive integer")
-		}
-	}
-	runAware := false
-	if raw := strings.TrimSpace(os.Getenv("MULTICA_ISSUE_WATCHDOG_RUN_AWARE")); raw != "" {
-		runAware, err = strconv.ParseBool(raw)
-		if err != nil {
-			return Config{}, errors.New("MULTICA_ISSUE_WATCHDOG_RUN_AWARE must be true or false")
-		}
-	}
-	cfg := Config{
-		Enabled:          enabled,
-		WorkspaceID:      strings.TrimSpace(os.Getenv("MULTICA_ISSUE_WATCHDOG_WORKSPACE_ID")),
-		WebhookURL:       strings.TrimSpace(os.Getenv("MULTICA_ISSUE_WATCHDOG_WEBHOOK_URL")),
-		WebhookKey:       os.Getenv("MULTICA_ISSUE_WATCHDOG_WEBHOOK_KEY"),
-		TickInterval:     tick,
-		TodoStartDelay:   todoDelay,
-		IdleInterval:     idleInterval,
-		ManagerWait:      managerWait,
-		MaxEmployeeRound: rounds,
-		HeartbeatFile:    strings.TrimSpace(os.Getenv("MULTICA_ISSUE_WATCHDOG_HEARTBEAT_FILE")),
-		InReviewWait:     inReviewWait,
-		KunLabel:         lookupEnvOr("MULTICA_ISSUE_WATCHDOG_KUN_LABEL", defaultKunLabel),
-		KunGroup:         envOr("MULTICA_ISSUE_WATCHDOG_KUN_GROUP", defaultKunGroup),
-		RunAware:         runAware,
-		SilentInterval:   silentInterval,
-		HoldWake:         holdWake,
-		HoldWait:         holdWait,
-		ReviewWake:       reviewWake,
-		ReviewWait:       reviewWait,
-		StuckWake:        stuckWake,
-		NoRunWait:        noRunWait,
-		ChildWake:        childWake,
-		ChildWait:        childWait,
-		RoundStop:        roundStop,
-		RoundLimit:       roundLimit,
-		StopRouting:      stopRouting,
-		OfflineWait:      offlineWait,
-	}
-	if cfg.HeartbeatFile == "" {
-		cfg.HeartbeatFile = defaultHeartbeatFile
-	}
-	if cfg.Enabled {
-		if _, err := uuid.Parse(cfg.WorkspaceID); err != nil {
-			return Config{}, errors.New("MULTICA_ISSUE_WATCHDOG_WORKSPACE_ID must be a UUID when enabled")
-		}
-		if cfg.WebhookURL == "" || cfg.WebhookKey == "" {
-			return Config{}, errors.New("issue watchdog webhook URL and key must both be configured when enabled")
-		}
-		u, err := url.Parse(cfg.WebhookURL)
-		if err != nil || u.Host == "" || (u.Scheme != "https" && !(u.Scheme == "http" && isLoopbackHost(u.Hostname()))) {
-			return Config{}, errors.New("issue watchdog webhook must use HTTPS (HTTP is allowed only for loopback test receivers)")
-		}
-		if cfg.TickInterval <= 0 || cfg.TodoStartDelay <= 0 || cfg.IdleInterval <= 0 || cfg.ManagerWait <= 0 ||
-			cfg.MaxEmployeeRound < 1 || cfg.SilentInterval <= 0 {
-			return Config{}, errors.New("issue watchdog thresholds must be positive")
-		}
-	}
+	// Legacy escalation/wake/timeouts are intentionally not read. They cannot
+	// reactivate the retired chain, even in an old deployment environment.
 	return cfg, nil
 }
 
@@ -319,8 +192,18 @@ func isLoopbackHost(host string) bool {
 
 type NudgeFunc func(context.Context, string, string, string, string) error
 
+type QueryStore interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+type Store interface {
+	QueryStore
+	Begin(context.Context) (pgx.Tx, error)
+}
+
 type Watchdog struct {
-	pool   *pgxpool.Pool
+	pool   Store
 	cfg    Config
 	nudge  NudgeFunc
 	wake   WakeFunc
@@ -330,7 +213,7 @@ type Watchdog struct {
 	now    func() time.Time
 }
 
-func New(pool *pgxpool.Pool, cfg Config, nudge NudgeFunc) *Watchdog {
+func New(pool Store, cfg Config, nudge NudgeFunc) *Watchdog {
 	return &Watchdog{
 		pool:  pool,
 		cfg:   cfg,
@@ -358,6 +241,9 @@ type Issue struct {
 	AssigneeID      string
 	EmployeeName    string
 	ManagerName     string
+	ProjectID       string
+	WaitingKun      bool
+	Cause           string
 	ProjectName     string
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
@@ -411,113 +297,9 @@ type issueState struct {
 	ManagerEscalated bool
 }
 
-func (w *Watchdog) HandleEvent(e events.Event) {
-	if !w.cfg.Enabled || e.WorkspaceID != w.cfg.WorkspaceID {
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	switch e.Type {
-	case protocol.EventIssueUpdated:
-		payload, ok := payloadMap(e.Payload)
-		if !ok {
-			return
-		}
-		if changed, _ := payload["status_changed"].(bool); changed {
-			issue, ok := w.issueFromPayload(ctx, e.WorkspaceID, payload["issue"])
-			if !ok {
-				return
-			}
-			w.resolveManagerWaits(ctx, issue.ID)
-			switch issue.Status {
-			case "in_review", "blocked", "done":
-				rev := issue.IssueRevision
-				if rev == 0 {
-					rev = w.now().UnixNano()
-				}
-				_ = w.notifyManager(ctx, issue, "status_"+issue.Status,
-					fmt.Sprintf("status:%s:%d:%s", issue.ID, rev, issue.Status),
-					statusChangeReason(issue), "manager", w.now())
-			}
-			if w.cfg.StopRouting && (issue.Status == "done" || issue.Status == "cancelled") {
-				_ = w.checkDependencyWaits(ctx, w.now())
-			}
-		}
-		if changed, _ := payload["assignee_changed"].(bool); changed {
-			issue, ok := w.issueFromPayload(ctx, e.WorkspaceID, payload["issue"])
-			if ok {
-				w.rebaselineAssignment(ctx, issue, w.now())
-			}
-		}
-	case protocol.EventTaskCompleted, protocol.EventTaskFailed, protocol.EventTaskCancelled:
-		if !w.cfg.StopRouting {
-			return
-		}
-		payload, ok := payloadMap(e.Payload)
-		if !ok {
-			return
-		}
-		taskID, _ := payload["task_id"].(string)
-		issueID, _ := payload["issue_id"].(string)
-		if taskID == "" || issueID == "" {
-			return // a chat run
-		}
-		if err := w.routeRunEnd(ctx, issueID, taskID, false, w.now()); err != nil {
-			slog.WarnContext(ctx, "issue watchdog run-end routing failed", "issue_id", issueID, "task_id", taskID)
-		}
-	case protocol.EventIssueLabelsChanged:
-		payload, ok := payloadMap(e.Payload)
-		if !ok {
-			return
-		}
-		issueID, _ := payload["issue_id"].(string)
-		if issueID == "" {
-			return
-		}
-		issue, err := w.loadIssue(ctx, e.WorkspaceID, issueID)
-		if err != nil {
-			return
-		}
-		_ = w.checkKunDecision(ctx, issue, w.now())
-	case protocol.EventCommentCreated:
-		payload, ok := payloadMap(e.Payload)
-		if !ok {
-			return
-		}
-		comment, ok := payloadMap(payload["comment"])
-		if !ok {
-			return
-		}
-		issueID, _ := comment["issue_id"].(string)
-		authorType, _ := comment["author_type"].(string)
-		authorID, _ := comment["author_id"].(string)
-		content, _ := comment["content"].(string)
-		commentType, _ := comment["type"].(string)
-		commentID, _ := comment["id"].(string)
-		if issueID == "" || authorType == "system" || commentType != "comment" || isWatchdogComment(content) {
-			return
-		}
-		issue, err := w.loadIssue(ctx, e.WorkspaceID, issueID)
-		if err != nil {
-			return
-		}
-		if w.cfg.HoldWake || w.cfg.RoundStop {
-			w.onHold(ctx, issue, commentID, actor{Type: authorType, ID: authorID}, content)
-		}
-		if authorType == "member" && isManagerReply(content, issue.ManagerName) {
-			w.resolveManagerWaitsForReply(ctx, issue.ID, content)
-		}
-		if issue.AssigneeType != authorType || issue.AssigneeID == "" || issue.AssigneeID != authorID || isPureAcknowledgment(content) {
-			return
-		}
-		if commentID == "" {
-			commentID = w.now().Format(time.RFC3339Nano)
-		}
-		_ = w.notifyManager(ctx, issue, "employee_comment",
-			"employee-comment:"+commentID,
-			"负责员工在单子里发了新评论，等待负责经理回应", "manager", w.now())
-	}
-}
+// Events do not independently wake employees, reviewers or COO. The periodic
+// scan is the only stall decision path; normal dispatch and mentions are separate.
+func (w *Watchdog) HandleEvent(e events.Event) {}
 
 // statusChangeReason is the manager alert for a status change. An issue that
 // enters review with no reviewer waits on the manager to accept it.
@@ -557,15 +339,24 @@ func (w *Watchdog) issueFromPayload(ctx context.Context, workspaceID string, raw
 }
 
 func (w *Watchdog) loadIssue(ctx context.Context, workspaceID, issueID string) (Issue, error) {
+	return w.loadIssueUsing(ctx, w.pool, workspaceID, issueID)
+}
+func (w *Watchdog) loadIssueUsing(ctx context.Context, store QueryStore, workspaceID, issueID string) (Issue, error) {
 	var out Issue
 	var firstExecutedAt pgtype.Timestamptz
-	err := w.pool.QueryRow(ctx, `
+	err := store.QueryRow(ctx, `
 SELECT i.id::text, i.workspace_id::text, i.number, w.issue_prefix || '-' || i.number::text,
        i.title, i.status, COALESCE(i.assignee_type, ''), COALESCE(i.assignee_id::text, ''),
-       COALESCE(a.name, u.name, ''), COALESCE(manager_option.value->>'name', 'CTO·扳手'),
+       COALESCE(a.name, u.name, ''), COALESCE(NULLIF(btrim(i.metadata->>'manager_bot'), ''), manager_option.value->>'name', ''),
        COALESCE(p.title, ''), i.created_at, i.updated_at, i.first_executed_at,
        GREATEST(
-         i.created_at,
+         i.created_at, i.updated_at,
+         COALESCE((SELECT max(GREATEST(COALESCE(t.completed_at,t.started_at,t.dispatched_at,t.created_at),
+                     CASE WHEN t.status=ANY($6) AND rt.status='offline'
+                          THEN GREATEST(COALESCE(rt.last_seen_at,rt.updated_at),rt.updated_at)
+                          ELSE t.created_at END))
+                   FROM agent_task_queue t LEFT JOIN agent_runtime rt ON rt.id=t.runtime_id
+                   WHERE t.issue_id = i.id), i.created_at),
          COALESCE((SELECT max(c.created_at)
                    FROM comment c
                    WHERE c.workspace_id = i.workspace_id AND c.issue_id = i.id
@@ -586,7 +377,13 @@ SELECT i.id::text, i.workspace_id::text, i.number, w.issue_prefix || '-' || i.nu
          WHERE il.issue_id = i.id AND l.workspace_id = i.workspace_id
            AND l.resource_type = 'issue' AND lower(l.name) = lower($4)
        ) AS kun_label,
-       COALESCE(btrim(i.metadata->>$5::text), '')
+       COALESCE(btrim(i.metadata->>$5::text), ''), COALESCE(i.project_id::text, ''),
+       COALESCE(i.metadata->>'close.block_kind', i.metadata->>'block_kind', '') IN ('decision','permission') OR
+       COALESCE(i.metadata->>'waiting_for_kun', '') = 'true',
+       COALESCE((SELECT CASE WHEN t.status=ANY($6) AND rt.status='offline' THEN 'runtime_offline'
+                            ELSE t.failure_reason END
+                 FROM agent_task_queue t LEFT JOIN agent_runtime rt ON rt.id=t.runtime_id WHERE t.issue_id = i.id
+                 ORDER BY t.created_at DESC, t.id DESC LIMIT 1), '')
 FROM issue i
 JOIN workspace w ON w.id = i.workspace_id
 LEFT JOIN project p ON p.id = i.project_id AND p.workspace_id = i.workspace_id
@@ -602,11 +399,11 @@ LEFT JOIN LATERAL (
     LIMIT 1
 ) manager_option ON true
 WHERE i.workspace_id = $1::uuid AND i.id = $2::uuid`,
-		workspaceID, issueID, watchdogCommentMarker, w.cfg.KunLabel, replyGroupKey,
+		workspaceID, issueID, watchdogCommentMarker, w.cfg.KunLabel, replyGroupKey, activeTaskStatuses,
 	).Scan(&out.ID, &out.WorkspaceID, &out.Number, &out.Identifier, &out.Title, &out.Status,
 		&out.AssigneeType, &out.AssigneeID, &out.EmployeeName, &out.ManagerName, &out.ProjectName,
 		&out.CreatedAt, &out.UpdatedAt, &firstExecutedAt, &out.ProgressAt, &out.IssueRevision,
-		&out.ParentID, &out.Reviewer.Type, &out.Reviewer.ID, &out.KunLabel, &out.ReplyGroup)
+		&out.ParentID, &out.Reviewer.Type, &out.Reviewer.ID, &out.KunLabel, &out.ReplyGroup, &out.ProjectID, &out.WaitingKun, &out.Cause)
 	if err != nil {
 		return Issue{}, err
 	}
@@ -633,7 +430,7 @@ func (w *Watchdog) Run(ctx context.Context, now time.Time) error {
 SELECT id::text
 FROM issue
 WHERE workspace_id = $1::uuid
-  AND status IN ('todo', 'in_progress', 'in_review', 'blocked', 'done')
+  AND status IN ('in_progress', 'in_review', 'blocked')
 ORDER BY updated_at ASC
 LIMIT 5000`, w.cfg.WorkspaceID)
 	if err != nil {
@@ -666,128 +463,40 @@ LIMIT 5000`, w.cfg.WorkspaceID)
 			slog.WarnContext(ctx, "issue watchdog scan item failed", "issue_id", issue.ID)
 		}
 	}
-	if w.cfg.StopRouting {
-		if err := w.catchUpRunEnds(ctx, now); err != nil {
-			slog.WarnContext(ctx, "issue watchdog run-end catch-up failed")
-		}
-		if err := w.checkOfflineRuns(ctx, now); err != nil {
-			slog.WarnContext(ctx, "issue watchdog offline-run scan failed")
-		}
-		if err := w.checkDependencyWaits(ctx, now); err != nil {
-			slog.WarnContext(ctx, "issue watchdog dependency scan failed")
-		}
-	}
-	if err := w.escalateExpiredManagerWaits(ctx, now); err != nil {
-		return fmt.Errorf("process issue watchdog manager waits")
-	}
+
 	return nil
 }
 
 func (w *Watchdog) checkIssue(ctx context.Context, issue Issue, now time.Time) error {
-	state, err := w.loadOrUpdateState(ctx, issue, now)
+	if !stallEligible(issue) || now.Sub(issue.ProgressAt) < 30*time.Minute {
+		return nil
+	}
+	active, err := w.hasAnyRun(ctx, issue)
+	if err != nil || active {
+		return err
+	}
+	manager, registration := w.cfg.Owners.Resolve(issue.ManagerName, issue.ProjectID)
+	key := fmt.Sprintf("owner-stall:%d", issue.ProgressAt.UnixMicro())
+	event := Reminder{
+		EventID: issue.ID + ":" + key, IssueID: issue.ID, IssueNumber: issue.Identifier,
+		Title: issue.Title, Status: issue.Status, Manager: manager, ProjectName: issue.ProjectName,
+		Cause: stallCause(issue.Cause), StallAt: issue.ProgressAt, OccurredAt: now,
+		RegistrationNeeded: registration,
+	}
+	event.Reason = "无运行且无进展已满 30 分钟，请负责人在原单安排后续。"
+	if registration {
+		event.Reason += " 项目归属缺失，请扫帚补登记。"
+	}
+	payload, err := json.Marshal(event)
 	if err != nil {
 		return err
 	}
-	if err := w.checkKunDecision(ctx, issue, now); err != nil {
-		slog.WarnContext(ctx, "issue watchdog Kun-decision push failed", "issue_id", issue.ID)
-	}
-	if issue.KunLabel {
-		return nil // waits on Kun; nobody else can move it
-	}
-	if w.cfg.ChildWake && issue.ParentID != "" {
-		if err := w.checkChild(ctx, issue, now); err != nil {
-			slog.WarnContext(ctx, "issue watchdog sub-issue check failed", "issue_id", issue.ID)
-		}
-	}
-	handled, stuckDue, err := w.checkReviewWakes(ctx, issue, now)
-	if err != nil || handled {
-		return err
-	}
-	switch {
-	case issue.Status == "in_review":
-		return w.remindManagerIdle(ctx, issue, state, inReviewOverdue, w.cfg.InReviewWait, now)
-	case issue.Status != "todo" && issue.Status != "in_progress":
-		return nil
-	}
-	if issue.AssigneeID == "" || (issue.AssigneeType != "agent" && issue.AssigneeType != "member") {
-		return nil
-	}
-	if issue.Status == "todo" && issue.FirstExecutedAt != nil {
-		return w.remindManagerIdle(ctx, issue, state, todoOverdue, w.cfg.TodoStartDelay, now)
-	}
-	if w.cfg.RunAware && issue.AssigneeType == "agent" {
-		run, running, err := w.loadActiveRun(ctx, issue)
-		if err != nil {
-			return err
-		}
-		if running {
-			return w.remindSilentRun(ctx, issue, run, now)
-		}
-	}
-	if state.EmployeeRounds >= w.cfg.MaxEmployeeRound {
-		if !state.ManagerEscalated {
-			key := fmt.Sprintf("stalled:%s:%d", issue.ID, state.LastProgressAt.UnixNano())
-			if err := w.notifyManager(ctx, issue, "employee_unresponsive", key,
-				"连续两轮唤醒负责员工后，单子仍无有效进展", "manager", now); err != nil {
-				return err
-			}
-			_, err := w.pool.Exec(ctx, `
-UPDATE office_issue_watchdog_state
-SET manager_escalated_at = COALESCE(manager_escalated_at, $2), updated_at = now()
-WHERE issue_id = $1::uuid`, issue.ID, now)
-			return err
-		}
-		return nil
-	}
-
-	dueAt := state.LastProgressAt.Add(w.cfg.IdleInterval)
-	if issue.Status == "todo" && state.EmployeeRounds == 0 && state.AssignedAt != nil {
-		dueAt = state.AssignedAt.Add(w.cfg.TodoStartDelay)
-	} else if state.EmployeeRounds > 0 && state.LastNudgeAt != nil {
-		dueAt = state.LastNudgeAt.Add(w.cfg.IdleInterval)
-	}
-	if stuckDue != nil && state.EmployeeRounds == 0 && stuckDue.Before(dueAt) {
-		dueAt = *stuckDue
-	}
-	if now.Before(dueAt) {
-		return nil
-	}
-	round := state.EmployeeRounds + 1
-	eventKey := fmt.Sprintf("employee:%s:%d:%d", issue.ID, state.LastProgressAt.UnixNano(), round)
-	attemptID, claimed, err := w.claimEmployeeRound(ctx, issue, eventKey, round, now)
-	if err != nil || !claimed {
-		return err
-	}
-	age := now.Sub(state.LastProgressAt)
-	if issue.Status == "todo" && round == 1 && state.AssignedAt != nil {
-		age = now.Sub(*state.AssignedAt)
-	}
-	reason := employeeNudgeReason(issue, round, age)
-	nudgeErr := error(nil)
-	if w.nudge == nil {
-		nudgeErr = errors.New("employee wake path is unavailable")
-	} else {
-		nudgeErr = w.nudge(ctx, issue.ID, issue.AssigneeType, issue.AssigneeID, reason)
-	}
-	w.finishAttempt(ctx, attemptID, nudgeErr == nil)
-	if round == w.cfg.MaxEmployeeRound {
-		key := fmt.Sprintf("stalled:%s:%d", issue.ID, state.LastProgressAt.UnixNano())
-		if err := w.notifyManager(ctx, issue, "employee_unresponsive", key,
-			"连续两轮唤醒负责员工后，单子仍无有效进展", "manager", now); err != nil {
-			return err
-		}
-		_, err = w.pool.Exec(ctx, `
-UPDATE office_issue_watchdog_state
-SET manager_escalated_at = COALESCE(manager_escalated_at, $2), updated_at = now()
-WHERE issue_id = $1::uuid`, issue.ID, now)
-		if err != nil {
-			return err
-		}
-	}
-	if nudgeErr != nil {
-		return errors.New("employee wake attempt failed")
-	}
-	return nil
+	_, err = w.pool.Exec(ctx, `
+INSERT INTO office_issue_watchdog_attempt
+(workspace_id, issue_id, event_key, event_type, target, manager_name, payload)
+VALUES ($1::uuid,$2::uuid,$3,'owner_stalled','manager',$4,$5::jsonb)
+ON CONFLICT (workspace_id,issue_id,event_key) DO NOTHING`, issue.WorkspaceID, issue.ID, key, manager, payload)
+	return err
 }
 
 func (w *Watchdog) claimEmployeeRound(ctx context.Context, issue Issue, eventKey string, round int, now time.Time) (int64, bool, error) {
