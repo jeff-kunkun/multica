@@ -353,11 +353,12 @@ Daemon behavior is configured via flags or environment variables:
 | Agent idle watchdog | — | `MULTICA_AGENT_IDLE_WATCHDOG` | `2h` (`0` disables the whole watchdog suite) |
 | Agent tool watchdog | — | `MULTICA_AGENT_TOOL_WATCHDOG` | same as the idle watchdog (`0` = never force-stop during a tool call) |
 | Live status reports (office) | — | `MULTICA_LIVE_STATUS` | off (`on` reports each running issue run's command, last output line and quiet time every 15s; see `docs/kun/office-live-status.md`) |
-| Codex semantic inactivity timeout | `--codex-semantic-inactivity-timeout` | `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | same as the idle watchdog (Codex's timer is not tool-aware, so it tracks the larger of the idle / tool budgets) |
+| Codex semantic inactivity timeout | `--codex-semantic-inactivity-timeout` | `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | same as the idle watchdog (the larger of the idle / tool budgets); while a command the turn started is still running, Codex waits the command cap instead |
 | Codex first-turn no-progress timeout | — | `MULTICA_CODEX_FIRST_TURN_TIMEOUT` | `0` (keeps the built-in `60s` ceiling) |
 | Codex handshake timeout | `--codex-handshake-timeout` | `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s`; `thread/start` and `thread/resume`: `60s` (an explicit value overrides both budgets globally) |
 | Codex turn-interrupt timeout | — | `MULTICA_CODEX_TURN_INTERRUPT_TIMEOUT` | `2s` (bounded grace period for `turn/interrupt` acknowledgement and `turn/completed`; tune from the logged interrupt latency on unusually slow hosts) |
 | OpenCode idle watchdog | — | `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` (`0` falls back to the generic idle watchdog; cannot extend it) |
+| Command cap | — | `MULTICA_COMMAND_WATCHDOG` | `60m`: how long one command may run, counted from its own start whether it prints or not; a running command is activity, so the idle window does not stop it. It narrows the in-flight-tool budget and cannot extend `MULTICA_AGENT_TOOL_WATCHDOG` (OpenCode's running commands come from its plugin); Codex's semantic timer uses it for the oldest command the turn started. Subagent hand-offs and Cursor background tools keep the silence budget. `0` = no separate cap. A stopped run's issue comment names the command, or the last step and output |
 | Max concurrent tasks | `--max-concurrent-tasks` | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` |
 | Daemon ID | `--daemon-id` | `MULTICA_DAEMON_ID` | hostname |
 | Device name | `--device-name` | `MULTICA_DAEMON_DEVICE_NAME` | hostname |

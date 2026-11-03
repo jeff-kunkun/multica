@@ -172,7 +172,7 @@ func runSuspendScenario(t *testing.T, sc suspendScenario, c *hostClock, now func
 		return sc.tools
 	}
 	go new(Daemon).runIdleWatchdogWithClock(ctx, sc.window, sc.window, &last, tools, &probe.Bool, &threshold,
-		cancel, make(chan agent.Message), nil, nil, slog.Default(), now)
+		cancel, make(chan agent.Message), nil, nil, commandCap{}, slog.Default(), now)
 	synctest.Wait()
 	return probe, &threshold
 }

@@ -135,7 +135,7 @@ func TestBackgroundToolWatchdogShortOverride(t *testing.T) {
 		last.Store(int64(awakeclock.Now()))
 		tools.Store(1)
 		calls := 0
-		go new(Daemon).runIdleWatchdog(ctx, 10*time.Minute, time.Minute, &last, tools.Load, &fired, &threshold, cancel, make(chan agent.Message), func() bool { calls++; cancel(); return true }, nil, slog.Default())
+		go new(Daemon).runIdleWatchdog(ctx, 10*time.Minute, time.Minute, &last, tools.Load, &fired, &threshold, cancel, make(chan agent.Message), func() bool { calls++; cancel(); return true }, nil, commandCap{}, slog.Default())
 		synctest.Wait()
 		time.Sleep(time.Minute)
 		synctest.Wait()
@@ -158,7 +158,7 @@ func TestBackgroundToolWatchdogNaturalExitRace(t *testing.T) {
 			tools.Store(0)
 			last.Store(int64(awakeclock.Now()))
 			return false
-		}, nil, slog.Default())
+		}, nil, commandCap{}, slog.Default())
 		synctest.Wait()
 		time.Sleep(time.Minute)
 		synctest.Wait()
@@ -188,7 +188,7 @@ func TestBackgroundToolWatchdogFreshActivityDuringRevalidation(t *testing.T) {
 		go new(Daemon).runIdleWatchdog(ctx, time.Minute, time.Minute, &last, toolState, &fired, &threshold, cancel, make(chan agent.Message), func() bool {
 			refreshAtBoundary = true
 			return false
-		}, nil, slog.Default())
+		}, nil, commandCap{}, slog.Default())
 		synctest.Wait()
 		time.Sleep(time.Minute)
 		synctest.Wait()

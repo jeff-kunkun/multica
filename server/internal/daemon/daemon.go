@@ -2190,6 +2190,7 @@ func (d *Daemon) run(ctx context.Context, healthLn net.Listener) error {
 		// without it an operator cannot read the tool budget actually in effect.
 		"tool_watchdog", d.cfg.AgentToolWatchdog,
 		"opencode_idle_watchdog", d.cfg.OpenCodeIdleWatchdog,
+		"command_watchdog", d.cfg.CommandWatchdog,
 		"idle_stop_policy", d.cfg.IdleStopPolicy,
 		// Derived from the watchdog budget too (Codex's own timer is not
 		// tool-aware), so it needs the same treatment as tool_watchdog: without
@@ -9176,9 +9177,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 	model, thinkingLevel, serviceTier = selection.Model, selection.ThinkingLevel, selection.ServiceTier
 
-	var idleWatchdogTimeout time.Duration
+	var idleWatchdogTimeout, toolWatchdogTimeout time.Duration
 	if provider == "opencode" || provider == "codearts" {
 		idleWatchdogTimeout = d.cfg.OpenCodeIdleWatchdog
+		toolWatchdogTimeout = narrowedToolWatchdog(d.cfg.AgentToolWatchdog, d.cfg.CommandWatchdog)
 	}
 	execOpts := agent.ExecOptions{
 		EnableTaskSupplement:       taskSupplementNegotiated,
@@ -9188,8 +9190,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		ThreadName:                 deriveTaskThreadName(task),
 		Timeout:                    d.cfg.AgentTimeout,
 		SemanticInactivityTimeout:  d.cfg.CodexSemanticInactivityTimeout,
+		SemanticCommandTimeout:     d.cfg.CommandWatchdog,
 		FirstTurnNoProgressTimeout: d.cfg.CodexFirstTurnNoProgressTimeout,
 		IdleWatchdogTimeout:        idleWatchdogTimeout,
+		ToolWatchdogTimeout:        toolWatchdogTimeout,
 		HandshakeTimeout:           d.cfg.CodexHandshakeTimeout,
 		TurnInterruptTimeout:       d.cfg.CodexTurnInterruptTimeout,
 		ThreadHandshakeTimeout:     d.cfg.CodexThreadHandshakeTimeout,
@@ -9218,7 +9222,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		QwenpawWorkspace:       env.QwenpawWorkspace,
 	}
 	if d.cfg.IdleStopPolicy == idleStopPolicyOffice {
-		applyOfficeIdlePolicy(&execOpts, provider, task.IdleUnlimited)
+		applyOfficeIdlePolicy(&execOpts, task.IdleUnlimited, narrowedToolWatchdog(d.cfg.AgentToolWatchdog, d.cfg.CommandWatchdog))
 	}
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:
@@ -9311,6 +9315,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"resume_session", execOpts.ResumeSessionID != "",
 		"timeout", execOpts.Timeout,
 		"idle_watchdog", execOpts.IdleWatchdogTimeout,
+		"tool_watchdog", execOpts.ToolWatchdogTimeout,
 		"office_idle_stop", execOpts.OfficeIdleStop,
 		"idle_unlimited", execOpts.IdleUnlimited,
 	)
@@ -9344,33 +9349,29 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		taskResult.SessionRestartReason = reason
 	}()
 
-	if shouldRetryWithFreshSession(result, task.PriorSessionID, tools, provider) {
-		firstResult := result
-		firstUsage := result.Usage
-		firstTools := tools
-		if !result.ResumeRejectedTransient {
-			retiredSessionID = task.PriorSessionID
-		}
-		taskLog.Warn("session resume failed, retrying with fresh session", "error", result.Error)
-
-		// Rebuild cold-session context before the single retry. The prior
-		// provider transcript is gone (missing, account-mismatched, or —
-		// GH #5975 — carrying history the provider now refuses), so the
-		// fresh process must NOT be told it is resuming a conversation:
-		//   - taskCtx.PriorSessionResumed=false + re-injecting the runtime
-		//     brief rewrites the on-disk AGENTS.md so it no longer claims
-		//     "You're resuming the prior session" (which file-based backends
-		//     like Kiro load themselves).
-		//   - clearing task.PriorSessionID rebuilds the prompt on the cold
-		//     comment-reading path instead of the warm resumed one.
-		//   - PriorSessionResumeUnavailable=true makes BuildPrompt append the
-		//     continuity notice for this surface, so the agent knows not to
-		//     assume continuity it no longer has. This is now the ONLY injector
-		//     on the retry path: the backend's own copy is suppressed below,
-		//     because before MUL-5722 both fired and the turn carried the same
-		//     paragraph twice.
-		// task and taskCtx are local (runTask takes task by value), so these
-		// mutations only affect the retry.
+	// coldSessionPrompt readies a fresh session that holds none of the earlier
+	// context and returns its prompt. The prior provider transcript is gone
+	// (missing, account-mismatched, or — GH #5975 — carrying history the
+	// provider now refuses), so the fresh process must NOT be told it is
+	// resuming a conversation:
+	//   - taskCtx.PriorSessionResumed=false + re-injecting the runtime
+	//     brief rewrites the on-disk AGENTS.md so it no longer claims
+	//     "You're resuming the prior session" (which file-based backends
+	//     like Kiro load themselves).
+	//   - clearing task.PriorSessionID rebuilds the prompt on the cold
+	//     comment-reading path instead of the warm resumed one, with the
+	//     issue description and snapshot in full.
+	//   - PriorSessionResumeUnavailable=true makes BuildPrompt append the
+	//     continuity notice for this surface, so the agent knows not to
+	//     assume continuity it no longer has. This is now the ONLY injector
+	//     on the retry path: the backend's own copy is suppressed below,
+	//     because before MUL-5722 both fired and the turn carried the same
+	//     paragraph twice.
+	// task and taskCtx are local (runTask takes task by value), so these
+	// mutations only affect the fresh session. The resume-failure retry below
+	// uses it, and so does the fresh continuation after an idle stop
+	// (DENE-2900), whose first prompt may have been the warm one.
+	coldSessionPrompt := func() string {
 		execOpts.ResumeSessionID = ""
 		task.PriorSessionID = ""
 		task.PriorSessionResumeUnavailable = true
@@ -9384,7 +9385,19 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				execOpts.SystemPrompt = runtimeBrief
 			}
 		}
-		freshPrompt := BuildPrompt(task, provider, promptOptions...)
+		return BuildPrompt(task, provider, promptOptions...)
+	}
+
+	if shouldRetryWithFreshSession(result, task.PriorSessionID, tools, provider) {
+		firstResult := result
+		firstUsage := result.Usage
+		firstTools := tools
+		if !result.ResumeRejectedTransient {
+			retiredSessionID = task.PriorSessionID
+		}
+		taskLog.Warn("session resume failed, retrying with fresh session", "error", result.Error)
+
+		freshPrompt := coldSessionPrompt()
 
 		retryResult, retryTools, retryErr := d.executeAndDrainDetectingSkills(ctx, backend, freshPrompt, execOpts, taskLog, task.ID, env.CodexHome, skillUsage, &msgSeq)
 		if retryErr != nil {
@@ -9403,24 +9416,64 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// than being relabeled resumable by a benign-looking second error.
 		result, tools = reconcileFreshRetryResult(firstResult, firstUsage, firstTools, retryResult, retryTools, retryErr)
 	}
-	if shouldResumeAfterIdleStop(result, execOpts) {
-		// One resume of the same session after the office policy stopped it
-		// for silence (DENE-2667). A second stop ends the run as blocked.
-		taskLog.Warn("idle stop: resuming the same session once", "session_id", result.SessionID, "error", result.Error)
-		execOpts.ResumeSessionID = result.SessionID
-		execOpts.ResumeExpected = true
-		if briefInline && resumedSessionHoldsBrief(provider, execOpts.ResumeSessionID) {
-			execOpts.SystemPrompt = ""
-		}
-		resumeResult, resumeTools, resumeErr := d.executeAndDrainDetectingSkills(ctx, backend, officeIdleResumePrompt, execOpts, taskLog, task.ID, env.CodexHome, skillUsage, &msgSeq)
-		if resumeErr != nil {
-			taskLog.Error("idle stop: resume failed to start; keeping the stopped result", "error", resumeErr)
+	if shouldResumeAfterIdleStop(result) && ctx.Err() == nil {
+		// One continuation after a watchdog stopped the run for silence
+		// (DENE-2667, every run since DENE-2900): the same session when it
+		// can be resumed, otherwise a fresh one given the task and the stop
+		// note, so the work does not restart from nothing. A second stop, or
+		// a continuation that cannot start, ends the run as blocked; the
+		// server does not retry idle_watchdog.
+		stopNote := result.Error
+		var next agent.Result
+		var nextTools int32
+		var nextErr error
+		fresh := result.SessionID == ""
+		if fresh {
+			taskLog.Warn("idle stop: no session to resume; starting fresh with the stop note", "error", stopNote)
 		} else {
-			resumeResult.Usage = mergeUsage(result.Usage, resumeResult.Usage)
-			if resumeResult.SessionID == "" {
-				resumeResult.SessionID = result.SessionID
+			taskLog.Warn("idle stop: resuming the same session once", "session_id", result.SessionID, "error", stopNote)
+			resumeOpts := execOpts
+			resumeOpts.ResumeSessionID = result.SessionID
+			resumeOpts.ResumeExpected = true
+			if briefInline && resumedSessionHoldsBrief(provider, resumeOpts.ResumeSessionID) {
+				resumeOpts.SystemPrompt = ""
 			}
-			result, tools = resumeResult, tools+resumeTools
+			next, nextTools, nextErr = d.executeAndDrainDetectingSkills(ctx, backend, officeIdleResumePromptFor(stopNote), resumeOpts, taskLog, task.ID, env.CodexHome, skillUsage, &msgSeq)
+			fresh = ctx.Err() == nil && (nextErr != nil || shouldRetryWithFreshSession(next, resumeOpts.ResumeSessionID, nextTools, provider))
+			if fresh {
+				taskLog.Warn("idle stop: the session could not be resumed; starting fresh with the stop note", "start_error", nextErr, "error", next.Error)
+			}
+		}
+		if fresh {
+			// The task again, built for a session with no context (the
+			// first prompt may have been the warm one of a resumed
+			// session), and the stop note.
+			freshPrompt := idleFreshPromptFor(coldSessionPrompt(), stopNote)
+			freshOpts := execOpts
+			freshOpts.ResumeExpected = false
+			next, nextTools, nextErr = d.executeAndDrainDetectingSkills(ctx, backend, freshPrompt, freshOpts, taskLog, task.ID, env.CodexHome, skillUsage, &msgSeq)
+		}
+		switch {
+		case nextErr != nil && ctx.Err() != nil:
+			// The task was cancelled meanwhile; the cancellation decides.
+			taskLog.Info("idle stop: task cancelled before the continuation started", "error", nextErr)
+		case nextErr != nil:
+			// Nothing continues the work, so a person has to (DENE-2900).
+			taskLog.Error("idle stop: the continuation failed to start", "error", nextErr)
+			result.Error = idleNotContinuedNote + "\n\n" + stopNote +
+				d.blockIssueAfterIdleStops(ctx, task, agentToken, idleNotContinuedAction, taskLog)
+		default:
+			next.Usage = mergeUsage(result.Usage, next.Usage)
+			if next.SessionID == "" && !fresh {
+				next.SessionID = result.SessionID
+			}
+			if next.Status == "idle_watchdog" {
+				// Stopped twice: the issue goes to blocked so a person
+				// picks it up, and the run's error says why (DENE-2900).
+				next.Error = idleStoppedTwiceNote + "\n\n" + next.Error +
+					d.blockIssueAfterIdleStops(ctx, task, agentToken, idleBlockAction, taskLog)
+			}
+			result, tools = next, tools+nextTools
 		}
 	}
 	// Record the account-level quota hit on the SAME terminal result, and only
@@ -10041,17 +10094,52 @@ func (d *Daemon) executeAndDrainDetectingSkills(ctx context.Context, backend age
 	if terminalObserved == nil {
 		terminalObserved = func() bool { return false }
 	}
+	// The tracker follows every run: the live report reads it, and the stop
+	// note names the running command or the last step from it (DENE-2900).
+	live := &liveTracker{running: session.RunningTools}
+	if session.RunningTools != nil {
+		// A call the backend reports as running is in flight even though the
+		// stream has not shown it yet (OpenCode prints a tool once finished),
+		// and its end is activity, as a tool_result would be: the stream
+		// shows the call only a moment after the backend stops reporting it.
+		counted := watchdogToolCount
+		watchdogToolCount = func() int32 {
+			running := live.untrackedRunning()
+			advanceActivity(&lastActivityAt, live.lastEnded())
+			return counted() + running
+		}
+	}
+	// The command cap measures each call the tracker follows from its start
+	// (DENE-2900). A backend that keeps its own tool accounting (Cursor's
+	// background shells) has calls the tracker cannot see end, so it keeps
+	// the silence budget only.
+	var stoppedByCommandCap atomic.Bool
+	// progress counts what the drain loop has taken, so the cap can tell the
+	// backlog it waits for from output queued after it.
+	progress := newDrainProgress(func() int { return len(session.Messages) })
+	commands := commandCap{stopped: &stoppedByCommandCap, drain: progress}
+	if session.ToolActivity == nil {
+		commands.oldest = live.oldestCommand
+	}
+	// idleStopNoteText holds the stop note, written the moment the watchdog
+	// fires: the messages a killed backend still flushes afterwards would
+	// otherwise move "the last step" past the one it stopped on.
+	var idleStopNoteText atomic.Value
+	fireIdleStop := func() {
+		note := idleStopNote(live.stopFacts(time.Duration(idleWatchdogThreshold.Load()), watchdogToolCount() > 0, stoppedByCommandCap.Load()))
+		idleStopNoteText.Store(note)
+		taskLog.Warn("idle watchdog stop note", "note", note)
+		agentCancel()
+	}
 	watchdogCtx, stopWatchdog := context.WithCancel(agentCtx)
 	defer stopWatchdog()
 	if idleWindow > 0 {
-		go d.runIdleWatchdog(watchdogCtx, idleWindow, toolWindow, &lastActivityAt, watchdogToolCount, &idleWatchdogFired, &idleWatchdogThreshold, agentCancel, session.Messages, session.InterruptBackgroundTools, terminalObserved, taskLog)
+		go d.runIdleWatchdog(watchdogCtx, idleWindow, toolWindow, &lastActivityAt, watchdogToolCount, &idleWatchdogFired, &idleWatchdogThreshold, fireIdleStop, session.Messages, session.InterruptBackgroundTools, terminalObserved, commands, taskLog)
 	}
 	// The live report (DENE-2667 PR 4) reads the silence on the watchdog's
 	// clock: watchdogToolCount merges the backend's tool and output activity
 	// into lastActivityAt before every reading, exactly as the watchdog does.
-	var live *liveTracker
 	if d.cfg.LiveStatus && taskID != "" {
-		live = &liveTracker{}
 		liveActivity := func() (time.Duration, int32) {
 			inFlight := watchdogToolCount()
 			return awakeclock.Now() - time.Duration(lastActivityAt.Load()), inFlight
@@ -10196,6 +10284,7 @@ func (d *Daemon) executeAndDrainDetectingSkills(ctx context.Context, backend age
 				observedAt := time.Now().UTC()
 				lastActivityAt.Store(int64(awakeclock.Now()))
 				live.observe(msg)
+				progress.took()
 				switch msg.Type {
 				case agent.MessageStatus:
 					// Persist the session/work_dir as soon as the backend
@@ -10338,11 +10427,15 @@ func (d *Daemon) executeAndDrainDetectingSkills(ctx context.Context, backend age
 					mu.Unlock()
 					flushFirstVisible()
 				}
+			case reply := <-progress.asks:
+				// Between two messages: everything taken is counted.
+				progress.answer(reply)
 			case <-drainCtx.Done():
 				goto drainDone
 			}
 		}
 	drainDone:
+		progress.stopped()
 		close(done)
 		// Let any tick-driven flush finish before the final one: a flush still
 		// in flight would otherwise keep posting batches after this goroutine
@@ -10381,13 +10474,16 @@ func (d *Daemon) executeAndDrainDetectingSkills(ctx context.Context, backend age
 	// delivered non-authoritative result is still returned to the idle-watchdog
 	// caller for re-tagging; ordinary upstream cancellation deliberately ignores
 	// it and keeps the existing generic cancelled disposition.
-	// idleStopped tags a result the idle watchdog stopped.
+	// idleStopped tags a result the idle watchdog stopped. The stop note
+	// replaces the error the backend reports for the kill itself.
 	idleStopped := func(result agent.Result) agent.Result {
 		result.Status = "idle_watchdog"
-		if result.Error == "" {
+		if note, _ := idleStopNoteText.Load().(string); note != "" {
+			result.Error = note
+		} else if result.Error == "" {
 			result.Error = idleWatchdogReason(time.Duration(idleWatchdogThreshold.Load()))
 		}
-		if sid, _ := observedSessionID.Load().(string); opts.OfficeIdleStop && result.SessionID == "" {
+		if sid, _ := observedSessionID.Load().(string); result.SessionID == "" {
 			result.SessionID = sid
 		}
 		return result
@@ -10441,6 +10537,15 @@ func (d *Daemon) executeAndDrainDetectingSkills(ctx context.Context, backend age
 			// disposition through a dedicated failure_reason, not the
 			// generic "agent_error" bucket the aborted path falls into.
 			result = idleStopped(result)
+		} else if note := codexSemanticStopNote(result, opts, live, watchdogToolCount() > 0); note != "" {
+			// Codex's own timer stopped the turn: leave the same note, so
+			// the issue says what it stopped on (DENE-2900).
+			// It is a stop for silence like the watchdog's, so it is handled
+			// as one: resumed once in the same session, never retried by
+			// the server in a fresh one (DENE-2900).
+			taskLog.Warn("codex semantic stop note", "note", note)
+			result.Status = "idle_watchdog"
+			result.Error = note + "\n\n" + result.Error
 		}
 		return result, toolCount.Load(), nil
 	case <-drainCtx.Done():
@@ -10567,7 +10672,20 @@ func idleWatchdogTickInterval(window time.Duration) time.Duration {
 //
 // In both cases the watchdog also requires the session.Messages buffer to be
 // empty — a buffered-but-undrained message means the drain loop is behind, not
-// the backend.
+// the backend. Past the command cap it waits only for the messages queued
+// when the cap was reached (capBacklog), not for output queued later, and one
+// tick at most; the drain loop itself says, between two messages, where that
+// backlog ends.
+//
+// With a tool in flight that commands.oldest measures, toolWindow is the
+// command cap instead (DENE-2900): the run is stopped once the oldest such
+// call has run that long since it started, however much else it printed
+// meanwhile, and never for silence before that. A command stuck in a loop of
+// output, or one running beside other work, would otherwise never reach the
+// silence budget, and one the stream does not show yet would be charged the
+// silence from before it started. The silence budget still applies while
+// only unmeasured calls are in flight (a subagent hand-off, or a backend that
+// keeps its own tool accounting).
 //
 // Polling rate comes from idleWatchdogTickInterval, so a run is force-stopped
 // somewhere between its budget and budget + tick, never earlier.
@@ -10576,20 +10694,137 @@ func idleWatchdogTickInterval(window time.Duration) time.Duration {
 // awake. lastActivityAt and every native tool timestamp are awakeclock
 // readings. A laptop that sleeps through a run resumes with its silence
 // exactly where it was before the lid closed (GitHub #9024).
-func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window, toolWindow time.Duration, lastActivityAt *atomic.Int64, inFlightTools func() int32, fired *atomic.Bool, firedThreshold *atomic.Int64, cancel context.CancelFunc, messages <-chan agent.Message, interruptBackground func() bool, terminalObserved func() bool, taskLog *slog.Logger) {
-	d.runIdleWatchdogWithClock(agentCtx, window, toolWindow, lastActivityAt, inFlightTools, fired, firedThreshold, cancel, messages, interruptBackground, terminalObserved, taskLog, awakeclock.Now)
+func (d *Daemon) runIdleWatchdog(agentCtx context.Context, window, toolWindow time.Duration, lastActivityAt *atomic.Int64, inFlightTools func() int32, fired *atomic.Bool, firedThreshold *atomic.Int64, cancel context.CancelFunc, messages <-chan agent.Message, interruptBackground func() bool, terminalObserved func() bool, commands commandCap, taskLog *slog.Logger) {
+	d.runIdleWatchdogWithClock(agentCtx, window, toolWindow, lastActivityAt, inFlightTools, fired, firedThreshold, cancel, messages, interruptBackground, terminalObserved, commands, taskLog, awakeclock.Now)
+}
+
+// commandCap is the command cap's view of one run (DENE-2900). oldest reports
+// when the oldest running call the cap measures started, on the awake clock;
+// nil means the run has no per-call starts and keeps the silence budget only.
+// drain is how far the drain loop has taken the run's messages; nil means the
+// cap does not wait for queued messages. stopped is set when the cap, not
+// silence, stopped the run.
+type commandCap struct {
+	oldest  func() (time.Duration, bool)
+	drain   *drainProgress
+	stopped *atomic.Bool
+}
+
+// drainProgress is how far the drain loop has taken the run's messages
+// (DENE-2900). Only the drain loop changes it, and only the drain loop says
+// where the queued backlog ends, between two messages: a message it has taken
+// off the queue but not handled yet is in neither the queue nor the count, so
+// a reading from any other goroutine could leave that message out, and with
+// it the result of the call the cap is about to stop (Codex's fourth review).
+type drainProgress struct {
+	// queued reads the queue's length.
+	queued func() int
+	// asks carries the cap's question to the drain loop, which receives it
+	// only between two messages.
+	asks chan chan int64
+	// done closes when the drain loop takes no more messages.
+	done  chan struct{}
+	taken atomic.Int64
+}
+
+// drainAnswerWait is how long the cap waits for the drain loop's answer, from
+// asking to the reply. It is longer than the drain loop's slowest step with a
+// message, the 5-second session pin, so a drain loop that does not answer
+// within it is busy with a message or stuck.
+const drainAnswerWait = 10 * time.Second
+
+func newDrainProgress(queued func() int) *drainProgress {
+	return &drainProgress{queued: queued, asks: make(chan chan int64), done: make(chan struct{})}
+}
+
+// took counts a message the drain loop has handled, after the tracker saw it.
+func (p *drainProgress) took() { p.taken.Add(1) }
+
+func (p *drainProgress) count() int64 { return p.taken.Load() }
+
+// answer is the drain loop's reply to an ask, given between two messages:
+// every message it took is counted, so the count plus the queue's length is
+// where the backlog queued now ends.
+func (p *drainProgress) answer(reply chan<- int64) {
+	reply <- p.taken.Load() + int64(p.queued())
+}
+
+// stopped tells the cap that the drain loop takes no more messages.
+func (p *drainProgress) stopped() { close(p.done) }
+
+// backlogEnd asks the drain loop for the count it reaches once it has taken
+// every message queued now, waiting at most wait from asking to the reply, so
+// a drain loop that takes the question and then stops still lets the cap go
+// on (Codex's fifth review). False means it did not answer: it is busy with a
+// message, or stuck.
+func (p *drainProgress) backlogEnd(ctx context.Context, wait time.Duration) (int64, bool) {
+	reply := make(chan int64, 1)
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case p.asks <- reply:
+		select {
+		case end := <-reply:
+			return end, true
+		case <-timer.C:
+		case <-ctx.Done():
+		}
+	case <-p.done:
+		return p.taken.Load(), true
+	case <-timer.C:
+	case <-ctx.Done():
+	}
+	return 0, false
+}
+
+// capBacklog is what the command cap waits for before it stops a call that
+// ran past it: the messages already queued when the cap was reached, one of
+// which may be the call's result (DENE-2900). It waits for them one tick at
+// most, whatever the drain loop does meanwhile: a drain loop handles a message
+// in seconds, so one that has not reached the end of that backlog a tick later
+// is stuck or flooded, and the cap stops the run. Every earlier wait that
+// depended on the drain loop making progress could be held off for ever by a
+// drain loop that stopped at the wrong moment (Codex's third to fifth
+// reviews).
+type capBacklog struct {
+	waited bool
+}
+
+// drained reports whether the cap may stop the call now. At the first tick
+// past the cap it asks the drain loop where the queued backlog ends and goes
+// ahead only if that backlog is already handled; otherwise, or if the drain
+// loop does not answer, the cap waits one tick. At the next tick it goes ahead
+// regardless.
+func (b *capBacklog) drained(ctx context.Context, c commandCap) bool {
+	if c.drain == nil || b.waited {
+		return true
+	}
+	b.waited = true
+	end, ok := c.drain.backlogEnd(ctx, drainAnswerWait)
+	return ok && c.drain.count() >= end
+}
+
+// check reports whether a call the cap measures is running, and whether the
+// oldest one has run for budget by now.
+func (c commandCap) check(now, budget time.Duration) (running, over bool) {
+	if c.oldest == nil {
+		return false, false
+	}
+	start, ok := c.oldest()
+	return ok, ok && now-start >= budget
 }
 
 // runIdleWatchdogWithClock is runIdleWatchdog with the awake clock injected,
 // so tests can simulate a host suspend: wall time that passes while the
 // awake reading stands still.
-func (d *Daemon) runIdleWatchdogWithClock(agentCtx context.Context, window, toolWindow time.Duration, lastActivityAt *atomic.Int64, inFlightTools func() int32, fired *atomic.Bool, firedThreshold *atomic.Int64, cancel context.CancelFunc, messages <-chan agent.Message, interruptBackground func() bool, terminalObserved func() bool, taskLog *slog.Logger, awakeNow func() time.Duration) {
+func (d *Daemon) runIdleWatchdogWithClock(agentCtx context.Context, window, toolWindow time.Duration, lastActivityAt *atomic.Int64, inFlightTools func() int32, fired *atomic.Bool, firedThreshold *atomic.Int64, cancel context.CancelFunc, messages <-chan agent.Message, interruptBackground func() bool, terminalObserved func() bool, commands commandCap, taskLog *slog.Logger, awakeNow func() time.Duration) {
 	tickWindow := window
 	if toolWindow > 0 && toolWindow < tickWindow {
 		tickWindow = toolWindow
 	}
 	ticker := time.NewTicker(idleWatchdogTickInterval(tickWindow))
 	defer ticker.Stop()
+	var backlog capBacklog
 	for {
 		select {
 		case <-agentCtx.Done():
@@ -10601,21 +10836,30 @@ func (d *Daemon) runIdleWatchdogWithClock(agentCtx context.Context, window, tool
 			// toolWindow <= 0 disables the in-flight bound entirely.
 			threshold := window
 			toolInFlight := inFlightTools() > 0
+			measured, capped := false, false
 			if toolInFlight {
 				if toolWindow <= 0 {
 					continue
 				}
 				threshold = toolWindow
+				measured, capped = commands.check(awakeNow(), toolWindow)
+			}
+			if !capped {
+				backlog = capBacklog{}
 			}
 			last := lastActivityAt.Load()
 			idleFor := awakeNow() - time.Duration(last)
-			if idleFor < threshold {
+			// A measured command is bounded by the cap alone: its silence is
+			// expected, and the cap already ends one that never returns.
+			if measured && !capped || !measured && idleFor < threshold {
 				continue
 			}
 			// A buffered-but-undrained message means the drain loop is
 			// behind, not the backend. Wait one more tick rather than
-			// killing a backend that is still producing output.
-			if len(messages) > 0 {
+			// killing a backend that is still producing output. Past the
+			// command cap, wait only for what was queued when the cap was
+			// reached, which may hold the call's result, and one tick at most.
+			if capped && !backlog.drained(agentCtx, commands) || !capped && len(messages) > 0 {
 				continue
 			}
 			// Cursor can stop its owned background tools without aborting the
@@ -10639,8 +10883,14 @@ func (d *Daemon) runIdleWatchdogWithClock(agentCtx context.Context, window, tool
 			// Refresh native tool activity BEFORE reading its timestamp. The
 			// callback may publish newer activity without changing the count.
 			currentToolInFlight := inFlightTools() > 0
-			currentActivity := lastActivityAt.Load()
-			if currentActivity != last ||
+			if capped {
+				// The cap counts from the call's start, so activity and later
+				// output do not matter; only that the call is still running
+				// past it.
+				if _, still := commands.check(awakeNow(), toolWindow); !still || !currentToolInFlight {
+					continue
+				}
+			} else if currentActivity := lastActivityAt.Load(); currentActivity != last ||
 				currentToolInFlight != toolInFlight || len(messages) > 0 {
 				continue
 			}
@@ -10658,13 +10908,28 @@ func (d *Daemon) runIdleWatchdogWithClock(agentCtx context.Context, window, tool
 				"idle_for", idleFor.Round(time.Second).String(),
 				"threshold", threshold.String(),
 				"tool_in_flight", toolInFlight,
+				"command_cap", capped,
 			)
 			firedThreshold.Store(int64(threshold))
+			if capped && commands.stopped != nil {
+				commands.stopped.Store(true)
+			}
 			fired.Store(true)
 			cancel()
 			return
 		}
 	}
+}
+
+// narrowedToolWatchdog is a provider's in-flight-tool budget: provider only
+// narrows the daemon-wide tool budget, and zero means "use that budget"
+// (ExecOptions.ToolWatchdogTimeout). A daemon-wide 0 — never stop while a tool
+// runs — therefore stays in force.
+func narrowedToolWatchdog(daemonWide, provider time.Duration) time.Duration {
+	if daemonWide > 0 && provider > 0 && provider < daemonWide {
+		return provider
+	}
+	return 0
 }
 
 // idleWatchdogBudgets returns one execution's silence budgets: idle with no

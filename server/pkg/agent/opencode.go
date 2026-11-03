@@ -222,6 +222,7 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	// them. Such runs are refused rather than started without their servers —
 	// see ErrOpenCodeV2MCPUnsupported.
 	var supplement *supplementInbox
+	var tools *opencodeToolWatch
 	if usesV2 {
 		if err := opencodeCheckMCPSupport(opts.McpConfig); err != nil {
 			cancel()
@@ -255,6 +256,19 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 				env = append(env, supplementInboxDirEnv+"="+inbox.dir)
 			}
 		}
+		// The stream prints a tool only once it finished; this plugin shows the
+		// daemon which calls are still running (DENE-2900). A run whose plugin
+		// cannot be installed keeps the stream-only view.
+		base := configContent
+		if base == "" {
+			base = b.cfg.Env["OPENCODE_CONFIG_CONTENT"]
+		}
+		if watch, merged, err := newOpenCodeToolWatch(base); err != nil {
+			b.cfg.Logger.Warn("opencode: running tools not reported for this run", "error", err)
+		} else {
+			tools, configContent = watch, merged
+			env = append(env, watch.env())
+		}
 		if configContent != "" {
 			env = append(env, "OPENCODE_CONFIG_CONTENT="+configContent)
 		}
@@ -279,12 +293,14 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		supplement.close()
+		tools.close()
 		cancel()
 		return nil, fmt.Errorf("opencode stdout pipe: %w", err)
 	}
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		supplement.close()
+		tools.close()
 		cancel()
 		return nil, fmt.Errorf("opencode stdin pipe: %w", err)
 	}
@@ -295,6 +311,7 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
 		closeStdin()
 		supplement.close()
+		tools.close()
 		cancel()
 		return nil, fmt.Errorf("start opencode: %w", err)
 	}
@@ -374,6 +391,7 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		close(procDone)
 		releaseProcessGroup(cmd)
 		supplement.close()
+		tools.close()
 		duration := time.Since(startTime)
 
 		// Wait closes the process pipes, so a prompt write still blocked when
@@ -439,7 +457,11 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		}
 	}()
 
-	return supplement.bindSupplement(&Session{Messages: msgCh, Result: resCh}), nil
+	session := &Session{Messages: msgCh, Result: resCh}
+	if tools != nil {
+		session.RunningTools = tools.runningTools
+	}
+	return supplement.bindSupplement(session), nil
 }
 
 // newOpenCodeSupplementInbox writes the plugin into a fresh inbox and returns
