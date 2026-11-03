@@ -183,12 +183,17 @@ type IssueCreateOpts struct {
 	AssignedAgentRunFireAt time.Time
 }
 
-// ErrActiveDuplicate signals that the duplicate guard found an active
-// issue with the same (workspace, project, parent, title) tuple and
-// AllowDuplicate was false. The IssueCreateResult.DuplicateIssue field is
-// populated when this error is returned so callers can render the
-// conflict (HTTP 409, Lark card, etc.).
+// ErrActiveDuplicate signals an exact-title conflict outside a project, or a
+// same-project similarity conflict (including recent terminal work). The result
+// identifies the original issue; SimilarIssuesError additionally lists matches.
 var ErrActiveDuplicate = errors.New("active duplicate issue exists")
+
+type SimilarIssuesError struct {
+	Candidates []issueguard.SimilarCandidate
+}
+
+func (e *SimilarIssuesError) Error() string { return issueguard.SimilarMessage(e.Candidates) }
+func (e *SimilarIssuesError) Unwrap() error { return ErrActiveDuplicate }
 
 // ErrParentIssueNotFound signals that the supplied ParentIssueID does
 // not exist in the issue's workspace. The service refuses to create
@@ -500,13 +505,44 @@ func (s *IssueService) createInTx(ctx context.Context, tx pgx.Tx, qtx *db.Querie
 		return issueCreateTxOutcome{}, err
 	}
 
-	duplicate, found, err := issueguard.LockAndFindActiveDuplicate(ctx, qtx, p.WorkspaceID, projectID, p.ParentIssueID, p.Title, p.AllowDuplicate)
-	if err != nil {
-		return issueCreateTxOutcome{}, fmt.Errorf("duplicate guard: %w", err)
+	similarInput := issueguard.SimilarInput{
+		WorkspaceID: p.WorkspaceID, ProjectID: projectID, ParentID: p.ParentIssueID,
+		Title: p.Title, Description: p.Description.String,
 	}
-	if found {
-		dup := duplicate
-		return issueCreateTxOutcome{DuplicateIssue: &dup}, ErrActiveDuplicate
+	if p.CreatorType == "member" {
+		similarInput.MemberID = p.CreatorID
+	}
+	var overrideReason string
+	if projectID.Valid {
+		workspace, err := qtx.GetWorkspace(ctx, p.WorkspaceID)
+		if err != nil {
+			return issueCreateTxOutcome{}, fmt.Errorf("duplicate workspace: %w", err)
+		}
+		similarInput.Prefix = workspace.IssuePrefix
+		if err := issueguard.LockSimilarProject(ctx, qtx, similarInput); err != nil {
+			return issueCreateTxOutcome{}, fmt.Errorf("duplicate project lock: %w", err)
+		}
+		candidates, err := issueguard.FindSimilar(ctx, qtx, similarInput)
+		if err != nil {
+			return issueCreateTxOutcome{}, fmt.Errorf("similar issue guard: %w", err)
+		}
+		if blocked := issueguard.BlockingSimilar(p.Description.String, candidates); len(blocked) > 0 {
+			dup := blocked[0].Issue
+			return issueCreateTxOutcome{DuplicateIssue: &dup}, &SimilarIssuesError{Candidates: blocked}
+		}
+		overrideReason = issueguard.OverrideReason(p.Description.String, candidates)
+	}
+	// Unprojected issues retain their legacy exact-title behavior. Project
+	// creates already passed the stronger, visibility-aware guard above.
+	if !projectID.Valid {
+		duplicate, found, err := issueguard.LockAndFindActiveDuplicate(ctx, qtx, p.WorkspaceID, projectID, p.ParentIssueID, p.Title, p.AllowDuplicate)
+		if err != nil {
+			return issueCreateTxOutcome{}, fmt.Errorf("duplicate guard: %w", err)
+		}
+		if found {
+			dup := duplicate
+			return issueCreateTxOutcome{DuplicateIssue: &dup}, ErrActiveDuplicate
+		}
 	}
 
 	issueNumber, err := AllocateIssueNumber(ctx, qtx, p.WorkspaceID, issueCountPolicy)
@@ -616,6 +652,16 @@ func (s *IssueService) createInTx(ctx context.Context, tx pgx.Tx, qtx *db.Querie
 		if err != nil {
 			return issueCreateTxOutcome{}, fmt.Errorf("record assignee source: %w", err)
 		}
+	}
+	if overrideReason != "" {
+		value, _ := json.Marshal(map[string]string{"reason": overrideReason})
+		row, err := qtx.SetIssueMetadataKey(ctx, db.SetIssueMetadataKeyParams{
+			ID: issue.ID, WorkspaceID: issue.WorkspaceID, Key: "dedupe_override", Value: value,
+		})
+		if err != nil {
+			return issueCreateTxOutcome{}, fmt.Errorf("record duplicate override: %w", err)
+		}
+		issue.Metadata, issue.Revision = row.Metadata, row.Revision
 	}
 	if len(p.AfterIssueIDs) > 0 {
 		row, err := qtx.SetIssueMetadataKey(ctx, db.SetIssueMetadataKeyParams{ID: issue.ID, WorkspaceID: issue.WorkspaceID, Key: MetaKeyBacklogAfter, Value: afterValue(p.AfterIssueIDs)})

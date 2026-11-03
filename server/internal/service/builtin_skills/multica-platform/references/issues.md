@@ -1,4 +1,36 @@
 # Issues
+
+## Check similar work before creating an issue
+
+`multica issue similar --project "<project-id-or-exact-title>" --title "<title>"
+--description-file ./description.md --output json` is read-only. Read project
+IDs with `multica project list --output json`; `--parent <issue-key-or-id>`
+excludes the selected parent and planned siblings.
+
+The server checks the same project for visible active work, work closed in the
+last 2 hours, and work completed in the last 72 hours. Chinese bigrams and word
+overlap compare the title and the first 300 description characters (threshold
+0.40); a shared MR, PR or named task branch also matches. The JSON response has
+`candidates[] {id, identifier, title, status, score, why, recent_done}`,
+`would_block` and `threshold`. Scores are 0..1; no matches means `[]`.
+
+Every ordinary create repeats the check in its transaction, immediately blocking
+with HTTP 409 `active_duplicate_issue` and `candidates` before creating work or
+starting an agent. The legacy `issue` reference and human-readable error remain
+for old clients, including mo. `issue create --output json` prints the conflict
+body to stdout and exits nonzero.
+
+When blocked, comment on the original issue and continue there; do not change the
+title to evade the guard. A different task may add a standalone description line
+`查重放行：和 DENE-123 不同在……`, naming every matching candidate and giving an
+explanation of at least 8 characters after removing issue keys. The reason stays
+in the description and `metadata.dedupe_override.reason`. A recent completed
+candidate is acknowledged by naming its exact issue key in the description.
+`--allow-duplicate` cannot bypass this check. Issues without a project keep the
+legacy exact-title guard; planned child/sibling work and trusted recurring
+autopilot creation retain their existing semantics. There is no observation
+period or external model call.
+
 Product contracts the runtime brief does not fully encode.
 - [PR linking](#pr-linking)
 - [Reading a linked PR's real state](#reading-a-linked-prs-real-state)

@@ -32,6 +32,7 @@ import { useCreateIssue } from "@/data/mutations/issues";
 import { useNewIssueDraftStore } from "@/data/stores/new-issue-draft-store";
 import { useMentionInput } from "@/lib/use-mention-input";
 import { useT } from "@/lib/i18n";
+import { SimilarIssuesNotice } from "@/components/issue/similar-issues-notice";
 
 export default function NewIssueModal() {
   const { t } = useT("issues");
@@ -132,6 +133,11 @@ export default function NewIssueModal() {
           <DescriptionField
             description={description}
             disabled={isSubmitting}
+          />
+          <SimilarIssuesNotice
+            title={title}
+            description={description.serialize()}
+            projectId={project?.id}
           />
           <CreateFormAttributeRow />
         </ScrollView>

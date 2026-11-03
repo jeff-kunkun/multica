@@ -165,7 +165,10 @@
     "toast_created": "Issue created",
     "view_issue": "View issue",
     "toast_failed": "Failed to create issue",
-    "toast_duplicate_title": "Duplicate issue",
+    "toast_duplicate_title": "Similar work already exists",
+    "similar_title": "Similar work already exists",
+    "similar_hint": "Continue in an existing issue. For different work, add a separate description line: 查重放行：<all candidate keys and a difference of at least 8 characters>. For recently completed work, name the original issue key in the description.",
+    "similar_done": "Recently completed",
     "toast_duplicate_view": "View existing issue",
     "issue_limit": {
       "title": "This workspace has reached its issue limit",

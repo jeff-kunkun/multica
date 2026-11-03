@@ -73,6 +73,9 @@
   "new": {
     "title": "New issue",
     "title_placeholder": "Issue title",
+    "similar_title": "Similar work already exists",
+    "similar_hint": "Continue in an existing issue. For different work, add a separate description line: 查重放行：<all candidate keys and a difference of at least 8 characters>. For recently completed work, name the original issue key in the description.",
+    "similar_done": "Recently completed",
     "create": "Create issue",
     "creating": "Creating...",
     "description_placeholder": "Description... (type @ to mention)"

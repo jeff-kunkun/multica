@@ -16,6 +16,7 @@ export { parseWithFallback, setSchemaLogger } from "./schema";
 export type { ParseOptions } from "./schema";
 export { DuplicateIssueErrorBodySchema } from "./schemas";
 export type { DuplicateIssueErrorBody } from "./schemas";
+export type { SimilarIssueCandidate, SimilarIssuesResponse } from "./schemas";
 export {
   CONFIG_BUNDLE_FORMAT,
   CONFIG_BUNDLE_SCHEMA_VERSION,

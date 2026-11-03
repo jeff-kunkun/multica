@@ -163,7 +163,10 @@
     "toast_created": "タスクを作成しました",
     "view_issue": "タスクを表示",
     "toast_failed": "タスクを作成できませんでした",
-    "toast_duplicate_title": "重複タスク",
+    "toast_duplicate_title": "同じプロジェクトに似たタスクがあります",
+    "similar_title": "同じプロジェクトに似たタスクがあります",
+    "similar_hint": "既存のタスクのコメントで引き継いでください。別の作業なら説明に「查重放行：全候補の番号と8文字以上の違い」を独立した1行で記載してください。最近完了した作業の続きは、説明に元の番号を記載してください。",
+    "similar_done": "最近完了",
     "toast_duplicate_view": "既存のタスクを表示",
     "issue_limit": {
       "title": "このワークスペースはタスク数の上限に達しました",

@@ -163,7 +163,10 @@
     "toast_created": "태스크를 만들었습니다",
     "view_issue": "태스크 보기",
     "toast_failed": "태스크를 만들지 못했습니다",
-    "toast_duplicate_title": "중복 태스크",
+    "toast_duplicate_title": "같은 프로젝트에 유사한 작업이 있습니다",
+    "similar_title": "같은 프로젝트에 유사한 작업이 있습니다",
+    "similar_hint": "기존 작업의 댓글에서 이어가세요. 다른 작업이면 설명에 \"查重放行：모든 후보 번호와 8자 이상의 차이\"를 별도 줄로 적으세요. 최근 완료된 작업의 후속 작업은 설명에 원래 작업 번호를 적으세요.",
+    "similar_done": "최근 완료",
     "toast_duplicate_view": "기존 태스크 보기",
     "issue_limit": {
       "title": "이 워크스페이스가 태스크 수 한도에 도달했습니다",

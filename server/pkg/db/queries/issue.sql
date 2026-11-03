@@ -637,6 +637,18 @@ FROM write_source RETURNING *;
 -- name: LockIssueDuplicateKey :exec
 SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0));
 
+-- name: ListSimilarIssueCandidates :many
+SELECT * FROM issue
+WHERE workspace_id = sqlc.arg('workspace_id')
+  AND project_id = sqlc.arg('project_id')
+  AND triage_state IS NULL
+  AND (
+    NOT (status = ANY(sqlc.arg('done_keys')::text[]) OR status = ANY(sqlc.arg('closed_keys')::text[]))
+    OR (status = ANY(sqlc.arg('done_keys')::text[]) AND updated_at >= sqlc.arg('done_after')::timestamptz)
+    OR (status = ANY(sqlc.arg('closed_keys')::text[]) AND updated_at >= sqlc.arg('closed_after')::timestamptz)
+  )
+ORDER BY created_at ASC;
+
 -- name: FindActiveDuplicateIssue :one
 SELECT * FROM issue
 WHERE workspace_id = $1

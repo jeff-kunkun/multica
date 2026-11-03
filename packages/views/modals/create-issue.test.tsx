@@ -1599,7 +1599,7 @@ describe("CreateIssueModal", () => {
     expect(typeof renderToast).toBe("function");
     render(renderToast("toast-dup"));
 
-    expect(screen.getByText("Duplicate issue")).toBeInTheDocument();
+    expect(screen.getByText("Similar work already exists")).toBeInTheDocument();
     expect(screen.getByText(/MUL-7/)).toBeInTheDocument();
     expect(screen.getByText(/Login bug/)).toBeInTheDocument();
 
