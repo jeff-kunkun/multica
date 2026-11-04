@@ -395,14 +395,12 @@ func TestSignStateRequiresSecret(t *testing.T) {
 	}
 }
 
-// TestWebhook_MergedPR_AdvancesLinkedIssueToDone exercises the end-to-end
+// TestWebhook_MergedPR_KeepsLinkedIssueStatus exercises the end-to-end
 // auto-link + merge-sync path: install a workspace, fire a `pull_request`
 // webhook with the issue identifier in the title, and verify (a) the PR row
-// is upserted, (b) it is linked to the issue, (c) the issue transitions to
-// 'done'. The system actor on that issue:updated event is what previously
-// panicked the activity / notification listeners — having this test pass
-// while listeners are wired up is the regression guard.
-func TestWebhook_MergedPR_AdvancesLinkedIssueToDone(t *testing.T) {
+// is upserted, (b) it is linked to the issue, (c) the issue keeps its status
+// for manager acceptance (DENE-2697).
+func TestWebhook_MergedPR_KeepsLinkedIssueStatus(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("handler test fixture not initialized (no DB?)")
 	}
@@ -494,13 +492,7 @@ func TestWebhook_MergedPR_AdvancesLinkedIssueToDone(t *testing.T) {
 		t.Fatalf("expected 1 linked PR, got %d", len(linked))
 	}
 
-	updated, err := testHandler.Queries.GetIssue(ctx, parseUUID(created.ID))
-	if err != nil {
-		t.Fatalf("GetIssue: %v", err)
-	}
-	if updated.Status != "done" {
-		t.Errorf("expected issue status 'done', got %q", updated.Status)
-	}
+	wantMergeKeepsStatus(t, created.ID, "in_progress")
 }
 
 // TestWebhook_MergedPR_PreservesCancelled guards the "do not stomp cancelled"
@@ -613,8 +605,8 @@ func TestWebhook_UninstallReturnsWorkspaceForBroadcast(t *testing.T) {
 
 // TestWebhook_MergedPR_WaitsForOpenSibling guards the multi-PR case: when an
 // issue is linked to two PRs and only one is merged, the issue must stay in
-// its current status. Only the merge that resolves the LAST in-flight PR
-// closes the issue.
+// its current status. Merging the LAST in-flight PR reports all_merged and
+// still leaves the status to the manager (DENE-2697).
 func TestWebhook_MergedPR_WaitsForOpenSibling(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("handler test fixture not initialized (no DB?)")
@@ -714,15 +706,10 @@ func TestWebhook_MergedPR_WaitsForOpenSibling(t *testing.T) {
 		t.Errorf("issue should stay in_progress while sibling PR is open, got %q", issueAfterA.Status)
 	}
 
-	// Now merge PR B. Issue should advance to done — last sibling resolved.
+	// Now merge PR B. Every linked PR is merged, and the issue still waits for
+	// manager acceptance (DENE-2697).
 	fire(t, "repo-b", 2, true)
-	issueAfterB, err := testHandler.Queries.GetIssue(ctx, parseUUID(created.ID))
-	if err != nil {
-		t.Fatalf("GetIssue: %v", err)
-	}
-	if issueAfterB.Status != "done" {
-		t.Errorf("expected issue 'done' after every linked PR merged, got %q", issueAfterB.Status)
-	}
+	wantMergeKeepsStatus(t, created.ID, "in_progress")
 }
 
 // firePullRequestWebhook is a shared helper for the multi-PR tests below: it
@@ -781,7 +768,8 @@ func firePullRequestWebhook(t *testing.T, secret, identifier string, installatio
 // TestWebhook_ClosedSiblingAfterMerge pins the MUL-7429 rule for a sibling
 // that closes without merging: "all linked PRs merged" is the only completion
 // condition, so the issue waits and shows the unmerged PR. Removing that PR
-// from the issue is a PR event and completes it.
+// leaves only merged work (all_merged); the status stays with the manager
+// (DENE-2697).
 func TestWebhook_ClosedSiblingAfterMerge(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("handler test fixture not initialized (no DB?)")
@@ -847,13 +835,7 @@ func TestWebhook_ClosedSiblingAfterMerge(t *testing.T) {
 
 	// Removing the abandoned PR leaves only merged work behind.
 	unlinkPRForTest(t, created.ID, githubPRIDForTest(t, "repo-b", 2))
-	final, err := testHandler.Queries.GetIssue(ctx, parseUUID(created.ID))
-	if err != nil {
-		t.Fatalf("GetIssue: %v", err)
-	}
-	if final.Status != "done" {
-		t.Errorf("expected issue 'done' after the unmerged PR was removed, got %q", final.Status)
-	}
+	wantMergeKeepsStatus(t, created.ID, "in_progress")
 }
 
 // TestWebhook_AllClosedWithoutMerge guards the "nothing was delivered" path:
@@ -1032,6 +1014,19 @@ func prAutoCompleteStateForTest(t *testing.T, issueID string) prAutoCompleteResp
 	return listIssuePRsForTest(t, issueID).AutoComplete
 }
 
+// wantMergeKeepsStatus pins DENE-2697: once every linked PR is merged the
+// decision reports all_merged, but the issue keeps its status until its
+// manager accepts it.
+func wantMergeKeepsStatus(t *testing.T, issueID, want string) {
+	t.Helper()
+	if got := issueStatusForTest(t, issueID); got != want {
+		t.Errorf("status = %q, want %q: a PR merge must not move the issue", got, want)
+	}
+	if got := prAutoCompleteStateForTest(t, issueID); got.State != prAutoCompleteAllMerged {
+		t.Errorf("auto_complete = %+v, want all_merged", got)
+	}
+}
+
 func unlinkPRForTest(t *testing.T, issueID, prID string) {
 	t.Helper()
 	req := newRequest("DELETE", "/api/issues/"+issueID+"/pull-requests/"+prID, nil)
@@ -1078,11 +1073,11 @@ func githubPRIDForTest(t *testing.T, repo string, number int32) string {
 	return uuidToString(pr.ID)
 }
 
-// TestWebhook_EveryLinkedIssueMovesOnMerge is the repro from #3264 under the
-// MUL-7726 rule: a title identifier and a body "Closes" both link, so the
-// merge moves both issues, while a passing body mention ("Follow up in") links
-// nothing and moves nothing.
-func TestWebhook_EveryLinkedIssueMovesOnMerge(t *testing.T) {
+// TestWebhook_EveryLinkedIssueSeesTheMerge is the repro from #3264 under the
+// MUL-7726 rule: a title identifier and a body "Closes" both link, so both
+// issues report all_merged (their status stays put, DENE-2697), while a
+// passing body mention ("Follow up in") links nothing.
+func TestWebhook_EveryLinkedIssueSeesTheMerge(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("handler test fixture not initialized (no DB?)")
 	}
@@ -1101,9 +1096,7 @@ func TestWebhook_EveryLinkedIssueMovesOnMerge(t *testing.T) {
 		if n := linkedPRCountForTest(t, issue.ID); n != 1 {
 			t.Errorf("%s should link, got %d rows", issue.Identifier, n)
 		}
-		if got := issueStatusForTest(t, issue.ID); got != "done" {
-			t.Errorf("%s: status = %q, want done", issue.Identifier, got)
-		}
+		wantMergeKeepsStatus(t, issue.ID, "in_progress")
 	}
 	if n := linkedPRCountForTest(t, followUp.ID); n != 0 {
 		t.Errorf("a passing body mention must not link, got %d rows", n)
@@ -1113,10 +1106,10 @@ func TestWebhook_EveryLinkedIssueMovesOnMerge(t *testing.T) {
 	}
 }
 
-// TestWebhook_TitleBranchAndKeywordLinksAllMove: a title identifier, a branch
-// name and a title closing keyword each link the PR, and the merge moves the
-// issue whichever way it was linked.
-func TestWebhook_TitleBranchAndKeywordLinksAllMove(t *testing.T) {
+// TestWebhook_TitleBranchAndKeywordAllLink: a title identifier, a branch name
+// and a title closing keyword each link the PR, and the merge reaches the
+// issue whichever way it was linked (status kept, DENE-2697).
+func TestWebhook_TitleBranchAndKeywordAllLink(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("handler test fixture not initialized (no DB?)")
 	}
@@ -1135,9 +1128,7 @@ func TestWebhook_TitleBranchAndKeywordLinksAllMove(t *testing.T) {
 		if n := linkedPRCountForTest(t, issue.ID); n != 1 {
 			t.Errorf("%s: expected 1 linked PR, got %d", issue.Identifier, n)
 		}
-		if got := issueStatusForTest(t, issue.ID); got != "done" {
-			t.Errorf("%s: status = %q, want done", issue.Identifier, got)
-		}
+		wantMergeKeepsStatus(t, issue.ID, "in_progress")
 	}
 	list := listIssuePRsForTest(t, byBranch.ID)
 	if len(list.PullRequests) != 1 || list.PullRequests[0].LinkSource != "branch" {
@@ -1232,9 +1223,9 @@ func TestWebhook_IdentifierRemovedBeforeMergeUnlinks(t *testing.T) {
 	}
 }
 
-// TestWebhook_AutoLinkOffKeepsExistingLinksMoving: turning auto-link off stops
-// new links, not what the merge does for links the issue already has.
-func TestWebhook_AutoLinkOffKeepsExistingLinksMoving(t *testing.T) {
+// TestWebhook_AutoLinkOffKeepsExistingLinks: turning auto-link off stops new
+// links, not the links the issue already has; their merge still counts.
+func TestWebhook_AutoLinkOffKeepsExistingLinks(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("handler test fixture not initialized (no DB?)")
 	}
@@ -1252,15 +1243,16 @@ func TestWebhook_AutoLinkOffKeepsExistingLinksMoving(t *testing.T) {
 	firePRWebhook(t, secret, installationID, 1, title, "", "refactor/session", "opened")
 	dbfx.Exec(t, `UPDATE workspace SET settings = COALESCE(settings, '{}'::jsonb) || '{"github_auto_link_prs_enabled": false}'::jsonb WHERE id = $1`, testWorkspaceID)
 	firePRWebhook(t, secret, installationID, 1, title, "", "refactor/session", "merged")
-	if got := issueStatusForTest(t, issue.ID); got != "done" {
-		t.Errorf("merge after auto-link was turned off: status = %q, want done", got)
+	if n := linkedPRCountForTest(t, issue.ID); n != 1 {
+		t.Errorf("turning auto-link off dropped the existing link, got %d rows", n)
 	}
+	wantMergeKeepsStatus(t, issue.ID, "in_progress")
 }
 
-// TestWebhook_PostMergeEditLinksAndMoves: adding a closing keyword to a merged
-// PR links it, and the new link is a PR event, so the issue moves. Removing it
-// again after merge keeps the link: the work landed.
-func TestWebhook_PostMergeEditLinksAndMoves(t *testing.T) {
+// TestWebhook_PostMergeEditLinks: adding a closing keyword to a merged PR
+// links it (status kept, DENE-2697). Removing it again after merge keeps the
+// link: the work landed.
+func TestWebhook_PostMergeEditLinks(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("handler test fixture not initialized (no DB?)")
 	}
@@ -1277,45 +1269,35 @@ func TestWebhook_PostMergeEditLinksAndMoves(t *testing.T) {
 	if n := linkedPRCountForTest(t, created.ID); n != 1 {
 		t.Fatalf("post-merge edit should link, got %d rows", n)
 	}
-	if got := issueStatusForTest(t, created.ID); got != "done" {
-		t.Errorf("status = %q, want done", got)
-	}
+	wantMergeKeepsStatus(t, created.ID, "in_progress")
 	firePRWebhook(t, secret, installationID, 1, "Dependency bump", "", "chore/bump", "edited_merged")
 	if n := linkedPRCountForTest(t, created.ID); n != 1 {
 		t.Errorf("a post-merge edit must not take delivered work off the issue, got %d rows", n)
 	}
 }
 
-// TestWebhook_ReopenedIssueStaysOpenUntilNewPRMerges is the reason the
-// decision is edge-triggered. A reopened issue whose PRs are all merged must
-// not bounce back to Done on the next unrelated event of a merged PR; the next
-// fix PR's merge completes it again — with no hidden per-issue switch flipped
+// TestWebhook_FollowUpPRKeepsStatus: no merge moves the issue (DENE-2697),
+// neither the first one, nor a later event of the merged PR, nor a follow-up
+// PR's merge. The decision still follows the PRs, waiting while the follow-up
+// is open and all_merged once it lands, with no per-issue switch flipped
 // behind the user's back.
-func TestWebhook_ReopenedIssueStaysOpenUntilNewPRMerges(t *testing.T) {
+func TestWebhook_FollowUpPRKeepsStatus(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("handler test fixture not initialized (no DB?)")
 	}
-	ctx := context.Background()
 	secret := "reopen-secret"
 	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
 	const installationID int64 = 30264006
-	created := prAutoCompleteTestIssue(t, "reopen flow", installationID)
+	created := prAutoCompleteTestIssue(t, "follow-up flow", installationID)
 
 	firePRWebhook(t, secret, installationID, 1, "First fix", "Closes "+created.Identifier, "fix/one", "opened")
 	firePRWebhook(t, secret, installationID, 1, "First fix", "Closes "+created.Identifier, "fix/one", "merged")
-	if got := issueStatusForTest(t, created.ID); got != "done" {
-		t.Fatalf("status after first merge = %q, want done", got)
-	}
+	wantMergeKeepsStatus(t, created.ID, "in_progress")
 
-	if _, err := testHandler.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
-		ID: parseUUID(created.ID), Status: "in_progress", WorkspaceID: parseUUID(testWorkspaceID),
-	}); err != nil {
-		t.Fatalf("reopen: %v", err)
-	}
 	// A later event on the already-merged PR (label, edit, redelivery).
 	firePRWebhook(t, secret, installationID, 1, "First fix (edited)", "Closes "+created.Identifier, "fix/one", "edited_merged")
 	if got := issueStatusForTest(t, created.ID); got != "in_progress" {
-		t.Fatalf("reopened issue bounced back to %q on an event of a merged PR", got)
+		t.Fatalf("an event of a merged PR moved the issue to %q", got)
 	}
 	if got := prAutoCompleteStateForTest(t, created.ID); got.State != prAutoCompleteAllMerged || got.IssueDisabled {
 		t.Fatalf("auto_complete = %+v, want all_merged with the issue still enabled", got)
@@ -1326,15 +1308,13 @@ func TestWebhook_ReopenedIssueStaysOpenUntilNewPRMerges(t *testing.T) {
 		t.Fatalf("auto_complete = %+v, want waiting on the new PR", got)
 	}
 	firePRWebhook(t, secret, installationID, 2, "Follow-up fix", "Fixes "+created.Identifier, "fix/two", "merged")
-	if got := issueStatusForTest(t, created.ID); got != "done" {
-		t.Errorf("status after the follow-up merged = %q, want done", got)
-	}
+	wantMergeKeepsStatus(t, created.ID, "in_progress")
 }
 
-// TestUnlinkIssuePullRequest_IsRememberedAndCompletes: a removed PR stays
-// removed across webhook redeliveries, and removing the last unmerged PR is
-// the PR event that completes the issue.
-func TestUnlinkIssuePullRequest_IsRememberedAndCompletes(t *testing.T) {
+// TestUnlinkIssuePullRequest_IsRemembered: a removed PR stays removed across
+// webhook redeliveries, and removing the last unmerged PR leaves the issue
+// all_merged with its status kept (DENE-2697).
+func TestUnlinkIssuePullRequest_IsRemembered(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("handler test fixture not initialized (no DB?)")
 	}
@@ -1351,9 +1331,7 @@ func TestUnlinkIssuePullRequest_IsRememberedAndCompletes(t *testing.T) {
 	}
 
 	unlinkPRForTest(t, created.ID, githubPRIDForTest(t, "widget", 1))
-	if got := issueStatusForTest(t, created.ID); got != "done" {
-		t.Fatalf("status after removing the open PR = %q, want done", got)
-	}
+	wantMergeKeepsStatus(t, created.ID, "in_progress")
 
 	firePRWebhook(t, secret, installationID, 1, created.Identifier+": abandoned approach", "", "try/one", "edited")
 	if n := linkedPRCountForTest(t, created.ID); n != 1 {
@@ -1390,13 +1368,9 @@ func TestLinkIssuePullRequest_ByURL(t *testing.T) {
 	if len(list.PullRequests) != 1 || list.PullRequests[0].LinkSource != "manual" {
 		t.Fatalf("pull_requests = %+v, want one manual link", list.PullRequests)
 	}
-	// Linking is a PR event: with every linked PR merged, the issue moves.
-	if got := issueStatusForTest(t, created.ID); got != "done" {
-		t.Errorf("linking a merged PR by hand: status = %q, want done", got)
-	}
-	if list.AutoComplete.State != prAutoCompleteTerminal {
-		t.Errorf("auto_complete = %+v, want terminal", list.AutoComplete)
-	}
+	// Linking a merged PR by hand leaves every linked PR merged; the issue
+	// keeps its status (DENE-2697).
+	wantMergeKeepsStatus(t, created.ID, "in_progress")
 	firePRWebhook(t, secret, installationID, 41, "Refactor session helper (renamed)", "", "refactor/session", "edited_merged")
 	if n := linkedPRCountForTest(t, created.ID); n != 1 {
 		t.Errorf("a manual link must survive webhook reconciliation, got %d rows", n)
@@ -1470,10 +1444,11 @@ func TestPRAutoComplete_WorkspaceAndIssueSwitches(t *testing.T) {
 	}
 }
 
-// TestPRAutoComplete_TargetStatus: the workspace picks the status a merge
-// moves an issue to. A custom started status works like Done; an issue already
-// in the target reports at_target and is not written; a choice that no longer
-// names a live started or done status, or names Blocked, moves nothing.
+// TestPRAutoComplete_TargetStatus: the workspace picks the target status the
+// decision reports. A custom started status works like Done, and the merge
+// still writes nothing (DENE-2697); an issue already in the target reports
+// at_target; a choice that no longer names a live started or done status, or
+// names Blocked, reports workspace_disabled.
 func TestPRAutoComplete_TargetStatus(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("handler test fixture not initialized (no DB?)")
@@ -1491,11 +1466,11 @@ func TestPRAutoComplete_TargetStatus(t *testing.T) {
 		t.Fatalf("auto_complete = %+v, want waiting for %s", got, regress.Key)
 	}
 	firePRWebhook(t, secret, installationID, 1, moved.Identifier+": fix", "", "fix/one", "merged")
-	if got := issueStatusForTest(t, moved.ID); got != regress.Key {
-		t.Fatalf("status = %q, want %s", got, regress.Key)
+	if got := issueStatusForTest(t, moved.ID); got != "in_progress" {
+		t.Fatalf("status = %q, want in_progress: a PR merge must not move the issue", got)
 	}
-	if got := prAutoCompleteStateForTest(t, moved.ID); got.State != prAutoCompleteAtTarget {
-		t.Fatalf("after the move: auto_complete = %+v, want at_target", got)
+	if got := prAutoCompleteStateForTest(t, moved.ID); got.State != prAutoCompleteAllMerged || got.TargetStatus != regress.Key {
+		t.Fatalf("after the merge: auto_complete = %+v, want all_merged for %s", got, regress.Key)
 	}
 
 	dbfx.Exec(t, `UPDATE workspace SET settings = settings || '{"pr_merge_status": "in_review"}'::jsonb WHERE id = $1`, testWorkspaceID)
@@ -3066,8 +3041,8 @@ func TestPRLinkPolicyPermits(t *testing.T) {
 
 // TestWebhook_AutoLinkOffKeepsValidClosingKeyword: turning auto-link off in a
 // workspace that shares its installation with another must not drop a closing
-// keyword only this workspace resolves — the merge still completes the issue
-// (PR #8794 re-review).
+// keyword only this workspace resolves — the merged PR stays linked and
+// reports all_merged (PR #8794 re-review; status kept, DENE-2697).
 func TestWebhook_AutoLinkOffKeepsValidClosingKeyword(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("handler test fixture not initialized (no DB?)")
@@ -3098,19 +3073,20 @@ func TestWebhook_AutoLinkOffKeepsValidClosingKeyword(t *testing.T) {
 			}
 			dbfx.Exec(t, `UPDATE workspace SET settings = COALESCE(settings, '{}'::jsonb) || '{"github_auto_link_prs_enabled": false}'::jsonb WHERE id = $1`, testWorkspaceID)
 			firePRWebhook(t, secret, installationID, 1, "Session refactor", "Closes "+issue.Identifier, "refactor/session", "merged")
-			if got := issueStatusForTest(t, issue.ID); got != "done" {
-				t.Errorf("keyword kept, auto-link off: status = %q, want done (auto_complete = %+v)", got, prAutoCompleteStateForTest(t, issue.ID))
+			if n := linkedPRCountForTest(t, issue.ID); n != 1 {
+				t.Errorf("keyword kept, auto-link off: expected 1 linked PR, got %d", n)
 			}
+			wantMergeKeepsStatus(t, issue.ID, "in_progress")
 		})
 	}
 }
 
-// TestWebhook_PullRequest_UniqueResolverAmongBindingsStillAutoCompletes is the
-// other half of the #6804 fix: withholding links must be scoped to the
-// identifiers we could not attribute. Two workspaces share an installation and
-// a prefix, but only one of them actually has an issue at that number — that is
-// a proven unique owner, so auto-complete must still fire for it.
-func TestWebhook_PullRequest_UniqueResolverAmongBindingsStillAutoCompletes(t *testing.T) {
+// TestWebhook_PullRequest_UniqueResolverAmongBindingsStillLinks is the other
+// half of the #6804 fix: withholding links must be scoped to the identifiers
+// we could not attribute. Two workspaces share an installation and a prefix,
+// but only one of them actually has an issue at that number — that is a proven
+// unique owner, so the PR must still link to it (status kept, DENE-2697).
+func TestWebhook_PullRequest_UniqueResolverAmongBindingsStillLinks(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("handler test fixture not initialized (no DB?)")
 	}
@@ -3154,13 +3130,10 @@ func TestWebhook_PullRequest_UniqueResolverAmongBindingsStillAutoCompletes(t *te
 	firePullRequestWebhook(t, secret, issueB.Identifier, installationID, repo, prNumber, "open")
 	firePullRequestWebhook(t, secret, issueB.Identifier, installationID, repo, prNumber, "merged")
 
-	issue, err := testHandler.Queries.GetIssue(ctx, parseUUID(issueB.ID))
-	if err != nil {
-		t.Fatalf("GetIssue: %v", err)
+	if n := linkedPRCountForTest(t, issueB.ID); n != 1 {
+		t.Fatalf("a proven unique resolver must keep the link, got %d rows", n)
 	}
-	if issue.Status != "done" {
-		t.Errorf("issue status = %q, want done — a proven unique resolver must keep auto-complete", issue.Status)
-	}
+	wantMergeKeepsStatus(t, issueB.ID, "in_progress")
 }
 
 // TestWebhook_PullRequest_UnreadableWorkspaceLinksNothing covers the

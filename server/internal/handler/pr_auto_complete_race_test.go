@@ -4,51 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
-
-	"github.com/jackc/pgx/v5"
 )
 
-// hookedTxStarter runs hook before starting a transaction, to schedule work
-// inside a handler's decision→write window.
-type hookedTxStarter struct {
-	base txStarter
-	hook func() error
-}
-
-func (h hookedTxStarter) Begin(ctx context.Context) (pgx.Tx, error) {
-	if err := h.hook(); err != nil {
-		return nil, err
-	}
-	return h.base.Begin(ctx)
-}
-
-// A PR linked between the auto-complete decision and the status write must
-// keep the issue open: the write re-checks the linked PRs (MUL-7429 review).
-func TestPRAutoComplete_PRLinkedDuringCompletionKeepsIssueOpen(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("handler test fixture not initialized (no DB?)")
-	}
-	secret := "pr-linked-during-completion"
-	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
-	const inst int64 = 8758002
-	issue := prAutoCompleteTestIssue(t, "PR linked during completion", inst)
-	firePRWebhook(t, secret, inst, 1, "Closes "+issue.Identifier, "", "fix/a", "opened")
-	original := testHandler.TxStarter
-	t.Cleanup(func() { testHandler.TxStarter = original })
-	// Schedule the second webhook after the first decision but before its write.
-	testHandler.TxStarter = hookedTxStarter{base: original, hook: func() error {
-		testHandler.TxStarter = original
-		firePRWebhook(t, secret, inst, 2, issue.Identifier, "", "fix/b", "opened")
-		return nil
-	}}
-	firePRWebhook(t, secret, inst, 1, "Closes "+issue.Identifier, "", "fix/a", "merged")
-	if n := linkedPRCountForTest(t, issue.ID); n != 2 {
-		t.Fatalf("want 2 linked PRs, got %d", n)
-	}
-	if got := issueStatusForTest(t, issue.ID); got != "in_progress" {
-		t.Fatalf("completed with linked open PR: got %s, want in_progress", got)
-	}
-}
+// The decision→write race test (MUL-7429 review) went with the status write
+// itself in DENE-2697: a merge no longer opens a transaction to race against.
 
 // fireTimedPRWebhook delivers a pull_request event that closes identifier,
 // with an explicit updated_at.
