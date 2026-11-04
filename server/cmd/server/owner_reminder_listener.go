@@ -20,7 +20,8 @@ type statusWaker interface {
 }
 
 // registerOwnerReminderListener queues the owner's status reminder the moment
-// an issue in the watched workspace is delivered or blocked (DENE-2967). It
+// an issue in the watched workspace is delivered, blocked or done (DENE-2967,
+// DENE-2981); the watchdog drops moves made by members. It
 // only writes the outbox row; delivery stays with the transport worker, and
 // the minute scan repeats the check for anything this path missed.
 func registerOwnerReminderListener(bus *events.Bus, workspaceID string, waker statusWaker) {

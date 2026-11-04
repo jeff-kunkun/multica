@@ -14,10 +14,12 @@ import (
 	"github.com/multica-ai/multica/server/internal/service"
 )
 
-// Owner reminders come in two kinds (DENE-2967). A status reminder wakes the
-// responsible owner as soon as an issue is delivered (in_review) or blocked;
-// the 30-minute stall reminder stays as the fallback. Both share the outbox,
-// the claim-time fresh read and the Mac transport.
+// Owner reminders come in three kinds, all on one chain (DENE-2967,
+// DENE-2981): a status reminder wakes the responsible owner as soon as an
+// employee delivers (in_review), blocks or finishes (done) an issue; a
+// progress reminder (progress_wake.go) reports a running issue; the
+// 30-minute stall reminder is the fallback. They share the outbox, the
+// claim-time fresh read and the Mac transport.
 const (
 	ownerStalledEvent = "owner_stalled"
 	ownerStatusEvent  = "owner_status"
@@ -39,11 +41,11 @@ const (
 	maxAttachments   = 5
 )
 
-var ownerReminderEvents = []string{ownerStalledEvent, ownerStatusEvent}
+var ownerReminderEvents = []string{ownerStalledEvent, ownerStatusEvent, ownerProgressEvent}
 
 // statusWakeCause is the cause a status reminder carries for each status that
 // wakes the owner at once.
-var statusWakeCause = map[string]string{"in_review": "delivered", "blocked": "blocked"}
+var statusWakeCause = map[string]string{"in_review": "delivered", "blocked": "blocked", "done": "done"}
 
 // WakesOnStatus reports whether entering status wakes the owner at once.
 func WakesOnStatus(status string) bool {
@@ -51,12 +53,20 @@ func WakesOnStatus(status string) bool {
 	return ok
 }
 
+// statusWakeEligible: the issue sits in a waking status and does not wait on Kun.
+func statusWakeEligible(issue Issue) bool {
+	return WakesOnStatus(issue.Status) && !waitsOnKun(issue)
+}
+
 // statusEntry is when an issue entered its current status: the latest
 // status-change event, provided it moved the issue to that status. EventID 0
-// means the issue was created in it (or the log has no matching move).
+// means the issue was created in it (or the log has no matching move). Actor
+// is who moved it: a member move is Kun's or a manager's own, never an
+// employee's progress, so it wakes nobody.
 type statusEntry struct {
 	EventID int64
 	At      time.Time
+	Actor   string
 }
 
 func currentStatusEntry(ctx context.Context, store QueryStore, issue Issue) (statusEntry, error) {
@@ -65,11 +75,11 @@ func currentStatusEntry(ctx context.Context, store QueryStore, issue Issue) (sta
 		status string
 	)
 	err := store.QueryRow(ctx, `
-SELECT id, occurred_at, COALESCE(changes->0->>'new', '')
+SELECT id, occurred_at, actor_type, COALESCE(changes->0->>'new', '')
 FROM office_event
 WHERE workspace_id = $1::uuid AND issue_id = $2::uuid AND event_type = 'issue.status_changed'
 ORDER BY id DESC
-LIMIT 1`, issue.WorkspaceID, issue.ID).Scan(&entry.EventID, &entry.At, &status)
+LIMIT 1`, issue.WorkspaceID, issue.ID).Scan(&entry.EventID, &entry.At, &entry.Actor, &status)
 	if errors.Is(err, pgx.ErrNoRows) || (err == nil && status != issue.Status) {
 		return statusEntry{At: issue.CreatedAt}, nil
 	}
@@ -99,7 +109,7 @@ func (w *Watchdog) WakeOnStatus(ctx context.Context, issueID string) error {
 func (w *Watchdog) recentStatusEntries(ctx context.Context, now time.Time) ([]string, error) {
 	rows, err := w.pool.Query(ctx, `
 SELECT id::text FROM issue
-WHERE workspace_id = $1::uuid AND status IN ('in_review', 'blocked') AND updated_at >= $2
+WHERE workspace_id = $1::uuid AND status IN ('in_review', 'blocked', 'done') AND updated_at >= $2
 ORDER BY updated_at ASC
 LIMIT 500`, w.cfg.WorkspaceID, now.Add(-statusWakeWindow))
 	if err != nil {
@@ -122,14 +132,14 @@ LIMIT 500`, w.cfg.WorkspaceID, now.Add(-statusWakeWindow))
 // second server all land on the same row.
 func (w *Watchdog) enqueueStatusWake(ctx context.Context, issue Issue, now time.Time) error {
 	cause, ok := statusWakeCause[issue.Status]
-	if !ok || !stallEligible(issue) {
+	if !ok || !statusWakeEligible(issue) {
 		return nil
 	}
 	entry, err := currentStatusEntry(ctx, w.pool, issue)
 	if err != nil {
 		return err
 	}
-	if entry.EventID == 0 || now.Sub(entry.At) > statusWakeWindow {
+	if entry.EventID == 0 || entry.Actor == "member" || now.Sub(entry.At) > statusWakeWindow {
 		return nil
 	}
 	manager, registration := w.cfg.Owners.Resolve(issue.ManagerName, issue.ProjectID)
@@ -159,9 +169,12 @@ ON CONFLICT (workspace_id,issue_id,event_key) DO NOTHING`,
 }
 
 func statusWakeReason(status string, registration bool) string {
-	reason := "单子已交付（审核中），请负责人验收：通过就关单，不通过就在原单写清要改什么。"
-	if status == "blocked" {
-		reason = "单子已阻塞，请负责人在原单解阻或安排下一步。"
+	reason := "单子已交付（审核中），请负责人验收：通过就关单，不通过就在原单写清要改什么；在项目群报一句结果。"
+	switch status {
+	case "blocked":
+		reason = "单子已阻塞，请负责人在原单解阻或安排下一步，在项目群报一句卡在哪。"
+	case "done":
+		reason = "员工已做完并关单，请负责人在项目群报一句做成了什么。"
 	}
 	if registration {
 		reason += " 项目归属缺失，请扫帚补登记。"
@@ -200,7 +213,10 @@ type attachmentRef struct {
 	Filename string `json:"filename"`
 }
 
-func latestDelivery(ctx context.Context, store QueryStore, issue Issue) (delivery, bool, error) {
+// latestDelivery is the comment the owner reads: for a status reminder the
+// assignee's newest comment, else anyone's; for a progress reminder the newest
+// agent comment, the one that set the reminder off.
+func latestDelivery(ctx context.Context, store QueryStore, issue Issue, progress bool) (delivery, bool, error) {
 	var (
 		d       delivery
 		content string
@@ -214,8 +230,9 @@ WHERE c.workspace_id = $1::uuid AND c.issue_id = $2::uuid
   AND c.author_type IN ('member', 'agent') AND c.type = 'comment'
   AND c.content NOT LIKE '%' || $3 || '%'
   AND regexp_replace(lower(trim(c.content)), '[[:space:][:punct:]，。！？、；：…]+', '', 'g') <> '收到'
-ORDER BY (c.author_type = $4 AND c.author_id::text = $5) DESC, c.created_at DESC, c.id DESC
-LIMIT 1`, issue.WorkspaceID, issue.ID, watchdogCommentMarker, issue.AssigneeType, issue.AssigneeID,
+  AND (NOT $6 OR c.author_type = 'agent')
+ORDER BY (NOT $6 AND c.author_type = $4 AND c.author_id::text = $5) DESC, c.created_at DESC, c.id DESC
+LIMIT 1`, issue.WorkspaceID, issue.ID, watchdogCommentMarker, issue.AssigneeType, issue.AssigneeID, progress,
 	).Scan(&d.CommentID, &content, &d.At, &d.Author)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return delivery{}, false, nil
@@ -399,7 +416,7 @@ func (w *Watchdog) refreshReminder(ctx context.Context, store QueryStore, event 
 	event.Manager, event.RegistrationNeeded = w.cfg.Owners.Resolve(issue.ManagerName, issue.ProjectID)
 	event.CheckedAt = now
 	event.IssueURL = w.issueURL(issue)
-	d, ok, err := latestDelivery(ctx, store, issue)
+	d, ok, err := latestDelivery(ctx, store, issue, event.Kind == reminderKindProgress)
 	if err != nil {
 		return err
 	}

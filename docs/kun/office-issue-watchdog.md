@@ -1,16 +1,24 @@
 # Office owner reminders
 
-The server is the only owner-reminder decision engine (DENE-2949). It sends two
-kinds through one outbox: a status reminder the moment an issue is delivered or
-blocked (DENE-2967) and the 30-minute stall reminder as the fallback. Normal assignment,
+The server is the only owner-reminder decision engine (DENE-2949), and owner
+reminders are one chain (DENE-2981): an employee's progress wakes the
+responsible owner, who says one line in the project group. It sends three
+kinds through one outbox: a status reminder the moment an employee delivers,
+blocks or finishes an issue (DENE-2967, DENE-2981), a progress reminder while
+an issue runs, and the 30-minute stall reminder as the fallback. The retired
+review, hold, run-end, silent-run, Kun-decision push and COO escalation code is
+deleted; their old variables are not read. Normal assignment,
 mentions, explicitly requested wakeups and bounded task-level technical retries
 continue through their existing services. This scheduler never calls rerun,
 handoff, employee wake, issue creation, status mutation or a COO webhook.
 
-## Status reminders (DENE-2967)
+## Status reminders (DENE-2967, DENE-2981)
 
-Entering `in_review` (cause `delivered`) or `blocked` (cause `blocked`) wakes
-the responsible owner once. An `issue:updated` bus listener with
+Entering `in_review` (cause `delivered`), `blocked` (cause `blocked`) or `done`
+(cause `done`) wakes the responsible owner once. A move made by a member (Kun,
+or a manager acting through the member account) wakes nobody: only an agent's
+or the system's move is an employee's progress; `actor_type` of the
+status-change event decides. An `issue:updated` bus listener with
 `status_changed` queues the row at once; the minute scan repeats the check for
 entries within the last 10 minutes, so a missed event costs one tick and a
 deploy does not wake owners for issues that sat in review for days. The event
@@ -38,6 +46,34 @@ flight or ended uncertain; it fires only after a proven non-delivery
 (`not_sent` after its retry, `resolved_before_delivery` or `stale`), and then
 once per entry: stall reminders for in_review / blocked carry the same
 `status_entry` and are skipped once one exists.
+
+## Progress reminders (DENE-2981)
+
+An `in_progress` issue that does not wait on Kun wakes its owner (event type
+`owner_progress`, kind `progress`) when an agent posted a substantive comment
+since the owner was last woken (cause `comment`), or when a live run (runtime
+not offline) has gone on for 15 minutes since it started or since the last
+wake (cause `running`). One issue wakes its owner at most once per 15 minutes,
+counting every owner reminder that may have reached the owner; rows that
+provably never did (`not_sent`, `resolved_before_delivery`, `stale`) do not
+count. A comment counts from the last wake (at most one hour back), so one
+written during the quiet 15 minutes is reported once they end. Without an
+earlier wake only comments from the last 15 minutes count, so turning the
+feature on does not report old comments. While a progress row of the issue is
+still waiting or in flight, no other is queued, so a relay outage does not
+stack bells that later arrive together. The key is the 15-minute bucket,
+`owner-progress:<unix/900>`, so racing scanners write one row.
+
+The row becomes claimable 30 seconds later, so a delivery that follows its
+comment within seconds turns into the status reminder alone: at claim time a
+progress row whose issue left `in_progress` ends `resolved_before_delivery`.
+The claimed payload carries the newest agent comment (the one that set the
+reminder off, whoever wrote it; status reminders keep preferring the
+assignee's), `steps` (the newest
+run's last 3 narrated `text` messages, oldest first, masked like the summary
+and clipped to 160 characters; thinking and tool output are never sent) and
+`run_minutes` for a live run. The owner reads them and posts one plain line in
+the project group, without re-reading the issue.
 
 ## Decision and ownership
 
@@ -122,7 +158,8 @@ with status-light `office/install.py install reminder`, and install the passive
 collector through StatusLight's normal signed release path. Start with the
 server switch off until the transport and owner registration are ready.
 Status reminders need the Mac reminder that understands `owner_status`
-installed first: an older worker rejects the whole claimed batch as invalid. Once
+installed first, and the `done` cause and `owner_progress` need the DENE-2981
+reminder: an older worker rejects the whole claimed batch as invalid. Once
 on, all already-stalled eligible issues in that workspace can emit one event.
 
 For rollback, disable the server switch and redeploy the previous image. Leave

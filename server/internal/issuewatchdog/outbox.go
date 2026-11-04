@@ -64,7 +64,12 @@ var waitingKunTitle = regexp.MustCompile(`(?i)^\s*(?:[【\[]?\s*(?:待|等)\s*ku
 
 func stallEligible(issue Issue) bool {
 	return (issue.Status == "in_progress" || issue.Status == "in_review" || issue.Status == "blocked") &&
-		!issue.KunLabel && !issue.WaitingKun && !waitingKunTitle.MatchString(issue.Title)
+		!waitsOnKun(issue)
+}
+
+// waitsOnKun: the issue is parked for Kun, so nobody is woken on it.
+func waitsOnKun(issue Issue) bool {
+	return issue.KunLabel || issue.WaitingKun || waitingKunTitle.MatchString(issue.Title)
 }
 
 func stallCause(reason string) string {
@@ -75,6 +80,8 @@ func stallCause(reason string) string {
 	}
 	return "no_live_run"
 }
+
+var activeTaskStatuses = []string{"queued", "dispatched", "running", "deferred", "waiting_local_directory"}
 
 func (w *Watchdog) hasAnyRun(ctx context.Context, issue Issue) (bool, error) {
 	return hasAnyRunUsing(ctx, w.pool, issue, w.now())
@@ -92,8 +99,10 @@ func hasAnyRunUsing(ctx context.Context, store QueryStore, issue Issue, now time
 
 type Reminder struct {
 	ID int64 `json:"id"`
-	// Kind is "stall" (30 minutes without a run or progress) or "status"
-	// (the issue was just delivered or blocked). Empty reads as stall.
+	// Kind is "stall" (30 minutes without a run or progress), "status" (an
+	// employee just delivered, blocked or finished the issue) or "progress"
+	// (an employee commented, or the run has gone on, while in progress).
+	// Empty reads as stall.
 	Kind               string    `json:"kind"`
 	EventID            string    `json:"event_id"`
 	IssueID            string    `json:"issue_id"`
@@ -117,6 +126,10 @@ type Reminder struct {
 	CheckedAt time.Time        `json:"checked_at,omitzero"`
 	IssueURL  string           `json:"issue_url,omitempty"`
 	Comment   *ReminderComment `json:"comment,omitempty"`
+	// Progress reminders only: the run's latest narrated steps, newest last,
+	// and how long it has been running.
+	Steps      []string `json:"steps,omitempty"`
+	RunMinutes int      `json:"run_minutes,omitempty"`
 }
 
 // ReminderComment is the latest delivery comment: a masked one-line summary,
@@ -202,9 +215,12 @@ func (w *Watchdog) Claim(ctx context.Context, token string) ([]Reminder, error) 
 		}
 		eligible := false
 		if loadErr == nil {
-			if c.kind == ownerStatusEvent {
+			switch c.kind {
+			case ownerStatusEvent:
 				eligible, err = statusStillCurrent(ctx, tx, issue, event)
-			} else {
+			case ownerProgressEvent:
+				eligible = progressStillCurrent(issue)
+			default:
 				eligible, err = stallStillCurrent(ctx, tx, issue, event, now)
 			}
 			if err != nil {
@@ -219,6 +235,11 @@ func (w *Watchdog) Claim(ctx context.Context, token string) ([]Reminder, error) 
 		}
 		if err = w.refreshReminder(ctx, tx, &event, issue, now); err != nil {
 			return nil, err
+		}
+		if c.kind == ownerProgressEvent {
+			if err = refreshRunSteps(ctx, tx, &event, issue, now); err != nil {
+				return nil, err
+			}
 		}
 		event.ID, event.ClaimToken = c.id, token
 		event.DeliveryCount = c.count
@@ -252,10 +273,10 @@ func stallStillCurrent(ctx context.Context, store QueryStore, issue Issue, event
 	return now.Sub(issue.ProgressAt) >= 30*time.Minute, nil
 }
 
-// statusStillCurrent: the issue is still in the status it was delivered or
-// blocked with, entered by the same move, and not waiting on Kun.
+// statusStillCurrent: the issue is still in the status it was delivered,
+// blocked or finished with, entered by the same move, and not waiting on Kun.
 func statusStillCurrent(ctx context.Context, store QueryStore, issue Issue, event Reminder) (bool, error) {
-	if !stallEligible(issue) || issue.Status != event.Status {
+	if !statusWakeEligible(issue) || issue.Status != event.Status {
 		return false, nil
 	}
 	entry, err := currentStatusEntry(ctx, store, issue)

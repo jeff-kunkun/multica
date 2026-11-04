@@ -42,7 +42,7 @@ func (b *reviewBench) watchdog(cfg Config) *Watchdog {
 	cfg.WorkspaceID = b.workspaceID
 	cfg.Owners = OwnerTable{ProjectManagers: map[string]string{b.projectID: "CTO·扳手"}}
 	cfg.HeartbeatFile = filepath.Join(b.t.TempDir(), "last-run")
-	w := New(b.pool, cfg, nil)
+	w := New(b.pool, cfg)
 	w.now = func() time.Time { return b.now }
 	return w
 }

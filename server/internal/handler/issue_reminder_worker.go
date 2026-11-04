@@ -24,7 +24,7 @@ func (h *Handler) reminderWorker(w http.ResponseWriter, r *http.Request) *issuew
 		writeError(w, http.StatusServiceUnavailable, "reminder storage unavailable")
 		return nil
 	}
-	return issuewatchdog.New(store, cfg, nil)
+	return issuewatchdog.New(store, cfg)
 }
 
 // ClaimIssueReminders is an owner-authorized transport API, not a task action.

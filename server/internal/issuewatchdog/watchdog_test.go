@@ -7,57 +7,6 @@ import (
 	"time"
 )
 
-func TestManagerReplyRequiresAssignedSignatureAndSubstance(t *testing.T) {
-	tests := []struct {
-		name    string
-		content string
-		manager string
-		want    bool
-	}{
-		{"bracketed wrench", "[负责经理·扳手] 已安排", "CTO·扳手", true},
-		{"Chinese bracketed wrench", "【负责经理·扳手】已安排", "CTO·扳手", true},
-		{"plain wrench alias", "负责经理扳手：已安排", "CTO·扳手", true},
-		{"other manager", "[负责经理·小喇叭] 已看", "CTO·扳手", false},
-		{"signature not at beginning", "我看到了 [负责经理·扳手] 已安排", "CTO·扳手", false},
-		{"bare received", "[负责经理·扳手] 收到。", "CTO·扳手", false},
-		{"Chinese bracketed received", "【负责经理·扳手】收到。", "CTO·扳手", false},
-		{"unmarked received", "收到！", "CTO·扳手", false},
-		{"coo signature", "[COO·Grok] 我来处理", "COO·Grok", true},
-		{"Chinese bracketed coo signature", "【COO·Grok】我来处理", "COO·Grok", true},
-		{"missing signature", "已经处理", "CTO·扳手", false},
-		{"generic Grok is not a signature", "Grok 已处理", "COO·Grok", false},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := isManagerReply(tc.content, tc.manager); got != tc.want {
-				t.Fatalf("isManagerReply(%q, %q) = %v, want %v", tc.content, tc.manager, got, tc.want)
-			}
-		})
-	}
-}
-
-func TestEveryManagerHasAnAssignedSignature(t *testing.T) {
-	tests := []struct {
-		manager string
-		content string
-	}{
-		{"CTO·扳手", "[负责经理扳手] 已处理"},
-		{"内容总监·小喇叭", "[负责经理·小喇叭] 已处理"},
-		{"选品经理·放大镜", "负责经理放大镜：已处理"},
-		{"论文负责人·学霸", "[负责经理·学霸] 已处理"},
-		{"COO·Grok", "[COO·Grok] 已处理"},
-		{"基建管家·扫帚", "【负责经理·扫帚】已处理"},
-		{"负责人·手柄", "【负责经理·手柄】已处理"},
-	}
-	for _, tc := range tests {
-		t.Run(tc.manager, func(t *testing.T) {
-			if !isManagerReply(tc.content, tc.manager) {
-				t.Fatalf("%q was not accepted for %q", tc.content, tc.manager)
-			}
-		})
-	}
-}
-
 func TestConfigHasOnlyOneDecisionEngine(t *testing.T) {
 	t.Setenv("MULTICA_ISSUE_WATCHDOG_ENABLED", "")
 	t.Setenv("MULTICA_ISSUE_WATCHDOG_TICK", "")
@@ -68,7 +17,7 @@ func TestConfigHasOnlyOneDecisionEngine(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Enabled || cfg.StopRouting || cfg.ReviewWake || cfg.NoRunWait != 30*time.Minute {
+	if cfg.Enabled || cfg.TickInterval != time.Minute {
 		t.Fatalf("unexpected active config: %+v", cfg)
 	}
 	t.Setenv("MULTICA_ISSUE_WATCHDOG_ENABLED", "true")

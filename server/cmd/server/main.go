@@ -732,7 +732,7 @@ func main() {
 		slog.Error("invalid issue watchdog configuration", "error", watchdogConfigErr)
 		os.Exit(1)
 	}
-	watchdog := issuewatchdog.New(pool, watchdogConfig, nil)
+	watchdog := issuewatchdog.New(pool, watchdogConfig)
 	if watchdogConfig.Enabled {
 		registerOwnerReminderListener(bus, watchdogConfig.WorkspaceID, watchdog)
 	}

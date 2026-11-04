@@ -4,20 +4,18 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"testing"
+	"time"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/testutil"
-	"testing"
-	"time"
 )
 
-func TestSingleOwnerReminderNeverWakesEmployeeOrCOO(t *testing.T) {
+func TestSingleOwnerReminderPerStall(t *testing.T) {
 	b := newReviewBench(t)
 	id := b.issue("Stalled test", "in_progress", b.dev, nil)
-	w := b.watchdog(Config{StopRouting: true, HoldWake: true, ReviewWake: true, StuckWake: true, ChildWake: true, RoundStop: true})
-	wakes := 0
-	w.nudge = func(context.Context, string, string, string, string) error { wakes++; return nil }
-	w.SetWake(func(context.Context, string, string, string, string, string) error { wakes++; return nil })
+	w := b.watchdog(Config{})
 	b.run(w, b.now)
 	b.run(w, b.now.Add(3*time.Hour))
 	var count int
@@ -25,8 +23,8 @@ func TestSingleOwnerReminderNeverWakesEmployeeOrCOO(t *testing.T) {
 	if err := b.pool.QueryRow(b.ctx, `SELECT count(*),min(manager_name),min(target) FROM office_issue_watchdog_attempt WHERE issue_id=$1::uuid`, id).Scan(&count, &manager, &target); err != nil {
 		t.Fatal(err)
 	}
-	if count != 1 || manager != "CTO·扳手" || target != "manager" || wakes != 0 {
-		t.Fatalf("count=%d manager=%s target=%s wakes=%d", count, manager, target, wakes)
+	if count != 1 || manager != "CTO·扳手" || target != "manager" {
+		t.Fatalf("count=%d manager=%s target=%s", count, manager, target)
 	}
 	if _, err := b.pool.Exec(b.ctx, `UPDATE issue SET updated_at=$2 WHERE id=$1::uuid`, id, b.now.Add(time.Hour)); err != nil {
 		t.Fatal(err)

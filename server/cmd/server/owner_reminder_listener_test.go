@@ -25,7 +25,7 @@ func (r *recordingWaker) WakeOnStatus(_ context.Context, id string) error {
 	return nil
 }
 
-func TestOwnerReminderListenerWakesOnlyOnDeliveredOrBlockedInWatchedWorkspace(t *testing.T) {
+func TestOwnerReminderListenerWakesOnDeliveredBlockedOrDoneInWatchedWorkspace(t *testing.T) {
 	const ws = "11111111-1111-1111-1111-111111111111"
 	bus := events.New()
 	waker := &recordingWaker{hit: make(chan struct{}, 8)}
@@ -36,12 +36,12 @@ func TestOwnerReminderListenerWakesOnlyOnDeliveredOrBlockedInWatchedWorkspace(t 
 	// Handler payload shape, task-service payload shape: both wake.
 	publish(ws, map[string]any{"status_changed": true, "issue": handler.IssueResponse{ID: "handler-review", Status: "in_review"}})
 	publish(ws, map[string]any{"status_changed": true, "issue": map[string]any{"id": "service-blocked", "status": "blocked"}})
+	publish(ws, map[string]any{"status_changed": true, "issue": handler.IssueResponse{ID: "closed", Status: "done"}})
 	// None of these wake.
 	publish(ws, map[string]any{"status_changed": false, "issue": handler.IssueResponse{ID: "title-edit", Status: "in_review"}})
 	publish(ws, map[string]any{"status_changed": true, "issue": handler.IssueResponse{ID: "working", Status: "in_progress"}})
-	publish(ws, map[string]any{"status_changed": true, "issue": handler.IssueResponse{ID: "closed", Status: "done"}})
 	publish("22222222-2222-2222-2222-222222222222", map[string]any{"status_changed": true, "issue": handler.IssueResponse{ID: "other-ws", Status: "blocked"}})
-	for range 2 {
+	for range 3 {
 		select {
 		case <-waker.hit:
 		case <-time.After(5 * time.Second):
@@ -59,7 +59,7 @@ func TestOwnerReminderListenerWakesOnlyOnDeliveredOrBlockedInWatchedWorkspace(t 
 	for _, id := range waker.ids {
 		got[id] = true
 	}
-	if len(got) != 2 || !got["handler-review"] || !got["service-blocked"] {
+	if len(got) != 3 || !got["handler-review"] || !got["service-blocked"] || !got["closed"] {
 		t.Fatalf("woke %v", waker.ids)
 	}
 }
