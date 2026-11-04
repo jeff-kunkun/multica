@@ -376,7 +376,11 @@ async function fetchHealth(): Promise<DaemonStatus> {
   // honest answer; probing the default port would surface the user's own CLI
   // daemon as if it were Desktop's.
   if (!active) return { state: "stopped" };
-  const data = await fetchProfileHealth(active);
+  const fetched = await fetchProfileHealth(active);
+  // A retiring daemon (DENE-2979) handed the profile over and only finishes
+  // its runs; it is not the profile's daemon. Treated as stopped, so a
+  // Desktop that wants a daemon starts one beside it.
+  const data = fetched?.retiring === true ? null : fetched;
 
   if (!data || data.status !== "running") {
     // A start that never reaches "running" is the symptom; an expired/invalid

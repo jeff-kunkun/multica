@@ -580,7 +580,7 @@ func runDaemonBackgroundWith(cmd *cobra.Command, predecessor *daemonPortRecord) 
 	if predecessor == nil {
 		health = checkDaemonHealthOnPort(ctx, healthPort)
 	}
-	if predecessor == nil && daemonAlive(health) {
+	if predecessor == nil && daemonServing(health) {
 		// A live daemon on our port that belongs to someone else is a
 		// collision. The foreground child can safely use a fallback port.
 		if err := daemonIdentityMismatch(health, profile, healthPort); err != nil {
@@ -1160,7 +1160,7 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	probeCancel()
 	existingPID, _ := existing["pid"].(float64)
 	isPredecessor := hasPredecessor && int(existingPID) == predecessor.PID
-	if daemonAlive(existing) && !isPredecessor && daemonIdentityMismatch(existing, profile, port) == nil {
+	if daemonServing(existing) && !isPredecessor && daemonIdentityMismatch(existing, profile, port) == nil {
 		return fmt.Errorf("daemon %s is already running or starting", describeProfile(profile))
 	}
 	healthLn, actualPort, err := bindDaemonHealthPort(cfg.HealthPort, net.Listen)
@@ -1364,7 +1364,9 @@ func runDaemonRestart(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	health := checkDaemonHealthOnPort(ctx, healthPort)
-	if daemonAlive(health) {
+	// A retiring daemon is left to finish its runs; restart only starts a new
+	// one beside it (DENE-2979).
+	if daemonServing(health) {
 		// Identity before preflight, and well before the stop phase: restart
 		// kills whatever answered on this port, so a collision would take out
 		// another profile's daemon and then start ours in its place.
@@ -1769,6 +1771,18 @@ func daemonAlive(health map[string]any) bool {
 	default:
 		return false
 	}
+}
+
+// daemonServing reports whether health is a daemon that serves the profile —
+// alive and not retiring. A retiring daemon (DENE-2979) has handed the profile
+// over and only finishes its runs, so start and restart treat the profile as
+// free: the new daemon finds it from its retire record and leaves its runs
+// alone.
+func daemonServing(health map[string]any) bool {
+	if retiring, _ := health["retiring"].(bool); retiring {
+		return false
+	}
+	return daemonAlive(health)
 }
 
 // checkDaemonHealthOnPort calls the daemon's local health endpoint on the given port.

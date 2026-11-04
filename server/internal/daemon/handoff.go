@@ -277,16 +277,19 @@ func (d *Daemon) retireLoop(ctx context.Context) {
 			// A result the server has not acknowledged yet stays this
 			// process's to deliver; exiting would leave a completed run for
 			// the successor's orphan recovery to fail.
+			// While waiting it still falls through to the successor check:
+			// with no successor the profile is taken back and the reports
+			// stay queued for this process to send.
 			if pending := d.retiredPendingReports(); pending > 0 {
 				d.logger.Info("retired daemon waiting for terminal reports to be delivered", "pending", pending)
 				d.signalTerminalReportReplay()
-				continue
+			} else {
+				d.logger.Info("retired daemon finished its runs; exiting")
+				if d.cancelFunc != nil {
+					d.cancelFunc()
+				}
+				return
 			}
-			d.logger.Info("retired daemon finished its runs; exiting")
-			if d.cancelFunc != nil {
-				d.cancelFunc()
-			}
-			return
 		}
 		d.handoff.mu.Lock()
 		since := d.handoff.retireSince

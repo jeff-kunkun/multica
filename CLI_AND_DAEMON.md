@@ -279,7 +279,10 @@ seconds, the old one takes the profile back and claims again.
 As it retires, the old daemon writes `daemon.retiring-<pid>.json` in the
 profile directory: its port and the runs it still holds. Any daemon that starts
 on the profile while it lives reads that record, so even one started by hand
-after the new daemon was stopped neither re-claims nor fails those runs. One
+after the new daemon was stopped neither re-claims nor fails those runs.
+`multica daemon start` and `restart` (and the Desktop app) do not count a
+retiring daemon as the profile's daemon: they start a new one beside it and
+never stop it. One
 handover at a time: a daemon whose predecessor still runs reports
 `"handoff_ready": false` and defers self-updates until the predecessor exits.
 

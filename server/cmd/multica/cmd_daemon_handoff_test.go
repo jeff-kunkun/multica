@@ -215,3 +215,16 @@ func TestRetireRecordWithNoRuns(t *testing.T) {
 		t.Fatalf("record = %+v %v", rec, ok)
 	}
 }
+
+func TestDaemonServingSkipsRetiringDaemon(t *testing.T) {
+	t.Parallel()
+	if !daemonServing(map[string]any{"status": "running"}) {
+		t.Fatal("running daemon not serving")
+	}
+	if daemonServing(map[string]any{"status": "running", "retiring": true}) {
+		t.Fatal("retiring daemon read as serving the profile")
+	}
+	if daemonServing(map[string]any{"status": "stopped"}) {
+		t.Fatal("stopped daemon read as serving")
+	}
+}

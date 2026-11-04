@@ -122,6 +122,17 @@ describe("decideVersionAction", () => {
     ).toBe("defer");
   });
 
+  it("leaves a retiring daemon alone: it is finishing runs, then exits", () => {
+    expect(
+      decideVersionAction("v1.2.3", {
+        status: "running",
+        cli_version: "v1.2.2",
+        active_task_count: 1,
+        retiring: true,
+      }),
+    ).toBe("not_running");
+  });
+
   it("does not hand over when versions already match", () => {
     expect(
       decideVersionAction("v1.2.3", {

@@ -11,6 +11,8 @@ export interface VersionCheckHealth {
    * (DENE-2979). Absent on daemons, or servers, that predate the handoff.
    */
   handoff_ready?: boolean;
+  /** Handed over to a newer daemon and only finishing its runs (DENE-2979). */
+  retiring?: boolean;
 }
 
 export type VersionAction = "handoff" | "restart" | "defer" | "ok" | "not_running";
@@ -33,6 +35,8 @@ export function decideVersionAction(
   running: VersionCheckHealth | null,
 ): VersionAction {
   if (!running || running.status !== "running") return "not_running";
+  // Already handing over; it exits by itself and is nobody's to restart.
+  if (running.retiring === true) return "not_running";
 
   const runningVersion = running.cli_version;
   if (!bundled || !runningVersion) return "ok";

@@ -635,3 +635,34 @@ func TestSuccessor_PendingReportIsNotRecovered(t *testing.T) {
 		t.Fatal("settled successor must deliver the predecessor's pending report")
 	}
 }
+
+// A report that cannot be delivered must not keep a daemon retired with no
+// successor: it takes the profile back and keeps the report queued.
+func TestRetireLoop_PendingReportStillReclaimsWithoutSuccessor(t *testing.T) {
+	shortenHandoffTimers(t)
+	retireSuccessorGrace = 20 * time.Millisecond
+	d := newHandoffTestDaemon(t, "")
+	withTerminalOutbox(t, d)
+	d.observeServerCapabilities([]string{protocol.DaemonCapabilityHandoffV1})
+	var reclaimed atomic.Bool
+	d.SetHandoffHooks(HandoffHooks{
+		Release:          func([]string) error { return nil },
+		Reclaim:          func() error { reclaimed.Store(true); return nil },
+		SuccessorRunning: func() bool { return false },
+	})
+	bindRetireLifecycle(t, d, func() { t.Error("exited with a report still pending") })
+	d.holdTask("run-1")
+	d.activeTasks.Add(1)
+	if _, err := d.beginRetire("test"); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.terminalReports.enqueue(terminalTaskReport{kind: terminalTaskReportComplete, taskID: "run-1", output: "done"}); err != nil {
+		t.Fatal(err)
+	}
+	d.releaseHeldTask("run-1")
+	d.activeTasks.Add(-1)
+	waitForWithin(t, time.Second, reclaimed.Load, "no successor and a pending report, but the profile was never taken back")
+	if !d.terminalReports.hasPending("run-1") {
+		t.Fatal("reclaim dropped the pending report")
+	}
+}
