@@ -1602,3 +1602,27 @@ func TestListComments_RootsOnlyResolutionSinceAndSummary(t *testing.T) {
 		t.Fatalf("summary: short resolution should be untruncated, got %v %v", s.ResolutionContentTruncated, s.ResolutionContent)
 	}
 }
+
+// TestListComments_RootsOnlyDirectoryPageReturnsThreadResolution covers the
+// office's paged directory (roots_only + limit/offset), which upstream does
+// not have: it must project the same resolution fields as the unpaged read.
+func TestListComments_RootsOnlyDirectoryPageReturnsThreadResolution(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("requires DB")
+	}
+	fx := newCommentListFixture(t)
+	base := fx.Base
+
+	setCommentResolvedAt(t, fx.R1b1, base.Add(20*time.Minute))
+	setCommentResolvedAt(t, fx.Root2, base.Add(30*time.Minute))
+
+	_, rows := listComments(t, fx.IssueID, "roots_only=true&limit=10")
+	m := byID(rows)
+	r1 := m[fx.Root1]
+	if r1.ThreadResolved == nil || !*r1.ThreadResolved || r1.ResolutionID == nil || *r1.ResolutionID != fx.R1b1 {
+		t.Fatalf("directory page reply resolution: got resolved=%v id=%v want %s", r1.ThreadResolved, r1.ResolutionID, fx.R1b1)
+	}
+	if r2 := m[fx.Root2]; r2.ThreadResolved == nil || !*r2.ThreadResolved || r2.ResolutionID != nil {
+		t.Fatalf("directory page root-resolved thread: want thread_resolved only, got %+v", r2)
+	}
+}
