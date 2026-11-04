@@ -240,7 +240,7 @@ applyStableFeed(autoUpdater, "0.0.0");
 // Set when the user clicks "Restart now" on a downloaded update. The app is
 // back within seconds, so before-quit leaves the daemon (and its running
 // tasks) alone even with autoStop on; the relaunched app swaps the daemon to
-// the new CLI once it drains.
+// the new CLI once it is idle, without pausing its claims.
 let quittingToInstallUpdate = false;
 
 export function isQuittingToInstallUpdate(): boolean {

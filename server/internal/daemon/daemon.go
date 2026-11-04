@@ -752,6 +752,13 @@ type Daemon struct {
 	// drainUntil (unix nanos) pauses claiming until that time; set by POST
 	// /drain. Independent of pauseClaims so the update barriers never see it.
 	drainUntil atomic.Int64
+	// drainMu guards the bookkeeping that bounds one drain: when its first
+	// request came, when the latest did, and whether reaching drainMaxHold was
+	// logged. drainUntil stays atomic so the claim gates read it lock-free.
+	drainMu          sync.Mutex
+	drainSince       time.Time
+	drainLastRequest time.Time
+	drainCapLogged   bool
 
 	activeEnvRootsMu   sync.Mutex
 	activeEnvRootsCond *sync.Cond      // signalled when an in-flight env-root GC mutation finishes
@@ -5429,17 +5436,41 @@ func (d *Daemon) tryEnterClaim() bool {
 	return true
 }
 
-// drainLease is how long one POST /drain keeps the daemon from claiming. The
-// Desktop app renews it on every status poll while it waits to restart the
-// daemon into a new bundled CLI, so a busy daemon actually reaches idle
-// instead of picking up new work forever. A short lease means a caller that
-// goes away (app quit or crashed) can never leave claiming paused for long.
+// drainLease is how long one POST /drain keeps the daemon from claiming. A
+// caller renews it while it waits for running tasks to finish; a short lease
+// means a caller that goes away (app quit or crashed) can never leave claiming
+// paused for long.
 var drainLease = 90 * time.Second
 
-// startDrain pauses new claims until the lease expires. Running tasks are
-// untouched; the caller restarts the daemon once active_task_count reaches 0.
-func (d *Daemon) startDrain() {
-	d.drainUntil.Store(time.Now().Add(drainLease).UnixNano())
+// drainMaxHold bounds one drain however often it is renewed. Past it the
+// daemon claims again and the restart waits for a natural idle moment, so a
+// single long task cannot hold every queued task on the machine.
+var drainMaxHold = 10 * time.Minute
+
+// startDrain pauses new claims until the lease expires, but never past
+// drainMaxHold from the drain's first request. A request arriving after the
+// previous one's lease would have lapsed starts a new drain. Running tasks are
+// untouched. Reports whether claiming is paused after this request.
+func (d *Daemon) startDrain(now time.Time) bool {
+	d.drainMu.Lock()
+	defer d.drainMu.Unlock()
+	if d.drainLastRequest.IsZero() || now.Sub(d.drainLastRequest) > drainLease {
+		d.drainSince = now
+		d.drainCapLogged = false
+	}
+	d.drainLastRequest = now
+	until := now.Add(drainLease)
+	if limit := d.drainSince.Add(drainMaxHold); until.After(limit) {
+		until = limit
+	}
+	d.drainUntil.Store(until.UnixNano())
+	paused := now.Before(until)
+	if !paused && !d.drainCapLogged && d.logger != nil {
+		d.drainCapLogged = true
+		d.logger.Warn("drain held new tasks past its limit; taking tasks again, restart waits for idle",
+			"limit", drainMaxHold, "active_tasks", d.activeTasks.Load())
+	}
+	return paused
 }
 
 func (d *Daemon) draining() bool {

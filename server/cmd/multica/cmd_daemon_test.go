@@ -180,6 +180,30 @@ func TestPrintDaemonStatusExplainsDeferredRestart(t *testing.T) {
 	}
 }
 
+func TestPrintDaemonStatusShowsPausedClaimsOnlyWhileDraining(t *testing.T) {
+	t.Parallel()
+
+	base := map[string]any{
+		"status":      "running",
+		"pid":         float64(1234),
+		"uptime":      "1h2m3s",
+		"cli_version": "0.3.7",
+	}
+
+	var open bytes.Buffer
+	printDaemonStatusReport(&open, "Daemon", base)
+	if strings.Contains(open.String(), "Claims paused") {
+		t.Errorf("status output = %q, want no paused-claims row without a drain", open.String())
+	}
+
+	base["draining"] = true
+	var paused bytes.Buffer
+	printDaemonStatusReport(&paused, "Daemon", base)
+	if !strings.Contains(paused.String(), "Claims paused") {
+		t.Errorf("status output = %q, want the paused-claims row while draining", paused.String())
+	}
+}
+
 // TestPrintDaemonStatusOmitsVersionWhenMissing pins the back-compat contract:
 // when the daemon doesn't report cli_version (older daemon paired with a newer
 // CLI) or reports an empty string, the CLI must skip the line entirely instead

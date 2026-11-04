@@ -459,19 +459,20 @@ func (d *Daemon) shutdownHandler() http.HandlerFunc {
 	}
 }
 
-// drainHandler stops the daemon from claiming new tasks for drainLease, so the
-// Desktop app can restart it into a new CLI as soon as running tasks finish.
-// Callers renew it while they wait. Localhost-only, like /shutdown.
+// drainHandler stops the daemon from claiming new tasks for drainLease, so a
+// caller can restart it as soon as running tasks finish. Callers renew it while
+// they wait, up to drainMaxHold; "draining" answers whether this request still
+// pauses claims. Localhost-only, like /shutdown.
 func (d *Daemon) drainHandler() http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
-		d.startDrain()
+		paused := d.startDrain(time.Now())
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]any{
-			"draining":          true,
+			"draining":          paused,
 			"active_task_count": d.activeTasks.Load(),
 		})
 	}

@@ -77,10 +77,7 @@ const HEALTH_PROBE_TIMEOUT_MS = 2_000;
 // misses this second independent window is no longer treated as merely busy.
 const RECOVERY_HEALTH_PROBE_TIMEOUT_MS = 10_000;
 
-const DEFAULT_PREFS: DaemonPrefs = { autoStart: true, autoStop: false, drainForUpgrade: false };
-// Last drainForUpgrade read from disk. before-quit must decide synchronously,
-// so it reads this instead of awaiting loadPrefs.
-let drainForUpgradeCached = false;
+const DEFAULT_PREFS: DaemonPrefs = { autoStart: true, autoStop: false };
 
 // Always a resolved Desktop-owned profile. "Not resolved yet" is represented by
 // `null` at every call site, never by an empty name — see daemon-profile.ts.
@@ -193,23 +190,6 @@ interface HealthPayload {
   workspaces?: unknown[];
   /** Local annotation: the port this payload was fetched from. */
   port?: number;
-}
-
-/**
- * Asks the daemon to stop claiming new tasks for a short lease so a pending
- * version restart can actually happen once running tasks finish. Renewed on
- * every poll tick while the restart is deferred. Daemons older than /drain
- * answer 404; they simply keep the old wait-for-idle behavior.
- */
-async function requestDaemonDrain(port: number): Promise<void> {
-  try {
-    await fetch(`http://127.0.0.1:${port}/drain`, {
-      method: "POST",
-      signal: AbortSignal.timeout(HEALTH_PROBE_TIMEOUT_MS),
-    });
-  } catch {
-    // Best-effort: the next poll tick retries.
-  }
 }
 
 async function fetchHealthAtPort(
@@ -660,7 +640,9 @@ async function getCliBinaryVersion(): Promise<string | null> {
  *
  * On a confirmed mismatch while the daemon is busy, `pendingVersionRestart`
  * is set; the poll loop retries this function on each 5s tick and will fire
- * the restart as soon as the daemon drains.
+ * the restart as soon as the daemon is idle. The daemon keeps claiming while
+ * the restart waits: pausing its claims would park every queued task behind
+ * the longest running one.
  */
 async function ensureRunningDaemonVersionMatches(): Promise<
   "restarted" | "deferred" | "ok" | "not_running"
@@ -688,19 +670,13 @@ async function ensureRunningDaemonVersionMatches(): Promise<
       pendingVersionRestart = false;
       return "ok";
     case "defer": {
-      const drain = (await loadPrefs()).drainForUpgrade === true;
       if (!pendingVersionRestart) {
         const activeTasks = running?.active_task_count ?? 0;
         console.log(
-          drain
-            ? `[daemon] CLI version mismatch (bundled=${bundled} running=${running?.cli_version}); draining — restart once ${activeTasks} active task(s) finish`
-            : `[daemon] CLI version mismatch (bundled=${bundled} running=${running?.cli_version}); deferring restart until ${activeTasks} active task(s) finish`,
+          `[daemon] CLI version mismatch (bundled=${bundled} running=${running?.cli_version}); deferring restart until ${activeTasks} active task(s) finish`,
         );
       }
       pendingVersionRestart = true;
-      // Opt-in (drainForUpgrade): a busy daemon keeps claiming new work and
-      // may never reach idle, so pause its claims while the restart waits.
-      if (drain && running?.port) await requestDaemonDrain(running.port);
       return "deferred";
     }
     case "restart":
@@ -843,11 +819,8 @@ async function loadPrefs(): Promise<DaemonPrefs> {
   try {
     const raw = await readFile(PREFS_PATH, "utf-8");
     const parsed = JSON.parse(raw);
-    const prefs: DaemonPrefs = { ...DEFAULT_PREFS, ...parsed };
-    drainForUpgradeCached = prefs.drainForUpgrade === true;
-    return prefs;
+    return { ...DEFAULT_PREFS, ...parsed };
   } catch {
-    drainForUpgradeCached = false;
     return { ...DEFAULT_PREFS };
   }
 }
@@ -1623,7 +1596,6 @@ export function setupDaemonManager(
 
   app.on("before-quit", createDaemonQuitHandler({
     isInstallingUpdate: isQuittingToInstallUpdate,
-    keepDaemonOnUpdateInstall: () => drainForUpgradeCached,
     stopSupervision: () => {
       console.log("[daemon] Desktop quitting; stopping supervision");
       setDesiredDaemonRunning(false);
