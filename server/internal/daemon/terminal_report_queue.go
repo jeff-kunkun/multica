@@ -297,6 +297,13 @@ func decodePersistedTerminalReport(body []byte) (persistedTerminalTaskReport, er
 	return record, nil
 }
 
+// hasPending reports whether a terminal report for taskID is still waiting
+// for the server's acknowledgement.
+func (s *terminalReportStore) hasPending(taskID string) bool {
+	_, err := os.Stat(filepath.Join(s.dir, terminalReportFileName(taskID)))
+	return err == nil
+}
+
 func (s *terminalReportStore) list() ([]pendingTerminalTaskReport, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -715,6 +722,15 @@ func (d *Daemon) replayPendingTerminalReports(ctx context.Context) (pending, del
 	if err != nil {
 		d.logger.Error("load pending terminal reports", "error", err)
 	}
+	// During a handoff (DENE-2979) the outbox is shared; each process replays
+	// only the reports it owns.
+	owned := items[:0]
+	for _, item := range items {
+		if d.replaysTerminalReport(item.report.taskID) {
+			owned = append(owned, item)
+		}
+	}
+	items = owned
 	if len(items) == 0 {
 		if listFailed {
 			// Keep the replay timer alive so corrupt/unsupported/unreadable

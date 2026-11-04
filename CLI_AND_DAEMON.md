@@ -271,14 +271,23 @@ A version switch no longer stops the running daemon first. The old daemon
 **retires**: it stops claiming, lets a claim already in flight land, and hands
 the profile (lock, port record, `daemon.log`) to a new daemon, which takes new
 tasks at once. The retiring daemon keeps heartbeating and keeps serving its own
-local port to its tasks, finishes and reports every run it holds, and exits by
-itself. It never deregisters the runtimes, which the new daemon shares. If no
-new daemon comes up within 90 seconds, the old one takes the profile back and
-claims again.
+local port to its tasks, finishes every run it holds, and exits by itself once
+the server has acknowledged each of their results. It never deregisters the
+runtimes, which the new daemon shares. If no new daemon comes up within 90
+seconds, the old one takes the profile back and claims again.
+
+As it retires, the old daemon writes `daemon.retiring-<pid>.json` in the
+profile directory: its port and the runs it still holds. Any daemon that starts
+on the profile while it lives reads that record, so even one started by hand
+after the new daemon was stopped neither re-claims nor fails those runs. One
+handover at a time: a daemon whose predecessor still runs reports
+`"handoff_ready": false` and defers self-updates until the predecessor exits.
 
 The new daemon never fails its predecessor's runs while that process lives. If
 the predecessor dies before reporting (killed, crashed), the new daemon fails
-exactly the runs it held, with `runtime_recovery`, and they retry as usual.
+exactly the runs it held, with `runtime_recovery`, and they retry as usual. A
+run that finished but whose result was still waiting to be sent is delivered
+by the new daemon instead.
 
 A handover needs both sides to support it: the daemon reports
 `"handoff_ready": true` in `/health` only when the server advertises

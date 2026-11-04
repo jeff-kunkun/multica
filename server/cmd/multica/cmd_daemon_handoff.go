@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -51,6 +52,73 @@ func parseDaemonPredecessor(raw string) (daemonPortRecord, bool) {
 // successor that can take the lock knows its predecessor is gone.
 func daemonRetiringMarkerPath(profile string, pid int) string {
 	return filepath.Join(daemonDirForProfile(profile), fmt.Sprintf("daemon.retiring-%d.lock", pid))
+}
+
+// daemonRetiringRecordPath is the retiring daemon's own account of itself,
+// written before it lets go of the profile: its health port and the runs it
+// still answers for. Any daemon that later starts on the profile — the
+// launched successor, or one started by hand or by Desktop after that
+// successor stopped — reads it, so its first recovery claim protects those
+// runs. A separate file from the marker: Windows locks are mandatory, so the
+// locked marker cannot be read.
+func daemonRetiringRecordPath(profile string, pid int) string {
+	return filepath.Join(daemonDirForProfile(profile), fmt.Sprintf("daemon.retiring-%d.json", pid))
+}
+
+type daemonRetiringRecord struct {
+	PID         int      `json:"pid"`
+	Port        int      `json:"port"`
+	HeldTaskIDs []string `json:"held_task_ids"`
+}
+
+func writeDaemonRetiringRecord(profile string, rec daemonRetiringRecord) error {
+	if rec.HeldTaskIDs == nil {
+		rec.HeldTaskIDs = []string{}
+	}
+	data, err := json.Marshal(rec)
+	if err != nil {
+		return err
+	}
+	path := daemonRetiringRecordPath(profile, rec.PID)
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, path)
+}
+
+func readDaemonRetiringRecord(profile string, pid int) (daemonRetiringRecord, bool) {
+	data, err := os.ReadFile(daemonRetiringRecordPath(profile, pid))
+	if err != nil {
+		return daemonRetiringRecord{}, false
+	}
+	var rec daemonRetiringRecord
+	if json.Unmarshal(data, &rec) != nil || rec.PID != pid || rec.HeldTaskIDs == nil {
+		return daemonRetiringRecord{}, false
+	}
+	return rec, true
+}
+
+// findRetiringPredecessor names the live retiring daemon of this profile, if
+// any, from the markers it holds. Records of daemons that are gone are
+// removed on the way. self is never its own predecessor.
+func findRetiringPredecessor(profile string, self int) (daemonRetiringRecord, bool) {
+	matches, _ := filepath.Glob(filepath.Join(daemonDirForProfile(profile), "daemon.retiring-*.lock"))
+	sort.Strings(matches)
+	for _, m := range matches {
+		raw := strings.TrimSuffix(strings.TrimPrefix(filepath.Base(m), "daemon.retiring-"), ".lock")
+		pid, err := strconv.Atoi(raw)
+		if err != nil || pid < 1 || pid == self {
+			continue
+		}
+		if predecessorGone(profile, pid) {
+			continue
+		}
+		if rec, ok := readDaemonRetiringRecord(profile, pid); ok && rec.Port > 0 {
+			return rec, true
+		}
+	}
+	return daemonRetiringRecord{}, false
 }
 
 func daemonProfileLockPath(profile string) string {
@@ -104,11 +172,12 @@ func (h *daemonProcessHandoff) closeAll() {
 		h.marker.Close()
 		h.marker = nil
 		// Exiting retired: the successor reads a missing marker as "gone".
+		_ = os.Remove(daemonRetiringRecordPath(h.profile, h.pid))
 		_ = os.Remove(daemonRetiringMarkerPath(h.profile, h.pid))
 	}
 }
 
-func (h *daemonProcessHandoff) release() error {
+func (h *daemonProcessHandoff) release(held []string) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if h.marker == nil {
@@ -120,6 +189,12 @@ func (h *daemonProcessHandoff) release() error {
 			return fmt.Errorf("retiring marker for pid %d is already held", h.pid)
 		}
 		h.marker = marker
+	}
+	if err := writeDaemonRetiringRecord(h.profile, daemonRetiringRecord{PID: h.pid, Port: h.port, HeldTaskIDs: held}); err != nil {
+		h.marker.Close()
+		h.marker = nil
+		_ = os.Remove(daemonRetiringMarkerPath(h.profile, h.pid))
+		return fmt.Errorf("record retiring state: %w", err)
 	}
 	if h.logSink != nil && h.rotator != nil {
 		// stderr is the bounded crash sink for a background daemon.
@@ -157,6 +232,7 @@ func (h *daemonProcessHandoff) reclaim() error {
 	if h.marker != nil {
 		h.marker.Close()
 		h.marker = nil
+		_ = os.Remove(daemonRetiringRecordPath(h.profile, h.pid))
 		_ = os.Remove(daemonRetiringMarkerPath(h.profile, h.pid))
 	}
 	return nil
@@ -180,6 +256,7 @@ func predecessorGone(profile string, pid int) bool {
 		return false
 	}
 	f.Close()
+	_ = os.Remove(daemonRetiringRecordPath(profile, pid))
 	_ = os.Remove(path)
 	return true
 }

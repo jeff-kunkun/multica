@@ -1170,8 +1170,18 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	defer healthLn.Close()
 	cfg.HealthPort = actualPort
 	handoff.port = actualPort
+	// A retiring daemon may still be finishing runs on this profile even when
+	// no handoff launched this process (its successor was stopped and this one
+	// started in its place). Its record names those runs, so this process
+	// neither re-claims nor recovers them.
 	if hasPredecessor {
 		cfg.Predecessor = daemon.PredecessorRef{PID: predecessor.PID, Port: predecessor.Port}
+		if rec, ok := readDaemonRetiringRecord(profile, predecessor.PID); ok {
+			cfg.Predecessor.HeldTaskIDs = rec.HeldTaskIDs
+		}
+	} else if rec, ok := findRetiringPredecessor(profile, os.Getpid()); ok {
+		cfg.Predecessor = daemon.PredecessorRef{PID: rec.PID, Port: rec.Port, HeldTaskIDs: rec.HeldTaskIDs}
+		logger.Info("a retiring daemon is still finishing runs on this profile; watching it", "predecessor_pid", rec.PID, "held_tasks", len(rec.HeldTaskIDs))
 	}
 	if err := publishDaemonPort(profile, daemonPortRecord{Port: actualPort, PID: os.Getpid()}); err != nil {
 		return fmt.Errorf("publish daemon health port: %w", err)

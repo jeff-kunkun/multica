@@ -352,6 +352,9 @@ func (c *Client) ClaimTasks(ctx context.Context, daemonID string, runtimeIDs []s
 type claimRecovery struct {
 	Active      bool
 	HeldTaskIDs []string
+	// Deferred: recovery is wanted but must wait (a handoff successor without
+	// its predecessor's snapshot yet). Never sent; keeps recovery pending.
+	Deferred bool
 }
 
 // claimBody is the request body shared by the HTTP claim and the tasks.claim

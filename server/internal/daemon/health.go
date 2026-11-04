@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sort"
 	"strings"
 	"time"
 
@@ -434,8 +433,7 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 		if resp.Retiring {
 			// The successor reads this to keep the server from re-delivering
 			// these tasks and to fail exactly them if this process dies.
-			resp.HeldTaskIDs = d.heldTaskIDs()
-			sort.Strings(resp.HeldTaskIDs)
+			resp.HeldTaskIDs = d.ownedTaskIDs()
 		}
 		if reporter, ok := d.repoCache.(interface{ Activity() repocache.Activity }); ok {
 			activity := reporter.Activity()

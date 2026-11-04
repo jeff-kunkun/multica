@@ -42,8 +42,10 @@ import (
 // Any nil hook disables the step that needs it.
 type HandoffHooks struct {
 	// Release hands the profile to a successor: take this process's retiring
-	// marker lock, release the profile lock, and stop writing daemon.log.
-	Release func() error
+	// marker lock, record heldTaskIDs (every run this process still answers
+	// for) where any later daemon can read them, release the profile lock, and
+	// stop writing daemon.log.
+	Release func(heldTaskIDs []string) error
 	// Reclaim undoes Release when no successor took the profile over.
 	Reclaim func() error
 	// SuccessorRunning reports whether another live daemon process now serves
@@ -61,6 +63,10 @@ type HandoffHooks struct {
 type PredecessorRef struct {
 	PID  int
 	Port int
+	// HeldTaskIDs is the predecessor's own record, written as it retired, of
+	// the runs it still answers for. Nil when no record was found; recovery
+	// claims then wait for its /health instead.
+	HeldTaskIDs []string
 }
 
 // Tunables; variables so tests can shorten them.
@@ -93,8 +99,16 @@ type handoffState struct {
 	retireSince  time.Time
 	retireReason string
 	retireLoopOn bool
+	// retireHeld is every task this process held when it retired. A retiring
+	// process never claims again, so these are the only runs whose terminal
+	// reports it owns in the outbox it now shares with its successor.
+	retireHeld map[string]struct{}
 
-	pred         *PredecessorRef
+	pred *PredecessorRef
+	// predSnapshot is set once the predecessor answered /health, so predHeld
+	// names what it holds. Until then recovery claims wait: an empty held list
+	// would let the server re-deliver the predecessor's live preparations.
+	predSnapshot bool
 	predHeld     map[string]struct{}
 	predRuntimes map[string]struct{}
 	predActive   int64
@@ -127,7 +141,7 @@ func (d *Daemon) observeServerCapabilities(capabilities []string) {
 // handoffReady reports whether this daemon can retire in favour of a
 // successor right now.
 func (d *Daemon) handoffReady() bool {
-	return d.ready.Load() && !d.isRetiring() && d.handoff.serverSupported.Load() && d.handoff.hooks.Release != nil
+	return d.ready.Load() && !d.isRetiring() && !d.hasPredecessor() && d.handoff.serverSupported.Load() && d.handoff.hooks.Release != nil
 }
 
 // RetireStatus is the answer to POST /retire.
@@ -140,8 +154,7 @@ type RetireStatus struct {
 }
 
 func (d *Daemon) retireStatus() RetireStatus {
-	ids := d.heldTaskIDs()
-	sort.Strings(ids)
+	ids := d.ownedTaskIDs()
 	return RetireStatus{
 		Retiring:        d.isRetiring(),
 		PID:             osGetpid(),
@@ -179,11 +192,17 @@ func (d *Daemon) beginRetire(reason string) (RetireStatus, error) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	if err := d.handoff.hooks.Release(); err != nil {
+	// No claim is in flight and none can start, so this list is final.
+	held := d.heldTaskIDs()
+	if err := d.handoff.hooks.Release(d.ownedTaskIDs()); err != nil {
 		d.handoff.retiring.Store(false)
 		return RetireStatus{}, fmt.Errorf("release daemon profile: %w", err)
 	}
 	d.handoff.mu.Lock()
+	d.handoff.retireHeld = make(map[string]struct{}, len(held))
+	for _, id := range held {
+		d.handoff.retireHeld[id] = struct{}{}
+	}
 	d.handoff.retireSince = time.Now()
 	d.handoff.retireReason = reason
 	startLoop := !d.handoff.retireLoopOn
@@ -255,6 +274,14 @@ func (d *Daemon) retireLoop(ctx context.Context) {
 		idle := d.claimsInFlight == 0 && d.activeTasks.Load() == 0
 		d.claimMu.Unlock()
 		if idle && !d.hasPredecessor() {
+			// A result the server has not acknowledged yet stays this
+			// process's to deliver; exiting would leave a completed run for
+			// the successor's orphan recovery to fail.
+			if pending := d.retiredPendingReports(); pending > 0 {
+				d.logger.Info("retired daemon waiting for terminal reports to be delivered", "pending", pending)
+				d.signalTerminalReportReplay()
+				continue
+			}
 			d.logger.Info("retired daemon finished its runs; exiting")
 			if d.cancelFunc != nil {
 				d.cancelFunc()
@@ -339,8 +366,77 @@ func (d *Daemon) setPredecessor(ref PredecessorRef) {
 	defer d.handoff.mu.Unlock()
 	r := ref
 	d.handoff.pred = &r
+	d.handoff.predSnapshot = ref.HeldTaskIDs != nil
 	d.handoff.predHeld = map[string]struct{}{}
+	for _, id := range ref.HeldTaskIDs {
+		d.handoff.predHeld[id] = struct{}{}
+	}
 	d.handoff.predRuntimes = map[string]struct{}{}
+}
+
+// ownedTaskIDs is what this process answers for: its own held tasks plus,
+// while it watches a predecessor, that predecessor's. A retiring daemon that
+// is itself still watching one (two switches in a row) reports both, so the
+// next successor protects the whole chain.
+func (d *Daemon) ownedTaskIDs() []string {
+	seen := map[string]struct{}{}
+	out := []string{}
+	for _, id := range append(d.heldTaskIDs(), d.predecessorHeldIDs()...) {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// recoveryClaimDeferred reports whether recovery claims must wait for a
+// predecessor snapshot.
+func (d *Daemon) recoveryClaimDeferred() bool {
+	d.handoff.mu.Lock()
+	defer d.handoff.mu.Unlock()
+	return d.handoff.pred != nil && !d.handoff.predSnapshot
+}
+
+// replaysTerminalReport splits the shared outbox between the two processes of
+// a handoff so a report is never delivered twice: a retiring daemon replays
+// only the runs it held, and its successor leaves those alone until the
+// predecessor has settled.
+func (d *Daemon) replaysTerminalReport(taskID string) bool {
+	d.handoff.mu.Lock()
+	defer d.handoff.mu.Unlock()
+	if d.handoff.retiring.Load() && d.handoff.retireHeld != nil {
+		_, own := d.handoff.retireHeld[taskID]
+		return own
+	}
+	if d.handoff.pred != nil {
+		_, theirs := d.handoff.predHeld[taskID]
+		return !theirs
+	}
+	return true
+}
+
+// retiredPendingReports counts outbox entries for runs this retiring process
+// held.
+func (d *Daemon) retiredPendingReports() int {
+	if d.terminalReports == nil {
+		return 0
+	}
+	d.handoff.mu.Lock()
+	ids := make([]string, 0, len(d.handoff.retireHeld))
+	for id := range d.handoff.retireHeld {
+		ids = append(ids, id)
+	}
+	d.handoff.mu.Unlock()
+	n := 0
+	for _, id := range ids {
+		if d.terminalReports.hasPending(id) {
+			n++
+		}
+	}
+	return n
 }
 
 func (d *Daemon) hasPredecessor() bool {
@@ -429,6 +525,7 @@ func (d *Daemon) probePredecessor(ctx context.Context) bool {
 		return false
 	}
 	d.handoff.predMisses = 0
+	d.handoff.predSnapshot = true
 	for _, id := range body.HeldTaskIDs {
 		d.handoff.predHeld[id] = struct{}{}
 	}
@@ -510,6 +607,15 @@ func (d *Daemon) finishPredecessor(ctx context.Context) bool {
 	for _, id := range d.heldTaskIDs() {
 		delete(held, id)
 	}
+	// A run whose result is still in the outbox finished; this process
+	// delivers that report once the predecessor is settled, never fails it.
+	if d.terminalReports != nil {
+		for id := range held {
+			if d.terminalReports.hasPending(id) {
+				delete(held, id)
+			}
+		}
+	}
 	for _, rid := range d.allRuntimeIDs() {
 		runtimes[rid] = struct{}{}
 	}
@@ -522,9 +628,13 @@ func (d *Daemon) finishPredecessor(ctx context.Context) bool {
 	settle := func() {
 		d.handoff.mu.Lock()
 		d.handoff.pred = nil
+		d.handoff.predSnapshot = false
 		d.handoff.predHeld = nil
 		d.handoff.predRuntimes = nil
 		d.handoff.mu.Unlock()
+		// The predecessor's undelivered reports are this process's now, and a
+		// recovery claim that waited for its snapshot may go ahead.
+		d.signalTerminalReportReplay()
 	}
 	if len(ids) == 0 {
 		d.logger.Info("retiring predecessor exited", "pid", pred.PID)

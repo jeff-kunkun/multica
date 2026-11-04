@@ -83,7 +83,7 @@ func TestObserveServerCapabilities_TracksLatestAck(t *testing.T) {
 func TestBeginRetire_RefusedWithoutServerCapability(t *testing.T) {
 	d := newHandoffTestDaemon(t, "")
 	released := false
-	d.SetHandoffHooks(HandoffHooks{Release: func() error { released = true; return nil }})
+	d.SetHandoffHooks(HandoffHooks{Release: func([]string) error { released = true; return nil }})
 	if _, err := d.beginRetire("test"); !errors.Is(err, errHandoffUnsupported) {
 		t.Fatalf("beginRetire err = %v, want errHandoffUnsupported", err)
 	}
@@ -101,7 +101,7 @@ func TestBeginRetire_StopsClaimsKeepsRunsAndExitsWhenIdle(t *testing.T) {
 	d := newHandoffTestDaemon(t, "")
 	d.observeServerCapabilities([]string{protocol.DaemonCapabilityHandoffV1})
 	var released atomic.Int32
-	d.SetHandoffHooks(HandoffHooks{Release: func() error { released.Add(1); return nil }})
+	d.SetHandoffHooks(HandoffHooks{Release: func([]string) error { released.Add(1); return nil }})
 	var exited atomic.Bool
 	bindRetireLifecycle(t, d, func() { exited.Store(true) })
 
@@ -149,7 +149,7 @@ func TestBeginRetire_WaitsForInFlightClaim(t *testing.T) {
 	retireClaimWait = 2 * time.Second
 	d := newHandoffTestDaemon(t, "")
 	d.observeServerCapabilities([]string{protocol.DaemonCapabilityHandoffV1})
-	d.SetHandoffHooks(HandoffHooks{Release: func() error { return nil }})
+	d.SetHandoffHooks(HandoffHooks{Release: func([]string) error { return nil }})
 	bindRetireLifecycle(t, d, nil)
 	if !d.tryEnterClaim() {
 		t.Fatal("claim gate closed")
@@ -174,7 +174,7 @@ func TestBeginRetire_ClaimStuckInFlightAbortsRetire(t *testing.T) {
 	retireClaimWait = 30 * time.Millisecond
 	d := newHandoffTestDaemon(t, "")
 	d.observeServerCapabilities([]string{protocol.DaemonCapabilityHandoffV1})
-	d.SetHandoffHooks(HandoffHooks{Release: func() error { t.Fatal("released despite a stuck claim"); return nil }})
+	d.SetHandoffHooks(HandoffHooks{Release: func([]string) error { t.Fatal("released despite a stuck claim"); return nil }})
 	d.tryEnterClaim()
 	if _, err := d.beginRetire("test"); err == nil {
 		t.Fatal("retire succeeded with a claim in flight")
@@ -193,7 +193,7 @@ func TestRetireLoop_ReclaimsWhenNoSuccessorAppears(t *testing.T) {
 	d.observeServerCapabilities([]string{protocol.DaemonCapabilityHandoffV1})
 	var reclaimed atomic.Int32
 	d.SetHandoffHooks(HandoffHooks{
-		Release:          func() error { return nil },
+		Release:          func([]string) error { return nil },
 		Reclaim:          func() error { reclaimed.Add(1); return nil },
 		SuccessorRunning: func() bool { return false },
 	})
@@ -218,7 +218,7 @@ func TestRetireLoop_StaysRetiredWhileSuccessorRuns(t *testing.T) {
 	d := newHandoffTestDaemon(t, "")
 	d.observeServerCapabilities([]string{protocol.DaemonCapabilityHandoffV1})
 	d.SetHandoffHooks(HandoffHooks{
-		Release:          func() error { return nil },
+		Release:          func([]string) error { return nil },
 		Reclaim:          func() error { t.Error("reclaimed while a successor runs"); return nil },
 		SuccessorRunning: func() bool { return true },
 	})
@@ -240,7 +240,7 @@ func TestRetireHandler(t *testing.T) {
 	d.activeTasks.Add(1)
 	reclaimErr := fmt.Errorf("held by successor")
 	d.SetHandoffHooks(HandoffHooks{
-		Release: func() error { return nil },
+		Release: func([]string) error { return nil },
 		Reclaim: func() error { return reclaimErr },
 	})
 	post := func(body string) (*httptest.ResponseRecorder, RetireStatus) {
@@ -271,7 +271,7 @@ func TestHealth_ReportsRetireAndPredecessor(t *testing.T) {
 	d := newHandoffTestDaemon(t, "")
 	bindRetireLifecycle(t, d, nil)
 	d.observeServerCapabilities([]string{protocol.DaemonCapabilityHandoffV1})
-	d.SetHandoffHooks(HandoffHooks{Release: func() error { return nil }})
+	d.SetHandoffHooks(HandoffHooks{Release: func([]string) error { return nil }})
 
 	read := func() map[string]any {
 		rec := httptest.NewRecorder()
@@ -461,4 +461,177 @@ func waitForWithin(t *testing.T, timeout time.Duration, cond func() bool, msg st
 		time.Sleep(5 * time.Millisecond)
 	}
 	t.Fatal(msg)
+}
+
+func withTerminalOutbox(t *testing.T, d *Daemon) {
+	t.Helper()
+	d.terminalReports = newTerminalReportStore(Config{
+		WorkspacesRoot: t.TempDir(),
+		ServerBaseURL:  "https://api.example.test",
+		DaemonID:       "daemon-handoff",
+	})
+}
+
+// A daemon that still watches its own retiring predecessor cannot retire in
+// turn: two switches in a row would leave the first daemon's runs with a
+// successor that does not know about them.
+func TestHandoffReady_FalseWhileWatchingPredecessor(t *testing.T) {
+	d := newHandoffTestDaemon(t, "")
+	d.observeServerCapabilities([]string{protocol.DaemonCapabilityHandoffV1})
+	d.SetHandoffHooks(HandoffHooks{Release: func([]string) error { t.Fatal("released while watching a predecessor"); return nil }})
+	if !d.handoffReady() {
+		t.Fatal("idle daemon not handoff_ready")
+	}
+	d.setPredecessor(PredecessorRef{PID: 4242, Port: 1})
+	if d.handoffReady() {
+		t.Fatal("handoff_ready while a predecessor still runs")
+	}
+	if _, err := d.beginRetire("test"); !errors.Is(err, errHandoffUnsupported) {
+		t.Fatalf("beginRetire err = %v, want errHandoffUnsupported", err)
+	}
+}
+
+// Without the predecessor's list the recovery claim waits instead of going
+// out empty, which would let the server re-deliver the predecessor's runs.
+func TestSuccessor_RecoveryClaimWaitsForPredecessorSnapshot(t *testing.T) {
+	d := newHandoffTestDaemon(t, "")
+	d.setPredecessor(PredecessorRef{PID: 4242, Port: 1})
+	d.claimRecoveryPending.Store(true)
+	if rec := d.claimRecoveryRequest(); rec.Active || !rec.Deferred {
+		t.Fatalf("recovery without a snapshot = %+v, want deferred", rec)
+	}
+	// The record the predecessor wrote as it retired is a snapshot.
+	s := newHandoffTestDaemon(t, "")
+	s.setPredecessor(PredecessorRef{PID: 4242, Port: 1, HeldTaskIDs: []string{"pred-1"}})
+	s.claimRecoveryPending.Store(true)
+	if rec := s.claimRecoveryRequest(); !rec.Active || rec.Deferred || strings.Join(rec.HeldTaskIDs, ",") != "pred-1" {
+		t.Fatalf("recovery with the retire record = %+v", rec)
+	}
+	// Once the predecessor is settled the claim no longer waits.
+	d.handoff.mu.Lock()
+	d.handoff.pred = nil
+	d.handoff.mu.Unlock()
+	if rec := d.claimRecoveryRequest(); !rec.Active || rec.Deferred {
+		t.Fatalf("recovery after settling = %+v", rec)
+	}
+}
+
+func TestBeginRetire_ReleaseGetsHeldTasks(t *testing.T) {
+	shortenHandoffTimers(t)
+	d := newHandoffTestDaemon(t, "")
+	d.observeServerCapabilities([]string{protocol.DaemonCapabilityHandoffV1})
+	var got []string
+	d.SetHandoffHooks(HandoffHooks{Release: func(ids []string) error { got = ids; return nil }})
+	bindRetireLifecycle(t, d, nil)
+	d.holdTask("b")
+	d.holdTask("a")
+	d.activeTasks.Add(2)
+	if _, err := d.beginRetire("test"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(got, ",") != "a,b" {
+		t.Fatalf("Release got %v, want [a b]", got)
+	}
+}
+
+// The shared outbox is split: the retiring daemon replays its own runs'
+// reports, the successor everything else until the predecessor settles.
+func TestTerminalReportOwnershipDuringHandoff(t *testing.T) {
+	shortenHandoffTimers(t)
+	old := newHandoffTestDaemon(t, "")
+	old.observeServerCapabilities([]string{protocol.DaemonCapabilityHandoffV1})
+	old.SetHandoffHooks(HandoffHooks{Release: func([]string) error { return nil }})
+	bindRetireLifecycle(t, old, nil)
+	old.holdTask("run-old")
+	old.activeTasks.Add(1)
+	if !old.replaysTerminalReport("anything") {
+		t.Fatal("a daemon outside a handoff must replay every report")
+	}
+	if _, err := old.beginRetire("test"); err != nil {
+		t.Fatal(err)
+	}
+	if !old.replaysTerminalReport("run-old") || old.replaysTerminalReport("run-new") {
+		t.Fatal("retiring daemon must replay only the runs it held")
+	}
+
+	succ := newHandoffTestDaemon(t, "")
+	succ.setPredecessor(PredecessorRef{PID: 4242, Port: 1, HeldTaskIDs: []string{"run-old"}})
+	if succ.replaysTerminalReport("run-old") || !succ.replaysTerminalReport("run-new") {
+		t.Fatal("successor must leave the predecessor's reports alone")
+	}
+}
+
+// A run that finished but whose result the server has not acknowledged keeps
+// the retiring daemon alive; exiting would hand a completed run to the
+// successor's orphan recovery.
+func TestRetireLoop_WaitsForPendingTerminalReports(t *testing.T) {
+	shortenHandoffTimers(t)
+	d := newHandoffTestDaemon(t, "")
+	withTerminalOutbox(t, d)
+	d.observeServerCapabilities([]string{protocol.DaemonCapabilityHandoffV1})
+	d.SetHandoffHooks(HandoffHooks{Release: func([]string) error { return nil }})
+	var exited atomic.Bool
+	bindRetireLifecycle(t, d, func() { exited.Store(true) })
+	d.holdTask("run-1")
+	d.activeTasks.Add(1)
+	if _, err := d.beginRetire("test"); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.terminalReports.enqueue(terminalTaskReport{kind: terminalTaskReportComplete, taskID: "run-1", output: "done"}); err != nil {
+		t.Fatal(err)
+	}
+	// Another process's pending report is not this one's to wait for.
+	if err := d.terminalReports.enqueue(terminalTaskReport{kind: terminalTaskReportComplete, taskID: "run-new", output: "done"}); err != nil {
+		t.Fatal(err)
+	}
+	d.releaseHeldTask("run-1")
+	d.activeTasks.Add(-1)
+	time.Sleep(60 * time.Millisecond)
+	if exited.Load() {
+		t.Fatal("retired daemon exited with its run's report still pending")
+	}
+	items, err := d.terminalReports.list()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range items {
+		if item.report.taskID == "run-1" {
+			if err := d.terminalReports.acknowledge(item); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	waitForWithin(t, time.Second, exited.Load, "retired daemon did not exit once its reports were delivered")
+}
+
+// A predecessor killed after its run finished but before the server
+// acknowledged the result: the successor delivers that result, it never
+// fails the run.
+func TestSuccessor_PendingReportIsNotRecovered(t *testing.T) {
+	shortenHandoffTimers(t)
+	var mu sync.Mutex
+	var calls []recoverCall
+	srv := recoverServer(t, &calls, &mu)
+	d := newHandoffTestDaemon(t, srv.URL)
+	withTerminalOutbox(t, d)
+	d.observeServerCapabilities([]string{protocol.DaemonCapabilityHandoffV1})
+	d.SetHandoffHooks(HandoffHooks{PredecessorGone: func(int) bool { return true }})
+	d.setPredecessor(PredecessorRef{PID: 4242, Port: 1, HeldTaskIDs: []string{"finished", "running"}})
+	d.handoff.mu.Lock()
+	d.handoff.predRuntimes["rt"] = struct{}{}
+	d.handoff.mu.Unlock()
+	if err := d.terminalReports.enqueue(terminalTaskReport{kind: terminalTaskReportComplete, taskID: "finished", output: "done"}); err != nil {
+		t.Fatal(err)
+	}
+	if !d.finishPredecessor(context.Background()) {
+		t.Fatal("predecessor not settled")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(calls) != 1 || strings.Join(calls[0].ids, ",") != "running" {
+		t.Fatalf("recover calls = %+v, want only [running]", calls)
+	}
+	if !d.replaysTerminalReport("finished") {
+		t.Fatal("settled successor must deliver the predecessor's pending report")
+	}
 }

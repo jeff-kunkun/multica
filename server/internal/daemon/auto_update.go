@@ -195,7 +195,10 @@ func (d *Daemon) autoUpdateLoop(ctx context.Context) {
 // fails today will be retried at the next tick, and we don't want a transient
 // network blip to escalate to a process-level shutdown.
 func (d *Daemon) tryAutoUpdate(ctx context.Context) {
-	if ctx.Err() != nil || d.isRetiring() {
+	// While a retiring predecessor still runs on the shared runtimes, a
+	// self-update restart (deregister, then a successor that knows nothing of
+	// it) would fail its runs; the next tick tries again (DENE-2979).
+	if ctx.Err() != nil || d.isRetiring() || d.hasPredecessor() {
 		return
 	}
 	// Don't race the server-triggered update path. If a manual update from
@@ -387,7 +390,9 @@ func (d *Daemon) trySelfReload(ctx context.Context) {
 	reason := fmt.Sprintf("multica binary on disk reports %s, running %s", onDisk, d.cfg.CLIVersion)
 	d.setReloadPending(reason)
 
-	if !d.trySetClaimBarrier() {
+	// A retiring predecessor's runs count as busy: an in-place restart would
+	// deregister the runtimes it shares and its successor would not know it.
+	if d.hasPredecessor() || !d.trySetClaimBarrier() {
 		// Busy: hand over instead of waiting for idle (DENE-2979). The successor
 		// takes new work now and this process finishes its runs, then exits.
 		// The updating flag stays held so no second reload starts meanwhile.

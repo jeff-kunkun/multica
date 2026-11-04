@@ -2268,6 +2268,10 @@ func (d *Daemon) run(ctx context.Context, healthLn net.Listener) error {
 			d.logger.Info("retired: leaving runtimes registered for the successor")
 			return
 		}
+		if d.hasPredecessor() {
+			d.logger.Info("leaving runtimes registered while the retiring predecessor finishes its runs")
+			return
+		}
 		d.deregisterRuntimes()
 	}()
 
@@ -5273,10 +5277,10 @@ func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *Pen
 		return
 	}
 
-	if d.isRetiring() {
+	if d.isRetiring() || d.hasPredecessor() {
 		d.reportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
 			"status": "failed",
-			"error":  "this daemon is handing over to a newer one; retry the update shortly",
+			"error":  "a daemon handover is in progress on this machine; retry the update once it finishes",
 		})
 		return
 	}

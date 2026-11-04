@@ -357,7 +357,7 @@ func (d *Daemon) claimTasksWSFirst(ctx context.Context, daemonID string, runtime
 			claimBody(daemonID, runtimeIDs, maxTasks, rec), &resp)
 		if err == nil {
 			resp.ClaimedOverWS = true
-			d.claimRecoveryPending.Store(resp.RecoveryPending)
+			d.claimRecoveryPending.Store(resp.RecoveryPending || rec.Deferred)
 			return resp, nil
 		}
 		if errors.Is(err, errWSRPCUncertain) {
@@ -382,7 +382,7 @@ func (d *Daemon) claimTasksWSFirst(ctx context.Context, daemonID string, runtime
 	}
 	result, err := d.client.claimTasksWithHints(ctx, daemonID, runtimeIDs, maxTasks, rec)
 	if err == nil {
-		d.claimRecoveryPending.Store(result.RecoveryPending)
+		d.claimRecoveryPending.Store(result.RecoveryPending || rec.Deferred)
 		return result, nil
 	}
 	// Server has no batch route (404): freeze the old API contract by falling
@@ -407,6 +407,9 @@ func (d *Daemon) claimTasksWSFirst(ctx context.Context, daemonID string, runtime
 func (d *Daemon) claimRecoveryRequest() claimRecovery {
 	if !d.claimRecoveryPending.Load() {
 		return claimRecovery{}
+	}
+	if d.recoveryClaimDeferred() {
+		return claimRecovery{Deferred: true}
 	}
 	// A retiring predecessor's tasks are still being prepared or run by that
 	// process; listing them keeps the server from re-delivering them here.

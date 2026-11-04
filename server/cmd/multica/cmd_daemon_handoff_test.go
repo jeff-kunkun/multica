@@ -57,7 +57,7 @@ func TestPredecessorGoneFollowsRetiringMarker(t *testing.T) {
 		t.Fatal("no marker at all should read as gone")
 	}
 	h := &daemonProcessHandoff{profile: "", pid: pid}
-	if err := h.release(); err != nil {
+	if err := h.release(nil); err != nil {
 		t.Fatalf("release: %v", err)
 	}
 	if predecessorGone("", pid) {
@@ -80,7 +80,7 @@ func TestDaemonProcessHandoffReleaseAndReclaimProfileLock(t *testing.T) {
 	}
 	h := &daemonProcessHandoff{profile: "", pid: os.Getpid(), port: 19999, lock: lock}
 	t.Cleanup(h.closeAll)
-	if err := h.release(); err != nil {
+	if err := h.release(nil); err != nil {
 		t.Fatalf("release: %v", err)
 	}
 	// A successor can now take the profile.
@@ -170,5 +170,48 @@ func TestPrintDaemonStatusShowsHandoff(t *testing.T) {
 	printDaemonStatusReport(&s, "Daemon", succ)
 	if !strings.Contains(s.String(), "Retiring predecessor:") || !strings.Contains(s.String(), "pid 1234 (v0.6.7) is finishing 1 run(s)") {
 		t.Fatalf("successor status = %q", s.String())
+	}
+}
+
+// Any daemon that starts while a retiring one still runs finds it, with the
+// runs it recorded as it retired — not only the successor the handoff
+// launched.
+func TestFindRetiringPredecessorReadsRetireRecord(t *testing.T) {
+	useTempDaemonProfileRoot(t)
+	if _, ok := findRetiringPredecessor("", os.Getpid()); ok {
+		t.Fatal("found a predecessor in an empty profile")
+	}
+	h := &daemonProcessHandoff{profile: "", pid: 4242, port: 19514}
+	if err := h.release([]string{"run-1", "run-2"}); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	rec, ok := findRetiringPredecessor("", os.Getpid())
+	if !ok || rec.PID != 4242 || rec.Port != 19514 || strings.Join(rec.HeldTaskIDs, ",") != "run-1,run-2" {
+		t.Fatalf("found %+v %v", rec, ok)
+	}
+	if _, ok := findRetiringPredecessor("", 4242); ok {
+		t.Fatal("a daemon found itself as its own predecessor")
+	}
+	h.closeAll()
+	if _, ok := findRetiringPredecessor("", os.Getpid()); ok {
+		t.Fatal("found a predecessor that exited")
+	}
+	if _, err := os.Stat(daemonRetiringRecordPath("", 4242)); !os.IsNotExist(err) {
+		t.Fatalf("retire record left behind: %v", err)
+	}
+}
+
+// A retire with no runs still writes a record, so a successor knows the
+// predecessor holds nothing rather than knowing nothing.
+func TestRetireRecordWithNoRuns(t *testing.T) {
+	useTempDaemonProfileRoot(t)
+	h := &daemonProcessHandoff{profile: "", pid: 4243, port: 19515}
+	t.Cleanup(h.closeAll)
+	if err := h.release(nil); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	rec, ok := readDaemonRetiringRecord("", 4243)
+	if !ok || rec.HeldTaskIDs == nil || len(rec.HeldTaskIDs) != 0 {
+		t.Fatalf("record = %+v %v", rec, ok)
 	}
 }
