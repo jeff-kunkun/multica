@@ -130,6 +130,9 @@ func runFakeClaudeInterrupt() {
 		os.Exit(35)
 	}
 	hook("UserPromptSubmit")
+	// Outlive the error-result grace the test shortens, so a run that wrongly
+	// armed it after the interrupted turn is killed before this result.
+	time.Sleep(400 * time.Millisecond)
 	fmt.Println(`{"type":"result","subtype":"success","session_id":"claude-interrupt","result":"wrote hello"}`)
 	if _, err := reader.ReadBytes('\n'); err != io.EOF {
 		os.Exit(36)
@@ -137,6 +140,10 @@ func runFakeClaudeInterrupt() {
 }
 
 func TestClaudeInterruptContinuesSameSession(t *testing.T) {
+	// The interrupted turn ends with an error result; the run continues, so the
+	// error-result grace must not start for it.
+	claudeErrorResultGraceNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { claudeErrorResultGraceNanos.Store(0) })
 	self, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
