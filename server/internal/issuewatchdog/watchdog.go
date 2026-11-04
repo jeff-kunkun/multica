@@ -24,7 +24,8 @@ const (
 )
 
 // Config is the one owner-reminder chain (DENE-2981): an employee's progress
-// on an issue (a new comment, delivery, a block, done, a long run) or a stall
+// on an issue (a new comment, delivery, a block, done), 10 quiet minutes in
+// progress, or a stall
 // wakes the issue's responsible owner through the outbox, and the owner says
 // one line in the project group. The retired review, hold, run-end, silent-run
 // and COO escalation wakes are gone, and their old variables are not read.
@@ -272,12 +273,18 @@ LIMIT 5000`, w.cfg.WorkspaceID)
 	return nil
 }
 
-func (w *Watchdog) checkIssue(ctx context.Context, issue Issue, now time.Time) error {
+// stallDue: 30 minutes with neither progress nor a live or queued run.
+func (w *Watchdog) stallDue(ctx context.Context, issue Issue, now time.Time) (bool, error) {
 	if !stallEligible(issue) || now.Sub(issue.ProgressAt) < 30*time.Minute {
-		return nil
+		return false, nil
 	}
 	active, err := w.hasAnyRun(ctx, issue)
-	if err != nil || active {
+	return err == nil && !active, err
+}
+
+func (w *Watchdog) checkIssue(ctx context.Context, issue Issue, now time.Time) error {
+	due, err := w.stallDue(ctx, issue, now)
+	if err != nil || !due {
 		return err
 	}
 	// One owner wake per entry of in_review / blocked: the status reminder,

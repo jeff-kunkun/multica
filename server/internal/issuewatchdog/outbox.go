@@ -101,19 +101,21 @@ type Reminder struct {
 	ID int64 `json:"id"`
 	// Kind is "stall" (30 minutes without a run or progress), "status" (an
 	// employee just delivered, blocked or finished the issue) or "progress"
-	// (an employee commented, or the run has gone on, while in progress).
+	// (an employee commented, or the issue went quiet, while in progress).
 	// Empty reads as stall.
-	Kind               string    `json:"kind"`
-	EventID            string    `json:"event_id"`
-	IssueID            string    `json:"issue_id"`
-	IssueNumber        string    `json:"issue_number"`
-	Title              string    `json:"title"`
-	Status             string    `json:"status"`
-	Manager            string    `json:"manager"`
-	ProjectName        string    `json:"project_name"`
-	Cause              string    `json:"cause"`
-	Reason             string    `json:"reason"`
-	StallAt            time.Time `json:"stall_at"`
+	Kind        string    `json:"kind"`
+	EventID     string    `json:"event_id"`
+	IssueID     string    `json:"issue_id"`
+	IssueNumber string    `json:"issue_number"`
+	Title       string    `json:"title"`
+	Status      string    `json:"status"`
+	Manager     string    `json:"manager"`
+	ProjectName string    `json:"project_name"`
+	Cause       string    `json:"cause"`
+	Reason      string    `json:"reason"`
+	StallAt     time.Time `json:"stall_at"`
+	// QuietSince: a quiet progress reminder's last activity on the issue.
+	QuietSince         time.Time `json:"quiet_since,omitzero"`
 	OccurredAt         time.Time `json:"occurred_at"`
 	RegistrationNeeded bool      `json:"registration_needed"`
 	DeliveryCount      int       `json:"delivery_count"`
@@ -219,7 +221,7 @@ func (w *Watchdog) Claim(ctx context.Context, token string) ([]Reminder, error) 
 			case ownerStatusEvent:
 				eligible, err = statusStillCurrent(ctx, tx, issue, event)
 			case ownerProgressEvent:
-				eligible = progressStillCurrent(issue)
+				eligible, err = quietStillCurrent(ctx, tx, issue, event)
 			default:
 				eligible, err = stallStillCurrent(ctx, tx, issue, event, now)
 			}

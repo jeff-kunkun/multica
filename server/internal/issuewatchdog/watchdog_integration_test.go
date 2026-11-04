@@ -20,7 +20,7 @@ func TestSingleOwnerReminderPerStall(t *testing.T) {
 	b.run(w, b.now.Add(3*time.Hour))
 	var count int
 	var manager, target string
-	if err := b.pool.QueryRow(b.ctx, `SELECT count(*),min(manager_name),min(target) FROM office_issue_watchdog_attempt WHERE issue_id=$1::uuid`, id).Scan(&count, &manager, &target); err != nil {
+	if err := b.pool.QueryRow(b.ctx, `SELECT count(*),min(manager_name),min(target) FROM office_issue_watchdog_attempt WHERE issue_id=$1::uuid AND event_type=$2`, id, ownerStalledEvent).Scan(&count, &manager, &target); err != nil {
 		t.Fatal(err)
 	}
 	if count != 1 || manager != "CTO·扳手" || target != "manager" {
@@ -30,10 +30,7 @@ func TestSingleOwnerReminderPerStall(t *testing.T) {
 		t.Fatal(err)
 	}
 	b.run(w, b.now.Add(3*time.Hour))
-	if err := b.pool.QueryRow(b.ctx, `SELECT count(*) FROM office_issue_watchdog_attempt WHERE issue_id=$1::uuid`, id).Scan(&count); err != nil {
-		t.Fatal(err)
-	}
-	if count != 2 {
+	if count = b.reminders(id, ownerStalledEvent); count != 2 {
 		t.Fatalf("new progress must start new episode: %d", count)
 	}
 }

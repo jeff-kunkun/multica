@@ -5,7 +5,7 @@ reminders are one chain (DENE-2981): an employee's progress wakes the
 responsible owner, who says one line in the project group. It sends three
 kinds through one outbox: a status reminder the moment an employee delivers,
 blocks or finishes an issue (DENE-2967, DENE-2981), a progress reminder while
-an issue runs, and the 30-minute stall reminder as the fallback. The retired
+an issue is in progress, and the 30-minute stall reminder as the fallback. The retired
 review, hold, run-end, silent-run, Kun-decision push and COO escalation code is
 deleted; their old variables are not read. Normal assignment,
 mentions, explicitly requested wakeups and bounded task-level technical retries
@@ -51,20 +51,34 @@ once per entry: stall reminders for in_review / blocked carry the same
 
 An `in_progress` issue that does not wait on Kun wakes its owner (event type
 `owner_progress`, kind `progress`) when an agent posted a substantive comment
-since the owner was last woken (cause `comment`), or when a live run (runtime
-not offline) has gone on for 15 minutes since it started or since the last
-wake (cause `running`). One issue wakes its owner at most once per 15 minutes,
-counting every owner reminder that may have reached the owner; rows that
-provably never did (`not_sent`, `resolved_before_delivery`, `stale`) do not
-count. A comment counts from the last wake (at most one hour back), so one
-written during the quiet 15 minutes is reported once they end. Without an
-earlier wake only comments from the last 15 minutes count, so turning the
-feature on does not report old comments. While a progress row of the issue is
-still waiting or in flight, no other is queued, so a relay outage does not
-stack bells that later arrive together. The key is the 15-minute bucket,
-`owner-progress:<unix/900>`, so racing scanners write one row.
+since the owner was last woken (cause `comment`), or when the issue has had no
+activity for 10 minutes (cause `quiet`, Kun 2026-11-04). Activity is anyone's
+comment (not the watchdog's own, not a bare 收到), a status move, a run being
+queued, started or finished, or any message a live run writes; each restarts
+the 10 minutes. One quiet stretch wakes the owner once: its key is
+`owner-quiet:<last activity, unix µs>`, and the payload's `quiet_since` is that
+activity. A quiet row has no settle delay; at claim time it ends
+`resolved_before_delivery` when the issue moved on (new activity, or no longer
+`in_progress`), so a late bell never rings after the clock restarted. A run
+that keeps writing steps no longer rings on a timer; the old `running` cause
+(every 15 minutes of a run) is gone, and the Mac relay still accepts it for
+rows queued before the switch. An in-progress issue with no run therefore
+rings at 10 quiet minutes and, if still untouched, the stall fallback at 30;
+one first seen when the stall is already due (first scan, scanner outage)
+gets the stall reminder alone, not both at once.
 
-The row becomes claimable 30 seconds later, so a delivery that follows its
+One issue wakes its owner at most once per 10 minutes, counting every owner
+reminder that may have reached the owner; rows that provably never did
+(`not_sent`, `resolved_before_delivery`, `stale`) do not count. A comment
+counts from the last wake (at most one hour back), so one written during the
+cooldown is reported once it ends. Without an earlier wake only comments from
+the last 10 minutes count, so turning the feature on does not report old
+comments. While a progress row of the issue is still waiting or in flight, no
+other is queued, so a relay outage does not stack bells that later arrive
+together. A comment row's key is the 10-minute bucket,
+`owner-progress:<unix/600>`, so racing scanners write one row.
+
+A comment row becomes claimable 30 seconds later, so a delivery that follows its
 comment within seconds turns into the status reminder alone: at claim time a
 progress row whose issue left `in_progress` ends `resolved_before_delivery`.
 The claimed payload carries the newest agent comment (the one that set the

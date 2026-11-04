@@ -26,12 +26,9 @@ func TestThirtyMinutesAndQuietWaitingOrClosedStates(t *testing.T) {
 				t.Fatal(err)
 			}
 			b.run(w, b.now)
-			var n int
-			if err := b.pool.QueryRow(b.ctx, `SELECT count(*) FROM office_issue_watchdog_attempt WHERE issue_id=$1::uuid`, id).Scan(&n); err != nil {
-				t.Fatal(err)
-			}
-			if n != tc.want {
-				t.Fatalf("got %d reminders, want %d", n, tc.want)
+			// In progress, ten quiet minutes ring the progress reminder; this is the stall fallback.
+			if n := b.reminders(id, ownerStalledEvent); n != tc.want {
+				t.Fatalf("got %d stall reminders, want %d", n, tc.want)
 			}
 		})
 	}
