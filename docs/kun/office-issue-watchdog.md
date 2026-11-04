@@ -56,14 +56,20 @@ not offline) has gone on for 15 minutes since it started or since the last
 wake (cause `running`). One issue wakes its owner at most once per 15 minutes,
 counting every owner reminder that may have reached the owner; rows that
 provably never did (`not_sent`, `resolved_before_delivery`, `stale`) do not
-count. Without an earlier wake only comments from the last 15 minutes count,
-so turning the feature on does not report old comments. The key is the
-15-minute bucket, `owner-progress:<unix/900>`, so racing scanners write one row.
+count. A comment counts from the last wake (at most one hour back), so one
+written during the quiet 15 minutes is reported once they end. Without an
+earlier wake only comments from the last 15 minutes count, so turning the
+feature on does not report old comments. While a progress row of the issue is
+still waiting or in flight, no other is queued, so a relay outage does not
+stack bells that later arrive together. The key is the 15-minute bucket,
+`owner-progress:<unix/900>`, so racing scanners write one row.
 
 The row becomes claimable 30 seconds later, so a delivery that follows its
 comment within seconds turns into the status reminder alone: at claim time a
 progress row whose issue left `in_progress` ends `resolved_before_delivery`.
-The claimed payload carries, besides the latest comment, `steps` (the newest
+The claimed payload carries the newest agent comment (the one that set the
+reminder off, whoever wrote it; status reminders keep preferring the
+assignee's), `steps` (the newest
 run's last 3 narrated `text` messages, oldest first, masked like the summary
 and clipped to 160 characters; thinking and tool output are never sent) and
 `run_minutes` for a live run. The owner reads them and posts one plain line in

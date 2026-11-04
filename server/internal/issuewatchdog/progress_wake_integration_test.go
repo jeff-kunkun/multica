@@ -71,11 +71,19 @@ func TestProgressWakeOnCommentThenOncePerInterval(t *testing.T) {
 FROM office_issue_watchdog_attempt WHERE issue_id=$1::uuid AND event_type=$2`, id, ownerProgressEvent).Scan(&settle); err != nil || settle != progressWakeSettle {
 		t.Fatalf("progress reminder settles for %v (%v), want %v", settle, err, progressWakeSettle)
 	}
-	_, events := b.claim(w, at.Add(progressWakeSettle))
+	token, events := b.claim(w, at.Add(progressWakeSettle))
 	if len(events) != 1 {
 		t.Fatalf("claimed %d, want 1", len(events))
 	}
 	got := events[0]
+	if err := w.Receipt(b.ctx, got.ID, token, "sent"); err != nil {
+		t.Fatal(err)
+	}
+	// Receipt stamps the database clock; put it back on the story's timeline.
+	if _, err := b.pool.Exec(b.ctx, `UPDATE office_issue_watchdog_attempt SET available_at=$2, delivered_at=$2 WHERE id=$1`,
+		got.ID, at.Add(progressWakeSettle)); err != nil {
+		t.Fatal(err)
+	}
 	if got.Kind != reminderKindProgress || got.Cause != progressCauseComment || got.Comment == nil ||
 		got.Comment.Summary != "中途回报：改完一半" || got.RunMinutes < 7 {
 		t.Fatalf("progress reminder = %+v", got)
@@ -84,16 +92,54 @@ FROM office_issue_watchdog_attempt WHERE issue_id=$1::uuid AND event_type=$2`, i
 		t.Fatalf("steps = %q", got.Steps)
 	}
 
-	// More comments inside the interval stay quiet; the run going on wakes
-	// the owner again once the interval has passed.
+	// A comment inside the interval stays quiet until it ends, then is
+	// reported even though it is older than one interval by then.
 	b.fx.Comment(t, id, "又一步", testutil.Cols{"author_type": "agent", "author_id": b.dev, "created_at": at.Add(time.Minute)})
 	b.run(w, at.Add(10*time.Minute))
 	if n := b.reminders(id, ownerProgressEvent); n != 1 {
 		t.Fatalf("second comment inside the interval queued a reminder (%d)", n)
 	}
-	b.run(w, at.Add(progressWakeInterval+time.Minute))
-	if n := b.reminders(id, ownerProgressEvent); n != 2 {
-		t.Fatalf("after the interval got %d progress reminders, want 2", n)
+	late := at.Add(progressWakeInterval + 5*time.Minute)
+	if _, err := b.pool.Exec(b.ctx, `UPDATE agent_task_queue SET status='completed', completed_at=$2 WHERE id=$1::uuid`, task, at.Add(2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	b.run(w, late)
+	_, events = b.claim(w, late.Add(progressWakeSettle))
+	if len(events) != 1 || events[0].Cause != progressCauseComment || events[0].Comment.Summary != "又一步" {
+		t.Fatalf("after the interval claimed %+v, want the comment written during it", events)
+	}
+}
+
+func TestProgressWakeDoesNotStackWhileUndelivered(t *testing.T) {
+	b := newReviewBench(t)
+	w := b.watchdog(Config{})
+	b.now = b.now.Add(-2 * time.Hour)
+	id := b.issue("Relay down", "in_progress", b.dev, nil)
+	b.fx.Insert(t, "agent_task_queue", testutil.Cols{"issue_id": id, "agent_id": b.dev, "status": "running",
+		"runtime_id": b.runtimeID, "started_at": b.now.Add(-20 * time.Minute)})
+	for _, minutes := range []int{0, 16, 32, 48} {
+		b.run(w, b.now.Add(time.Duration(minutes)*time.Minute))
+	}
+	if n := b.reminders(id, ownerProgressEvent); n != 1 {
+		t.Fatalf("undelivered run stacked %d progress reminders, want 1", n)
+	}
+	_, events := b.claim(w, b.now.Add(50*time.Minute))
+	if len(events) != 1 || events[0].RunMinutes < 70 {
+		t.Fatalf("claimed %+v, want one current reminder", events)
+	}
+}
+
+func TestProgressWakeCarriesTheCommentThatTriggeredIt(t *testing.T) {
+	b := newReviewBench(t)
+	w := b.watchdog(Config{})
+	b.now = b.now.Add(-time.Hour)
+	id := b.issue("Reviewer weighs in", "in_progress", b.dev, nil)
+	b.fx.Comment(t, id, "旧回报", testutil.Cols{"author_type": "agent", "author_id": b.dev, "created_at": b.now.Add(-time.Hour)})
+	b.fx.Comment(t, id, "审查：两处要改", testutil.Cols{"author_type": "agent", "author_id": b.reviewer, "created_at": b.now.Add(-time.Minute)})
+	b.run(w, b.now)
+	_, events := b.claim(w, b.now.Add(progressWakeSettle))
+	if len(events) != 1 || events[0].Comment == nil || events[0].Comment.Summary != "审查：两处要改" {
+		t.Fatalf("claimed %+v, want the reviewer's new comment", events)
 	}
 }
 

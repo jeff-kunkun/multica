@@ -29,6 +29,10 @@ const (
 	// seconds turn the reminder into the status one instead of both.
 	progressWakeSettle = 30 * time.Second
 
+	// progressCommentLookback caps how far back an unreported comment counts
+	// after an earlier wake; before any wake only the last interval counts.
+	progressCommentLookback = time.Hour
+
 	maxRunSteps     = 3
 	runStepMaxRunes = 160
 )
@@ -84,11 +88,23 @@ func (w *Watchdog) checkProgress(ctx context.Context, issue Issue, now time.Time
 	if woken && now.Sub(lastWake) < progressWakeInterval {
 		return nil
 	}
-	// Without an earlier wake only the last interval counts, so turning the
-	// feature on does not report old comments.
+	// One progress reminder per issue waits at a time: while the relay is down
+	// the next interval does not stack a second one behind it.
+	var waiting bool
+	if err := w.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM office_issue_watchdog_attempt
+WHERE workspace_id = $1::uuid AND issue_id = $2::uuid AND event_type = $3 AND outcome = 'claimed')`,
+		issue.WorkspaceID, issue.ID, ownerProgressEvent).Scan(&waiting); err != nil || waiting {
+		return err
+	}
+	// A comment counts from the last wake, so one written during the quiet
+	// interval is reported once it ends. Without an earlier wake only the last
+	// interval counts, so turning the feature on does not report old comments.
 	since := now.Add(-progressWakeInterval)
-	if woken && lastWake.After(since) {
+	if woken {
 		since = lastWake
+		if floor := now.Add(-progressCommentLookback); since.Before(floor) {
+			since = floor
+		}
 	}
 	cause := ""
 	commentAt, commented, err := w.latestEmployeeComment(ctx, issue)

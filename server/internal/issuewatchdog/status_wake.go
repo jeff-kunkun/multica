@@ -213,7 +213,10 @@ type attachmentRef struct {
 	Filename string `json:"filename"`
 }
 
-func latestDelivery(ctx context.Context, store QueryStore, issue Issue) (delivery, bool, error) {
+// latestDelivery is the comment the owner reads: for a status reminder the
+// assignee's newest comment, else anyone's; for a progress reminder the newest
+// agent comment, the one that set the reminder off.
+func latestDelivery(ctx context.Context, store QueryStore, issue Issue, progress bool) (delivery, bool, error) {
 	var (
 		d       delivery
 		content string
@@ -227,8 +230,9 @@ WHERE c.workspace_id = $1::uuid AND c.issue_id = $2::uuid
   AND c.author_type IN ('member', 'agent') AND c.type = 'comment'
   AND c.content NOT LIKE '%' || $3 || '%'
   AND regexp_replace(lower(trim(c.content)), '[[:space:][:punct:]，。！？、；：…]+', '', 'g') <> '收到'
-ORDER BY (c.author_type = $4 AND c.author_id::text = $5) DESC, c.created_at DESC, c.id DESC
-LIMIT 1`, issue.WorkspaceID, issue.ID, watchdogCommentMarker, issue.AssigneeType, issue.AssigneeID,
+  AND (NOT $6 OR c.author_type = 'agent')
+ORDER BY (NOT $6 AND c.author_type = $4 AND c.author_id::text = $5) DESC, c.created_at DESC, c.id DESC
+LIMIT 1`, issue.WorkspaceID, issue.ID, watchdogCommentMarker, issue.AssigneeType, issue.AssigneeID, progress,
 	).Scan(&d.CommentID, &content, &d.At, &d.Author)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return delivery{}, false, nil
@@ -412,7 +416,7 @@ func (w *Watchdog) refreshReminder(ctx context.Context, store QueryStore, event 
 	event.Manager, event.RegistrationNeeded = w.cfg.Owners.Resolve(issue.ManagerName, issue.ProjectID)
 	event.CheckedAt = now
 	event.IssueURL = w.issueURL(issue)
-	d, ok, err := latestDelivery(ctx, store, issue)
+	d, ok, err := latestDelivery(ctx, store, issue, event.Kind == reminderKindProgress)
 	if err != nil {
 		return err
 	}
