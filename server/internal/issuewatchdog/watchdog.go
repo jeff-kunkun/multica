@@ -62,6 +62,9 @@ const (
 type Config struct {
 	Owners     OwnerTable
 	OwnersFile string
+	// AppURL is the web origin (MULTICA_APP_URL, else FRONTEND_ORIGIN) used
+	// for the issue link in owner reminders; empty leaves the link out.
+	AppURL string
 
 	Enabled          bool
 	WorkspaceID      string
@@ -120,7 +123,8 @@ func ConfigFromEnv() (Config, error) {
 	cfg := Config{TickInterval: time.Minute, NoRunWait: 30 * time.Minute, KunLabel: defaultKunLabel,
 		HeartbeatFile: envOr("MULTICA_ISSUE_WATCHDOG_HEARTBEAT_FILE", defaultHeartbeatFile),
 		WorkspaceID:   strings.TrimSpace(os.Getenv("MULTICA_ISSUE_WATCHDOG_WORKSPACE_ID")),
-		OwnersFile:    strings.TrimSpace(os.Getenv("MULTICA_ISSUE_WATCHDOG_OWNERS_FILE"))}
+		OwnersFile:    strings.TrimSpace(os.Getenv("MULTICA_ISSUE_WATCHDOG_OWNERS_FILE")),
+		AppURL:        strings.TrimRight(strings.TrimSpace(envOr("MULTICA_APP_URL", os.Getenv("FRONTEND_ORIGIN"))), "/")}
 	var err error
 	if value := strings.TrimSpace(os.Getenv("MULTICA_ISSUE_WATCHDOG_ENABLED")); value != "" {
 		cfg.Enabled, err = strconv.ParseBool(value)
@@ -233,6 +237,7 @@ type Issue struct {
 	ParentID        string
 	Reviewer        actor
 	WorkspaceID     string
+	WorkspaceSlug   string
 	Number          int32
 	Identifier      string
 	Title           string
@@ -377,7 +382,7 @@ SELECT i.id::text, i.workspace_id::text, i.number, w.issue_prefix || '-' || i.nu
          WHERE il.issue_id = i.id AND l.workspace_id = i.workspace_id
            AND l.resource_type = 'issue' AND lower(l.name) = lower($4)
        ) AS kun_label,
-       COALESCE(btrim(i.metadata->>$5::text), ''), COALESCE(i.project_id::text, ''),
+       COALESCE(btrim(i.metadata->>$5::text), ''), COALESCE(i.project_id::text, ''), w.slug,
        COALESCE(i.metadata->>'close.block_kind', i.metadata->>'block_kind', '') IN ('decision','permission') OR
        COALESCE(i.metadata->>'waiting_for_kun', '') = 'true',
        COALESCE((SELECT CASE WHEN t.status=ANY($6) AND rt.status='offline' THEN 'runtime_offline'
@@ -403,7 +408,7 @@ WHERE i.workspace_id = $1::uuid AND i.id = $2::uuid`,
 	).Scan(&out.ID, &out.WorkspaceID, &out.Number, &out.Identifier, &out.Title, &out.Status,
 		&out.AssigneeType, &out.AssigneeID, &out.EmployeeName, &out.ManagerName, &out.ProjectName,
 		&out.CreatedAt, &out.UpdatedAt, &firstExecutedAt, &out.ProgressAt, &out.IssueRevision,
-		&out.ParentID, &out.Reviewer.Type, &out.Reviewer.ID, &out.KunLabel, &out.ReplyGroup, &out.ProjectID, &out.WaitingKun, &out.Cause)
+		&out.ParentID, &out.Reviewer.Type, &out.Reviewer.ID, &out.KunLabel, &out.ReplyGroup, &out.ProjectID, &out.WorkspaceSlug, &out.WaitingKun, &out.Cause)
 	if err != nil {
 		return Issue{}, err
 	}
@@ -451,6 +456,25 @@ LIMIT 5000`, w.cfg.WorkspaceID)
 	}
 	rows.Close()
 
+	// Status reminders first: an issue just delivered or blocked should not
+	// wait behind the stall scan. The event path normally got there already.
+	entered, err := w.recentStatusEntries(ctx, now)
+	if err != nil {
+		return fmt.Errorf("list issue watchdog status entries")
+	}
+	for _, id := range entered {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		issue, err := w.loadIssue(ctx, w.cfg.WorkspaceID, id)
+		if err != nil {
+			continue
+		}
+		if err := w.enqueueStatusWake(ctx, issue, now); err != nil {
+			slog.WarnContext(ctx, "issue watchdog status reminder failed", "issue_id", issue.ID)
+		}
+	}
+
 	for _, id := range ids {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -475,13 +499,25 @@ func (w *Watchdog) checkIssue(ctx context.Context, issue Issue, now time.Time) e
 	if err != nil || active {
 		return err
 	}
+	// One owner wake per entry of in_review / blocked: the status reminder,
+	// or this fallback when that one provably never reached the owner.
+	var entry statusEntry
+	if WakesOnStatus(issue.Status) {
+		if entry, err = currentStatusEntry(ctx, w.pool, issue); err != nil {
+			return err
+		}
+		woken, err := entryAlreadyWoken(ctx, w.pool, issue, entry)
+		if err != nil || woken {
+			return err
+		}
+	}
 	manager, registration := w.cfg.Owners.Resolve(issue.ManagerName, issue.ProjectID)
 	key := fmt.Sprintf("owner-stall:%d", issue.ProgressAt.UnixMicro())
 	event := Reminder{
-		EventID: issue.ID + ":" + key, IssueID: issue.ID, IssueNumber: issue.Identifier,
+		Kind: reminderKindStall, EventID: issue.ID + ":" + key, IssueID: issue.ID, IssueNumber: issue.Identifier,
 		Title: issue.Title, Status: issue.Status, Manager: manager, ProjectName: issue.ProjectName,
 		Cause: stallCause(issue.Cause), StallAt: issue.ProgressAt, OccurredAt: now,
-		RegistrationNeeded: registration,
+		RegistrationNeeded: registration, StatusEntry: entry.EventID,
 	}
 	event.Reason = "无运行且无进展已满 30 分钟，请负责人在原单安排后续。"
 	if registration {
@@ -494,8 +530,8 @@ func (w *Watchdog) checkIssue(ctx context.Context, issue Issue, now time.Time) e
 	_, err = w.pool.Exec(ctx, `
 INSERT INTO office_issue_watchdog_attempt
 (workspace_id, issue_id, event_key, event_type, target, manager_name, payload)
-VALUES ($1::uuid,$2::uuid,$3,'owner_stalled','manager',$4,$5::jsonb)
-ON CONFLICT (workspace_id,issue_id,event_key) DO NOTHING`, issue.WorkspaceID, issue.ID, key, manager, payload)
+VALUES ($1::uuid,$2::uuid,$3,$4,'manager',$5,$6::jsonb)
+ON CONFLICT (workspace_id,issue_id,event_key) DO NOTHING`, issue.WorkspaceID, issue.ID, key, ownerStalledEvent, manager, payload)
 	return err
 }
 

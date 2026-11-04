@@ -455,10 +455,12 @@ text. CLI roots-only/since/summary and thread modes keep their existing contract
 ## Internal owner reminder worker
 
 `issue reminder claim|receipt --content-file <JSON> --output json` transports
-server-decided reminders; it never decides stalls or reruns issues. Human
+server-decided owner reminders (an issue just delivered or blocked, or a
+30-minute stall); it never decides them or reruns issues. Human
 workspace owner/admin only: agent task tokens and Bot keys are refused.
 Persist a claim_token UUID before the claim; reuse it after a lost response.
-Receipt has claim_token and result sent / not_sent / uncertain. Only proven
+Receipt has claim_token and result sent / not_sent / uncertain / stale (the
+worker's last read found the status had moved on; nothing was sent). Only proven
 pre-send not_sent may retry once; uncertain delivery is terminal. Lost receipt
 retries do not resend the message. Operational details and current switches:
 `docs/kun/office-issue-watchdog.md` in the product source. Normal agents handle
