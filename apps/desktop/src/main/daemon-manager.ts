@@ -224,13 +224,21 @@ async function fetchProfileHealth(
   active: ActiveProfile,
   timeoutMs = HEALTH_PROBE_TIMEOUT_MS,
 ): Promise<HealthPayload | null> {
-  const health = await probeProfileHealth(active.name, (port) =>
+  return probeProfileHealth(active.name, (port) =>
     fetchHealthAtPort(port, timeoutMs),
   );
-  // A retiring daemon (DENE-2979) handed the profile over and only finishes
-  // its runs; it is not the profile's daemon. Status, start, recovery and the
-  // version check all read it as absent, so a Desktop that wants a daemon
-  // starts one beside it and never restarts or stops the retiring one.
+}
+
+/** The daemon serving the profile. A retiring daemon (DENE-2979) handed the
+ *  profile over and only finishes its runs, so status, start, recovery and
+ *  the version check read it as absent: a Desktop that wants a daemon starts
+ *  one beside it instead of restarting it. Credential changes and the
+ *  foreign-OS guard keep the raw probe — they must still see it. */
+async function fetchServingProfileHealth(
+  active: ActiveProfile,
+  timeoutMs = HEALTH_PROBE_TIMEOUT_MS,
+): Promise<HealthPayload | null> {
+  const health = await fetchProfileHealth(active, timeoutMs);
   return health?.retiring === true ? null : health;
 }
 
@@ -381,7 +389,7 @@ async function fetchHealth(): Promise<DaemonStatus> {
   // honest answer; probing the default port would surface the user's own CLI
   // daemon as if it were Desktop's.
   if (!active) return { state: "stopped" };
-  const data = await fetchProfileHealth(active);
+  const data = await fetchServingProfileHealth(active);
 
   if (!data || data.status !== "running") {
     // A start that never reaches "running" is the symptom; an expired/invalid
@@ -667,7 +675,7 @@ async function ensureRunningDaemonVersionMatches(): Promise<
 > {
   const active = await ensureActiveProfile();
   if (!active) return "not_running";
-  const running = await fetchProfileHealth(active);
+  const running = await fetchServingProfileHealth(active);
 
   // Don't try to version-match a daemon we can't restart (e.g. WSL2). Treat it
   // as up-to-date — restartDaemon would no-op anyway, and skipping here avoids
@@ -1095,7 +1103,7 @@ async function startDaemon(
   ) {
     return { success: false, error: "Daemon recovery was superseded" };
   }
-  const existing = await fetchProfileHealth(active);
+  const existing = await fetchServingProfileHealth(active);
   if (daemonStatusAlive(existing?.status)) {
     // A daemon is already up ("running") or booting ("starting") on this port —
     // don't spawn a second one (the CLI rejects that as "already running").
@@ -1297,7 +1305,7 @@ async function attemptDaemonRecovery(active: ActiveProfile): Promise<void> {
     // as process death, use an independent longer probe so a busy daemon is
     // not restarted merely because one health request was slow.
     confirmAlive: async () => {
-      const health = await fetchProfileHealth(active, RECOVERY_HEALTH_PROBE_TIMEOUT_MS);
+      const health = await fetchServingProfileHealth(active, RECOVERY_HEALTH_PROBE_TIMEOUT_MS);
       if (!daemonStatusAlive(health?.status)) return false;
       externalDaemonObserved = isDaemonExternallyManaged(
         health?.os,
