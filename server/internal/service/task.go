@@ -6357,7 +6357,7 @@ func resumeUnsafeFailureReason(reason string) bool {
 	// list on the resume-safety test alone. They are two reasons only because
 	// their copy differs — the 401 says the login is fine, the CLI's own
 	// logged-out notice must not — not because the resume decision differs.
-	case "iteration_limit", "agent_fallback_message", "api_invalid_request", "codex_semantic_inactivity", "agent_error.context_overflow", "codex_resume_oversized", "antigravity_session_token_expired", "antigravity_not_logged_in":
+	case "iteration_limit", "agent_fallback_message", "api_invalid_request", "codex_semantic_inactivity", "agent_error.context_overflow", "codex_resume_oversized", "antigravity_session_token_expired", "antigravity_not_logged_in", "opencode_clock_skew":
 		return true
 	default:
 		return false
