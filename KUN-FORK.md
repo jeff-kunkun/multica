@@ -49,6 +49,18 @@ bash scripts/sync-upstream.sh
 
 - [upstream #8385](https://github.com/multica-ai/multica/pull/8385)（Antigravity 工具事件实时转发，DENE-723）：`server/pkg/agent/antigravity.go` 与官方逐行一致，不会冲突；`server/pkg/agent/antigravity_tools_test.go` 是 add/add 冲突点，取官方版本（官方那个 POSIX sh 版 live fixture 在 macOS 和 Linux 上都成立）。上游合并后删掉这一条。
 
+### 按包挑进 `kun` 的官方提交（2026-11-04 起，DENE-2995 调研）
+
+整体合并官方不可行（303 个文件冲突、迁移全部撞号），所以按包 cherry-pick（`-x`，提交说明末尾带原提交号），`upstream-sync.json` 的同步点不动。下次整体同步遇到这些改动，按这里的「与官方不同」处理。
+
+| 包（单） | 官方提交 | 与官方不同 |
+| --- | --- | --- |
+| daemon 稳定性（DENE-3001） | `16a067f`（租约领取不超出查询上限） | 无；`agent.sql.go` 由 sqlc 生成结果为准 |
+| | `84e56b6`（休眠醒来后卡死的 HTTP/2 连接恢复） | 无 |
+| | `828e0c9`（Claude 报错结果后 10 秒内收掉进程） | 只取 `claude.go` 与测试；`classify.go` 保留我们已有的 session/weekly/opus limit 判断。10 秒计时只在「真正结束的 result」上启动：DENE-2667 的打断续跑（`interrupts.resultSeen()` 非空）不启动 |
+| | `0d26070`（Claude 收尾先排空控制回复再关 stdin） | `closeAfterControls` 同时 `interrupts.end()`，与我们的 `closeStdin` 一致；只在结束 result 上调用 |
+| | `1c82a5b`（关 daemon 被打断的任务重试） | 只取 `handleTask` 的 `finalCtx`（用量、取消确认、进度、状态查询在 daemon 关闭后仍送达）。不取「改标 `runtime_recovery`」：我们的 DENE-813 已把关闭中断报成 `cancelled`，服务端重试并给 issue 写提示；也不取本地目录锁等待那段（我们没有这把锁） |
+
 ## DeepSeek Harness
 
 官方已支持 `dsh` 运行时，但桥接包还没上公共 npm（[upstream #6936](https://github.com/multica-ai/multica/issues/6936)）。自托管请用本 fork 的一键脚本：
