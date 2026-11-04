@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -115,6 +116,43 @@ func localRepoCandidates(absPath, repoURL string) []string {
 	return candidates
 }
 
+// preferredWorktreeNames are tried first, in this order, when a folder holds
+// several worktrees of one repository: the stable copies the office layout
+// names (see worktreeRoot). Any other child follows in name order.
+var preferredWorktreeNames = []string{"main", "dev"}
+
+// matchingWorktreeBelow looks one level inside umbrella — a non-git folder
+// named after the repository — for a worktree whose remote matches repoURL
+// (DENE-2969: pg-game/game_web_all holds only dev/, the real checkout).
+func matchingWorktreeBelow(umbrella, repoURL string, remotesOf gitRemotesFunc) (string, bool) {
+	entries, err := os.ReadDir(umbrella)
+	if err != nil {
+		return "", false
+	}
+	var names []string
+	for _, e := range entries {
+		if e.IsDir() && !strings.HasPrefix(e.Name(), ".") {
+			names = append(names, e.Name())
+		}
+	}
+	rank := func(name string) int {
+		if i := slices.Index(preferredWorktreeNames, name); i >= 0 {
+			return i
+		}
+		return len(preferredWorktreeNames)
+	}
+	// os.ReadDir is already in name order; the stable sort keeps it among
+	// the non-preferred children.
+	slices.SortStableFunc(names, func(a, b string) int { return rank(a) - rank(b) })
+	for _, n := range names {
+		dir := filepath.Join(umbrella, n)
+		if repoident.MatchesRemotes(repoURL, remotesOf(dir)) {
+			return dir, true
+		}
+	}
+	return "", false
+}
+
 // resolveLocalRepo decides whether the task's local directory already holds
 // repoURL. A nil assignment means the project pinned no directory on this
 // machine, which is the one case where a remote checkout is the correct answer.
@@ -135,6 +173,14 @@ func resolveLocalRepo(assignment *localDirectoryAssignment, repoURL string, remo
 			// It is a git tree, and it is a different repository. Nothing
 			// suspicious about that — an umbrella directory holds many.
 			continue
+		}
+		if dir != assignment.AbsPath {
+			// The folder named after the repository is itself an umbrella of
+			// that repository's worktrees (<name>/dev, <name>/main, …) rather
+			// than a checkout. The proof still has to be a matching remote.
+			if path, ok := matchingWorktreeBelow(dir, repoURL, remotesOf); ok {
+				return localRepoResolution{Path: path, Covered: true}
+			}
 		}
 		if repoident.LooksLikeSameRepo(repoURL, dir) && suspected == "" {
 			suspected = dir
@@ -169,6 +215,9 @@ type taskCodeSource struct {
 	// CoveredRepos are project repo URLs proven to already live in the
 	// directory. The agent must not check these out.
 	CoveredRepos []string
+	// CoveredPaths maps a covered URL to where it lives when that is not the
+	// bound folder itself, so the brief can name the checkout.
+	CoveredPaths map[string]string
 	// UnprovenRepos are repo URLs the directory is NAMED after but could not be
 	// proven to hold, each with the reason. Surfaced rather than guessed at.
 	UnprovenRepos []codeSourceWarning
@@ -218,6 +267,12 @@ func resolveTaskCodeSource(assignment *localDirectoryAssignment, readOnly []*loc
 		switch {
 		case res.Covered:
 			src.CoveredRepos = append(src.CoveredRepos, url)
+			if res.Path != assignment.AbsPath {
+				if src.CoveredPaths == nil {
+					src.CoveredPaths = map[string]string{}
+				}
+				src.CoveredPaths[url] = res.Path
+			}
 		case res.Suspected:
 			src.UnprovenRepos = append(src.UnprovenRepos, codeSourceWarning{URL: url, Reason: res.Reason})
 		default:
@@ -310,10 +365,7 @@ func codeSourceForEnv(src taskCodeSource) execenv.CodeSourceForEnv {
 		out.CoRunners = append(out.CoRunners, execenv.CodeSourceCoRunnerForEnv{Identifier: run.Identifier, Title: run.Title, Branch: run.Branch})
 	}
 	for _, url := range src.CoveredRepos {
-		// Re-resolving would hit the filesystem a second time; the covered
-		// path is the directory itself unless a child matched, so report the
-		// directory and let the agent's own `git -C` be the finer answer.
-		out.CoveredRepos = append(out.CoveredRepos, execenv.CodeSourceRepoForEnv{URL: url})
+		out.CoveredRepos = append(out.CoveredRepos, execenv.CodeSourceRepoForEnv{URL: url, Detail: src.CoveredPaths[url]})
 	}
 	for _, w := range src.UnprovenRepos {
 		out.UnprovenRepos = append(out.UnprovenRepos, execenv.CodeSourceRepoForEnv{URL: w.URL, Detail: w.Reason})
