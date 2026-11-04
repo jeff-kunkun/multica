@@ -262,6 +262,12 @@ const (
 	terminalTaskReportTimeout = 6 * time.Minute
 )
 
+// shutdownFinalReportBudget bounds the usage, cancel-ack, progress and status
+// calls handleTask makes once the daemon context is already gone. They share
+// one deadline so a hung server cannot spend the 30-second drain window before
+// the terminal report reaches the durable outbox.
+var shutdownFinalReportBudget = 5 * time.Second
+
 // terminalTaskReport is the single daemon-side representation of a terminal
 // callback. Keeping every complete/fail path behind this value and
 // reportTerminalTask gives the durable outbox one insertion point without
@@ -6197,7 +6203,11 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 
 	// Shutdown cancels ctx before the runner returns. Keep the final usage,
 	// server-cancellation check and acknowledgement deliverable during cleanup.
-	finalCtx, finalCancel := context.WithTimeout(context.WithoutCancel(ctx), terminalTaskReportTimeout)
+	finalTimeout := terminalTaskReportTimeout
+	if ctx.Err() != nil {
+		finalTimeout = shutdownFinalReportBudget
+	}
+	finalCtx, finalCancel := context.WithTimeout(context.WithoutCancel(ctx), finalTimeout)
 	defer finalCancel()
 
 	// Report usage before any early return — the agent accumulates tokens

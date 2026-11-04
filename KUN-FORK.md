@@ -59,7 +59,7 @@ bash scripts/sync-upstream.sh
 | | `84e56b6`（休眠醒来后卡死的 HTTP/2 连接恢复） | 无 |
 | | `828e0c9`（Claude 报错结果后 10 秒内收掉进程） | 只取 `claude.go` 与测试；`classify.go` 保留我们已有的 session/weekly/opus limit 判断。10 秒计时只在「真正结束的 result」上启动：DENE-2667 的打断续跑（`interrupts.resultSeen()` 非空）不启动 |
 | | `0d26070`（Claude 收尾先排空控制回复再关 stdin） | `closeAfterControls` 同时 `interrupts.end()`，与我们的 `closeStdin` 一致；只在结束 result 上调用 |
-| | `1c82a5b`（关 daemon 被打断的任务重试） | 只取 `handleTask` 的 `finalCtx`（用量、取消确认、进度、状态查询在 daemon 关闭后仍送达）。不取「改标 `runtime_recovery`」：我们的 DENE-813 已把关闭中断报成 `cancelled`，服务端重试并给 issue 写提示；也不取本地目录锁等待那段（我们没有这把锁） |
+| | `1c82a5b`（关 daemon 被打断的任务重试） | 只取 `handleTask` 的 `finalCtx`（用量、取消确认、进度、状态查询在 daemon 关闭后仍送达）。不取「改标 `runtime_recovery`」：我们的 DENE-813 已把关闭中断报成 `cancelled`，服务端重试并给 issue 写提示；也不取本地目录锁等待那段（我们没有这把锁）。另加：daemon 关闭时这几次调用共用 5 秒（`shutdownFinalReportBudget`），服务端卡住也不挡终态上报 |
 
 ## DeepSeek Harness
 
