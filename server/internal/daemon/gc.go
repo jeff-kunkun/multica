@@ -91,6 +91,13 @@ type gcStats struct {
 
 // runGC performs a single GC scan across all workspace directories.
 func (d *Daemon) runGC(ctx context.Context) {
+	// During a handoff (DENE-2979) two processes share the workspaces tree,
+	// and each knows only its own active env roots and repo locks. Neither
+	// collects until the retiring one has exited.
+	if d.isRetiring() || d.hasPredecessor() {
+		d.logger.Info("gc: skipped during a daemon handoff")
+		return
+	}
 	root := d.cfg.WorkspacesRoot
 	entries, err := os.ReadDir(root)
 	if err != nil {

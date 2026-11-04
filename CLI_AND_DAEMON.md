@@ -171,10 +171,14 @@ read its config instead of the user's (`gh` reporting "not logged in", for one).
 
 A CLI-launched daemon periodically compares its own compile-time version against
 the `--version` output of the `multica` binary it would re-exec. When they differ
-— `brew upgrade multica`, a re-download, a local `make build` — it waits for any
-running task to finish, then restarts into the new binary. A running task is
-never interrupted; if the daemon is busy the restart is deferred to the next
-check, and `multica daemon status` shows why it's still on the old version.
+— `brew upgrade multica`, a re-download, a local `make build` — it switches to
+the new binary. An idle daemon restarts in place. A busy one hands over (see
+[Version switch](#version-switch-handover)): the new binary starts and takes new
+tasks at once, and the old process finishes its runs, then exits. A running task
+is never interrupted. Where a handover is not possible (the server predates it,
+or the daemon runs under Multica's own systemd unit, whose cgroup would stop the
+new process with the old one), the restart waits for the daemon to be idle, and
+`multica daemon status` shows why it's still on the old version.
 
 This is separate from the GitHub self-update poller: disabling that does not stop
 the daemon from following a binary you installed yourself. To turn it off:
@@ -252,6 +256,39 @@ that daemon's lifecycle through its own app-start daemon preference.
 multica daemon stop
 ```
 
+Stops the daemon serving the profile. A daemon still retiring after a
+[handover](#version-switch-handover) is not on the profile's port; it finishes
+its runs and exits on its own.
+
+### Version switch (handover)
+
+```bash
+multica daemon restart                 # hands over when it can, else stop and start
+multica daemon restart --handoff-only  # hand over, or leave the daemon untouched and fail
+```
+
+A version switch no longer stops the running daemon first. The old daemon
+**retires**: it stops claiming, lets a claim already in flight land, and hands
+the profile (lock, port record, `daemon.log`) to a new daemon, which takes new
+tasks at once. The retiring daemon keeps heartbeating and keeps serving its own
+local port to its tasks, finishes and reports every run it holds, and exits by
+itself. It never deregisters the runtimes, which the new daemon shares. If no
+new daemon comes up within 90 seconds, the old one takes the profile back and
+claims again.
+
+The new daemon never fails its predecessor's runs while that process lives. If
+the predecessor dies before reporting (killed, crashed), the new daemon fails
+exactly the runs it held, with `runtime_recovery`, and they retry as usual.
+
+A handover needs both sides to support it: the daemon reports
+`"handoff_ready": true` in `/health` only when the server advertises
+`daemon-handoff-v1`. Against an older server, or with an older daemon, every
+switch is the previous stop-then-start, and recovery and deregistration behave
+as before. Plain `multica daemon restart` falls back to that by itself;
+`--handoff-only` refuses instead. The Desktop app uses `--handoff-only` when it
+moves its daemon to a new bundled CLI, and keeps stop-then-start for a sign-in
+or account change.
+
 ### Status
 
 ```bash
@@ -261,11 +298,18 @@ multica daemon status --output json
 
 Shows PID, uptime, detected agents, and watched workspaces.
 
+During a handover the new daemon's status adds a `Retiring predecessor` row
+with the old process's PID, version and the runs it has left, and
+`--output json` carries the same as `predecessor` (`pid`, `cli_version`,
+`active_task_count`). The retiring daemon itself is no longer on the profile's
+port; it reports `"retiring": true` and its `held_task_ids` on its own port.
+
 While a restart drain pauses claiming, the output adds a `Claims paused` row
 and `--output json` reports `"draining": true`; queued tasks wait until it
 ends. Only Desktop builds older than DENE-2974 ask for one, before moving the
 daemon to a new bundled CLI. Current Desktop keeps the daemon claiming and
-restarts it once it is idle. However often a drain is renewed, it pauses
+hands over to the new version (or, without handover, restarts it once it is
+idle). However often a drain is renewed, it pauses
 claiming for at most 10 minutes; after that the daemon takes tasks again and
 the restart waits for an idle moment.
 

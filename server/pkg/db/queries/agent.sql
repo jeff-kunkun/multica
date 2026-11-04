@@ -1607,6 +1607,24 @@ SET status = 'failed',
 WHERE runtime_id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory')
 RETURNING *;
 
+-- name: RecoverOrphanedTasksForRuntimeByIDs :many
+-- The handoff form of RecoverOrphanedTasksForRuntime (DENE-2979). During a
+-- version switch two daemon processes share one runtime, so "everything on
+-- this runtime" would also fail the work the other process is still running.
+-- The successor names exactly the tasks its retired predecessor held when that
+-- process disappeared; only those rows, and only while still in flight, fail.
+UPDATE agent_task_queue
+SET status = 'failed',
+    completed_at = now(),
+    error = 'daemon restarted while task was in flight',
+    failure_reason = 'runtime_recovery',
+    wait_reason = NULL,
+    prepare_lease_expires_at = NULL
+WHERE runtime_id = $1
+  AND id = ANY(sqlc.arg('task_ids')::uuid[])
+  AND status IN ('dispatched', 'running', 'waiting_local_directory')
+RETURNING *;
+
 -- name: FailStaleTasks :many
 -- Fails tasks stuck in dispatched/running beyond the given thresholds.
 --

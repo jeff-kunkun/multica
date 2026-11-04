@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -88,8 +89,20 @@ type HealthResponse struct {
 	ReloadPendingReason string `json:"reload_pending_reason,omitempty"`
 	// Draining is true while a POST /drain lease keeps the daemon from
 	// claiming new tasks ahead of a restart.
-	Draining   bool              `json:"draining,omitempty"`
-	Workspaces []healthWorkspace `json:"workspaces"`
+	Draining bool `json:"draining,omitempty"`
+	// HandoffReady is true when a version switch can hand this daemon over to
+	// a successor (POST /retire) instead of stopping it (DENE-2979): the server
+	// advertised daemon-handoff-v1 and this process is not already retiring.
+	// Absent on older daemons, which callers must treat as "stop, then start".
+	HandoffReady bool `json:"handoff_ready,omitempty"`
+	// Retiring is true once this daemon handed its profile to a successor. It
+	// claims nothing, finishes HeldTaskIDs, and exits by itself.
+	Retiring    bool     `json:"retiring,omitempty"`
+	HeldTaskIDs []string `json:"held_task_ids,omitempty"`
+	// Predecessor is the retiring daemon this process took over from, while it
+	// still runs.
+	Predecessor *PredecessorHealth `json:"predecessor,omitempty"`
+	Workspaces  []healthWorkspace  `json:"workspaces"`
 	// AgentAccounts is the live multi-CLI account overlay: every existing
 	// account directory of every CLI this daemon knows how to probe, with its
 	// binding lever and credential-existence status. Always present, possibly
@@ -411,9 +424,18 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 
 			ReloadPendingReason: d.reloadPending(),
 			Draining:            d.draining(),
+			HandoffReady:        d.handoffReady(),
+			Retiring:            d.isRetiring(),
+			Predecessor:         d.predecessorHealth(),
 			Workspaces:          wsList,
 			AgentAccounts:       agentAccounts,
 			AgentAccountsError:  agentAccountsErr,
+		}
+		if resp.Retiring {
+			// The successor reads this to keep the server from re-delivering
+			// these tasks and to fail exactly them if this process dies.
+			resp.HeldTaskIDs = d.heldTaskIDs()
+			sort.Strings(resp.HeldTaskIDs)
 		}
 		if reporter, ok := d.repoCache.(interface{ Activity() repocache.Activity }); ok {
 			activity := reporter.Activity()
@@ -485,6 +507,7 @@ func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt tim
 	mux.HandleFunc("/health", d.healthHandler(startedAt))
 	mux.HandleFunc("/shutdown", d.shutdownHandler())
 	mux.HandleFunc("/drain", d.drainHandler())
+	mux.HandleFunc("/retire", d.retireHandler())
 	mux.HandleFunc("/repo/checkout", d.repoCheckoutHandler())
 	mux.HandleFunc("/outputs", d.localOutputsHandler())
 

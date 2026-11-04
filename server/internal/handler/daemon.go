@@ -1929,7 +1929,7 @@ func (h *Handler) processHeartbeat(ctx context.Context, runtimeID string, suppor
 	ack := &protocol.DaemonHeartbeatAckPayload{
 		RuntimeID:          runtimeID,
 		Status:             "ok",
-		ServerCapabilities: []string{protocol.DaemonCapabilityRPCV1},
+		ServerCapabilities: []string{protocol.DaemonCapabilityRPCV1, protocol.DaemonCapabilityHandoffV1},
 	}
 	if h.AgentCLICommands != nil {
 		if cmd, err := h.AgentCLICommands.Peek(ctx, runtimeID); err != nil {

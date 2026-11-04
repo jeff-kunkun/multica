@@ -408,7 +408,21 @@ func (d *Daemon) claimRecoveryRequest() claimRecovery {
 	if !d.claimRecoveryPending.Load() {
 		return claimRecovery{}
 	}
-	return claimRecovery{Active: true, HeldTaskIDs: d.heldTaskIDs()}
+	// A retiring predecessor's tasks are still being prepared or run by that
+	// process; listing them keeps the server from re-delivering them here.
+	held := d.heldTaskIDs()
+	if pred := d.predecessorHeldIDs(); len(pred) > 0 {
+		seen := make(map[string]struct{}, len(held))
+		for _, id := range held {
+			seen[id] = struct{}{}
+		}
+		for _, id := range pred {
+			if _, ok := seen[id]; !ok {
+				held = append(held, id)
+			}
+		}
+	}
+	return claimRecovery{Active: true, HeldTaskIDs: held}
 }
 
 // holdTask records that this daemon owns a task from claim through handleTask's

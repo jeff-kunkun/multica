@@ -97,6 +97,9 @@ let cachedCliBinaryVersion: string | null | undefined = undefined;
 // busy executing tasks. The poll loop retries the check on each tick and
 // fires the restart once active_task_count drops to 0.
 let pendingVersionRestart = false;
+// PID of a daemon whose handoff failed; its version switch falls back to the
+// idle restart so a broken handoff is not retried on every poll.
+let handoffFailedPid: number | null = null;
 let targetApiBaseUrl: string | null = null;
 let activeProfile: ActiveProfile | null = null;
 let lastDaemonId: string | undefined;
@@ -186,6 +189,12 @@ interface HealthPayload {
   cli_version?: string;
   cli_commit?: string;
   active_task_count?: number;
+  /** DENE-2979: this daemon can retire in favour of a successor right now. */
+  handoff_ready?: boolean;
+  /** DENE-2979: this daemon handed over and is finishing its runs. */
+  retiring?: boolean;
+  /** DENE-2979: the retiring daemon this one took over from, while it runs. */
+  predecessor?: { pid?: number; active_task_count?: number; cli_version?: string };
   agents?: string[];
   workspaces?: unknown[];
   /** Local annotation: the port this payload was fetched from. */
@@ -633,7 +642,11 @@ async function getCliBinaryVersion(): Promise<string | null> {
  * logic itself is in `version-decision.ts` (pure, unit-tested); this
  * wrapper handles the async plumbing and side effects.
  *
- * Restart is only fired when ALL of:
+ * A daemon that reports `handoff_ready` hands over at once (DENE-2979): a
+ * new daemon starts and takes new tasks, and the old one finishes its runs,
+ * then exits. Nothing is interrupted, so this does not wait for idle.
+ *
+ * Otherwise (older daemon or server) restart is only fired when ALL of:
  *   - a daemon is actually running on the active profile's port
  *   - both sides report a version and the strings differ
  *   - `active_task_count` is 0 (no in-flight agent work would be killed)
@@ -660,7 +673,12 @@ async function ensureRunningDaemonVersionMatches(): Promise<
   }
 
   const bundled = await getCliBinaryVersion();
-  const action = decideVersionAction(bundled, running);
+  const action = decideVersionAction(
+    bundled,
+    running && running.pid !== undefined && running.pid === handoffFailedPid
+      ? { ...running, handoff_ready: false }
+      : running,
+  );
 
   switch (action) {
     case "not_running":
@@ -678,6 +696,25 @@ async function ensureRunningDaemonVersionMatches(): Promise<
       }
       pendingVersionRestart = true;
       return "deferred";
+    }
+    case "handoff": {
+      console.log(
+        `[daemon] CLI version mismatch (bundled=${bundled} running=${running?.cli_version}) — handing over to a new daemon; ${running?.active_task_count ?? 0} run(s) finish on the old one`,
+      );
+      pendingVersionRestart = false;
+      const result = await handoffDaemon();
+      if (result.success) {
+        handoffFailedPid = null;
+        return "restarted";
+      }
+      console.warn(`[daemon] daemon handoff failed, falling back: ${result.error}`);
+      handoffFailedPid = running?.pid ?? null;
+      if ((running?.active_task_count ?? 0) > 0) {
+        pendingVersionRestart = true;
+        return "deferred";
+      }
+      await restartDaemon();
+      return "restarted";
     }
     case "restart":
       console.log(
@@ -1182,6 +1219,38 @@ async function restartDaemon(): Promise<{ success: boolean; error?: string }> {
   const stopResult = await stopDaemon();
   if (!stopResult.success) return stopResult;
   return startDaemon();
+}
+
+/**
+ * Version switch without interruption (DENE-2979): `multica daemon restart
+ * --handoff-only` retires the running daemon (it stops claiming, finishes and
+ * reports its runs, then exits) and starts the new one, which takes new tasks
+ * at once. If the running daemon or the server cannot hand over, the CLI
+ * leaves the daemon untouched and fails, and the caller falls back.
+ *
+ * Only for version switches: a credential or user change must not leave the
+ * old login's daemon running, so those keep restartDaemon.
+ */
+async function handoffDaemon(): Promise<{ success: boolean; error?: string }> {
+  if (await lifecycleBlockedByForeignDaemon()) return { success: true };
+  const bin = await resolveCliBinary();
+  if (!bin) return { success: false, error: "multica CLI is not installed" };
+  const active = await ensureActiveProfile();
+  if (!active) return { success: false, error: "Waiting for the service address" };
+
+  const args = ["daemon", "restart", "--handoff-only", ...profileArgs(active.name)];
+  return new Promise((resolve) => {
+    execFile(
+      bin,
+      args,
+      // The retire waits up to 15s for an in-flight claim before the start.
+      { timeout: DAEMON_START_EXEC_TIMEOUT_MS + 30_000, env: desktopSpawnEnv() },
+      (err) => {
+        scheduleStatusRefresh();
+        resolve(err ? { success: false, error: err.message } : { success: true });
+      },
+    );
+  });
 }
 
 async function daemonPidIsConfirmedAbsent(profile: string): Promise<boolean> {

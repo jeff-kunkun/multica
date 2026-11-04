@@ -195,7 +195,7 @@ func (d *Daemon) autoUpdateLoop(ctx context.Context) {
 // fails today will be retried at the next tick, and we don't want a transient
 // network blip to escalate to a process-level shutdown.
 func (d *Daemon) tryAutoUpdate(ctx context.Context) {
-	if ctx.Err() != nil {
+	if ctx.Err() != nil || d.isRetiring() {
 		return
 	}
 	// Don't race the server-triggered update path. If a manual update from
@@ -324,7 +324,7 @@ func (d *Daemon) tryAutoUpdate(ctx context.Context) {
 // runtimeVersionProbeAttempts documents), and "couldn't read the version" is
 // not a reason to restart into one.
 func (d *Daemon) trySelfReload(ctx context.Context) {
-	if ctx.Err() != nil {
+	if ctx.Err() != nil || d.isRetiring() {
 		return
 	}
 	if d.RestartBinary() != "" {
@@ -388,6 +388,15 @@ func (d *Daemon) trySelfReload(ctx context.Context) {
 	d.setReloadPending(reason)
 
 	if !d.trySetClaimBarrier() {
+		// Busy: hand over instead of waiting for idle (DENE-2979). The successor
+		// takes new work now and this process finishes its runs, then exits.
+		// The updating flag stays held so no second reload starts meanwhile.
+		if d.handoffToBinary(target) {
+			d.logger.Info("auto-reload: handed over to a successor; finishing running tasks here", "reason", reason, "binary", target)
+			d.clearReloadPending()
+			released = true
+			return
+		}
 		d.logger.Info("auto-reload: deferring — task or claim in flight at barrier check", "reason", reason)
 		return
 	}

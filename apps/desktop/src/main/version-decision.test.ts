@@ -86,4 +86,50 @@ describe("decideVersionAction", () => {
       decideVersionAction(bundled, { ...base, active_task_count: 0 }),
     ).toBe("restart");
   });
+
+  // DENE-2979: a daemon that can hand over switches versions at once — its
+  // runs finish on the old process while the new one takes new tasks.
+  it("returns handoff for a busy daemon that can hand over", () => {
+    expect(
+      decideVersionAction("v1.2.3", {
+        status: "running",
+        cli_version: "v1.2.2",
+        active_task_count: 2,
+        handoff_ready: true,
+      }),
+    ).toBe("handoff");
+  });
+
+  it("returns handoff for an idle daemon that can hand over", () => {
+    expect(
+      decideVersionAction("v1.2.3", {
+        status: "running",
+        cli_version: "v1.2.2",
+        active_task_count: 0,
+        handoff_ready: true,
+      }),
+    ).toBe("handoff");
+  });
+
+  it("keeps defer for a busy daemon without handoff (older daemon or server)", () => {
+    expect(
+      decideVersionAction("v1.2.3", {
+        status: "running",
+        cli_version: "v1.2.2",
+        active_task_count: 2,
+        handoff_ready: false,
+      }),
+    ).toBe("defer");
+  });
+
+  it("does not hand over when versions already match", () => {
+    expect(
+      decideVersionAction("v1.2.3", {
+        status: "running",
+        cli_version: "v1.2.3",
+        active_task_count: 2,
+        handoff_ready: true,
+      }),
+    ).toBe("ok");
+  });
 });

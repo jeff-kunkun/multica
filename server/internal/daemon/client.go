@@ -827,6 +827,26 @@ func (c *Client) RecoverOrphans(ctx context.Context, runtimeID string) error {
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/recover-orphans", runtimeID), map[string]any{}, nil)
 }
 
+// RecoverOrphanResult is the server's count of what one recovery failed and
+// re-queued.
+type RecoverOrphanResult struct {
+	Orphaned int `json:"orphaned"`
+	Retried  int `json:"retried"`
+}
+
+// RecoverTasks fails only the named in-flight tasks on a runtime — the work a
+// retired predecessor process held when it vanished (DENE-2979). Call it only
+// against a server that advertised daemon-handoff-v1: an older server ignores
+// task_ids and fails every task on the runtime, including this process's own.
+func (c *Client) RecoverTasks(ctx context.Context, runtimeID string, taskIDs []string) (RecoverOrphanResult, error) {
+	var out RecoverOrphanResult
+	if len(taskIDs) == 0 {
+		return out, nil
+	}
+	err := c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/recover-orphans", runtimeID), map[string]any{"task_ids": taskIDs}, &out)
+	return out, err
+}
+
 // GetTaskStatus returns the current status of a task. Used by the daemon to
 // detect terminal/interruption signals (cancelled, failed, completed, or a
 // 404 task-not-found) while a task is executing.
