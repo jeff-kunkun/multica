@@ -2,8 +2,10 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -29,9 +31,12 @@ func TestOpenCodeClockSkewResumeQueries(t *testing.T) {
 				dbfx.Task(t, agentID, testutil.Cols{scope.column: scope.id, "runtime_id": runtimeID, "session_id": history.session, "status": history.status, "failure_reason": history.reason, "work_dir": "/clock-workdir", "completed_at": testutil.Raw("now() - interval '" + history.age + "'")})
 			}
 			if scope.name == "issue" {
+				// Office: a failed issue turn breaks continuity for every earlier
+				// session (session_break_at), so nothing is resumable here — a
+				// stronger outcome than upstream's fallback to "healthy".
 				got, err := testHandler.Queries.GetLastTaskSession(ctx, db.GetLastTaskSessionParams{AgentID: parseUUID(agentID), IssueID: parseUUID(issueID)})
-				if err != nil || got.SessionID.String != "healthy" {
-					t.Fatalf("issue resumed poisoned history: %+v, %v", got, err)
+				if !errors.Is(err, pgx.ErrNoRows) {
+					t.Fatalf("issue resumed history across the clock-skew failure: %+v, %v", got, err)
 				}
 			} else {
 				got, err := testHandler.Queries.GetLastChatTaskSession(ctx, db.GetLastChatTaskSessionParams{ChatSessionID: parseUUID(chatID)})
