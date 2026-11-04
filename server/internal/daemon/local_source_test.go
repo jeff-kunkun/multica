@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -133,5 +134,103 @@ func TestResolveTaskCodeSourceWithoutAssignmentKeepsEveryRepoRemote(t *testing.T
 	}
 	if src.LocalPath != "" {
 		t.Errorf("no directory is pinned, so none may be reported: %q", src.LocalPath)
+	}
+}
+
+// umbrellaOfWorktrees lays out <base>/<name>/{dev,main,test}: the folder named
+// after the repository is not a checkout, its children are (DENE-2969).
+func umbrellaOfWorktrees(t *testing.T, name string, children ...string) (base, umbrella string) {
+	t.Helper()
+	base = t.TempDir()
+	umbrella = filepath.Join(base, name)
+	for _, c := range children {
+		if err := os.MkdirAll(filepath.Join(umbrella, c), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return base, umbrella
+}
+
+func TestUmbrellaOfWorktreesIsProvenByAWorktreeRemote(t *testing.T) {
+	base, umbrella := umbrellaOfWorktrees(t, "game_web_all", "dev")
+	dev := filepath.Join(umbrella, "dev")
+	remotes := fakeRemotes(map[string][]string{dev: {"http://189.1.240.110:8929/front/game_web_all.git"}})
+
+	out := decideLocalCheckout(assignment(t, base), "http://189.1.240.110:8929/front/game_web_all", remotes)
+	if out.Refusal != "" {
+		t.Fatalf("a worktree with the matching remote proves the repository: %s", out.Refusal)
+	}
+	if out.Path != dev {
+		t.Fatalf("expected the worktree %q, got %+v", dev, out)
+	}
+
+	src := resolveTaskCodeSource(assignment(t, base), nil, []string{"http://189.1.240.110:8929/front/game_web_all"}, remotes)
+	if len(src.CoveredRepos) != 1 || len(src.UnprovenRepos) != 0 {
+		t.Fatalf("covered = %v, unproven = %+v", src.CoveredRepos, src.UnprovenRepos)
+	}
+	env := codeSourceForEnv(src)
+	if env.CoveredRepos[0].Detail != dev {
+		t.Errorf("the brief must name where the repository lives, got %q", env.CoveredRepos[0].Detail)
+	}
+}
+
+func TestUmbrellaPrefersMainThenDevOverOtherWorktrees(t *testing.T) {
+	base, umbrella := umbrellaOfWorktrees(t, "game-backend", "a-task", "dev", "main", "test")
+	url := "http://189.1.240.110:8929/develop/game-backend.git"
+	remotes := fakeRemotes(map[string][]string{
+		filepath.Join(umbrella, "a-task"): {url},
+		filepath.Join(umbrella, "dev"):    {url},
+		filepath.Join(umbrella, "main"):   {url},
+		filepath.Join(umbrella, "test"):   {url},
+	})
+	out := decideLocalCheckout(assignment(t, base), "http://189.1.240.110:8929/develop/game-backend", remotes)
+	if want := filepath.Join(umbrella, "main"); out.Path != want {
+		t.Fatalf("expected %q, got %+v", want, out)
+	}
+}
+
+func TestUmbrellaWhoseWorktreesHoldAnotherRepoIsStillRefused(t *testing.T) {
+	// Only a matching remote is proof. A worktree of some other repository
+	// under the same name must not be handed out.
+	base, umbrella := umbrellaOfWorktrees(t, "game_web_pg", "dev")
+	remotes := fakeRemotes(map[string][]string{filepath.Join(umbrella, "dev"): {"https://github.com/kun-game-port/other.git"}})
+	out := decideLocalCheckout(assignment(t, base), "http://189.1.240.110:8929/develop/game_web_pg", remotes)
+	if out.Path != "" || out.Refusal == "" {
+		t.Fatalf("an unproven umbrella must still be refused, got %+v", out)
+	}
+}
+
+func TestUmbrellaIsNotSearchedBelowTheBoundFolderItself(t *testing.T) {
+	// The bound folder's own children are already candidates by name; going
+	// below them for every repository would turn a name check into a crawl.
+	base := t.TempDir()
+	stray := filepath.Join(base, "unrelated", "dev")
+	if err := os.MkdirAll(stray, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	remotes := fakeRemotes(map[string][]string{stray: {"https://github.com/o/r.git"}})
+	out := decideLocalCheckout(assignment(t, base), "https://github.com/o/r", remotes)
+	if out.Path != "" || out.Refusal != "" {
+		t.Fatalf("a repository nowhere near its name must still clone, got %+v", out)
+	}
+}
+
+func TestUmbrellaOfWorktreesWithRealGit(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	base, umbrella := umbrellaOfWorktrees(t, "game_web_all", "dev")
+	dev := filepath.Join(umbrella, "dev")
+	for _, args := range [][]string{
+		{"init", "-q", "-b", "dev", dev},
+		{"-C", dev, "remote", "add", "team", "http://189.1.240.110:8929/front/game_web_all.git"},
+	} {
+		if out, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	out := decideLocalCheckout(assignment(t, base), "http://189.1.240.110:8929/front/game_web_all", nil)
+	if out.Path != dev || out.Refusal != "" {
+		t.Fatalf("expected %q from real git remotes, got %+v", dev, out)
 	}
 }
