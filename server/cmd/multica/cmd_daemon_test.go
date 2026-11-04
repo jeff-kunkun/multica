@@ -1053,3 +1053,25 @@ func clearDaemonTaskEnv(t *testing.T) {
 		t.Setenv(key, "")
 	}
 }
+
+func TestPrintDaemonStatusListsExcludedWorkspaces(t *testing.T) {
+	t.Parallel()
+
+	base := map[string]any{
+		"status":     "running",
+		"pid":        float64(1234),
+		"workspaces": []any{map[string]any{"id": "ws-1"}},
+	}
+	var plain bytes.Buffer
+	printDaemonStatusReport(&plain, "Daemon", base)
+	if strings.Contains(plain.String(), "Excluded workspaces") {
+		t.Fatalf("status without exclusions = %q, want no Excluded workspaces row", plain.String())
+	}
+
+	base["excluded_workspace_ids"] = []any{"32b72664-aaaa-4bbb-8ccc-000000000001"}
+	var out bytes.Buffer
+	printDaemonStatusReport(&out, "Daemon", base)
+	if !strings.Contains(out.String(), "Excluded workspaces:") || !strings.Contains(out.String(), "32b72664-aaaa-4bbb-8ccc-000000000001") {
+		t.Fatalf("status = %q, want the excluded workspace listed", out.String())
+	}
+}

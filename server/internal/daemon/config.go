@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/mattn/go-shellwords"
 
 	"github.com/multica-ai/multica/server/internal/cli"
@@ -218,6 +219,13 @@ type Config struct {
 	// prefers a matching, executable override over resolving the profile's
 	// command_name on PATH. nil/empty means "always resolve via PATH".
 	ProfileCommandOverrides map[string]string
+
+	// ExcludeWorkspaceIDs lists the workspaces this daemon must not serve
+	// (normalized lowercase UUIDs, deduplicated). The workspace sync skips
+	// them, so no runtime is registered there and no task of theirs can be
+	// claimed. Resolved from MULTICA_DAEMON_EXCLUDE_WORKSPACE_IDS, else the
+	// profile's config.json `exclude_workspace_ids`.
+	ExcludeWorkspaceIDs []string
 }
 
 // Overrides allows CLI flags to override environment variables and defaults.
@@ -293,10 +301,12 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// purely from env-var configuration. We log a warning and proceed with
 	// no overrides.
 	var profileCommandOverrides map[string]string
+	var fileExcludeWorkspaceIDs []string
 	if cliCfg, err := cli.LoadCLIConfigForProfile(overrides.Profile); err != nil {
 		slog.Warn("could not load CLI config for backend overrides; proceeding without",
 			"profile", overrides.Profile, "err", err)
 	} else {
+		fileExcludeWorkspaceIDs = cliCfg.ExcludeWorkspaceIDs
 		if oc := openclawOverrideFrom(cliCfg); oc != nil {
 			applyOpenclawOverride(oc)
 		}
@@ -722,6 +732,11 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		autoReloadEnabled = false
 	}
 
+	excludeWorkspaceIDs, err := resolveExcludeWorkspaceIDs(fileExcludeWorkspaceIDs)
+	if err != nil {
+		return Config{}, err
+	}
+
 	return Config{
 		ServerBaseURL:                   serverBaseURL,
 		DaemonID:                        daemonID,
@@ -779,7 +794,58 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		QwenArgs:                        qwenArgs,
 		QwenpawArgs:                     qwenpawArgs,
 		ProfileCommandOverrides:         profileCommandOverrides,
+		ExcludeWorkspaceIDs:             excludeWorkspaceIDs,
 	}, nil
+}
+
+// ExcludeWorkspaceIDsEnv names the env var that overrides config.json's
+// exclude_workspace_ids. Blank counts as unset, like the other daemon env
+// knobs; clear the persisted value with `config set exclude_workspace_ids ""`.
+const ExcludeWorkspaceIDsEnv = "MULTICA_DAEMON_EXCLUDE_WORKSPACE_IDS"
+
+// resolveExcludeWorkspaceIDs applies env > config.json for the exclusion list.
+// A malformed entry fails startup instead of being dropped: an exclusion the
+// operator believes is in force but is not would quietly put this machine back
+// on the workspace they meant to leave.
+func resolveExcludeWorkspaceIDs(fromFile []string) ([]string, error) {
+	if raw := strings.TrimSpace(os.Getenv(ExcludeWorkspaceIDsEnv)); raw != "" {
+		ids, err := NormalizeWorkspaceIDList(strings.Split(raw, ","))
+		if err != nil {
+			return nil, fmt.Errorf("invalid %s: %w", ExcludeWorkspaceIDsEnv, err)
+		}
+		return ids, nil
+	}
+	ids, err := NormalizeWorkspaceIDList(fromFile)
+	if err != nil {
+		return nil, fmt.Errorf("invalid exclude_workspace_ids in config.json: %w", err)
+	}
+	return ids, nil
+}
+
+// NormalizeWorkspaceIDList trims, lowercases and deduplicates workspace UUIDs,
+// keeping first-seen order and skipping blank entries. Any entry that is not a
+// UUID is an error. Shared by the daemon and `multica config set` so a value
+// the CLI accepted is one the daemon accepts.
+func NormalizeWorkspaceIDList(raw []string) ([]string, error) {
+	var out []string
+	seen := make(map[string]struct{}, len(raw))
+	for _, entry := range raw {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		parsed, err := uuid.Parse(entry)
+		if err != nil || len(entry) != 36 {
+			return nil, fmt.Errorf("%q is not a workspace UUID", entry)
+		}
+		id := parsed.String()
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out, nil
 }
 
 // officialCloudHost is the hostname of Multica's hosted cloud. It's the only

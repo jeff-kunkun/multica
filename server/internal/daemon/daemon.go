@@ -2191,6 +2191,9 @@ func (d *Daemon) run(ctx context.Context, healthLn net.Listener) error {
 	if d.cfg.Profile != "" {
 		logFields = append(logFields, "profile", d.cfg.Profile)
 	}
+	if len(d.cfg.ExcludeWorkspaceIDs) > 0 {
+		logFields = append(logFields, "excluded_workspaces", d.cfg.ExcludeWorkspaceIDs)
+	}
 	d.logger.Info("starting daemon", logFields...)
 	d.logger.Info("agent permissions", agentPermissionLogFields(runtime.GOOS)...)
 	d.logger.Debug("daemon config resolved",
@@ -4443,6 +4446,17 @@ func (d *Daemon) workspaceSyncLoop(ctx context.Context) {
 	}
 }
 
+// workspaceExcluded reports whether config excludes this workspace from the
+// daemon (Config.ExcludeWorkspaceIDs).
+func (d *Daemon) workspaceExcluded(workspaceID string) bool {
+	for _, id := range d.cfg.ExcludeWorkspaceIDs {
+		if strings.EqualFold(id, workspaceID) {
+			return true
+		}
+	}
+	return false
+}
+
 func (d *Daemon) workspaceSyncBaseInterval() time.Duration {
 	if len(d.allRuntimeIDs()) == 0 {
 		return DefaultWorkspaceBootstrapSyncInterval
@@ -4491,8 +4505,14 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 	}
 	d.logger.Debug("workspace sync: fetched workspaces", "count", len(workspaces))
 
+	// An excluded workspace is treated exactly like one the account is not a
+	// member of: never registered, and dropped below if it was tracked.
 	apiIDs := make(map[string]string, len(workspaces)) // id -> name
 	for _, ws := range workspaces {
+		if d.workspaceExcluded(ws.ID) {
+			d.logger.Debug("workspace sync: skipping excluded workspace", "workspace_id", ws.ID, "name", ws.Name)
+			continue
+		}
 		apiIDs[ws.ID] = ws.Name
 	}
 
@@ -4673,8 +4693,8 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 	// just upgraded, and a state file removed by repo cache GC.
 	d.publishTrackedCoAuthoredByState()
 
-	if len(d.allRuntimeIDs()) == 0 && registered == 0 && len(workspaces) > 0 {
-		return fmt.Errorf("%w for any of the %d workspace(s)", errNoWorkspaceRuntimesRegistered, len(workspaces))
+	if len(d.allRuntimeIDs()) == 0 && registered == 0 && len(apiIDs) > 0 {
+		return fmt.Errorf("%w for any of the %d workspace(s)", errNoWorkspaceRuntimesRegistered, len(apiIDs))
 	}
 	if registered > 0 || removed > 0 {
 		d.logger.Debug("workspace sync done", "registered", registered, "removed", removed, "tracked", len(apiIDs))

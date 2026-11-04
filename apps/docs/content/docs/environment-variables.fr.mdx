@@ -247,6 +247,7 @@ Les variables ci-dessous sont lues sur l'ordinateur qui exécute vos agents, et 
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud `true` ; auto-hébergé `false` | Vérifier et appliquer automatiquement ou non les mises à jour du CLI |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | Intervalle de vérification des mises à jour |
 | `MULTICA_DAEMON_AUTO_RELOAD` | `true` | Redémarrer ou non sur un binaire `multica` remplacé sur disque par un moyen externe (`brew upgrade`, un nouveau téléchargement, une compilation locale). Indépendant de `MULTICA_DAEMON_AUTO_UPDATE` |
+| `MULTICA_DAEMON_EXCLUDE_WORKSPACE_IDS` | vide | UUID d'espaces de travail, séparés par des virgules, que ce daemon ne sert pas : il n'y enregistre aucun runtime et n'en réclame aucune tâche ; les autres espaces du compte sont servis normalement. Remplace `exclude_workspace_ids` de `config.json` ; une entrée invalide fait échouer le démarrage |
 | `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | Répertoire racine des répertoires de travail des exécutions |
 | `MULTICA_AGENT_TEMP_BASE` | `/tmp` (Linux/macOS) | Linux/macOS uniquement. Répertoire parent des répertoires temporaires privés de chaque exécution ; doit être un répertoire absolu existant et accessible en écriture, et une valeur invalide fait échouer le démarrage de l'exécution au lieu de se rabattre sur `/tmp`. Choisissez un chemin court — les outils enfants peuvent y lier des sockets AF_UNIX, et `sun_path` est limité à 108 octets sous Linux et à 104 sous macOS |
 | `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | Conserver les répertoires des exécutions pour le débogage |
@@ -297,6 +298,7 @@ Clés prises en charge :
 | `disable_auto_update` | suit l'environnement | `true` désactive la mise à jour automatique ; `false` efface la surcharge locale et revient à la variable d'environnement ou à la valeur par défaut |
 | `auto_update_check_interval` | `6h` | Intervalle de vérification des mises à jour |
 | `disable_auto_reload` | suit l'environnement | `true` empêche le daemon de suivre un binaire remplacé sur disque ; `false` efface la surcharge locale. Résolu indépendamment de `disable_auto_update` |
+| `exclude_workspace_ids` | vide | UUID d'espaces de travail, séparés par des virgules, que le daemon de cette machine ne sert pas (aucun runtime, aucune tâche). Enregistrés en minuscules sans doublons ; une entrée qui n'est pas un UUID est refusée. Lu au démarrage du daemon : redémarrez-le après modification, puis supprimez les runtimes restants de la machine dans cet espace. `multica daemon status` les liste |
 
 Quelques règles concernant les valeurs :
 
