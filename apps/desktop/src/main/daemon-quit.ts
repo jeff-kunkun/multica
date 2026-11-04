@@ -3,8 +3,6 @@ import type { DaemonPrefs } from "../shared/daemon-types";
 // Electron only honors preventDefault during the event, before any await.
 export function createDaemonQuitHandler(deps: {
   isInstallingUpdate: () => boolean;
-  /** drainForUpgrade: leave the daemon running across an update install. */
-  keepDaemonOnUpdateInstall: () => boolean;
   stopSupervision: () => void;
   loadPrefs: () => Promise<DaemonPrefs>;
   stop: () => Promise<unknown>;
@@ -16,15 +14,10 @@ export function createDaemonQuitHandler(deps: {
   return (event: { preventDefault: () => void }): void => {
     if (finished) return;
     if (deps.isInstallingUpdate()) {
-      // Never hold an update install's quit. Default (old behaviour): autoStop
-      // still stops the daemon, best-effort, while the app exits.
+      // Never hold an update install's quit, and leave the daemon and its
+      // running tasks alone even with autoStop on: the relaunched app is back
+      // within seconds and moves the daemon to the new CLI once it is idle.
       deps.stopSupervision();
-      if (!deps.keepDaemonOnUpdateInstall()) {
-        finished = true;
-        void deps.loadPrefs()
-          .then((prefs) => (prefs.autoStop ? deps.stop() : undefined))
-          .catch(deps.logError);
-      }
       return;
     }
     event.preventDefault();

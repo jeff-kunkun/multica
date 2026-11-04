@@ -261,6 +261,14 @@ multica daemon status --output json
 
 Shows PID, uptime, detected agents, and watched workspaces.
 
+While a restart drain pauses claiming, the output adds a `Claims paused` row
+and `--output json` reports `"draining": true`; queued tasks wait until it
+ends. Only Desktop builds older than DENE-2974 ask for one, before moving the
+daemon to a new bundled CLI. Current Desktop keeps the daemon claiming and
+restarts it once it is idle. However often a drain is renewed, it pauses
+claiming for at most 10 minutes; after that the daemon takes tasks again and
+the restart waits for an idle moment.
+
 ### Logs
 
 ```bash

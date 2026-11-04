@@ -14,7 +14,6 @@ describe("daemon quit", () => {
     const stopped = deferred<void>();
     const deps = {
       isInstallingUpdate: () => false,
-      keepDaemonOnUpdateInstall: () => false,
       stopSupervision: vi.fn(),
       loadPrefs: vi.fn(() => prefs.promise),
       stop: vi.fn(() => stopped.promise),
@@ -39,10 +38,9 @@ describe("daemon quit", () => {
     expect(event.preventDefault).toHaveBeenCalledTimes(2);
   });
 
-  it.each([false, true])("keeps daemon running during an opted-in update or when autoStop is disabled (%s)", async (updating) => {
+  it.each([false, true])("keeps daemon running when autoStop is disabled (installing update: %s)", async (updating) => {
     const deps = {
       isInstallingUpdate: () => updating,
-      keepDaemonOnUpdateInstall: () => true,
       stopSupervision: vi.fn(),
       loadPrefs: vi.fn(async () => ({ autoStart: true, autoStop: false })),
       stop: vi.fn(),
@@ -58,10 +56,9 @@ describe("daemon quit", () => {
     expect(deps.quit).toHaveBeenCalledTimes(updating ? 0 : 1);
   });
 
-  it("stops the daemon on an update install by default when autoStop is on, without holding the quit", async () => {
+  it("leaves the daemon running on an update install even with autoStop on, without holding the quit", async () => {
     const deps = {
       isInstallingUpdate: () => true,
-      keepDaemonOnUpdateInstall: () => false,
       stopSupervision: vi.fn(),
       loadPrefs: vi.fn(async () => ({ autoStart: true, autoStop: true })),
       stop: vi.fn(async () => undefined),
@@ -74,7 +71,8 @@ describe("daemon quit", () => {
     await Promise.resolve();
     expect(event.preventDefault).not.toHaveBeenCalled();
     expect(deps.stopSupervision).toHaveBeenCalledOnce();
-    expect(deps.stop).toHaveBeenCalledOnce();
+    expect(deps.loadPrefs).not.toHaveBeenCalled();
+    expect(deps.stop).not.toHaveBeenCalled();
     expect(deps.quit).not.toHaveBeenCalled();
   });
 });

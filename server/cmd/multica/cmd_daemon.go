@@ -1580,6 +1580,11 @@ func printDaemonStatusReport(w io.Writer, label string, health map[string]any) {
 	if reason, ok := health["reload_pending_reason"].(string); ok && reason != "" {
 		rows = append(rows, row{"Restart pending", reason})
 	}
+	// Only present while a /drain lease holds, so a queue that stops moving is
+	// explained here instead of looking like a slot or dead-process problem.
+	if draining, ok := health["draining"].(bool); ok && draining {
+		rows = append(rows, row{"Claims paused", "draining before a restart; queued tasks wait"})
+	}
 	if agents, ok := health["agents"].([]any); ok && len(agents) > 0 {
 		parts := make([]string, len(agents))
 		for i, a := range agents {

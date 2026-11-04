@@ -414,6 +414,47 @@ func TestDrainHandlerPausesClaimsUntilLeaseExpires(t *testing.T) {
 	d.exitClaim()
 }
 
+// A caller that renews forever, like a Desktop waiting on one long task, must
+// not keep every queued task off the machine: past drainMaxHold claims reopen
+// and further renewals of the same drain do not close them again.
+func TestDrainStopsPausingClaimsAfterMaxHold(t *testing.T) {
+	t.Parallel()
+
+	d := &Daemon{
+		workspaces: map[string]*workspaceState{},
+		logger:     slog.New(slog.NewTextHandler(io.Discard, nil)),
+	}
+	// Run the drain in the past so its cap lands on the real clock that
+	// draining() and the claim gates read.
+	start := time.Now().Add(-drainMaxHold)
+	renew := drainLease / 2
+	for at := start; at.Before(start.Add(drainMaxHold)); at = at.Add(renew) {
+		if !d.startDrain(at) {
+			t.Fatalf("renewal at +%s must still pause claims", at.Sub(start))
+		}
+	}
+
+	capped := start.Add(drainMaxHold)
+	if d.startDrain(capped) {
+		t.Fatal("a renewal at drainMaxHold must not pause claims")
+	}
+	if d.startDrain(capped.Add(renew)) {
+		t.Fatal("renewing a capped drain must not pause claims again")
+	}
+	if d.draining() {
+		t.Fatal("/health must stop reporting draining once the cap is reached")
+	}
+	if !d.tryEnterClaim() {
+		t.Fatal("claims must reopen once the drain reaches drainMaxHold")
+	}
+	d.exitClaim()
+
+	// A caller that went quiet for longer than a lease asks for a new drain.
+	if !d.startDrain(capped.Add(renew + drainLease + time.Second)) {
+		t.Fatal("a request after a lapsed lease must start a new drain")
+	}
+}
+
 func TestDrainHandlerRejectsNonPost(t *testing.T) {
 	t.Parallel()
 
