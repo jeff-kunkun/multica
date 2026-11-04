@@ -34,8 +34,8 @@ func TestEvidenceLinksTrimDedupeAndCap(t *testing.T) {
 	}
 }
 
-func TestOnlyDeliveredAndBlockedWakeAtOnce(t *testing.T) {
-	for status, want := range map[string]bool{"in_review": true, "blocked": true, "in_progress": false, "todo": false, "done": false, "cancelled": false} {
+func TestDeliveredBlockedAndDoneWakeAtOnce(t *testing.T) {
+	for status, want := range map[string]bool{"in_review": true, "blocked": true, "done": true, "in_progress": false, "todo": false, "cancelled": false} {
 		if WakesOnStatus(status) != want {
 			t.Fatalf("WakesOnStatus(%q) = %v", status, !want)
 		}
