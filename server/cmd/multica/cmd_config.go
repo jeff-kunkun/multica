@@ -11,6 +11,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/daemon"
 )
 
 var configCmd = &cobra.Command{
@@ -45,6 +46,7 @@ var configSetSupportedKeys = []string{
 	"disable_auto_update",
 	"auto_update_check_interval",
 	"disable_auto_reload",
+	"exclude_workspace_ids",
 }
 
 var configSetCmd = &cobra.Command{
@@ -55,7 +57,7 @@ var configSetCmd = &cobra.Command{
 		"device_name, runtime_name, workspaces_root, max_concurrent_tasks, poll_interval, ws_claim_poll_interval, " +
 		"heartbeat_interval, agent_timeout, " +
 		"codex_semantic_inactivity_timeout, codex_handshake_timeout, " +
-		"disable_auto_update, auto_update_check_interval, disable_auto_reload.\n\n" +
+		"disable_auto_update, auto_update_check_interval, disable_auto_reload, exclude_workspace_ids.\n\n" +
 		"The daemon keys (device_name, runtime_name, workspaces_root, max_concurrent_tasks, " +
 		"poll_interval, ws_claim_poll_interval, heartbeat_interval, agent_timeout, " +
 		"codex_semantic_inactivity_timeout, codex_handshake_timeout, " +
@@ -68,7 +70,12 @@ var configSetCmd = &cobra.Command{
 		"'0s' is meaningful and explicitly disables the wall-clock cap. " +
 		"disable_auto_update and disable_auto_reload take 'true' or 'false' " +
 		"(single-direction: setting one to 'true' turns that behavior off, " +
-		"'false' clears the override so env/default decides). Pass an empty " +
+		"'false' clears the override so env/default decides). " +
+		"exclude_workspace_ids takes comma-separated workspace UUIDs the daemon " +
+		"must not serve: it registers no runtime there and claims none of its " +
+		"tasks, while every other workspace is served as before. It has no flag; " +
+		"MULTICA_DAEMON_EXCLUDE_WORKSPACE_IDS overrides it, and the daemon reads it " +
+		"at start, so restart the daemon after changing it. Pass an empty " +
 		"string to clear a persisted " +
 		"value (e.g. `config set poll_interval \"\"`).",
 	Args: exactArgs(2),
@@ -111,6 +118,7 @@ func runConfigShow(cmd *cobra.Command, _ []string) error {
 	fmt.Fprintf(os.Stdout, "%-34s %t\n", "disable_auto_update:", cfg.DisableAutoUpdate)
 	fmt.Fprintf(os.Stdout, "%-34s %s\n", "auto_update_check_interval:", valueOrDefault(cfg.AutoUpdateCheckInterval, "(not set)"))
 	fmt.Fprintf(os.Stdout, "%-34s %t\n", "disable_auto_reload:", cfg.DisableAutoReload)
+	fmt.Fprintf(os.Stdout, "%-34s %s\n", "exclude_workspace_ids:", valueOrDefault(strings.Join(cfg.ExcludeWorkspaceIDs, ","), "(not set)"))
 	return nil
 }
 
@@ -135,8 +143,11 @@ func runConfigSet(cmd *cobra.Command, args []string) error {
 	}
 
 	storedValue := value
-	if key == "workspaces_root" {
+	switch key {
+	case "workspaces_root":
 		storedValue = cfg.WorkspacesRoot
+	case "exclude_workspace_ids":
+		storedValue = strings.Join(cfg.ExcludeWorkspaceIDs, ",")
 	}
 	fmt.Fprintf(os.Stderr, "Set %s = %s\n", key, storedValue)
 	return nil
@@ -254,6 +265,12 @@ func applyConfigSet(cfg *cli.CLIConfig, key, value string) error {
 		if err := assignBool(&cfg.DisableAutoReload, key, value); err != nil {
 			return err
 		}
+	case "exclude_workspace_ids":
+		ids, err := daemon.NormalizeWorkspaceIDList(strings.Split(value, ","))
+		if err != nil {
+			return fmt.Errorf("exclude_workspace_ids must be comma-separated workspace UUIDs: %w", err)
+		}
+		cfg.ExcludeWorkspaceIDs = ids
 	default:
 		return fmt.Errorf("unknown config key %q (supported: %s)", key, joinKeys(configSetSupportedKeys))
 	}

@@ -1686,6 +1686,13 @@ func printDaemonStatusReport(w io.Writer, label string, health map[string]any) {
 	if ws, ok := health["workspaces"].([]any); ok {
 		rows = append(rows, row{"Workspaces", strconv.Itoa(len(ws))})
 	}
+	if excluded, ok := health["excluded_workspace_ids"].([]any); ok && len(excluded) > 0 {
+		parts := make([]string, len(excluded))
+		for i, id := range excluded {
+			parts[i] = fmt.Sprint(id)
+		}
+		rows = append(rows, row{"Excluded workspaces", strings.Join(parts, ", ")})
+	}
 
 	keyWidth := 0
 	for _, r := range rows {

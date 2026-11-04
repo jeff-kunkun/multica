@@ -144,6 +144,14 @@ type CLIConfig struct {
 	// field, default (enabled).
 	DisableAutoReload bool `json:"disable_auto_reload,omitempty"`
 
+	// ExcludeWorkspaceIDs lists workspaces (by UUID) the daemon started with
+	// this profile must not serve: it registers no runtime there and so never
+	// claims that workspace's tasks, even though the account is a member.
+	// Every other workspace is unaffected. Lets one account's machines split
+	// workspaces between them. Resolution precedence (highest wins):
+	// MULTICA_DAEMON_EXCLUDE_WORKSPACE_IDS env (comma-separated), this field.
+	ExcludeWorkspaceIDs []string `json:"exclude_workspace_ids,omitempty"`
+
 	// Backends contains per-backend overrides for users who want to point
 	// the daemon at non-default tool installations (e.g. an OpenClaw bundled
 	// inside another desktop app, or multiple isolated profiles on the same

@@ -250,6 +250,7 @@ API key と base URL の両方が空の場合、このレイヤーは無効に�
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud は `true`、セルフホストは `false` | CLI の更新を自動でチェックして適用するか |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | 更新チェックの間隔 |
 | `MULTICA_DAEMON_AUTO_RELOAD` | `true` | 帯域外で置き換えられた `multica` バイナリ（`brew upgrade`、再ダウンロード、ローカルビルド）へ再起動して追従するかどうか。`MULTICA_DAEMON_AUTO_UPDATE` とは独立 |
+| `MULTICA_DAEMON_EXCLUDE_WORKSPACE_IDS` | 空 | このデーモンが担当しないワークスペース UUID（カンマ区切り）。そこにはランタイムを登録せず、タスクも取得しない。アカウントの他のワークスペースは通常どおり担当する。`config.json` の `exclude_workspace_ids` を置き換え、不正な項目があるとデーモンの起動は失敗する |
 | `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | 実行用作業ディレクトリのルート |
 | `MULTICA_AGENT_TEMP_BASE` | `/tmp`（Linux/macOS） | Linux/macOS 専用。作業ごとのプライベート一時ディレクトリの親ディレクトリ。既存かつ書き込み可能な絶対パスである必要があり、無効な値の場合は `/tmp` にフォールバックせず作業の開始に失敗します。短いパスを選んでください。子ツールがその配下に AF_UNIX ソケットを作成する場合があり、`sun_path` の上限は Linux で 108 バイト、macOS で 104 バイトです |
 | `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | デバッグ用に実行ディレクトリを保持 |
@@ -300,6 +301,7 @@ multica config show
 | `disable_auto_update` | 環境に従う | `true` で自動更新を無効化。`false` はローカルの上書きをクリアし、環境変数またはデフォルトに戻します |
 | `auto_update_check_interval` | `6h` | 更新チェックの間隔 |
 | `disable_auto_reload` | 環境に従う | `true` でディスク上の置き換えへの追従を停止。`false` はローカルの上書きをクリア。`disable_auto_update` とは別に解決されます |
+| `exclude_workspace_ids` | 空 | このマシンのデーモンが担当しないワークスペース UUID（カンマ区切り、ランタイムもタスクもなし）。小文字・重複なしで保存され、UUID でない項目は拒否される。デーモン起動時に読むため、変更後はデーモンを再起動し、そのワークスペースに残ったこのマシンのランタイムを削除する。`multica daemon status` に表示される |
 
 値のルール:
 

@@ -431,3 +431,69 @@ func TestPollIntervalRoundTripThroughDuration(t *testing.T) {
 		t.Fatalf("parsed = %v, want %v", got, want)
 	}
 }
+
+// exclude_workspace_ids is stored normalized (lowercase, deduplicated), rejects
+// anything that is not a workspace UUID without touching the stored list, and
+// an empty value clears it. `config show` prints what was stored.
+func TestApplyConfigSetExcludeWorkspaceIDs(t *testing.T) {
+	t.Parallel()
+
+	const a = "32b72664-aaaa-4bbb-8ccc-000000000001"
+	const b = "32b72664-aaaa-4bbb-8ccc-000000000002"
+	cfg := cli.CLIConfig{}
+	if err := applyConfigSet(&cfg, "exclude_workspace_ids", " "+strings.ToUpper(a)+", "+b+","+a); err != nil {
+		t.Fatalf("set exclude_workspace_ids: %v", err)
+	}
+	if got := strings.Join(cfg.ExcludeWorkspaceIDs, ","); got != a+","+b {
+		t.Fatalf("ExcludeWorkspaceIDs = %q, want %q", got, a+","+b)
+	}
+
+	err := applyConfigSet(&cfg, "exclude_workspace_ids", a+",wd-game")
+	if err == nil || !strings.Contains(err.Error(), "wd-game") {
+		t.Fatalf("set with a non-UUID entry = %v, want an error naming it", err)
+	}
+	if got := strings.Join(cfg.ExcludeWorkspaceIDs, ","); got != a+","+b {
+		t.Fatalf("rejected value changed the stored list to %q", got)
+	}
+
+	if err := applyConfigSet(&cfg, "exclude_workspace_ids", ""); err != nil {
+		t.Fatalf("clear exclude_workspace_ids: %v", err)
+	}
+	if cfg.ExcludeWorkspaceIDs != nil {
+		t.Fatalf("ExcludeWorkspaceIDs after clear = %v, want nil", cfg.ExcludeWorkspaceIDs)
+	}
+}
+
+func TestRunConfigSetAndShowExcludeWorkspaceIDs(t *testing.T) {
+	redirectTestHome(t, t.TempDir())
+	const id = "32b72664-aaaa-4bbb-8ccc-000000000001"
+
+	cmd := newConfigTestCmd()
+	_ = cmd.Flags().Set("profile", "dev")
+	stderr := captureStderr(t)
+	if err := runConfigSet(cmd, []string{"exclude_workspace_ids", strings.ToUpper(id)}); err != nil {
+		stderr.restore()
+		t.Fatalf("runConfigSet exclude_workspace_ids: %v", err)
+	}
+	setOut := stderr.read()
+	stderr.restore()
+	if !strings.Contains(setOut, "Set exclude_workspace_ids = "+id) {
+		t.Fatalf("config set output = %q, want the normalized value", setOut)
+	}
+
+	cfg, err := cli.LoadCLIConfigForProfile("dev")
+	if err != nil {
+		t.Fatalf("LoadCLIConfigForProfile: %v", err)
+	}
+	if len(cfg.ExcludeWorkspaceIDs) != 1 || cfg.ExcludeWorkspaceIDs[0] != id {
+		t.Fatalf("persisted ExcludeWorkspaceIDs = %v, want [%s]", cfg.ExcludeWorkspaceIDs, id)
+	}
+
+	out, err := captureStdout(t, func() error { return runConfigShow(cmd, nil) })
+	if err != nil {
+		t.Fatalf("runConfigShow: %v", err)
+	}
+	if !strings.Contains(out, "exclude_workspace_ids:") || !strings.Contains(out, id) {
+		t.Fatalf("config show = %q, want the exclude_workspace_ids line", out)
+	}
+}

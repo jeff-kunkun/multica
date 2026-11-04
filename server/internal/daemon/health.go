@@ -102,6 +102,9 @@ type HealthResponse struct {
 	// still runs.
 	Predecessor *PredecessorHealth `json:"predecessor,omitempty"`
 	Workspaces  []healthWorkspace  `json:"workspaces"`
+	// ExcludedWorkspaceIDs echoes Config.ExcludeWorkspaceIDs: workspaces this
+	// daemon deliberately does not serve. Omitted when none are excluded.
+	ExcludedWorkspaceIDs []string `json:"excluded_workspace_ids,omitempty"`
 	// AgentAccounts is the live multi-CLI account overlay: every existing
 	// account directory of every CLI this daemon knows how to probe, with its
 	// binding lever and credential-existence status. Always present, possibly
@@ -421,14 +424,15 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 			Agents:                agents,
 			SkippedAgents:         d.skippedAgentsSnapshot(),
 
-			ReloadPendingReason: d.reloadPending(),
-			Draining:            d.draining(),
-			HandoffReady:        d.handoffReady(),
-			Retiring:            d.isRetiring(),
-			Predecessor:         d.predecessorHealth(),
-			Workspaces:          wsList,
-			AgentAccounts:       agentAccounts,
-			AgentAccountsError:  agentAccountsErr,
+			ReloadPendingReason:  d.reloadPending(),
+			Draining:             d.draining(),
+			HandoffReady:         d.handoffReady(),
+			Retiring:             d.isRetiring(),
+			Predecessor:          d.predecessorHealth(),
+			Workspaces:           wsList,
+			ExcludedWorkspaceIDs: d.cfg.ExcludeWorkspaceIDs,
+			AgentAccounts:        agentAccounts,
+			AgentAccountsError:   agentAccountsErr,
 		}
 		if resp.Retiring {
 			// The successor reads this to keep the server from re-delivering

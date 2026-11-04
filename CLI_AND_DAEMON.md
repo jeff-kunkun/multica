@@ -199,6 +199,25 @@ availability stays independent of a third party's release cadence.
 Desktop-managed daemons ignore both, because the Desktop app owns its bundled
 CLI's lifecycle.
 
+#### Not serving a workspace on this machine
+
+A daemon serves every workspace its account belongs to. To keep one machine
+out of a workspace (say, a production workspace that only a server should
+serve), list the workspace UUIDs in the profile's config and restart the
+daemon:
+
+```bash
+multica config set exclude_workspace_ids <workspace-uuid>[,<workspace-uuid>…]
+# one start only, replaces the persisted list
+MULTICA_DAEMON_EXCLUDE_WORKSPACE_IDS=<workspace-uuid> multica daemon start
+```
+
+The daemon then registers no runtime in those workspaces, so it claims none of
+their tasks; other workspaces are untouched. `multica daemon status` shows the
+list. The machine's runtimes already registered there stay behind as offline
+rows; delete them in that workspace once. A Desktop-managed daemon reads the
+same key from the Desktop profile (`--profile desktop-<host>`).
+
 ### Boot autostart
 
 Opt-in: only `multica daemon autostart enable` registers the profile's

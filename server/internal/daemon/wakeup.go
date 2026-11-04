@@ -491,7 +491,7 @@ func (d *Daemon) extendTaskWakeupReadDeadline(conn *websocket.Conn) error {
 }
 
 func (d *Daemon) handleRuntimeProfilesChanged(payload protocol.RuntimeProfilesChangedPayload) {
-	if payload.WorkspaceID == "" {
+	if payload.WorkspaceID == "" || d.workspaceExcluded(payload.WorkspaceID) {
 		return
 	}
 	if err := d.refreshWorkspaceRuntimeProfiles(d.recoveryContext(), payload.WorkspaceID); err != nil {
