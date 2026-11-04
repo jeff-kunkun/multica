@@ -7,9 +7,10 @@ import (
 	"time"
 )
 
+// In review only the stall fallback rings, so each issue yields one row.
 func TestOutboxClaimReceiptRetryAndFreshRead(t *testing.T) {
 	b := newReviewBench(t)
-	id := b.issue("Delivery proof", "in_progress", b.dev, nil)
+	id := b.issue("Delivery proof", "in_review", b.dev, nil)
 	w := b.watchdog(Config{})
 	b.run(w, b.now)
 	token := uuid.NewString()
@@ -43,14 +44,14 @@ func TestOutboxClaimReceiptRetryAndFreshRead(t *testing.T) {
 	if err != nil || len(more) != 0 {
 		t.Fatalf("uncertain replay: %+v %v", more, err)
 	}
-	id = b.issue("Resolved before send", "in_progress", b.dev, nil)
+	id = b.issue("Resolved before send", "in_review", b.dev, nil)
 	b.run(w, b.now)
 	b.fx.Insert(t, "agent_task_queue", testutil.Cols{"issue_id": id, "agent_id": b.reviewer, "status": "running", "runtime_id": b.runtimeID, "started_at": b.now})
 	more, err = w.Claim(b.ctx, uuid.NewString())
 	if err != nil || len(more) != 0 {
 		t.Fatalf("fresh live run ignored: %+v %v", more, err)
 	}
-	id = b.issue("Closed before send", "in_progress", b.dev, nil)
+	id = b.issue("Closed before send", "in_review", b.dev, nil)
 	b.run(w, b.now)
 	if _, err = b.pool.Exec(b.ctx, `UPDATE issue SET status='done',updated_at=$2 WHERE id=$1::uuid`, id, b.now.Add(time.Second)); err != nil {
 		t.Fatal(err)
@@ -71,15 +72,19 @@ func TestOfflineRuntimeGetsThirtyMinuteGraceWithoutRestartingRun(t *testing.T) {
 	}
 	w := b.watchdog(Config{})
 	b.run(w, b.now)
-	var count int
-	b.pool.QueryRow(b.ctx, `SELECT count(*) FROM office_issue_watchdog_attempt WHERE issue_id=$1::uuid`, id).Scan(&count)
-	if count != 0 {
+	if b.reminders(id, ownerStalledEvent) != 0 {
 		t.Fatal("runtime reconnect grace was skipped")
 	}
 	b.run(w, b.now.Add(16*time.Minute))
-	events, err := w.Claim(b.ctx, uuid.NewString())
+	claimed, err := w.Claim(b.ctx, uuid.NewString())
+	var events []Reminder
+	for _, event := range claimed {
+		if event.Kind == reminderKindStall {
+			events = append(events, event)
+		}
+	}
 	if err != nil || len(events) != 1 || events[0].Cause != "runtime_offline" {
-		t.Fatalf("offline owner event=%+v %v", events, err)
+		t.Fatalf("offline owner event=%+v %v", claimed, err)
 	}
 	var status string
 	b.pool.QueryRow(b.ctx, `SELECT status FROM agent_task_queue WHERE issue_id=$1::uuid`, id).Scan(&status)

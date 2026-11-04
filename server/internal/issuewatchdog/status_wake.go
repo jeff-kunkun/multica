@@ -17,7 +17,8 @@ import (
 // Owner reminders come in three kinds, all on one chain (DENE-2967,
 // DENE-2981): a status reminder wakes the responsible owner as soon as an
 // employee delivers (in_review), blocks or finishes (done) an issue; a
-// progress reminder (progress_wake.go) reports a running issue; the
+// progress reminder (progress_wake.go) reports an in-progress issue (a new
+// comment, or 10 minutes without any activity); the
 // 30-minute stall reminder is the fallback. They share the outbox, the
 // claim-time fresh read and the Mac transport.
 const (
