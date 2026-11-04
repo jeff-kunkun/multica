@@ -104,7 +104,9 @@ func giteaSig(raw []byte) string {
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
-func TestVCSWebhook_ForgejoMirrorsAndCloses(t *testing.T) {
+// A Forgejo merge mirrors the PR and links it; the issue keeps its status for
+// manager acceptance (DENE-2697).
+func TestVCSWebhook_ForgejoMirrorsMerge(t *testing.T) {
 	ctx := context.Background()
 	box := withVCSBox(t)
 	connID := seedVCSConnection(t, ctx, box, "forgejo", "https://forgejo.test")
@@ -139,15 +141,12 @@ func TestVCSWebhook_ForgejoMirrorsAndCloses(t *testing.T) {
 	if len(rows) != 1 || rows[0].State != "merged" || rows[0].Provider != "forgejo" {
 		t.Fatalf("unexpected rows: %+v", rows)
 	}
-	updated, _ := testHandler.Queries.GetIssue(ctx, parseUUID(issue.ID))
-	if updated.Status != "done" {
-		t.Errorf("expected issue done, got %q", updated.Status)
-	}
+	wantMergeKeepsStatus(t, issue.ID, "in_progress")
 }
 
 // A bare body mention ("Related MUL-X", no closing keyword, not in title or
 // branch) claims nothing, so it must not link at all: it neither shows as a
-// working PR nor blocks a genuine Closes sibling from completing the issue.
+// working PR nor holds a genuine Closes sibling's all_merged decision.
 // Mirrors the GitHub claim rule (MUL-3739, MUL-7072).
 func TestVCSWebhook_BareBodyMentionIsNotLinked(t *testing.T) {
 	ctx := context.Background()
@@ -217,10 +216,9 @@ func TestVCSWebhook_BareBodyMentionIsNotLinked(t *testing.T) {
 		t.Fatalf("close PR: expected 202, got %d (%s)", w.Code, w.Body.String())
 	}
 
-	updated, _ := testHandler.Queries.GetIssue(ctx, parseUUID(issue.ID))
-	if updated.Status != "done" {
-		t.Errorf("issue should advance despite the open unlinked PR, got %q", updated.Status)
-	}
+	// all_merged proves the open, unlinked PR #7 does not hold the decision;
+	// the status itself stays with the manager (DENE-2697).
+	wantMergeKeepsStatus(t, issue.ID, "in_progress")
 }
 
 // The merge automation must span providers: an issue with an OPEN GitHub PR
@@ -346,8 +344,9 @@ func TestDeleteIssue_VCSLinkCleanupIsWorkspaceScoped(t *testing.T) {
 }
 
 // A PR linked while open stays linked when its merge event no longer names the
-// issue, and that merge moves the issue: the keyword only links (MUL-7726).
-func TestVCSWebhook_MergeMovesIssueLinkedEarlier(t *testing.T) {
+// issue, and that merge counts for the issue: the keyword only links
+// (MUL-7726). The status is kept for the manager (DENE-2697).
+func TestVCSWebhook_MergeCountsForIssueLinkedEarlier(t *testing.T) {
 	ctx := context.Background()
 	box := withVCSBox(t)
 	connID := seedVCSConnection(t, ctx, box, "forgejo", "https://forgejo.test")
@@ -379,10 +378,7 @@ func TestVCSWebhook_MergeMovesIssueLinkedEarlier(t *testing.T) {
 	fire("opened", "open", false, "Closes "+issue.Identifier, "2026-05-01T00:00:00Z")
 	fire("closed", "closed", true, "Related to "+issue.Identifier, "2026-05-02T00:00:00Z")
 
-	updated, _ := testHandler.Queries.GetIssue(ctx, parseUUID(issue.ID))
-	if updated.Status != "done" {
-		t.Errorf("status = %q, want done", updated.Status)
-	}
+	wantMergeKeepsStatus(t, issue.ID, "in_progress")
 	var links int
 	testPool.QueryRow(ctx, `SELECT count(*) FROM issue_vcs_pull_request WHERE issue_id = $1`, issue.ID).Scan(&links)
 	if links != 1 {
@@ -477,10 +473,7 @@ func TestVCSWebhook_GitlabMergeRequest(t *testing.T) {
 	if rows[0].State != "merged" {
 		t.Errorf("expected merged, got %q", rows[0].State)
 	}
-	updated, _ := testHandler.Queries.GetIssue(ctx, parseUUID(issue.ID))
-	if updated.Status != "done" {
-		t.Errorf("expected issue done, got %q", updated.Status)
-	}
+	wantMergeKeepsStatus(t, issue.ID, "in_progress")
 }
 
 func TestVCSWebhook_CommitStatusMirrors(t *testing.T) {

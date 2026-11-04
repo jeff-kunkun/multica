@@ -37,37 +37,30 @@ func (c *webhookStatusCatalog) GetIssueStatusEntryByKey(ctx context.Context, arg
 	return c.Querier.GetIssueStatusEntryByKey(ctx, arg)
 }
 
-// Exercise both real mirror paths, including the PR auto-complete gate.
-// Signature parsing is covered by the existing provider webhook suites.
-//
-// Catalog READS are asserted by TestWebhookStatusResolverCatalogReads, not
-// here. Counting them here cannot work: an issue that advances runs through
-// notifyWaitersOfIssueDone, which builds its own Resolver and reads the
-// catalog again, so the total is (1 + the number of issues this delivery
-// advanced) — a number this test would have to restate every time that
-// unrelated path changes. What the close check costs is measured on its own.
-func TestWebhookStatusResolver(t *testing.T) {
+// A merge on either real mirror path leaves every linked issue's status
+// alone (DENE-2697), whatever category its key has in its workspace, and so
+// the mirror no longer reads the status catalog at all. The fixtures keep the
+// cases the old close check distinguished: a custom key that is terminal in
+// one workspace and nonterminal in the other, built-ins, an unknown key, and a
+// catalog that cannot be read.
+func TestWebhookMergeLeavesStatuses(t *testing.T) {
 	ctx := context.Background()
 	for _, provider := range []string{"github", "forgejo"} {
 		t.Run(provider, func(t *testing.T) {
 			for _, tc := range []struct {
-				name           string
-				statuses, want []string
-				fail           bool
+				name     string
+				statuses []string
+				fail     bool
 			}{
-				{"custom", []string{"approved", "dropped", "review", "approved", "done"}, []string{"approved", "dropped", "done", "approved", "done"}, false},
-				{"builtins", []string{"done", "cancelled", "in_review"}, []string{"done", "cancelled", "done"}, false},
-				// An unresolved key keeps the old nonterminal-gate behavior. This
-				// optimization must not introduce a new close-policy decision.
-				{"unknown", []string{"missing", "missing"}, []string{"done", "done"}, false},
-				{"unavailable", []string{"review", "review"}, []string{"done", "done"}, true},
+				{"custom", []string{"approved", "dropped", "review", "approved", "done"}, false},
+				{"builtins", []string{"done", "cancelled", "in_review"}, false},
+				{"unknown", []string{"missing", "missing"}, false},
+				{"unavailable", []string{"review", "review"}, true},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					catalog := &webhookStatusCatalog{Querier: testHandler.Queries, reads: map[pgtype.UUID]int{}, fail: tc.fail}
 					h := *testHandler
 					h.IssueStatusCatalog = catalog
-					// The same key is terminal in one workspace and nonterminal in
-					// the other; a process-wide resolver would close the wrong set.
 					for workspace := 0; workspace < 2; workspace++ {
 						ws := dbfx.Workspace(t, "Webhook status resolver", fmt.Sprintf("resolver-%s-%s-%d", provider, tc.name, workspace), testutil.Cols{"issue_prefix": "RSL"})
 						wsID := parseUUID(ws)
@@ -95,27 +88,21 @@ func TestWebhookStatusResolver(t *testing.T) {
 						fixture.Cleanup(t, "DELETE FROM vcs_pull_request WHERE workspace_id = $1", ws)
 						mirror := mirrorFixturePullRequest(ctx, t, &h, provider, fixture, ws, wsID, workspace, strings.Join(closing, "\n"))
 						mirror(1)
+						mirror(2)
 						for i, id := range ids {
-							want := tc.want[i]
-							if workspace == 1 && tc.statuses[i] == "approved" {
-								want = "done"
-							}
 							var status string
 							fixture.QueryRow(t, "SELECT status FROM issue WHERE id = $1", id).Scan(&status)
-							if status != want {
-								t.Errorf("workspace %d issue %d status = %q, want %q", workspace, i, status, want)
+							if status != tc.statuses[i] {
+								t.Errorf("workspace %d issue %d status = %q, want %q kept", workspace, i, status, tc.statuses[i])
 							}
 						}
-						// A redelivery of the same merge is not a new PR event, so it
-						// decides nothing and reads nothing.
-						if tc.name == "custom" {
-							fixture.Exec(t, "UPDATE issue SET status = 'dropped' WHERE id = $1", ids[0])
-							mirror(1)
-							var status string
-							fixture.QueryRow(t, "SELECT status FROM issue WHERE id = $1", ids[0]).Scan(&status)
-							if status != "dropped" {
-								t.Errorf("replay changed terminal status to %q", status)
-							}
+						var linked int
+						fixture.QueryRow(t, "SELECT count(*) FROM (SELECT issue_id FROM issue_pull_request UNION ALL SELECT issue_id FROM issue_vcs_pull_request) l WHERE issue_id IN (SELECT id FROM issue WHERE workspace_id = $1)", ws).Scan(&linked)
+						if want := 2 * len(ids); linked != want {
+							t.Errorf("workspace %d: %d links, want %d (both PRs to every issue)", workspace, linked, want)
+						}
+						if got := catalog.reads[wsID]; got != 0 {
+							t.Errorf("workspace %d: catalog reads = %d, want 0", workspace, got)
 						}
 					}
 					if catalog.pointReads != 0 {
@@ -131,7 +118,7 @@ func TestWebhookStatusResolver(t *testing.T) {
 // closes every issue the fixture just created, driven through the provider's
 // real mirror path. Each PR number is a separate delivery. workspace is the
 // loop index; the two providers are otherwise identical, which is what lets
-// the read-count test below exercise both without restating the payload.
+// the merge test above exercise both without restating the payload.
 func mirrorFixturePullRequest(
 	ctx context.Context,
 	t *testing.T,
@@ -163,84 +150,5 @@ func mirrorFixturePullRequest(
 	return func(number int32) {
 		ev := vcs.PullRequestEvent{Action: "closed", State: "merged", RepoOwner: "fixture", RepoName: "resolver", Number: number, Title: "Resolve linked issues", Body: body, HTMLURL: fmt.Sprintf("https://forgejo.test/fixture/resolver/pulls/%d", number), CreatedAt: timestamp, UpdatedAt: timestamp}
 		h.mirrorVCSPullRequest(ctx, conn, ev)
-	}
-}
-
-// The close check resolves the workspace's status catalog at most ONCE per
-// delivery, however many linked issues it re-evaluates, and once per delivery
-// rather than once per process. That is the whole point of the workspace-scoped
-// Resolver (f5f0b604f), and it is the only thing counted here.
-//
-// Every issue starts terminal, so nothing advances and the close check is the
-// sole catalog reader. That is what makes this count attributable: an issue
-// that does advance goes on to notifyWaitersOfIssueDone, which builds a
-// Resolver of its own and reads the catalog again. Counting the two together
-// is why the shared assertion in TestWebhookStatusResolver used to read 3 where
-// it wanted 1 — and why it looked like cross-run state leaking in.
-func TestWebhookStatusResolverCatalogReads(t *testing.T) {
-	ctx := context.Background()
-	for _, provider := range []string{"github", "forgejo"} {
-		t.Run(provider, func(t *testing.T) {
-			for _, tc := range []struct {
-				name      string
-				status    string
-				wantReads int
-			}{
-				// Five linked issues, one catalog read: the resolver is reused
-				// across the loop instead of loading per issue.
-				{"custom terminal key", "approved", 1},
-				// A built-in needs no catalog at all — the fast path the perf
-				// change had to preserve.
-				{"built-in key", "done", 0},
-			} {
-				t.Run(tc.name, func(t *testing.T) {
-					catalog := &webhookStatusCatalog{Querier: testHandler.Queries, reads: map[pgtype.UUID]int{}}
-					h := *testHandler
-					h.IssueStatusCatalog = catalog
-					ws := dbfx.Workspace(t, "Webhook status resolver reads", fmt.Sprintf("resolver-reads-%s-%s", provider, strings.ReplaceAll(tc.name, " ", "-")), testutil.Cols{"issue_prefix": "RSL"})
-					wsID := parseUUID(ws)
-					fixture := testutil.New(testPool, ws, testUserID)
-					fixture.Insert(t, "issue_status", testutil.Cols{
-						"workspace_id": ws, "key": "approved", "name": "approved",
-						"category": "done", "color": "#123456", "archived_at": testutil.Raw("now()"),
-					})
-
-					const linked = 5
-					var closing []string
-					for i := 1; i <= linked; i++ {
-						fixture.Issue(t, "Resolver read fixture", testutil.Cols{"status": tc.status, "number": i})
-						closing = append(closing, fmt.Sprintf("Closes RSL-%d", i))
-					}
-					for _, table := range []string{"issue_pull_request", "issue_vcs_pull_request"} {
-						fixture.Cleanup(t, "DELETE FROM "+table+" WHERE issue_id IN (SELECT id FROM issue WHERE workspace_id = $1)", ws)
-					}
-					fixture.Cleanup(t, "DELETE FROM github_pull_request WHERE workspace_id = $1", ws)
-					fixture.Cleanup(t, "DELETE FROM vcs_pull_request WHERE workspace_id = $1", ws)
-
-					mirror := mirrorFixturePullRequest(ctx, t, &h, provider, fixture, ws, wsID, 0, strings.Join(closing, "\n"))
-					mirror(1)
-					if got := catalog.reads[wsID]; got != tc.wantReads {
-						t.Errorf("catalog reads for %d linked issues = %d, want %d", linked, got, tc.wantReads)
-					}
-					// A redelivery of the same merge is not a new PR event, so it
-					// decides nothing and reads nothing.
-					mirror(1)
-					if got := catalog.reads[wsID]; got != tc.wantReads {
-						t.Errorf("catalog reads after redelivery = %d, want %d", got, tc.wantReads)
-					}
-					// A second merged PR re-resolves from scratch: the resolver is
-					// scoped to one mirror pass, not cached across webhooks.
-					mirror(2)
-					if got := catalog.reads[wsID]; got != tc.wantReads*2 {
-						t.Errorf("catalog reads after a second delivery = %d, want %d", got, tc.wantReads*2)
-					}
-					// And not through the per-key path, which would cost one read
-					// per issue and is what this optimization replaced.
-					if catalog.pointReads != 0 {
-						t.Errorf("per-key reads = %d, want 0", catalog.pointReads)
-					}
-				})
-			}
-		})
 	}
 }

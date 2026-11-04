@@ -352,7 +352,9 @@ func TestRealtimeGuestSeesProjectScopeOnlyAfterJoining(t *testing.T) {
 	}
 
 	// From now on the project's issues are live for the guest.
-	liveTitle := visIssueTitle("project-live")
+	// Same-project similarity blocks API creation (DENE-2913), so this title
+	// shares no keyword with the project-scope issue above.
+	liveTitle := fmt.Sprintf("guest live delivery %d", time.Now().UnixNano())
 	live := visCreateIssue(t, testToken, projectID, liveTitle, nil)
 	visSetIssueVisibility(t, testToken, live["id"].(string), "project")
 	delivered := guest.waitForType("issue:updated", 5*time.Second)
