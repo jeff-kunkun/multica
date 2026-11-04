@@ -1,9 +1,43 @@
 # Office owner reminders
 
-The server is the only stall decision engine (DENE-2949). Normal assignment,
+The server is the only owner-reminder decision engine (DENE-2949). It sends two
+kinds through one outbox: a status reminder the moment an issue is delivered or
+blocked (DENE-2967) and the 30-minute stall reminder as the fallback. Normal assignment,
 mentions, explicitly requested wakeups and bounded task-level technical retries
 continue through their existing services. This scheduler never calls rerun,
 handoff, employee wake, issue creation, status mutation or a COO webhook.
+
+## Status reminders (DENE-2967)
+
+Entering `in_review` (cause `delivered`) or `blocked` (cause `blocked`) wakes
+the responsible owner once. An `issue:updated` bus listener with
+`status_changed` queues the row at once; the minute scan repeats the check for
+entries within the last 10 minutes, so a missed event costs one tick and a
+deploy does not wake owners for issues that sat in review for days. The event
+type is `owner_status` and the key is `owner-status:<status-change event id>`
+from `office_event`, so the listener, every scan and a second server write one
+row per entry. Issues created directly in a waking status have no entry event
+and stay with the stall fallback. Waiting-Kun, paused and closed issues are
+quiet, as for stalls.
+
+The row becomes claimable 10 seconds after the move, so the delivery comment
+posted right after the status flip is the one the owner reads. At claim time
+the server re-reads the issue: if it left the status or re-entered it by a
+newer move, the row ends as `resolved_before_delivery`. Otherwise the payload
+is refreshed with the current title, status, owner, `checked_at`, the issue's
+web link (`MULTICA_APP_URL`, else `FRONTEND_ORIGIN`; empty when neither is set
+and the Mac fills its own) and the latest substantive comment (the assignee's
+own first): one-line summary up to 280 characters with credential-looking
+values masked, up to 5 cited links and up to 5 attachment names. The Mac reads
+the status once more just before sending; when it changed, nothing is sent and
+the receipt is `stale` (terminal).
+
+Leaving and re-entering a status is a new entry and wakes again. Within one
+entry the stall fallback stays quiet once a status reminder was sent, is in
+flight or ended uncertain; it fires only after a proven non-delivery
+(`not_sent` after its retry, `resolved_before_delivery` or `stale`), and then
+once per entry: stall reminders for in_review / blocked carry the same
+`status_entry` and are skipped once one exists.
 
 ## Decision and ownership
 
@@ -47,7 +81,8 @@ multica issue reminder receipt 123 --content-file receipt.json --output json
 ```
 
 Claim body: `{"claim_token":"<durable UUID>"}`. Receipt additionally has result
-`sent`, `not_sent` or `uncertain`. The corresponding endpoints are POST
+`sent`, `not_sent`, `uncertain` or `stale` (the worker's last read found the
+status had moved on; terminal, nothing sent). The corresponding endpoints are POST
 `/api/workspaces/{id}/issue-reminders/claim` and
 `/api/workspaces/{id}/issue-reminders/{reminderId}/receipt`.
 Task tokens and external Bot keys cannot collect workspace-wide reminder data.
@@ -85,7 +120,9 @@ Before rollout inspect actual switch values without printing secrets. Apply the
 additive migration, deploy the backend and matching Mac CLI, install reminder
 with status-light `office/install.py install reminder`, and install the passive
 collector through StatusLight's normal signed release path. Start with the
-server switch off until the transport and owner registration are ready. Once
+server switch off until the transport and owner registration are ready.
+Status reminders need the Mac reminder that understands `owner_status`
+installed first: an older worker rejects the whole claimed batch as invalid. Once
 on, all already-stalled eligible issues in that workspace can emit one event.
 
 For rollback, disable the server switch and redeploy the previous image. Leave
@@ -103,5 +140,8 @@ reviewer, quiet states, owner fallback, episode deduplication, fresh claim reads
 worker idempotency, no stealing, bounded pre-send retry and uncertain no-replay.
 Mac transport tests cover real SQLite restart/receipt recovery and owner-only
 payloads. Use a naturally stalled test issue to verify one owner delivery and
-no employee run, COO event, status change or relay issue. Do not backdate the
+no employee run, COO event, status change or relay issue. For status reminders,
+move a fresh test issue to in_review and another to blocked and check one
+`owner_status` row each, delivered within a minute with the latest status, and
+no further rows over later scans. Do not backdate the
 production issue to simulate the grace period.

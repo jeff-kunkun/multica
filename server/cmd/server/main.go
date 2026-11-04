@@ -733,6 +733,9 @@ func main() {
 		os.Exit(1)
 	}
 	watchdog := issuewatchdog.New(pool, watchdogConfig, nil)
+	if watchdogConfig.Enabled {
+		registerOwnerReminderListener(bus, watchdogConfig.WorkspaceID, watchdog)
+	}
 
 	// Construct a LivenessStore that mirrors the one wired into the HTTP
 	// handler. Both the heartbeat write path (handler) and the sweeper read

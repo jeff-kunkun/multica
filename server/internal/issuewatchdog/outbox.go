@@ -91,7 +91,10 @@ func hasAnyRunUsing(ctx context.Context, store QueryStore, issue Issue, now time
 }
 
 type Reminder struct {
-	ID                 int64     `json:"id"`
+	ID int64 `json:"id"`
+	// Kind is "stall" (30 minutes without a run or progress) or "status"
+	// (the issue was just delivered or blocked). Empty reads as stall.
+	Kind               string    `json:"kind"`
 	EventID            string    `json:"event_id"`
 	IssueID            string    `json:"issue_id"`
 	IssueNumber        string    `json:"issue_number"`
@@ -106,6 +109,25 @@ type Reminder struct {
 	RegistrationNeeded bool      `json:"registration_needed"`
 	DeliveryCount      int       `json:"delivery_count"`
 	ClaimToken         string    `json:"claim_token"`
+	// StatusEntry is the status-change event the issue entered Status with
+	// (0: created in it); one owner wake per entry of in_review / blocked.
+	StatusEntry int64     `json:"status_entry"`
+	EnteredAt   time.Time `json:"entered_at,omitzero"`
+	// Claim-time facts: what the owner reads is re-read at CheckedAt.
+	CheckedAt time.Time        `json:"checked_at,omitzero"`
+	IssueURL  string           `json:"issue_url,omitempty"`
+	Comment   *ReminderComment `json:"comment,omitempty"`
+}
+
+// ReminderComment is the latest delivery comment: a masked one-line summary,
+// the links it cites and its attachments.
+type ReminderComment struct {
+	ID          string          `json:"id"`
+	Author      string          `json:"author"`
+	At          time.Time       `json:"at"`
+	Summary     string          `json:"summary"`
+	Links       []string        `json:"links,omitempty"`
+	Attachments []attachmentRef `json:"attachments,omitempty"`
 }
 
 // Claim reserves a bounded batch for one durable worker request. Repeating the
@@ -135,16 +157,17 @@ func (w *Watchdog) Claim(ctx context.Context, token string) ([]Reminder, error) 
 	}
 	first := inserted.RowsAffected() > 0
 	rows, err := tx.Query(ctx, `
- SELECT id, payload, delivery_count, claim_token::text
+ SELECT id, event_type, payload, delivery_count, claim_token::text
  FROM office_issue_watchdog_attempt
- WHERE workspace_id=$1::uuid AND event_type='owner_stalled' AND outcome='claimed'
+ WHERE workspace_id=$1::uuid AND event_type=ANY($4) AND outcome='claimed'
    AND (claim_token=$2::uuid OR ($3 AND (claim_token IS NULL OR delivery_result='not_sent') AND available_at<=now() AND delivery_count<2))
- ORDER BY id LIMIT 50 FOR UPDATE SKIP LOCKED`, w.cfg.WorkspaceID, token, first)
+ ORDER BY id LIMIT 50 FOR UPDATE SKIP LOCKED`, w.cfg.WorkspaceID, token, first, ownerReminderEvents)
 	if err != nil {
 		return nil, err
 	}
 	type candidate struct {
 		id    int64
+		kind  string
 		data  []byte
 		count int
 		token *string
@@ -152,7 +175,7 @@ func (w *Watchdog) Claim(ctx context.Context, token string) ([]Reminder, error) 
 	var candidates []candidate
 	for rows.Next() {
 		var c candidate
-		if err := rows.Scan(&c.id, &c.data, &c.count, &c.token); err != nil {
+		if err := rows.Scan(&c.id, &c.kind, &c.data, &c.count, &c.token); err != nil {
 			rows.Close()
 			return nil, err
 		}
@@ -163,23 +186,30 @@ func (w *Watchdog) Claim(ctx context.Context, token string) ([]Reminder, error) 
 	if err != nil {
 		return nil, err
 	}
+	now := w.now()
 	for _, c := range candidates {
 		var event Reminder
 		if json.Unmarshal(c.data, &event) != nil {
 			return nil, errors.New("invalid reminder payload")
+		}
+		if event.Kind == "" {
+			event.Kind = reminderKindStall
 		}
 		// Re-read current issue and all runs immediately before delivery admission.
 		issue, loadErr := w.loadIssueUsing(ctx, tx, w.cfg.WorkspaceID, event.IssueID)
 		if loadErr != nil && !errors.Is(loadErr, pgx.ErrNoRows) {
 			return nil, loadErr
 		}
-		eligible := loadErr == nil && stallEligible(issue) && issue.ProgressAt.Equal(event.StallAt)
-		if eligible {
-			active, runErr := hasAnyRunUsing(ctx, tx, issue, w.now())
-			if runErr != nil {
-				return nil, runErr
+		eligible := false
+		if loadErr == nil {
+			if c.kind == ownerStatusEvent {
+				eligible, err = statusStillCurrent(ctx, tx, issue, event)
+			} else {
+				eligible, err = stallStillCurrent(ctx, tx, issue, event, now)
 			}
-			eligible = !active && w.now().Sub(issue.ProgressAt) >= 30*time.Minute
+			if err != nil {
+				return nil, err
+			}
 		}
 		if !eligible {
 			if _, err = tx.Exec(ctx, `UPDATE office_issue_watchdog_attempt SET outcome='failed',delivery_result='resolved_before_delivery' WHERE id=$1`, c.id); err != nil {
@@ -187,7 +217,9 @@ func (w *Watchdog) Claim(ctx context.Context, token string) ([]Reminder, error) 
 			}
 			continue
 		}
-		event.Manager, event.RegistrationNeeded = w.cfg.Owners.Resolve(issue.ManagerName, issue.ProjectID)
+		if err = w.refreshReminder(ctx, tx, &event, issue, now); err != nil {
+			return nil, err
+		}
 		event.ID, event.ClaimToken = c.id, token
 		event.DeliveryCount = c.count
 		if c.token == nil || *c.token != token {
@@ -207,22 +239,49 @@ func (w *Watchdog) Claim(ctx context.Context, token string) ([]Reminder, error) 
 	return result, nil
 }
 
+// stallStillCurrent: no progress since the stall was judged, no run, still
+// 30 minutes quiet.
+func stallStillCurrent(ctx context.Context, store QueryStore, issue Issue, event Reminder, now time.Time) (bool, error) {
+	if !stallEligible(issue) || !issue.ProgressAt.Equal(event.StallAt) {
+		return false, nil
+	}
+	active, err := hasAnyRunUsing(ctx, store, issue, now)
+	if err != nil || active {
+		return false, err
+	}
+	return now.Sub(issue.ProgressAt) >= 30*time.Minute, nil
+}
+
+// statusStillCurrent: the issue is still in the status it was delivered or
+// blocked with, entered by the same move, and not waiting on Kun.
+func statusStillCurrent(ctx context.Context, store QueryStore, issue Issue, event Reminder) (bool, error) {
+	if !stallEligible(issue) || issue.Status != event.Status {
+		return false, nil
+	}
+	entry, err := currentStatusEntry(ctx, store, issue)
+	if err != nil {
+		return false, err
+	}
+	return entry.EventID == event.StatusEntry, nil
+}
+
 // Receipt only retries a proven pre-send failure. Timeouts and crashes remain
-// visible as uncertain; replaying those could notify the owner twice.
+// visible as uncertain; replaying those could notify the owner twice. stale
+// means the worker's last read before sending found the issue had moved on.
 func (w *Watchdog) Receipt(ctx context.Context, id int64, token, result string) error {
 	if _, err := uuid.Parse(token); err != nil {
 		return errors.New("claim_token must be a UUID")
 	}
-	if result != "sent" && result != "not_sent" && result != "uncertain" {
-		return errors.New("result must be sent, not_sent or uncertain")
+	if result != "sent" && result != "not_sent" && result != "uncertain" && result != "stale" {
+		return errors.New("result must be sent, not_sent, uncertain or stale")
 	}
 	tag, err := w.pool.Exec(ctx, `UPDATE office_issue_watchdog_attempt
  SET outcome=CASE WHEN $4='sent' THEN 'sent' WHEN $4='not_sent' AND delivery_count<2 THEN 'claimed' ELSE 'failed' END,
      delivery_result=$4,
      claim_token=CASE WHEN $4='not_sent' AND delivery_count<2 THEN NULL ELSE claim_token END,
      available_at=now()+interval '30 seconds', delivered_at=CASE WHEN $4='sent' THEN COALESCE(delivered_at,now()) ELSE delivered_at END
- WHERE workspace_id=$1::uuid AND id=$2 AND event_type='owner_stalled' AND claim_token=$3::uuid
-   AND (outcome='claimed' OR delivery_result=$4)`, w.cfg.WorkspaceID, id, token, result)
+ WHERE workspace_id=$1::uuid AND id=$2 AND event_type=ANY($5) AND claim_token=$3::uuid
+   AND (outcome='claimed' OR delivery_result=$4)`, w.cfg.WorkspaceID, id, token, result, ownerReminderEvents)
 	if err != nil {
 		return err
 	}
@@ -230,7 +289,7 @@ func (w *Watchdog) Receipt(ctx context.Context, id int64, token, result string) 
 		// A repeated not_sent receipt after its token was released is harmless.
 		var previous string
 		err = w.pool.QueryRow(ctx, `SELECT delivery_result FROM office_issue_watchdog_attempt
-   WHERE workspace_id=$1::uuid AND id=$2 AND event_type='owner_stalled'`, w.cfg.WorkspaceID, id).Scan(&previous)
+   WHERE workspace_id=$1::uuid AND id=$2 AND event_type=ANY($3)`, w.cfg.WorkspaceID, id, ownerReminderEvents).Scan(&previous)
 		if err == nil && previous == result && result == "not_sent" {
 			return nil
 		}
