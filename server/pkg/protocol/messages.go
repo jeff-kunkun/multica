@@ -69,6 +69,14 @@ const (
 	// Gated so only daemons+servers that both support it route claim over WS;
 	// everyone else keeps using the HTTP claim endpoint.
 	DaemonCapabilityRPCV1 = "rpc-v1"
+	// DaemonCapabilityHandoffV1 is server-to-daemon only (heartbeat ack
+	// server_capabilities): POST /api/daemon/runtimes/{id}/recover-orphans
+	// accepts {"task_ids": [...]} and fails only those in-flight tasks
+	// (DENE-2979). A daemon hands its profile to a successor process only when
+	// the server advertises it; otherwise a version switch keeps the old
+	// stop-then-start, because an older server would read the narrowed
+	// request as "fail every task on this runtime".
+	DaemonCapabilityHandoffV1 = "daemon-handoff-v1"
 	// DaemonCapabilityClaimPollHintsV1 advertises that the daemon understands
 	// the batch-claim response's safety-poll metadata. The server only performs
 	// the extra deferred-task lookup for clients that opt in, and an older

@@ -30,7 +30,44 @@ func (h *Handler) RecoverOrphanedTasks(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rows, err := h.TaskService.RecoverOrphanedTasksForRuntime(r.Context(), parseUUID(runtimeID))
+	// An optional body narrows the recovery to named tasks (DENE-2979). A
+	// daemon handing over to a successor shares its runtime with that
+	// successor, so the successor names exactly the tasks its vanished
+	// predecessor held instead of failing everything on the runtime. Older
+	// daemons send no body and keep the runtime-wide recovery.
+	//
+	// Presence of the key selects the narrow form, whatever its value: a
+	// handoff request that arrives with `null` or `[]` must recover nothing,
+	// never fall through to failing every task on the runtime.
+	var req struct {
+		TaskIDs json.RawMessage `json:"task_ids"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	var (
+		rows []db.AgentTaskQueue
+		err  error
+	)
+	if len(req.TaskIDs) > 0 {
+		var taskIDs []string
+		if err := json.Unmarshal(req.TaskIDs, &taskIDs); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid task_ids")
+			return
+		}
+		if len(taskIDs) == 0 {
+			writeJSON(w, http.StatusOK, map[string]any{"orphaned": 0, "retried": 0})
+			return
+		}
+		taskUUIDs, ok := parseUUIDSliceOrBadRequest(w, taskIDs, "task_ids")
+		if !ok {
+			return
+		}
+		rows, err = h.TaskService.RecoverOrphanedTasksForRuntimeByIDs(r.Context(), parseUUID(runtimeID), taskUUIDs)
+	} else {
+		rows, err = h.TaskService.RecoverOrphanedTasksForRuntime(r.Context(), parseUUID(runtimeID))
+	}
 	if err != nil {
 		slog.Warn("recover-orphans failed", "runtime_id", runtimeID, "error", err)
 		writeError(w, http.StatusInternalServerError, "recover orphans failed")

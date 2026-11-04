@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
   alive: false,
+  retiring: false,
+  os: undefined as string | undefined,
   autoStart: true,
   token: "test-saved-token",
   exec: vi.fn(),
@@ -41,6 +43,8 @@ vi.mock("./daemon-port", () => ({
   probeProfileHealth: async () => state.alive ? {
     status: "running", daemon_id: "test-daemon", profile: "desktop-office.example.com",
     server_url: "https://office.example.com", cli_version: "test",
+    ...(state.retiring ? { retiring: true } : {}),
+    ...(state.os ? { os: state.os } : {}),
   } : null,
 }));
 vi.mock("./cli-bootstrap", () => ({ ensureManagedCli: vi.fn(), managedCliPath: () => "/test/cli" }));
@@ -51,6 +55,8 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
   state.alive = false;
+  state.retiring = false;
+  state.os = undefined;
   state.autoStart = true;
   state.token = "test-saved-token";
   state.handlers.clear();
@@ -59,6 +65,7 @@ beforeEach(() => {
     if (args[0] === "version") callback(null, '{"version":"test"}');
     else if (args[1] === "start") {
       state.alive = true;
+      state.retiring = false;
       callback(null);
     } else callback(null);
   });
@@ -106,6 +113,42 @@ describe("Desktop daemon supervision", () => {
     await state.handlers.get("daemon:stop")!();
     await vi.advanceTimersByTimeAsync(60_000);
     expect(starts()).toHaveLength(0);
+  });
+
+  // DENE-2979: a daemon that handed over only finishes its runs. It is not
+  // the profile's daemon, so Desktop starts one beside it.
+  it("starts a daemon beside one that is only retiring", async () => {
+    state.alive = true;
+    state.retiring = true;
+    await boot();
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(starts()).toHaveLength(1);
+  });
+
+  // A credential change must not leave the old login's daemon running, even
+  // one that is only retiring.
+  it("restarts on a credential change when only a retiring daemon is up", async () => {
+    await boot();
+    await vi.advanceTimersByTimeAsync(15_000);
+    state.retiring = true;
+    state.exec.mockClear();
+    await state.handlers.get("daemon:sync-token")!({}, "mul_test_rotated", "user-2");
+    const stops = state.exec.mock.calls.filter((call) => call[1][0] === "daemon" && call[1][1] === "stop");
+    expect(stops).toHaveLength(1);
+    expect(starts()).toHaveLength(1);
+  });
+
+  // The foreign-OS guard must still see a retiring daemon's OS: Stop on a
+  // daemon the app cannot drive stays a no-op.
+  it("does not stop a foreign daemon that is retiring", async () => {
+    await boot();
+    await vi.advanceTimersByTimeAsync(15_000);
+    state.retiring = true;
+    state.os = process.platform === "linux" ? "windows" : "linux";
+    state.exec.mockClear();
+    await state.handlers.get("daemon:stop")!();
+    const stops = state.exec.mock.calls.filter((call) => call[1][0] === "daemon" && call[1][1] === "stop");
+    expect(stops).toHaveLength(0);
   });
 
   it("recovers when a successful start command never produces a health listener", async () => {

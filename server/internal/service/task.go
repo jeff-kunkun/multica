@@ -7258,6 +7258,18 @@ func (s *TaskService) RecoverOrphanedTasksForRuntime(ctx context.Context, runtim
 	})
 }
 
+// RecoverOrphanedTasksForRuntimeByIDs fails only the named in-flight tasks on
+// a runtime: the work a retired daemon process held when it disappeared while
+// its successor keeps running other tasks on the same runtime (DENE-2979).
+func (s *TaskService) RecoverOrphanedTasksForRuntimeByIDs(ctx context.Context, runtimeID pgtype.UUID, taskIDs []pgtype.UUID) ([]db.AgentTaskQueue, error) {
+	return s.terminateTasksInTx(ctx, func(qtx *db.Queries) ([]db.AgentTaskQueue, error) {
+		return qtx.RecoverOrphanedTasksForRuntimeByIDs(ctx, db.RecoverOrphanedTasksForRuntimeByIDsParams{
+			RuntimeID: runtimeID,
+			TaskIds:   taskIDs,
+		})
+	})
+}
+
 // CancelTasksForArchivedAgent cancels every active task belonging to an agent
 // being archived and settles their recovery receipts in the same transaction.
 //

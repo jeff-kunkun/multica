@@ -6,9 +6,16 @@ export interface VersionCheckHealth {
   status?: string;
   cli_version?: string;
   active_task_count?: number;
+  /**
+   * The daemon can hand over to a successor without interrupting its runs
+   * (DENE-2979). Absent on daemons, or servers, that predate the handoff.
+   */
+  handoff_ready?: boolean;
+  /** Handed over to a newer daemon and only finishing its runs (DENE-2979). */
+  retiring?: boolean;
 }
 
-export type VersionAction = "restart" | "defer" | "ok" | "not_running";
+export type VersionAction = "handoff" | "restart" | "defer" | "ok" | "not_running";
 
 /**
  * Decides what the daemon-manager should do given the currently-resolved
@@ -16,6 +23,8 @@ export type VersionAction = "restart" | "defer" | "ok" | "not_running";
  *
  *   not_running: no daemon is up, nothing to do
  *   ok:          versions match, OR either side is unknown (fail safe)
+ *   handoff:     versions differ and the daemon can hand over — start the new
+ *                daemon now; the old one finishes its runs, then exits
  *   defer:       versions differ but the daemon is busy — wait for drain
  *   restart:     versions differ and the daemon is idle — safe to restart
  *
@@ -26,10 +35,14 @@ export function decideVersionAction(
   running: VersionCheckHealth | null,
 ): VersionAction {
   if (!running || running.status !== "running") return "not_running";
+  // Already handing over; it exits by itself and is nobody's to restart.
+  if (running.retiring === true) return "not_running";
 
   const runningVersion = running.cli_version;
   if (!bundled || !runningVersion) return "ok";
   if (runningVersion === bundled) return "ok";
+
+  if (running.handoff_ready === true) return "handoff";
 
   const activeTasks = running.active_task_count ?? 0;
   if (activeTasks > 0) return "defer";

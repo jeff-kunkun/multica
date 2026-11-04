@@ -53,7 +53,8 @@ func (d *Daemon) tryEnterClaimFor(runtimeIDs []string) (agentCLIClaim, bool) {
 	// A /drain lease pauses this gate too: it is the one the batch poller
 	// actually goes through, so checking only tryEnterClaim would never stop
 	// a claim.
-	if d.pauseClaims || d.draining() {
+	// A retiring daemon (DENE-2979) has handed new work to its successor.
+	if d.pauseClaims || d.draining() || d.isRetiring() {
 		return agentCLIClaim{}, false
 	}
 	var claim agentCLIClaim

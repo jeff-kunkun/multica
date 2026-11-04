@@ -749,6 +749,10 @@ type Daemon struct {
 	// claimGateWakeup nudges the batch poller when a held provider is
 	// released, so its queued tasks do not wait out a poll interval.
 	claimGateWakeup chan struct{}
+	// handoff is the version-switch handover state (DENE-2979): this process
+	// retiring in favour of a successor, or this process watching a retiring
+	// predecessor. See handoff.go.
+	handoff handoffState
 	// drainUntil (unix nanos) pauses claiming until that time; set by POST
 	// /drain. Independent of pauseClaims so the update barriers never see it.
 	drainUntil atomic.Int64
@@ -2235,6 +2239,18 @@ func (d *Daemon) run(ctx context.Context, healthLn net.Listener) error {
 	// already run, so a missing token still fails fast before we begin serving.
 	go d.serveHealth(ctx, healthLn, time.Now())
 
+	// A handoff successor (DENE-2979) learns what its retiring predecessor
+	// holds before its first claim, whose recovery part must list those tasks.
+	if d.cfg.Predecessor.PID > 0 {
+		d.setPredecessor(d.cfg.Predecessor)
+		if d.probePredecessor(ctx) {
+			d.logger.Info("taking over from a retiring daemon", "predecessor_pid", d.cfg.Predecessor.PID, "predecessor_held_tasks", len(d.predecessorHeldIDs()))
+		} else {
+			d.logger.Warn("retiring predecessor did not answer; watching it until it exits", "predecessor_pid", d.cfg.Predecessor.PID)
+		}
+		go d.predecessorWatchLoop(ctx)
+	}
+
 	// Renew the PAT before the first API call, then do the initial
 	// workspace sync. Both steps live in preflightAuth so the ordering
 	// invariant (renew first) is enforced at one site instead of
@@ -2244,8 +2260,20 @@ func (d *Daemon) run(ctx context.Context, healthLn net.Listener) error {
 		return err
 	}
 
-	// Deregister runtimes on shutdown (uses a fresh context since ctx will be cancelled).
-	defer d.deregisterRuntimes()
+	// Deregister runtimes on shutdown (uses a fresh context since ctx will be
+	// cancelled) — except after retiring: the successor shares them and is
+	// running on them right now.
+	defer func() {
+		if d.isRetiring() {
+			d.logger.Info("retired: leaving runtimes registered for the successor")
+			return
+		}
+		if d.hasPredecessor() {
+			d.logger.Info("leaving runtimes registered while the retiring predecessor finishes its runs")
+			return
+		}
+		d.deregisterRuntimes()
+	}()
 
 	// Start workspace sync loop to discover newly created workspaces.
 	go d.workspaceSyncLoop(ctx)
@@ -4592,7 +4620,17 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 		// running on these runtimes. Without this, an issue can stay stuck
 		// at in_progress until the slow heartbeat sweeper or the in-flight
 		// task timeout (2.5h) kicks in.
-		for _, rid := range runtimeIDs {
+		//
+		// Not during a handoff (DENE-2979): the runtimes are shared with a
+		// retiring process whose runs are alive, and a runtime-wide recovery
+		// would fail them. The successor recovers a vanished predecessor's runs
+		// by name instead (finishPredecessor).
+		recoverIDs := runtimeIDs
+		if d.hasPredecessor() || d.isRetiring() {
+			d.logger.Info("skipping runtime-wide orphan recovery during a daemon handoff", "workspace_id", id)
+			recoverIDs = nil
+		}
+		for _, rid := range recoverIDs {
 			if err := d.client.RecoverOrphans(ctx, rid); err != nil {
 				d.logger.Warn("recover-orphans failed", "runtime_id", rid, "error", err)
 			}
@@ -4779,6 +4817,7 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 	if resp == nil {
 		return
 	}
+	d.observeServerCapabilities(resp.ServerCapabilities)
 	if resp.PendingUpdate != nil || resp.PendingModelList != nil || resp.PendingLocalSkills != nil || resp.PendingLocalSkillImport != nil {
 		d.logger.Debug("heartbeat: pending actions",
 			"runtime_id", runtimeID,
@@ -5238,6 +5277,14 @@ func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *Pen
 		return
 	}
 
+	if d.isRetiring() || d.hasPredecessor() {
+		d.reportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
+			"status": "failed",
+			"error":  "a daemon handover is in progress on this machine; retry the update once it finishes",
+		})
+		return
+	}
+
 	switch d.tryBeginServerUpdate(ctx) {
 	case serverUpdateAlreadyRunning:
 		d.logger.Warn("update deferred: another update is already in progress", "runtime_id", runtimeID, "update_id", update.ID)
@@ -5429,7 +5476,7 @@ func (d *Daemon) reportUpdateResultWithRetry(ctx context.Context, runtimeID, upd
 func (d *Daemon) tryEnterClaim() bool {
 	d.claimMu.Lock()
 	defer d.claimMu.Unlock()
-	if d.pauseClaims || d.draining() {
+	if d.pauseClaims || d.draining() || d.isRetiring() {
 		return false
 	}
 	d.claimsInFlight++

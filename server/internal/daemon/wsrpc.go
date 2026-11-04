@@ -357,7 +357,7 @@ func (d *Daemon) claimTasksWSFirst(ctx context.Context, daemonID string, runtime
 			claimBody(daemonID, runtimeIDs, maxTasks, rec), &resp)
 		if err == nil {
 			resp.ClaimedOverWS = true
-			d.claimRecoveryPending.Store(resp.RecoveryPending)
+			d.claimRecoveryPending.Store(resp.RecoveryPending || rec.Deferred)
 			return resp, nil
 		}
 		if errors.Is(err, errWSRPCUncertain) {
@@ -382,7 +382,7 @@ func (d *Daemon) claimTasksWSFirst(ctx context.Context, daemonID string, runtime
 	}
 	result, err := d.client.claimTasksWithHints(ctx, daemonID, runtimeIDs, maxTasks, rec)
 	if err == nil {
-		d.claimRecoveryPending.Store(result.RecoveryPending)
+		d.claimRecoveryPending.Store(result.RecoveryPending || rec.Deferred)
 		return result, nil
 	}
 	// Server has no batch route (404): freeze the old API contract by falling
@@ -408,7 +408,24 @@ func (d *Daemon) claimRecoveryRequest() claimRecovery {
 	if !d.claimRecoveryPending.Load() {
 		return claimRecovery{}
 	}
-	return claimRecovery{Active: true, HeldTaskIDs: d.heldTaskIDs()}
+	if d.recoveryClaimDeferred() {
+		return claimRecovery{Deferred: true}
+	}
+	// A retiring predecessor's tasks are still being prepared or run by that
+	// process; listing them keeps the server from re-delivering them here.
+	held := d.heldTaskIDs()
+	if pred := d.predecessorHeldIDs(); len(pred) > 0 {
+		seen := make(map[string]struct{}, len(held))
+		for _, id := range held {
+			seen[id] = struct{}{}
+		}
+		for _, id := range pred {
+			if _, ok := seen[id]; !ok {
+				held = append(held, id)
+			}
+		}
+	}
+	return claimRecovery{Active: true, HeldTaskIDs: held}
 }
 
 // holdTask records that this daemon owns a task from claim through handleTask's

@@ -64,8 +64,12 @@ var daemonProbeRuntimesCmd = &cobra.Command{
 
 var daemonRestartCmd = &cobra.Command{
 	Use:   "restart",
-	Short: "Restart the running daemon (stop + start)",
-	RunE:  runDaemonRestart,
+	Short: "Restart the running daemon (hand over to a new one, or stop + start)",
+	Long: "Starts a new daemon and hands the profile to it. The running daemon stops taking tasks,\n" +
+		"finishes the runs it already has, reports them, and exits by itself; no run is interrupted.\n" +
+		"When the running daemon or the server predates this handover, restart stops the daemon and\n" +
+		"starts a new one instead (pass --handoff-only to refuse that).",
+	RunE: runDaemonRestart,
 }
 
 var daemonLogsCmd = &cobra.Command{
@@ -135,6 +139,7 @@ func init() {
 	rf.Bool("no-auto-update", false, "Disable periodic CLI self-update (env: MULTICA_DAEMON_AUTO_UPDATE=false)")
 	rf.Duration("auto-update-interval", 0, "How often to poll GitHub for a newer release (env: MULTICA_DAEMON_AUTO_UPDATE_INTERVAL)")
 	rf.Bool("no-auto-reload", false, "Disable restarting when the multica binary on disk changes version (env: MULTICA_DAEMON_AUTO_RELOAD=false)")
+	rf.Bool("handoff-only", false, "Only hand over to a new daemon; never stop the running one")
 
 	df := daemonDiskUsageCmd.Flags()
 	df.Bool("by-workspace", false, "Aggregate output by workspace instead of by run")
@@ -557,14 +562,25 @@ func runDaemonStart(cmd *cobra.Command, _ []string) error {
 }
 
 func runDaemonBackground(cmd *cobra.Command) error {
+	return runDaemonBackgroundWith(cmd, nil)
+}
+
+// runDaemonBackgroundWith starts a background daemon. A non-nil predecessor is
+// a daemon that just retired in its favour (DENE-2979): it still answers on its
+// port and has already released the profile lock, so neither the
+// already-running guard nor the lock wait applies.
+func runDaemonBackgroundWith(cmd *cobra.Command, predecessor *daemonPortRecord) error {
 	profile := resolveProfile(cmd)
 	healthPort := resolveHealthPort(profile)
 
 	// Check if daemon is already running.
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
-	health := checkDaemonHealthOnPort(ctx, healthPort)
-	if daemonAlive(health) {
+	var health map[string]any
+	if predecessor == nil {
+		health = checkDaemonHealthOnPort(ctx, healthPort)
+	}
+	if predecessor == nil && daemonServing(health) {
 		// A live daemon on our port that belongs to someone else is a
 		// collision. The foreground child can safely use a fallback port.
 		if err := daemonIdentityMismatch(health, profile, healthPort); err != nil {
@@ -604,8 +620,10 @@ func runDaemonBackground(cmd *cobra.Command) error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("create daemon directory: %w", err)
 	}
-	if err := waitForDaemonProfileRelease(profile, daemonShutdownLockWait); err != nil {
-		return err
+	if predecessor == nil {
+		if err := waitForDaemonProfileRelease(profile, daemonShutdownLockWait); err != nil {
+			return err
+		}
 	}
 
 	// The child (foreground daemon) writes daemon.log itself through a
@@ -634,6 +652,11 @@ func runDaemonBackground(cmd *cobra.Command) error {
 	}
 
 	child := exec.Command(exePath, args...)
+	var childEnv []string
+	if predecessor != nil {
+		childEnv = append(os.Environ(), "MULTICA_DAEMON_HANDOFF=1", daemonPredecessorEnv+"="+formatDaemonPredecessor(*predecessor))
+	}
+	child.Env = childEnv
 	child.Stdout = logFile
 	child.Stderr = logFile
 	// On Windows we want to break the child out of the parent shell's Job
@@ -648,6 +671,7 @@ func runDaemonBackground(cmd *cobra.Command) error {
 			// Retry without breakaway. Reset the cmd state — exec.Cmd is
 			// not safe to Start() twice, so build a fresh one.
 			child = exec.Command(exePath, args...)
+			child.Env = childEnv
 			child.Stdout = logFile
 			child.Stderr = logFile
 			child.SysProcAttr = daemonSysProcAttr(false)
@@ -964,6 +988,9 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	var (
 		logger     *slog.Logger
 		logRotator *lumberjack.Logger
+		// logSink lets a retiring daemon move off daemon.log, which its
+		// successor's rotator then owns (DENE-2979).
+		logSink *swappableWriter
 	)
 	if logger_pkg.StderrIsTerminal() {
 		logger = logger_pkg.NewLogger("daemon")
@@ -976,11 +1003,16 @@ func runDaemonForeground(cmd *cobra.Command) error {
 		// fd never blocks rename.
 		repointStdioToErrLog(daemonStderrLogPathForProfile(profile))
 		logRotator = newDaemonLogRotator(daemonLogPathForProfile(profile))
-		defer logRotator.Close()
+		logSink = &swappableWriter{w: logRotator}
+		defer func() {
+			if r, ok := logSink.swap(io.Discard).(*lumberjack.Logger); ok {
+				_ = r.Close()
+			}
+		}()
 		// Route both this process's structured logger and the package-global
 		// slog default through the rotator, so every log line — including
 		// LoadConfig's slog.Warn below — is captured and rotated.
-		logger = logger_pkg.NewWriterLoggerDefault("daemon", logRotator)
+		logger = logger_pkg.NewWriterLoggerDefault("daemon", logSink)
 	}
 	if len(droppedSessionEnv) > 0 {
 		logger.Warn("daemon started inside an OpenCode session; dropped its environment so tasks use this machine's config dirs", "keys", droppedSessionEnv)
@@ -1110,19 +1142,25 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	// Set by the Electron Desktop app when it spawns the CLI so the server
 	// can mark those runtimes as "managed" and hide CLI self-update UI.
 	cfg.LaunchedBy = os.Getenv("MULTICA_LAUNCHED_BY")
-	lock, err := acquireDaemonProfileLock(profile, os.Getenv("MULTICA_DAEMON_HANDOFF") == "1")
+	predecessor, hasPredecessor := parseDaemonPredecessor(os.Getenv(daemonPredecessorEnv))
+	_ = os.Unsetenv(daemonPredecessorEnv)
+	lock, err := acquireDaemonProfileLock(profile, os.Getenv("MULTICA_DAEMON_HANDOFF") == "1" || hasPredecessor)
 	if err != nil {
 		return err
 	}
-	defer lock.Close()
+	handoff := &daemonProcessHandoff{profile: profile, pid: os.Getpid(), lock: lock, logSink: logSink, rotator: logRotator}
+	defer handoff.closeAll()
 	_ = os.Unsetenv("MULTICA_DAEMON_HANDOFF")
 	// An older daemon has no profile lock. A direct --foreground start must
-	// still refuse to launch a second daemon for that same profile.
+	// still refuse to launch a second daemon for that same profile — but not
+	// the retiring predecessor this process is taking over from.
 	port := resolveHealthPort(profile)
 	probeCtx, probeCancel := context.WithTimeout(context.Background(), 2*time.Second)
 	existing := checkDaemonHealthOnPort(probeCtx, port)
 	probeCancel()
-	if daemonAlive(existing) && daemonIdentityMismatch(existing, profile, port) == nil {
+	existingPID, _ := existing["pid"].(float64)
+	isPredecessor := hasPredecessor && int(existingPID) == predecessor.PID
+	if daemonServing(existing) && !isPredecessor && daemonIdentityMismatch(existing, profile, port) == nil {
 		return fmt.Errorf("daemon %s is already running or starting", describeProfile(profile))
 	}
 	healthLn, actualPort, err := bindDaemonHealthPort(cfg.HealthPort, net.Listen)
@@ -1131,6 +1169,20 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	}
 	defer healthLn.Close()
 	cfg.HealthPort = actualPort
+	handoff.port = actualPort
+	// A retiring daemon may still be finishing runs on this profile even when
+	// no handoff launched this process (its successor was stopped and this one
+	// started in its place). Its record names those runs, so this process
+	// neither re-claims nor recovers them.
+	if hasPredecessor {
+		cfg.Predecessor = daemon.PredecessorRef{PID: predecessor.PID, Port: predecessor.Port}
+		if rec, ok := readDaemonRetiringRecord(profile, predecessor.PID); ok {
+			cfg.Predecessor.HeldTaskIDs = rec.HeldTaskIDs
+		}
+	} else if rec, ok := findRetiringPredecessor(profile, os.Getpid()); ok {
+		cfg.Predecessor = daemon.PredecessorRef{PID: rec.PID, Port: rec.Port, HeldTaskIDs: rec.HeldTaskIDs}
+		logger.Info("a retiring daemon is still finishing runs on this profile; watching it", "predecessor_pid", rec.PID, "held_tasks", len(rec.HeldTaskIDs))
+	}
 	if err := publishDaemonPort(profile, daemonPortRecord{Port: actualPort, PID: os.Getpid()}); err != nil {
 		return fmt.Errorf("publish daemon health port: %w", err)
 	}
@@ -1140,13 +1192,23 @@ func runDaemonForeground(cmd *cobra.Command) error {
 	defer stop()
 
 	d := daemon.New(cfg, logger)
+	// Auto-reload hands over by spawning its own successor — except under our
+	// own systemd unit, whose cgroup would take the successor down with us.
+	var spawnSuccessor func(string) error
+	if !daemonUnderOwnSystemdUnit(profile) {
+		spawnSuccessor = func(binary string) error {
+			return spawnDaemonSuccessor(cmd, profile, binary, daemonPortRecord{Port: actualPort, PID: os.Getpid()})
+		}
+	}
+	d.SetHandoffHooks(handoff.hooks(spawnSuccessor))
 
 	// Write PID file so "daemon stop" can find us.
 	if dir := daemonDirForProfile(profile); dir != "" {
 		os.MkdirAll(dir, 0o755)
 		os.WriteFile(daemonPIDPathForProfile(profile), []byte(strconv.Itoa(os.Getpid())), 0o644)
 	}
-	defer os.Remove(daemonPIDPathForProfile(profile))
+	// A retired process must not delete its successor's PID file.
+	defer removeDaemonPIDIfOwned(profile, os.Getpid())
 
 	if err := d.RunWithHealthListener(ctx, healthLn); err != nil && !errors.Is(err, context.Canceled) {
 		return err
@@ -1162,9 +1224,11 @@ func runDaemonForeground(cmd *cobra.Command) error {
 		// this process's remaining handoff logs to the crash sink (stderr),
 		// including the package-global slog default (which would otherwise
 		// reopen daemon.log on its next write).
-		if logRotator != nil {
+		if logSink != nil {
 			logger = logger_pkg.NewWriterLoggerDefault("daemon", os.Stderr)
-			_ = logRotator.Close()
+			if r, ok := logSink.swap(os.Stderr).(*lumberjack.Logger); ok {
+				_ = r.Close()
+			}
 		}
 
 		// Under OUR OWN systemd unit, spawning a successor and exiting 0
@@ -1300,7 +1364,9 @@ func runDaemonRestart(cmd *cobra.Command, args []string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	health := checkDaemonHealthOnPort(ctx, healthPort)
-	if daemonAlive(health) {
+	// A retiring daemon is left to finish its runs; restart only starts a new
+	// one beside it (DENE-2979).
+	if daemonServing(health) {
 		// Identity before preflight, and well before the stop phase: restart
 		// kills whatever answered on this port, so a collision would take out
 		// another profile's daemon and then start ours in its place.
@@ -1316,6 +1382,19 @@ func runDaemonRestart(cmd *cobra.Command, args []string) error {
 		// this extra server round-trip.
 		if err := requireDaemonRestartPreflight(cmd, profile); err != nil {
 			return err
+		}
+		// Hand over instead of stopping when both the daemon and the server
+		// support it (DENE-2979): the running daemon's runs continue to the
+		// end while a new daemon takes new tasks. Foreground restarts keep
+		// the old behaviour: they need this terminal for the new daemon.
+		foreground, _ := cmd.Flags().GetBool("foreground")
+		if !foreground {
+			if handled, err := runDaemonHandoff(cmd, healthPort, health); handled {
+				return err
+			}
+		}
+		if handoffOnly, _ := cmd.Flags().GetBool("handoff-only"); handoffOnly {
+			return errDaemonHandoffUnavailable
 		}
 		pid, _ := health["pid"].(float64)
 		if pid > 0 {
@@ -1585,6 +1664,18 @@ func printDaemonStatusReport(w io.Writer, label string, health map[string]any) {
 	if draining, ok := health["draining"].(bool); ok && draining {
 		rows = append(rows, row{"Claims paused", "draining before a restart; queued tasks wait"})
 	}
+	// Handoff (DENE-2979): this daemon retired in favour of a newer one, or a
+	// retired predecessor is still finishing its runs next to this one.
+	if retiring, ok := health["retiring"].(bool); ok && retiring {
+		rows = append(rows, row{"Retiring", fmt.Sprintf("handed over to a newer daemon; finishing %v run(s), then exits", health["active_task_count"])})
+	}
+	if pred, ok := health["predecessor"].(map[string]any); ok {
+		value := fmt.Sprintf("pid %v is finishing %v run(s), then exits", pred["pid"], pred["active_task_count"])
+		if v, ok := pred["cli_version"].(string); ok && v != "" {
+			value = fmt.Sprintf("pid %v (%s) is finishing %v run(s), then exits", pred["pid"], v, pred["active_task_count"])
+		}
+		rows = append(rows, row{"Retiring predecessor", value})
+	}
 	if agents, ok := health["agents"].([]any); ok && len(agents) > 0 {
 		parts := make([]string, len(agents))
 		for i, a := range agents {
@@ -1680,6 +1771,18 @@ func daemonAlive(health map[string]any) bool {
 	default:
 		return false
 	}
+}
+
+// daemonServing reports whether health is a daemon that serves the profile —
+// alive and not retiring. A retiring daemon (DENE-2979) has handed the profile
+// over and only finishes its runs, so start and restart treat the profile as
+// free: the new daemon finds it from its retire record and leaves its runs
+// alone.
+func daemonServing(health map[string]any) bool {
+	if retiring, _ := health["retiring"].(bool); retiring {
+		return false
+	}
+	return daemonAlive(health)
 }
 
 // checkDaemonHealthOnPort calls the daemon's local health endpoint on the given port.
