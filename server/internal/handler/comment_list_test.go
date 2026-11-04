@@ -1577,16 +1577,20 @@ func TestListComments_RootsOnlyResolutionSinceAndSummary(t *testing.T) {
 		t.Fatalf("lengthen r2b: %v", err)
 	}
 
-	// since between the two roots: only Root2 returns, with its resolution.
+	// Office: roots_only+since also returns roots whose replies changed after
+	// the cutoff (the fixture only backdates created_at), so both roots come
+	// back; Root2 must still carry its resolution.
 	v := url.Values{}
 	v.Set("roots_only", "true")
 	v.Set("since", base.Add(5*time.Minute).UTC().Format(time.RFC3339Nano))
 	_, rows := listComments(t, fx.IssueID, v.Encode())
-	if len(rows) != 1 || rows[0].ID != fx.Root2 {
-		t.Fatalf("roots_only+since: want only %s, got %v", fx.Root2, ids(rows))
+	since := byID(rows)
+	r2, ok := since[fx.Root2]
+	if !ok {
+		t.Fatalf("roots_only+since: want %s among %v", fx.Root2, ids(rows))
 	}
-	if rows[0].ResolutionID == nil || *rows[0].ResolutionID != fx.R2b {
-		t.Fatalf("roots_only+since: resolution_id got=%v want=%s", rows[0].ResolutionID, fx.R2b)
+	if r2.ResolutionID == nil || *r2.ResolutionID != fx.R2b {
+		t.Fatalf("roots_only+since: resolution_id got=%v want=%s", r2.ResolutionID, fx.R2b)
 	}
 
 	_, rows = listComments(t, fx.IssueID, "roots_only=true&summary=true")

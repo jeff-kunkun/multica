@@ -25,7 +25,8 @@ func TestCommentInvocationDeniedNoticePersistsWithoutDisclosure(t *testing.T) {
 	foreignWorkspace := dbfx.Workspace(t, "Other notice workspace", "notice-"+uuid.NewString())
 	foreignID := dbfx.Agent(t, "Other workspace secret", handlerTestRuntimeID(t), testutil.Cols{"workspace_id": foreignWorkspace})
 	missingID := uuid.NewString()
-	issueID := dbfx.Issue(t, "Persist denied mentions")
+	// Office issues default to private; the second reader must be able to see it.
+	issueID := dbfx.Issue(t, "Persist denied mentions", testutil.Cols{"visibility": "workspace"})
 	dbfx.Cleanup(t, `DELETE FROM comment WHERE issue_id = $1`, issueID)
 	dbfx.Cleanup(t, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
 	content := fmt.Sprintf("[@Private alias](mention://agent/%s) [@Missing alias](mention://agent/%s) [@Foreign alias](mention://agent/%s) [@Team alias](mention://squad/%s) [@Allowed alias](mention://agent/%s)", privateID, missingID, foreignID, squadID, allowedID)
