@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({
   alive: false,
+  retiring: false,
   autoStart: true,
   token: "test-saved-token",
   exec: vi.fn(),
@@ -41,6 +42,7 @@ vi.mock("./daemon-port", () => ({
   probeProfileHealth: async () => state.alive ? {
     status: "running", daemon_id: "test-daemon", profile: "desktop-office.example.com",
     server_url: "https://office.example.com", cli_version: "test",
+    ...(state.retiring ? { retiring: true } : {}),
   } : null,
 }));
 vi.mock("./cli-bootstrap", () => ({ ensureManagedCli: vi.fn(), managedCliPath: () => "/test/cli" }));
@@ -51,6 +53,7 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
   state.alive = false;
+  state.retiring = false;
   state.autoStart = true;
   state.token = "test-saved-token";
   state.handlers.clear();
@@ -59,6 +62,7 @@ beforeEach(() => {
     if (args[0] === "version") callback(null, '{"version":"test"}');
     else if (args[1] === "start") {
       state.alive = true;
+      state.retiring = false;
       callback(null);
     } else callback(null);
   });
@@ -106,6 +110,16 @@ describe("Desktop daemon supervision", () => {
     await state.handlers.get("daemon:stop")!();
     await vi.advanceTimersByTimeAsync(60_000);
     expect(starts()).toHaveLength(0);
+  });
+
+  // DENE-2979: a daemon that handed over only finishes its runs. It is not
+  // the profile's daemon, so Desktop starts one beside it.
+  it("starts a daemon beside one that is only retiring", async () => {
+    state.alive = true;
+    state.retiring = true;
+    await boot();
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(starts()).toHaveLength(1);
   });
 
   it("recovers when a successful start command never produces a health listener", async () => {

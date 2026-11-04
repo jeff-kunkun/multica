@@ -224,9 +224,14 @@ async function fetchProfileHealth(
   active: ActiveProfile,
   timeoutMs = HEALTH_PROBE_TIMEOUT_MS,
 ): Promise<HealthPayload | null> {
-  return probeProfileHealth(active.name, (port) =>
+  const health = await probeProfileHealth(active.name, (port) =>
     fetchHealthAtPort(port, timeoutMs),
   );
+  // A retiring daemon (DENE-2979) handed the profile over and only finishes
+  // its runs; it is not the profile's daemon. Status, start, recovery and the
+  // version check all read it as absent, so a Desktop that wants a daemon
+  // starts one beside it and never restarts or stops the retiring one.
+  return health?.retiring === true ? null : health;
 }
 
 /**
@@ -376,11 +381,7 @@ async function fetchHealth(): Promise<DaemonStatus> {
   // honest answer; probing the default port would surface the user's own CLI
   // daemon as if it were Desktop's.
   if (!active) return { state: "stopped" };
-  const fetched = await fetchProfileHealth(active);
-  // A retiring daemon (DENE-2979) handed the profile over and only finishes
-  // its runs; it is not the profile's daemon. Treated as stopped, so a
-  // Desktop that wants a daemon starts one beside it.
-  const data = fetched?.retiring === true ? null : fetched;
+  const data = await fetchProfileHealth(active);
 
   if (!data || data.status !== "running") {
     // A start that never reaches "running" is the symptom; an expired/invalid
