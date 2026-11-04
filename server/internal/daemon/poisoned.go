@@ -75,7 +75,17 @@ const (
 	// for the other audience, which was the blocking finding on the first
 	// review of this fix.
 	FailureReasonAntigravityNotLoggedIn = "antigravity_not_logged_in"
+	// FailureReasonOpenCodeClockSkew retires an OpenCode session whose stored
+	// timestamps are ahead of the host clock (upstream MUL-8174).
+	FailureReasonOpenCodeClockSkew = "opencode_clock_skew"
 )
+
+func classifyOpenCodeClockSkew(provider, errMsg string) (string, bool) {
+	if provider == "opencode" && strings.HasPrefix(errMsg, agent.ErrOpenCodeClockSkew.Error()) {
+		return FailureReasonOpenCodeClockSkew, true
+	}
+	return "", false
+}
 
 // poisonedOutputMaxLen caps how long an output can be and still be
 // classified as a poisoned fallback. Real fallback messages are short,
